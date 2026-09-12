@@ -5,14 +5,22 @@ on:
     paths:
       - '.onecompany/**'
       - 'company/**'
+      - 'patterns/**'
+      - 'overlays/**'
       - 'scripts/**'
+      - 'onecompany.py'
+      - 'Makefile'
       - '.github/workflows/onecompany-validate.yml'
   push:
     branches: [main]
     paths:
       - '.onecompany/**'
       - 'company/**'
+      - 'patterns/**'
+      - 'overlays/**'
       - 'scripts/**'
+      - 'onecompany.py'
+      - 'Makefile'
       - '.github/workflows/onecompany-validate.yml'
   workflow_dispatch:
 
@@ -23,13 +31,15 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-      - name: Validate control plane
-        run: python scripts/validate.py
-      - name: Simulate policy invariants
-        run: python scripts/simulate.py
+      - name: Validate complete control plane
+        run: python onecompany.py validate
+      - name: Simulate core policy invariants
+        run: python onecompany.py simulate
+      - name: Simulate 24/7 supervision invariants
+        run: python onecompany.py simulate-supervision
       - name: Compile Python helpers
         run: python -m compileall -q scripts

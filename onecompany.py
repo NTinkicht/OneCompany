@@ -10,8 +10,9 @@ ROOT = Path(__file__).resolve().parent
 
 COMMANDS = {
     "doctor": "doctor.py",
-    "validate": "validate.py",
+    "validate": "validate_all.py",
     "simulate": "simulate.py",
+    "simulate-supervision": "simulate_supervision.py",
     "readiness": "readiness.py",
     "audit-github": "github_audit.py",
     "route": "router.py",

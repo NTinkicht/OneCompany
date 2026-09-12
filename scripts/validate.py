@@ -16,6 +16,7 @@ REQUIRED = [
     "queue.json",
     "patterns.json",
     "overlays.json",
+    "readiness.json",
 ]
 
 
@@ -46,6 +47,7 @@ def main() -> int:
     queue = docs["queue.json"]
     patterns = docs["patterns.json"]
     overlays = docs["overlays.json"]
+    readiness = docs["readiness.json"]
 
     if config.get("project", {}).get("source_of_truth") != "github":
         errors.append("config.project.source_of_truth must be 'github'")
@@ -88,6 +90,8 @@ def main() -> int:
         errors.append(f"budget cost classes both allowed and forbidden: {sorted(overlap)}")
 
     actor_ids: set[str] = set()
+    actor_capabilities: dict[str, set[str]] = {}
+    enabled_actor_ids: set[str] = set()
     for actor in actors.get("actors", []):
         actor_id = actor.get("id")
         if not actor_id:
@@ -96,12 +100,66 @@ def main() -> int:
         if actor_id in actor_ids:
             errors.append(f"duplicate actor id: {actor_id}")
         actor_ids.add(actor_id)
-        if not actor.get("capabilities"):
+        capabilities = set(actor.get("capabilities", []))
+        actor_capabilities[actor_id] = capabilities
+        if not capabilities:
             errors.append(f"actor {actor_id} has no capabilities")
         if actor.get("may_independently_gate_own_material_authorship") is True:
-            warnings.append(f"actor {actor_id} can gate own material authorship; verify this is intentional")
-        if actor.get("enabled") and not actor.get("configured"):
-            errors.append(f"actor {actor_id} is enabled but configured=false")
+            errors.append(f"actor {actor_id} may not independently gate its own material authorship")
+        if actor.get("enabled"):
+            enabled_actor_ids.add(actor_id)
+            if not actor.get("configured"):
+                errors.append(f"actor {actor_id} is enabled but configured=false")
+
+    readiness_by_actor: dict[str, dict] = {}
+    for item in readiness.get("actors", []):
+        actor_id = item.get("actor_id")
+        if not actor_id:
+            errors.append("readiness record missing actor_id")
+            continue
+        if actor_id in readiness_by_actor:
+            errors.append(f"duplicate readiness actor_id: {actor_id}")
+            continue
+        readiness_by_actor[actor_id] = item
+        if actor_id not in actor_ids:
+            errors.append(f"readiness record references unknown actor: {actor_id}")
+            continue
+
+        setup_state = item.get("setup_state")
+        if setup_state not in {"not_started", "partially_ready", "ready", "degraded", "unavailable"}:
+            errors.append(f"readiness {actor_id} has invalid setup_state: {setup_state}")
+
+        verified = set(item.get("verified_capabilities", []))
+        unavailable = set(item.get("temporarily_unavailable_capabilities", []))
+        undeclared_verified = verified - actor_capabilities.get(actor_id, set())
+        undeclared_unavailable = unavailable - actor_capabilities.get(actor_id, set())
+        if undeclared_verified:
+            errors.append(f"readiness {actor_id} verifies undeclared capabilities: {sorted(undeclared_verified)}")
+        if undeclared_unavailable:
+            errors.append(f"readiness {actor_id} marks undeclared capabilities unavailable: {sorted(undeclared_unavailable)}")
+
+        access = item.get("repository_access", {})
+        for key in ("read", "write", "review", "merge"):
+            if not isinstance(access.get(key), bool):
+                errors.append(f"readiness {actor_id} repository_access.{key} must be boolean")
+        unattended = item.get("unattended", {})
+        if unattended.get("verified") is True and unattended.get("configured") is not True:
+            errors.append(f"readiness {actor_id} unattended.verified=true requires configured=true")
+
+    missing_readiness = actor_ids - set(readiness_by_actor)
+    if missing_readiness:
+        errors.append(f"actors missing readiness records: {sorted(missing_readiness)}")
+
+    for actor_id in enabled_actor_ids:
+        item = readiness_by_actor.get(actor_id)
+        if not item:
+            continue
+        if item.get("setup_state") not in {"ready", "degraded"}:
+            errors.append(f"enabled actor {actor_id} must have readiness setup_state ready/degraded")
+        if not item.get("verified_capabilities"):
+            errors.append(f"enabled actor {actor_id} has no verified capabilities")
+        if not item.get("repository_access", {}).get("read"):
+            errors.append(f"enabled actor {actor_id} has no verified repository read access")
 
     role_ids: set[str] = set()
     for role in roles.get("roles", []):
@@ -109,8 +167,11 @@ def main() -> int:
         if role_id in role_ids:
             errors.append(f"duplicate role id: {role_id}")
         role_ids.add(role_id)
-        if not role.get("required_capabilities"):
+        required_caps = set(role.get("required_capabilities", []))
+        if not required_caps:
             warnings.append(f"role {role_id} has no required capabilities")
+        elif not any(required_caps <= caps for caps in actor_capabilities.values()):
+            errors.append(f"role {role_id} has no declared actor capable of all required capabilities: {sorted(required_caps)}")
 
     pattern_ids: set[str] = set()
     for pattern in patterns.get("patterns", []):

@@ -16,16 +16,19 @@ MERGE_CAPS = {"merge_execution"}
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--capability", action="append", required=True, help="Required capability; repeatable")
-    parser.add_argument("--exclude-author", action="append", default=[], help="Actor ID materially conflicted for independent gate")
+    parser.add_argument("--exclude-author", action="append", default=[], help="Additional actor ID materially conflicted for independent gate")
     parser.add_argument("--for-independent-gate", action="store_true")
     args = parser.parse_args()
 
     actors_doc = load_json(CONTROL / "actors.json")
     readiness_doc = load_json(CONTROL / "readiness.json")
     budget = load_json(CONTROL / "budget.json")
+    state = load_json(CONTROL / "state.json")
     readiness = {item.get("actor_id"): item for item in readiness_doc.get("actors", [])}
     required = set(args.capability)
     excluded = set(args.exclude_author)
+    if args.for_independent_gate:
+        excluded.update(state.get("current_material_authors", []))
 
     eligible = []
     rejected = []
@@ -87,7 +90,12 @@ def main() -> int:
             })
 
     eligible.sort(key=lambda item: item["score"], reverse=True)
-    print(json.dumps({"required": sorted(required), "eligible": eligible, "rejected": rejected}, indent=2))
+    print(json.dumps({
+        "required": sorted(required),
+        "material_authors_excluded": sorted(excluded) if args.for_independent_gate else [],
+        "eligible": eligible,
+        "rejected": rejected,
+    }, indent=2))
     return 0 if eligible else 2
 
 

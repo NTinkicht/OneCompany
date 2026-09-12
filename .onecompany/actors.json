@@ -3,6 +3,17 @@
   "schema_version": "1.0",
   "actors": [
     {
+      "id": "human-owner",
+      "display_name": "Human Owner",
+      "enabled": false,
+      "configured": false,
+      "execution_modes": ["human_github"],
+      "cost_class": "HUMAN",
+      "permissions": ["owner_defined"],
+      "capabilities": ["architecture", "planning", "implementation", "repository_intelligence", "ci_remediation", "code_review", "security_review", "test_design", "failure_analysis", "documentation", "research", "state_reconciliation", "merge_execution"],
+      "may_independently_gate_own_material_authorship": false
+    },
+    {
       "id": "chatgpt",
       "display_name": "ChatGPT",
       "enabled": false,

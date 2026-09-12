@@ -8,7 +8,7 @@ import sys
 
 from onecompany_lib import CONTROL, active_implementation_leases, load_json
 
-DONE = {"MERGED", "DONE", "CANCELLED"}
+DONE = {"MERGED", "DONE"}
 CANDIDATE = {"PROPOSED", "READY"}
 
 
@@ -32,8 +32,8 @@ def main() -> int:
         if item.get("status") not in CANDIDATE:
             continue
         deps = item.get("dependencies", [])
-        unsatisfied = [dep for dep in deps if by_id.get(dep, {}).get("status") not in DONE]
         missing = [dep for dep in deps if dep not in by_id]
+        unsatisfied = [dep for dep in deps if dep in by_id and by_id[dep].get("status") not in DONE]
         if missing or unsatisfied:
             blocked.append({"id": item.get("id"), "missing": missing, "unsatisfied": unsatisfied})
             continue

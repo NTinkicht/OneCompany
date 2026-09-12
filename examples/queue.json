@@ -1,0 +1,23 @@
+{
+  "schema_version": "1.0",
+  "work_units": [
+    {
+      "id": "WU01",
+      "title": "Establish product foundation contracts",
+      "status": "DONE",
+      "priority": 100,
+      "dependencies": [],
+      "issue": 1,
+      "risk_class": "MEDIUM"
+    },
+    {
+      "id": "WU02",
+      "title": "Implement first bounded product capability",
+      "status": "PROPOSED",
+      "priority": 90,
+      "dependencies": ["WU01"],
+      "issue": 2,
+      "risk_class": "MEDIUM"
+    }
+  ]
+}

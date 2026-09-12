@@ -15,6 +15,7 @@ COMMANDS = {
     "simulate-supervision": "simulate_supervision.py",
     "readiness": "readiness.py",
     "audit-github": "github_audit.py",
+    "next-work": "next_work.py",
     "route": "router.py",
     "lease": "lease.py",
     "gate": "gate.py",

@@ -6,15 +6,19 @@ If you are an AI worker operating in this repository, these instructions are par
 
 1. `agents/UNIVERSAL-CONTRACT.md`
 2. `company/CONSTITUTION.md`
-3. `.onecompany/config.json`
-4. `.onecompany/budget.json`
-5. `.onecompany/actors.json`
-6. `.onecompany/roles.json`
-7. `.onecompany/patterns.json`
-8. `.onecompany/overlays.json` and any overlay selected by the current Work Unit
+3. project foundation contracts when present: `PRODUCT.md`, `ARCHITECTURE.md`, `SECURITY.md`, `QUALITY.md`, `OPERATIONS.md`
+4. `.onecompany/config.json`
+5. `.onecompany/budget.json`
+6. `.onecompany/actors.json`, `.onecompany/readiness.json`, `.onecompany/routing.json`
+7. `.onecompany/roles.json`, `.onecompany/patterns.json`, `.onecompany/overlays.json`
+8. `.onecompany/supervision.json` when acting as an unattended/scheduled supervisor
 9. the current Work Unit / PR and **live GitHub state**
 
 `.onecompany/state.json` is a cache, not authority. Reconcile before consequential action.
+
+## Contract hierarchy
+
+A Work Unit cannot silently contradict product, architecture, security, quality or operations contracts. If a higher-level contract must change, make the change explicit and review it as product/governance/architecture/security work rather than smuggling it inside implementation.
 
 ## Non-negotiable defaults
 
@@ -30,6 +34,7 @@ If you are an AI worker operating in this repository, these instructions are par
 - Merge must verify the current head still equals the approved SHA.
 - Role overlays sharpen a lens only; they do not create actors, capacity, leases, permissions, independence, or merge authority.
 - Experimental infrastructure should start in shadow/read-only mode when an incorrect output could alter a consequential decision.
+- A scheduled task is a liveness supervisor, not permission to start another implementation stream.
 
 ## Progress evidence
 
@@ -41,4 +46,4 @@ State the exact blocker, evidence, current head, what has already been tried, an
 
 ## Pattern discipline
 
-The pattern library in `patterns/` records why OneCompany uses particular mechanisms. Preserve the invariant rather than cargo-culting the vocabulary. If a project intentionally replaces a pattern, record the replacement and its safety properties in a reviewed governance change.
+Preserve invariants rather than cargo-culting vocabulary. If a project intentionally replaces a OneCompany pattern, record the replacement and its safety properties in a reviewed governance change.

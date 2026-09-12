@@ -1,0 +1,42 @@
+# Architecture Contract
+
+## System context
+Describe major users, services, repositories, external systems, and trust boundaries.
+
+## Modules / bounded contexts
+| Module | Owns | Must not own |
+| --- | --- | --- |
+| | | |
+
+## Data ownership
+- System of record:
+- Derived/cache data:
+- Cross-tenant/user isolation rules:
+
+## Interfaces
+Document APIs, events, queues, file formats, CLI contracts, or other public boundaries.
+
+## State, concurrency and idempotency
+- Transaction boundaries:
+- Lock/version strategy:
+- Retry/idempotency rules:
+- Ordering requirements:
+
+## External dependencies
+| Dependency | Purpose | Failure behavior | Cost/availability constraint |
+| --- | --- | --- | --- |
+| | | | |
+
+## Compatibility / migrations
+-
+
+## Observability
+-
+
+## Architectural non-goals
+-
+
+## Decision records
+Link ADRs or reviewed architecture issues here.
+
+> Implementations may vary; these boundaries are authoritative until deliberately amended.

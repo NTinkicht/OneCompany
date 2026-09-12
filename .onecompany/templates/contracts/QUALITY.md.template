@@ -1,0 +1,33 @@
+# Quality and Deterministic CI Contract
+
+## Definition of deterministic green
+List the exact commands/jobs required for a merge candidate.
+
+```text
+format/check:
+lint:
+typecheck:
+unit tests:
+integration tests:
+smoke/browser tests:
+build/package:
+security/dependency audit:
+```
+
+## Test strategy
+- Unit:
+- Integration:
+- End-to-end:
+- Concurrency/property/adversarial:
+
+## Required environments
+-
+
+## Flaky-test policy
+A flaky required test is a defect to fix or explicitly quarantine through reviewed policy; it is not permission to ignore red CI.
+
+## Regression policy
+Material BLOCKER/MAJOR defects should become durable regressions when technically meaningful.
+
+## Exact-head rule
+All required checks for merge must correspond to the same candidate SHA that receives the independent final gate.

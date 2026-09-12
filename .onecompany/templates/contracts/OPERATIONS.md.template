@@ -1,0 +1,39 @@
+# Operations Contract
+
+## Environments
+- Local:
+- Test/staging:
+- Production:
+
+## Deployment
+- Trigger:
+- Artifact:
+- Required approvals:
+- Rollout strategy:
+
+## Rollback / recovery
+-
+
+## Backups / restore
+-
+
+## Availability / SLOs
+-
+
+## Capacity limits
+-
+
+## External provider degradation
+-
+
+## Observability
+- Logs:
+- Metrics:
+- Traces:
+- Alerts:
+
+## Incident stop switch
+How to stop writes/deployments/autonomous execution quickly.
+
+## Production-destructive actions
+List actions that remain human-only by default.

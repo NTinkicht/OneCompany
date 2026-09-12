@@ -3,7 +3,7 @@
   "$id": "https://onecompany.dev/schemas/state.schema.json",
   "title": "OneCompany State",
   "type": "object",
-  "required": ["schema_version", "company_state", "active_leases", "ready_work_count", "open_blockers", "human_decision_required"],
+  "required": ["schema_version", "company_state", "current_material_authors", "active_leases", "ready_work_count", "open_blockers", "human_decision_required"],
   "properties": {
     "schema_version": {"type": "string"},
     "generated_or_reconciled_at": {"type": ["string", "null"]},
@@ -12,6 +12,7 @@
     "current_work_unit": {"type": ["string", "null"]},
     "current_pr": {"type": ["integer", "null"]},
     "current_pr_head": {"type": ["string", "null"]},
+    "current_material_authors": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
     "active_leases": {"type": "array", "items": {"type": "object"}},
     "current_gate": {"type": ["object", "null"]},
     "ready_work_count": {"type": "integer", "minimum": 0},

@@ -10,7 +10,7 @@
       "execution_modes": ["interactive", "connector"],
       "cost_class": "INCLUDED_SUBSCRIPTION",
       "permissions": ["read", "write_if_connected"],
-      "capabilities": ["architecture", "planning", "implementation", "code_review", "failure_analysis", "documentation", "research", "state_reconciliation"],
+      "capabilities": ["architecture", "planning", "implementation", "repository_intelligence", "ci_remediation", "code_review", "security_review", "test_design", "failure_analysis", "documentation", "research", "state_reconciliation", "merge_execution"],
       "may_independently_gate_own_material_authorship": false
     },
     {
@@ -18,10 +18,10 @@
       "display_name": "Codex",
       "enabled": false,
       "configured": false,
-      "execution_modes": ["github_native", "cloud_workspace"],
+      "execution_modes": ["github_native", "cloud_workspace", "local_cli_if_available"],
       "cost_class": "INCLUDED_SUBSCRIPTION",
       "permissions": ["read", "write_if_connected"],
-      "capabilities": ["implementation", "repository_intelligence", "ci_remediation", "code_review", "test_design"],
+      "capabilities": ["planning", "implementation", "repository_intelligence", "ci_remediation", "code_review", "test_design", "failure_analysis", "documentation", "state_reconciliation", "merge_execution"],
       "may_independently_gate_own_material_authorship": false
     },
     {
@@ -29,10 +29,10 @@
       "display_name": "Claude",
       "enabled": false,
       "configured": false,
-      "execution_modes": ["interactive", "github_native_if_available"],
+      "execution_modes": ["interactive", "local_cli", "github_action_if_configured"],
       "cost_class": "INCLUDED_SUBSCRIPTION",
       "permissions": ["read", "write_if_connected"],
-      "capabilities": ["architecture", "code_review", "security_review", "implementation", "failure_analysis", "documentation"],
+      "capabilities": ["architecture", "planning", "implementation", "repository_intelligence", "ci_remediation", "code_review", "security_review", "test_design", "failure_analysis", "documentation", "research", "state_reconciliation", "merge_execution"],
       "may_independently_gate_own_material_authorship": false
     },
     {
@@ -40,10 +40,10 @@
       "display_name": "GitHub Copilot",
       "enabled": false,
       "configured": false,
-      "execution_modes": ["github_native", "ide"],
+      "execution_modes": ["github_native", "cloud_agent_if_enabled", "ide", "cli_if_available"],
       "cost_class": "INCLUDED_SUBSCRIPTION",
       "permissions": ["read", "write_if_connected"],
-      "capabilities": ["implementation", "ci_remediation", "code_review", "test_design"],
+      "capabilities": ["implementation", "repository_intelligence", "ci_remediation", "code_review", "test_design", "failure_analysis", "documentation", "state_reconciliation", "merge_execution"],
       "may_independently_gate_own_material_authorship": false
     },
     {
@@ -54,7 +54,7 @@
       "execution_modes": ["local_cli", "unattended_if_configured"],
       "cost_class": "FREE_ALLOWANCE",
       "permissions": ["read", "write_if_connected"],
-      "capabilities": ["repository_intelligence", "regression_scouting", "implementation", "research"],
+      "capabilities": ["repository_intelligence", "regression_scouting", "implementation", "code_review", "test_design", "failure_analysis", "documentation", "research"],
       "may_independently_gate_own_material_authorship": false
     },
     {
@@ -62,10 +62,10 @@
       "display_name": "Mistral Vibe",
       "enabled": false,
       "configured": false,
-      "execution_modes": ["local_cli", "interactive"],
+      "execution_modes": ["local_cli", "interactive", "unattended_if_configured"],
       "cost_class": "INCLUDED_SUBSCRIPTION",
       "permissions": ["read", "write_if_connected"],
-      "capabilities": ["failure_analysis", "test_design", "implementation", "repository_intelligence"],
+      "capabilities": ["implementation", "repository_intelligence", "ci_remediation", "code_review", "test_design", "failure_analysis", "documentation", "research"],
       "may_independently_gate_own_material_authorship": false
     }
   ]

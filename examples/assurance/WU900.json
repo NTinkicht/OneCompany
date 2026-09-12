@@ -1,0 +1,43 @@
+{
+  "work_unit": "WU900",
+  "status": "ready",
+  "objective": "Demonstrate a fully traceable high-risk assurance packet before implementation.",
+  "risk_level": "high",
+  "requirements": [
+    {
+      "id": "FR-900", "type": "functional", "statement": "The system shall reject an unauthenticated deletion request.",
+      "rationale": "Prevent unauthorized destructive actions.", "source": "product-security", "priority": "must", "status": "approved",
+      "verification_method": "test", "acceptance_criteria": ["AC-900"], "risk_ids": ["RISK-900"]
+    }
+  ],
+  "acceptance_criteria": [
+    {"id": "AC-900", "statement": "Given no authenticated principal, when deletion is requested, then the service returns a denial and no record is deleted.", "verification_method": "automated-test"}
+  ],
+  "risks": [
+    {
+      "id": "RISK-900", "title": "Unauthorized destructive action", "domain": "security",
+      "cause": "A deletion endpoint may be invoked without a valid principal", "event": "an unauthorized deletion is accepted",
+      "consequence": "protected data is lost", "likelihood": 3, "impact": 5, "inherent_score": 15, "owner": "security-reviewer",
+      "treatment": "reduce", "mitigations": [{"id": "MIT-900", "description": "Enforce authentication and authorization before deletion"}],
+      "residual_likelihood": 1, "residual_impact": 5, "residual_score": 5, "status": "open", "review_trigger": "auth or deletion-path change"
+    }
+  ],
+  "traceability": [
+    {"source": "FR-900", "target": "AC-900", "relationship": "requirement_to_acceptance_criterion"},
+    {"source": "FR-900", "target": "WU900", "relationship": "requirement_to_work_unit"},
+    {"source": "FR-900", "target": "TEST-900", "relationship": "requirement_to_test"},
+    {"source": "RISK-900", "target": "MIT-900", "relationship": "risk_to_mitigation"},
+    {"source": "MIT-900", "target": "TEST-901", "relationship": "mitigation_to_test"}
+  ],
+  "test_plan": {
+    "families": ["static", "unit", "integration", "contract", "e2e", "acceptance", "regression", "security", "operations"],
+    "tests": [
+      {"id": "TEST-900", "family": "acceptance", "covers": ["FR-900", "AC-900"]},
+      {"id": "TEST-901", "family": "security", "covers": ["RISK-900", "MIT-900"]}
+    ]
+  },
+  "documentation_impact": {"declared": true, "types": ["security", "operations"]},
+  "architecture_impact": {"significant": false, "adr_ids": []},
+  "release": {"rollback_strategy": "Revert the exact change and redeploy the prior artifact.", "observability_plan": "Monitor deletion authorization denials and destructive-action audit events."},
+  "evidence": {}
+}

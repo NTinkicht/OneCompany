@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OneCompany Quality Evidence Manifest",
+  "type": "object",
+  "required": ["work_unit", "sha", "quality_profile", "requirements", "risks", "coverage", "gates", "generated_at"],
+  "properties": {
+    "work_unit": {"type": "string"},
+    "sha": {"type": "string", "minLength": 7},
+    "quality_profile": {"enum": ["prototype", "standard", "production", "high_assurance", "regulated"]},
+    "requirements": {"type": "object"},
+    "risks": {"type": "object"},
+    "coverage": {"type": "object"},
+    "gates": {"type": "object"},
+    "generated_at": {"type": "string"}
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "architecture_style": "project-defined",
+  "principles": {
+    "explicit_boundaries_required": true,
+    "dependency_direction_must_be_declared": true,
+    "circular_dependencies_forbidden": true,
+    "architecture_fitness_functions_required_for_critical_rules": true,
+    "significant_decisions_require_adr": true,
+    "architecture_change_requires_risk_and_traceability_impact_analysis": true
+  },
+  "fitness_functions": [],
+  "boundaries": []
+}

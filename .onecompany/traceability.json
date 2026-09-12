@@ -1,0 +1,27 @@
+{
+  "version": 1,
+  "bidirectional": true,
+  "required_links": [
+    "objective_to_requirement",
+    "requirement_to_acceptance_criterion",
+    "requirement_to_risk",
+    "requirement_to_design_or_architecture",
+    "requirement_to_work_unit",
+    "requirement_to_test",
+    "test_to_evidence",
+    "risk_to_mitigation",
+    "mitigation_to_test",
+    "change_to_requirement"
+  ],
+  "orphan_policy": {
+    "orphan_requirement_blocks_ready": true,
+    "orphan_acceptance_criterion_blocks_done": true,
+    "orphan_test_is_warning": true,
+    "unverified_requirement_blocks_merge": true,
+    "untested_high_or_critical_risk_mitigation_blocks_merge": true
+  },
+  "exact_head": {
+    "evidence_must_record_sha": true,
+    "head_change_invalidates_merge_ready_evidence": true
+  }
+}

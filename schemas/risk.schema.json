@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OneCompany Risk",
+  "type": "object",
+  "required": ["id", "title", "domain", "cause", "event", "consequence", "likelihood", "impact", "inherent_score", "owner", "treatment", "mitigations", "residual_likelihood", "residual_impact", "residual_score", "status", "review_trigger"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^RISK-[0-9]{3,}$"},
+    "title": {"type": "string", "minLength": 3},
+    "domain": {"type": "string"},
+    "cause": {"type": "string", "minLength": 3},
+    "event": {"type": "string", "minLength": 3},
+    "consequence": {"type": "string", "minLength": 3},
+    "likelihood": {"type": "integer", "minimum": 1, "maximum": 5},
+    "impact": {"type": "integer", "minimum": 1, "maximum": 5},
+    "inherent_score": {"type": "integer", "minimum": 1, "maximum": 25},
+    "owner": {"type": "string", "minLength": 1},
+    "treatment": {"enum": ["avoid", "reduce", "transfer", "accept"]},
+    "mitigations": {"type": "array", "items": {"type": "string"}},
+    "residual_likelihood": {"type": "integer", "minimum": 1, "maximum": 5},
+    "residual_impact": {"type": "integer", "minimum": 1, "maximum": 5},
+    "residual_score": {"type": "integer", "minimum": 1, "maximum": 25},
+    "status": {"enum": ["open", "treated", "accepted", "closed"]},
+    "review_trigger": {"type": "string", "minLength": 1},
+    "acceptance": {"type": ["object", "null"]}
+  },
+  "additionalProperties": true
+}

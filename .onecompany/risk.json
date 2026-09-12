@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "standard": "ISO 31000-inspired; not a certification claim",
+  "scale": {
+    "likelihood": {"min": 1, "max": 5},
+    "impact": {"min": 1, "max": 5},
+    "score_formula": "likelihood * impact"
+  },
+  "bands": {
+    "low": {"min": 1, "max": 4},
+    "medium": {"min": 5, "max": 9},
+    "high": {"min": 10, "max": 16},
+    "critical": {"min": 17, "max": 25}
+  },
+  "domains": [
+    "product", "requirements", "architecture", "security", "privacy", "safety", "data", "delivery", "operations",
+    "reliability", "performance", "compliance", "financial", "vendor", "ai_model", "reputation", "accessibility"
+  ],
+  "mandatory_attributes": [
+    "id", "title", "domain", "cause", "event", "consequence", "likelihood", "impact", "inherent_score",
+    "owner", "treatment", "mitigations", "residual_likelihood", "residual_impact", "residual_score", "status", "review_trigger"
+  ],
+  "gates": {
+    "critical_residual_risk_requires_human_acceptance": true,
+    "high_residual_risk_requires_named_owner": true,
+    "unowned_open_risk_blocks_ready": true,
+    "risk_assessment_required_before_implementation": true,
+    "risk_reassessment_required_on_scope_or_architecture_change": true,
+    "security_privacy_safety_risks_cannot_be_silently_accepted": true
+  }
+}

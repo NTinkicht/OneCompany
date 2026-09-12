@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "profile": "production",
+  "principles": {
+    "quality_is_evidence_not_opinion": true,
+    "quality_cannot_regress": true,
+    "changed_code_has_stricter_thresholds": true,
+    "critical_paths_require_scenario_evidence": true,
+    "author_cannot_be_sole_quality_gate": true,
+    "exact_head_evidence_required": true
+  },
+  "profiles": {
+    "prototype": {"line_coverage_min": 60, "branch_coverage_min": 50, "changed_line_coverage_min": 80, "mutation_score_min": 0},
+    "standard": {"line_coverage_min": 75, "branch_coverage_min": 70, "changed_line_coverage_min": 90, "mutation_score_min": 50},
+    "production": {"line_coverage_min": 85, "branch_coverage_min": 80, "changed_line_coverage_min": 95, "mutation_score_min": 70},
+    "high_assurance": {"line_coverage_min": 90, "branch_coverage_min": 90, "changed_line_coverage_min": 100, "mutation_score_min": 80},
+    "regulated": {"line_coverage_min": 90, "branch_coverage_min": 90, "changed_line_coverage_min": 100, "mutation_score_min": 80}
+  },
+  "test_families": [
+    "static", "unit", "component", "integration", "contract", "api", "e2e", "acceptance", "regression",
+    "property_based", "fuzz", "mutation", "security", "data_migration", "performance", "reliability",
+    "accessibility", "visual_regression", "compatibility", "operations", "ai_evaluation"
+  ],
+  "risk_required_families": {
+    "low": ["static", "unit", "regression"],
+    "medium": ["static", "unit", "integration", "acceptance", "regression"],
+    "high": ["static", "unit", "integration", "contract", "e2e", "acceptance", "regression", "security", "operations"],
+    "critical": ["static", "unit", "component", "integration", "contract", "api", "e2e", "acceptance", "regression", "property_based", "fuzz", "mutation", "security", "performance", "reliability", "operations"]
+  },
+  "clean_code": {
+    "formatter_required": true,
+    "lint_required": true,
+    "type_check_required_when_supported": true,
+    "dead_code_forbidden": true,
+    "new_untracked_todo_forbidden": true,
+    "unexplained_suppressions_forbidden": true,
+    "new_dependency_cycles_forbidden": true,
+    "new_known_critical_vulnerabilities_forbidden": true
+  },
+  "documentation": {
+    "documentation_impact_declaration_required": true,
+    "architecture_decision_record_required_for_significant_decisions": true,
+    "public_api_documentation_required": true,
+    "operational_runbook_required_for_operational_changes": true,
+    "migration_and_rollback_docs_required_when_applicable": true
+  },
+  "debt_ratchet": {
+    "grandfather_existing_debt": true,
+    "new_debt_forbidden_without_waiver": true,
+    "touched_area_must_not_regress": true,
+    "expired_waiver_blocks_merge": true
+  }
+}

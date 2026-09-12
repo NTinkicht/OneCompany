@@ -13,7 +13,7 @@ COMMANDS = {
     "readiness": ["readiness.py"], "audit-github": ["github_audit.py"], "next-work": ["next_work.py"], "route": ["router.py"], "dispatch": ["dispatch.py"],
     "ledger": ["ledger.py"], "lease": ["lease.py"], "gate": ["gate.py"], "merge": ["merge.py"], "reconcile": ["reconcile.py"], "supervise": ["supervise.py"],
     "bootstrap": ["bootstrap.py"], "init": ["init_project.py"],
-    "assurance": ["assurance.py", "validate"], "trace": ["assurance.py", "trace"], "risk": ["assurance.py", "risk"], "evidence": ["assurance.py", "evidence"],
+    "assurance": ["assurance_gate.py"], "trace": ["assurance.py", "trace"], "risk": ["assurance.py", "risk"], "evidence": ["assurance.py", "evidence"],
 }
 
 

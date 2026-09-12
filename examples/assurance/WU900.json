@@ -1,12 +1,16 @@
 {
   "work_unit": "WU900",
-  "status": "ready",
-  "objective": "Demonstrate a fully traceable high-risk assurance packet before implementation.",
+  "status": "merge_ready",
+  "objective": "Demonstrate a fully traceable high-risk assurance packet through exact-head merge evidence.",
   "risk_level": "high",
+  "quality_profile": "production",
+  "code_change": true,
+  "candidate_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "material_authors": ["implementer-example"],
   "requirements": [
     {
       "id": "FR-900", "type": "functional", "statement": "The system shall reject an unauthenticated deletion request.",
-      "rationale": "Prevent unauthorized destructive actions.", "source": "product-security", "priority": "must", "status": "approved",
+      "rationale": "Prevent unauthorized destructive actions.", "source": "product-security", "priority": "must", "status": "verified",
       "verification_method": "test", "acceptance_criteria": ["AC-900"], "risk_ids": ["RISK-900"]
     }
   ],
@@ -19,15 +23,20 @@
       "cause": "A deletion endpoint may be invoked without a valid principal", "event": "an unauthorized deletion is accepted",
       "consequence": "protected data is lost", "likelihood": 3, "impact": 5, "inherent_score": 15, "owner": "security-reviewer",
       "treatment": "reduce", "mitigations": [{"id": "MIT-900", "description": "Enforce authentication and authorization before deletion"}],
-      "residual_likelihood": 1, "residual_impact": 5, "residual_score": 5, "status": "open", "review_trigger": "auth or deletion-path change"
+      "residual_likelihood": 1, "residual_impact": 5, "residual_score": 5, "status": "treated", "review_trigger": "auth or deletion-path change"
     }
   ],
   "traceability": [
+    {"source": "OBJ-900", "target": "FR-900", "relationship": "objective_to_requirement"},
     {"source": "FR-900", "target": "AC-900", "relationship": "requirement_to_acceptance_criterion"},
+    {"source": "FR-900", "target": "RISK-900", "relationship": "requirement_to_risk"},
+    {"source": "FR-900", "target": "DESIGN-900", "relationship": "requirement_to_design_or_architecture"},
     {"source": "FR-900", "target": "WU900", "relationship": "requirement_to_work_unit"},
     {"source": "FR-900", "target": "TEST-900", "relationship": "requirement_to_test"},
     {"source": "RISK-900", "target": "MIT-900", "relationship": "risk_to_mitigation"},
-    {"source": "MIT-900", "target": "TEST-901", "relationship": "mitigation_to_test"}
+    {"source": "MIT-900", "target": "TEST-901", "relationship": "mitigation_to_test"},
+    {"source": "TEST-900", "target": "EVID-900", "relationship": "test_to_evidence"},
+    {"source": "TEST-901", "target": "EVID-901", "relationship": "test_to_evidence"}
   ],
   "test_plan": {
     "families": ["static", "unit", "integration", "contract", "e2e", "acceptance", "regression", "security", "operations"],
@@ -39,5 +48,13 @@
   "documentation_impact": {"declared": true, "types": ["security", "operations"]},
   "architecture_impact": {"significant": false, "adr_ids": []},
   "release": {"rollback_strategy": "Revert the exact change and redeploy the prior artifact.", "observability_plan": "Monitor deletion authorization denials and destructive-action audit events."},
-  "evidence": {}
+  "evidence": {
+    "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "verified_requirements": ["FR-900"],
+    "verified_acceptance_criteria": ["AC-900"],
+    "coverage": {"line": 92, "branch": 88, "changed_line": 100, "mutation": 76},
+    "test_family_results": {"static": "pass", "unit": "pass", "integration": "pass", "contract": "pass", "e2e": "pass", "acceptance": "pass", "regression": "pass", "security": "pass", "operations": "pass"},
+    "gates": {"requirements": "pass", "risk": "pass", "architecture": "pass", "code_quality": "pass", "functional_qa": "pass", "nonfunctional_qa": "pass", "documentation": "pass", "independent_review": "pass"},
+    "independent_review": {"actor": "reviewer-example", "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "verdict": "pass"}
+  }
 }

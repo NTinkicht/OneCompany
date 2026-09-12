@@ -1,0 +1,14 @@
+{
+  "work_unit": "WU000",
+  "links": [
+    {"source": "OBJ-000", "target": "FR-000", "relationship": "objective_to_requirement"},
+    {"source": "FR-000", "target": "AC-000", "relationship": "requirement_to_acceptance_criterion"},
+    {"source": "FR-000", "target": "RISK-000", "relationship": "requirement_to_risk"},
+    {"source": "FR-000", "target": "DESIGN-000", "relationship": "requirement_to_design_or_architecture"},
+    {"source": "FR-000", "target": "WU000", "relationship": "requirement_to_work_unit"},
+    {"source": "FR-000", "target": "TEST-000", "relationship": "requirement_to_test"},
+    {"source": "RISK-000", "target": "MIT-000", "relationship": "risk_to_mitigation"},
+    {"source": "MIT-000", "target": "TEST-001", "relationship": "mitigation_to_test"},
+    {"source": "TEST-000", "target": "EVID-000", "relationship": "test_to_evidence"}
+  ]
+}

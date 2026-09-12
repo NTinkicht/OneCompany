@@ -61,7 +61,7 @@
     {
       "id": "merge_executor",
       "purpose": "Merge only after verifying expected head, required green CI, and current exact-head gate.",
-      "required_capabilities": ["state_reconciliation"],
+      "required_capabilities": ["merge_execution"],
       "write_scope": "merge_only",
       "conflicts": []
     }

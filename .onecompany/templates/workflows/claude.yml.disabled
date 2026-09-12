@@ -1,0 +1,41 @@
+# DISABLED TEMPLATE. Copy to .github/workflows/claude.yml only after reviewing current Anthropic docs,
+# auth/cost policy, permissions, and action revision. Prefer pinning the action to a reviewed immutable SHA.
+name: OneCompany Claude Review
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+  actions: read
+
+jobs:
+  claude:
+    if: >-
+      github.actor == vars.ONECOMPANY_OWNER_LOGIN &&
+      ((github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 20
+          persist-credentials: false
+      - name: Run Claude Code
+        uses: anthropics/claude-code-action@v1 # REVIEW/PIN before enabling
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          additional_permissions: |
+            actions: read
+          claude_args: >-
+            --max-turns 40
+
+# Reference posture is review/read focused. If you promote this workflow to implementation,
+# explicitly widen contents permission, preserve single-stream leases, and require another independent gate.

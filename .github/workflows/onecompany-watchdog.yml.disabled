@@ -1,0 +1,27 @@
+# Disabled by default to avoid unexpected private-repository runner cost.
+# Rename to onecompany-watchdog.yml only after reviewing CI budget policy.
+name: OneCompany Watchdog
+
+on:
+  workflow_dispatch:
+  # schedule:
+  #   - cron: '17 * * * *'   # hourly maximum recommended default
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+  actions: read
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate declared control plane
+        run: python scripts/validate.py
+      - name: Guidance
+        run: echo 'Add project-specific reconciliation/notification here. Do not grant write/merge authority to a watchdog by default.'

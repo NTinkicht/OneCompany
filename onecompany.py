@@ -19,6 +19,7 @@ COMMANDS = {
     "gate": "gate.py",
     "merge": "merge.py",
     "reconcile": "reconcile.py",
+    "supervise": "supervise.py",
     "bootstrap": "bootstrap.py",
 }
 

@@ -62,7 +62,8 @@ def main() -> int:
         return 2
 
     print(f"OneCompany files copied to {target}")
-    print("Next: edit .onecompany/config.json, budget.json, actors.json; review patterns/overlays; then run python scripts/doctor.py and validate.py")
+    print("Next: configure project/budget/actors/readiness/routing/supervision; then run doctor, validate, simulate and first-run acceptance drills.")
+    print("Unattended workflow templates remain under .onecompany/templates and are NOT activated automatically.")
     return 0
 
 

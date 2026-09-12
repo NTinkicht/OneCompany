@@ -1,0 +1,39 @@
+# DISABLED TEMPLATE. Copy to .github/workflows/onecompany-supervisor.yml only after reviewing budget and permissions.
+name: OneCompany Supervisor
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 * * * *'
+    # Responsive profile (higher Actions usage):
+    # - cron: '2,17,32,47 * * * *'
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+  actions: read
+
+concurrency:
+  group: onecompany-supervisor
+  cancel-in-progress: true
+
+jobs:
+  supervise:
+    if: vars.ONECOMPANY_SUPERVISION_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 20
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Validate control plane
+        run: python onecompany.py validate
+      - name: Reconcile liveness and post actionable Team Room marker
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python onecompany.py supervise --post-team-room

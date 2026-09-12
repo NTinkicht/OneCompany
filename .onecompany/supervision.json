@@ -1,0 +1,43 @@
+{
+  "$schema": "./schemas/supervision.schema.json",
+  "schema_version": "1.0",
+  "enabled": false,
+  "mode": "observe_only",
+  "continuous_operation": {
+    "event_driven_first": true,
+    "scheduled_reconciliation": true,
+    "quiet_when_no_action": true,
+    "stale_candidate_minutes": 30,
+    "target_effective_cadence_minutes": 60
+  },
+  "github_actions": {
+    "enabled": false,
+    "default_cron": "17 * * * *",
+    "responsive_cron_example": "2,17,32,47 * * * *",
+    "may_post_team_room": false,
+    "may_failover": false,
+    "may_merge": false
+  },
+  "chatgpt_tasks": {
+    "enabled": false,
+    "strategy": "four_staggered_hourly_supervisors",
+    "offset_minutes": [2, 17, 32, 47],
+    "required_connected_app": "GitHub",
+    "may_mutate": false
+  },
+  "coordination": {
+    "team_room_issue_number": null,
+    "post_only_actionable_states": true,
+    "deduplicate_same_state": true
+  },
+  "safety": {
+    "scheduler_is_supervisor_not_implementer": true,
+    "must_reconcile_live_github_before_action": true,
+    "must_verify_no_deterministic_job_progress_before_failover": true,
+    "never_create_duplicate_implementation_stream": true,
+    "never_override_budget_policy": true,
+    "never_override_human_only_decisions": true,
+    "automatic_merge_minimum_autonomy_level": "L3",
+    "automatic_next_work_minimum_autonomy_level": "L4"
+  }
+}

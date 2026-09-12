@@ -27,7 +27,7 @@ Tabibi source fork:
 - source lineage shown by the fork: https://github.com/msitarzewski/agency-agents
 - license at the pinned fork revision: MIT
 
-OneCompany adopts the **specialist-profile concept** as role overlays and writes its own concise governance-focused overlays. Upstream changes are never automatically imported.
+OneCompany adopts the specialist-profile concept as role overlays and writes its own concise governance-focused overlays. Upstream changes are never automatically imported.
 
 ## Headroom / local context compression
 
@@ -45,7 +45,31 @@ OneCompany does not require Headroom. It extracts the reusable techniques: deter
 - Epic context/capacity slice: PR #151
 - Epic six-actor/Spotify-inspired organization slice: PR #158
 
-Tabibi is evidence that these mechanisms were exercised in a real evolving repository. OneCompany intentionally generalizes them and should not copy Tabibi product/domain assumptions.
+Tabibi is evidence that these mechanisms were exercised in a real evolving repository. OneCompany intentionally generalizes them and does not copy Tabibi product/domain assumptions.
+
+## OpenAI scheduled and event-triggered tasks
+
+Current product behavior should be re-checked before deployment because limits can change.
+
+Official references:
+
+- Scheduled tasks in ChatGPT: https://help.openai.com/en/articles/10291617
+- ChatGPT Work and Codex: https://help.openai.com/en/articles/20001275/
+- Connecting GitHub to ChatGPT: https://help.openai.com/en/articles/11145903-connecting-github-to-chatgpt-drease
+
+At the time of the OneCompany 0.1.0 foundation audit (September 2026), the official documentation states that eligible paid plans can run recurring tasks up to hourly; Plus supports up to five active tasks; event-triggered Work tasks are available to eligible paid plans and can react to supported GitHub pull-request activity; connected-app permissions/approval requirements remain binding; tasks may pause; and tasks created in a ChatGPT Project should not be assumed to access files stored/uploaded in that Project.
+
+OneCompany therefore treats external ChatGPT tasks as a liveness/supervision layer that must retrieve authoritative state from GitHub rather than from old chat/project context.
+
+## GitHub Actions scheduling
+
+Official references:
+
+- Workflow syntax / `on.schedule`: https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax
+- Troubleshooting scheduled workflows: https://docs.github.com/en/actions/how-tos/troubleshoot-workflows
+- Scheduled issue example / load-delay warning: https://docs.github.com/en/actions/tutorials/manage-your-work/schedule-issue-creation
+
+GitHub documents scheduled workflows as default-branch workflows, with a minimum schedule interval of five minutes, and warns that scheduled runs can be delayed or dropped during high-load periods, especially around the start of an hour. OneCompany therefore schedules away from minute `00`, treats schedules as a reconciliation safety net rather than a correctness clock, and requires scheduler-health visibility.
 
 ## Attribution policy
 

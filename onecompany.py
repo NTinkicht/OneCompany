@@ -12,6 +12,8 @@ COMMANDS = {
     "doctor": "doctor.py",
     "validate": "validate.py",
     "simulate": "simulate.py",
+    "readiness": "readiness.py",
+    "audit-github": "github_audit.py",
     "route": "router.py",
     "lease": "lease.py",
     "reconcile": "reconcile.py",

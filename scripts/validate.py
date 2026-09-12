@@ -11,6 +11,7 @@ REQUIRED = [
     "config.json",
     "actors.json",
     "roles.json",
+    "routing.json",
     "budget.json",
     "state.json",
     "queue.json",
@@ -18,6 +19,10 @@ REQUIRED = [
     "overlays.json",
     "readiness.json",
 ]
+
+WRITE_CAPS = {"implementation", "ci_remediation"}
+REVIEW_CAPS = {"code_review", "security_review"}
+MERGE_CAPS = {"merge_execution"}
 
 
 def main() -> int:
@@ -42,6 +47,7 @@ def main() -> int:
     config = docs["config.json"]
     actors = docs["actors.json"]
     roles = docs["roles.json"]
+    routing = docs["routing.json"]
     budget = docs["budget.json"]
     state = docs["state.json"]
     queue = docs["queue.json"]
@@ -84,14 +90,18 @@ def main() -> int:
                 errors.append(f"zero-spend policy cannot set ai.{key}=true")
 
     allowed = set(budget.get("cost_classes", {}).get("allowed", []))
+    conditional = set(budget.get("cost_classes", {}).get("conditionally_allowed", []))
     forbidden = set(budget.get("cost_classes", {}).get("forbidden", []))
-    overlap = allowed & forbidden
-    if overlap:
-        errors.append(f"budget cost classes both allowed and forbidden: {sorted(overlap)}")
+    if allowed & forbidden:
+        errors.append(f"budget cost classes both allowed and forbidden: {sorted(allowed & forbidden)}")
+    if conditional & forbidden:
+        errors.append(f"budget cost classes both conditional and forbidden: {sorted(conditional & forbidden)}")
 
     actor_ids: set[str] = set()
     actor_capabilities: dict[str, set[str]] = {}
+    actor_costs: dict[str, str] = {}
     enabled_actor_ids: set[str] = set()
+    declared_capability_universe: set[str] = set()
     for actor in actors.get("actors", []):
         actor_id = actor.get("id")
         if not actor_id:
@@ -102,10 +112,14 @@ def main() -> int:
         actor_ids.add(actor_id)
         capabilities = set(actor.get("capabilities", []))
         actor_capabilities[actor_id] = capabilities
+        declared_capability_universe.update(capabilities)
+        actor_costs[actor_id] = actor.get("cost_class", "UNKNOWN_COST")
         if not capabilities:
             errors.append(f"actor {actor_id} has no capabilities")
         if actor.get("may_independently_gate_own_material_authorship") is True:
             errors.append(f"actor {actor_id} may not independently gate its own material authorship")
+        if actor_costs[actor_id] not in allowed | conditional | forbidden:
+            errors.append(f"actor {actor_id} uses cost class not classified by budget: {actor_costs[actor_id]}")
         if actor.get("enabled"):
             enabled_actor_ids.add(actor_id)
             if not actor.get("configured"):
@@ -131,17 +145,25 @@ def main() -> int:
 
         verified = set(item.get("verified_capabilities", []))
         unavailable = set(item.get("temporarily_unavailable_capabilities", []))
-        undeclared_verified = verified - actor_capabilities.get(actor_id, set())
-        undeclared_unavailable = unavailable - actor_capabilities.get(actor_id, set())
-        if undeclared_verified:
-            errors.append(f"readiness {actor_id} verifies undeclared capabilities: {sorted(undeclared_verified)}")
-        if undeclared_unavailable:
-            errors.append(f"readiness {actor_id} marks undeclared capabilities unavailable: {sorted(undeclared_unavailable)}")
+        declared = actor_capabilities.get(actor_id, set())
+        if verified - declared:
+            errors.append(f"readiness {actor_id} verifies undeclared capabilities: {sorted(verified - declared)}")
+        if unavailable - declared:
+            errors.append(f"readiness {actor_id} marks undeclared capabilities unavailable: {sorted(unavailable - declared)}")
 
         access = item.get("repository_access", {})
         for key in ("read", "write", "review", "merge"):
             if not isinstance(access.get(key), bool):
                 errors.append(f"readiness {actor_id} repository_access.{key} must be boolean")
+        if verified and not access.get("read"):
+            errors.append(f"readiness {actor_id} verifies capabilities but repository read access is false")
+        if verified & WRITE_CAPS and not access.get("write"):
+            errors.append(f"readiness {actor_id} verifies write capabilities without repository write access")
+        if verified & REVIEW_CAPS and not access.get("review"):
+            errors.append(f"readiness {actor_id} verifies review capabilities without review-publish access")
+        if verified & MERGE_CAPS and not access.get("merge"):
+            errors.append(f"readiness {actor_id} verifies merge_execution without merge access")
+
         unattended = item.get("unattended", {})
         if unattended.get("verified") is True and unattended.get("configured") is not True:
             errors.append(f"readiness {actor_id} unattended.verified=true requires configured=true")
@@ -160,6 +182,35 @@ def main() -> int:
             errors.append(f"enabled actor {actor_id} has no verified capabilities")
         if not item.get("repository_access", {}).get("read"):
             errors.append(f"enabled actor {actor_id} has no verified repository read access")
+
+    routing_policy = routing.get("policy", {})
+    for key in (
+        "preferences_are_not_leases",
+        "live_readiness_outranks_preference",
+        "budget_outranks_preference",
+        "reviewer_independence_outranks_preference",
+        "healthy_replacement_is_not_preempted_mid_attempt",
+    ):
+        if routing_policy.get(key) is not True:
+            errors.append(f"routing.policy.{key} must be true")
+
+    preferences = routing.get("preference_by_capability", {})
+    for capability in sorted(declared_capability_universe):
+        ordered = preferences.get(capability)
+        if not isinstance(ordered, list) or not ordered:
+            errors.append(f"routing missing non-empty preference list for declared capability: {capability}")
+            continue
+        if len(ordered) != len(set(ordered)):
+            errors.append(f"routing preference for {capability} contains duplicate actors")
+        for actor_id in ordered:
+            if actor_id not in actor_ids:
+                errors.append(f"routing preference {capability} references unknown actor: {actor_id}")
+            elif capability not in actor_capabilities.get(actor_id, set()):
+                errors.append(f"routing preference {capability} includes actor without declared capability: {actor_id}")
+
+    for capability in preferences:
+        if capability not in declared_capability_universe:
+            warnings.append(f"routing defines preference for capability no actor declares: {capability}")
 
     role_ids: set[str] = set()
     for role in roles.get("roles", []):
@@ -233,19 +284,52 @@ def main() -> int:
             if dep == wu.get("id"):
                 errors.append(f"{wu.get('id')} cannot depend on itself")
 
+    authors = state.get("current_material_authors", [])
+    if not isinstance(authors, list) or any(not isinstance(item, str) or not item for item in authors):
+        errors.append("state.current_material_authors must be an array of non-empty actor IDs")
+        authors = []
+    if len(authors) != len(set(authors)):
+        errors.append("state.current_material_authors contains duplicates")
+    for author in authors:
+        if author not in actor_ids:
+            errors.append(f"state.current_material_authors references unknown actor: {author}")
+
     impl_leases = active_implementation_leases(state)
     if len(impl_leases) > 1 and delivery.get("single_canonical_stream"):
         errors.append("state contains more than one active implementation lease")
+    for lease in impl_leases:
+        actor_id = lease.get("actor")
+        if actor_id not in actor_ids:
+            errors.append(f"active implementation lease references unknown actor: {actor_id}")
+        if actor_id and actor_id not in authors:
+            warnings.append(f"active implementation lease actor {actor_id} is not yet in current_material_authors")
     if config.get("no_idle", {}).get("enabled") and state.get("ready_work_count", 0) > 0 and not impl_leases:
         errors.append("FAULT_IDLE_WITH_READY_WORK: ready work exists but no active implementation lease")
 
     gate = state.get("current_gate")
-    if gate and gate.get("verdict") == "PASS — MERGE_READY":
-        if gate.get("sha") != state.get("current_pr_head"):
-            errors.append("current merge-ready gate SHA does not equal current PR head")
+    if gate:
+        reviewer = gate.get("reviewer_actor")
+        if reviewer and reviewer not in actor_ids:
+            errors.append(f"current gate references unknown reviewer actor: {reviewer}")
+        if reviewer and reviewer in authors:
+            errors.append(f"current gate reviewer is a tracked material author: {reviewer}")
+        gate_authors = gate.get("material_authors")
+        if gate_authors is not None and set(gate_authors) != set(authors):
+            errors.append("current gate material_authors does not match current state material authors")
+        if gate.get("verdict") == "PASS — MERGE_READY":
+            if gate.get("sha") != state.get("current_pr_head"):
+                errors.append("current merge-ready gate SHA does not equal current PR head")
+            if gate.get("stale") is True:
+                errors.append("current merge-ready gate is marked stale")
+            if state.get("open_blockers"):
+                errors.append("current merge-ready gate exists while open blockers remain")
+            if state.get("human_decision_required"):
+                errors.append("current merge-ready gate exists while human decision is required")
 
     if state.get("current_pr") is None and state.get("current_pr_head") is not None:
         errors.append("state.current_pr_head set while state.current_pr is null")
+    if state.get("current_pr") is None and gate is not None:
+        errors.append("state.current_gate set while state.current_pr is null")
 
     return finish(errors, warnings)
 

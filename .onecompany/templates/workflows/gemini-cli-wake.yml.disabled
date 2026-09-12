@@ -92,6 +92,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           READY: ${{ steps.preflight.outputs.ready }}
           ACTOR_EXIT: ${{ steps.actor.outputs.exit_code }}
+          ONECOMPANY_WAKE_ISSUE: ${{ vars.ONECOMPANY_WAKE_ISSUE }}
         shell: bash
         run: |
           set -euo pipefail
@@ -101,7 +102,8 @@ jobs:
           from pathlib import Path
           text = Path('/tmp/output.txt').read_text(encoding='utf-8', errors='replace') if Path('/tmp/output.txt').exists() else ''
           secret = os.environ.get('GEMINI_API_KEY', '')
-          if secret: text = text.replace(secret, '[REDACTED]')
+          if secret:
+              text = text.replace(secret, '[REDACTED]')
           text = re.sub(r'(?i)(authorization\s*:\s*bearer\s+)\S+', r'\1[REDACTED]', text)
           text = re.sub(r'(?i)(GEMINI_API_KEY\s*[=:]\s*)\S+', r'\1[REDACTED]', text)
           Path('/tmp/public.txt').write_text(text[:50000], encoding='utf-8')
@@ -113,9 +115,3 @@ jobs:
             echo 'CAPACITY_DEGRADED - preflight/runtime failed. No paid fallback attempted.' >> /tmp/comment.md
           fi
           gh issue comment "$ONECOMPANY_WAKE_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/comment.md
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          READY: ${{ steps.preflight.outputs.ready }}
-          ACTOR_EXIT: ${{ steps.actor.outputs.exit_code }}
-          ONECOMPANY_WAKE_ISSUE: ${{ vars.ONECOMPANY_WAKE_ISSUE }}

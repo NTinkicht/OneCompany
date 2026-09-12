@@ -1,45 +1,41 @@
 # OneCompany Setup From Zero
 
-This is the end-to-end path from a normal GitHub repository to a verified OneCompany installation. It intentionally starts safe and raises autonomy only after evidence.
+This is the end-to-end path from a normal GitHub repository to a verified OneCompany installation. It starts safe and raises autonomy only after evidence.
 
 ## Stage 0 - decide policy before connecting AI
 
-Write down:
+Write down repository scope, protected branches, sensitive data classes, AI spend cap, human-only actions, initial autonomy (L1/L2 recommended), deterministic CI commands, and whether unattended execution is allowed.
 
-- GitHub repository/repositories in scope;
-- default/protected branches;
-- data that must never enter prompts/logs;
-- additional AI spend cap;
-- human-only actions;
-- desired initial autonomy level (L1/L2 recommended);
-- CI commands that define deterministic green;
-- whether unattended execution is allowed at all.
-
-Set `.onecompany/budget.json` before enabling actors.
-
-## Stage 1 - bootstrap
+## Stage 1 - bootstrap safely
 
 From a OneCompany checkout:
 
 ```bash
-python onecompany.py bootstrap --target /path/to/project
+python onecompany.py bootstrap \
+  --target /path/to/project \
+  --repository owner/repo \
+  --initialize-contracts
 ```
 
-Merge conflicts intentionally; do not use `--force` as a substitute for reviewing existing project governance.
+`--repository` may be omitted when bootstrap can infer a GitHub `origin`. Bootstrap initializes the target identity, resets queue/state for the **new** company, and never copies OneCompany's own operational WU history. It refuses an existing `.onecompany` install unless forced; use `docs/UPGRADING.md` for upgrades.
 
-Set `.onecompany/config.json` project repository/default branch.
+## Stage 2 - fill authoritative project contracts
 
-## Stage 2 - configure GitHub
+Complete or map equivalents for:
 
-Follow `docs/GITHUB-SETUP.md`:
+```text
+PRODUCT.md
+ARCHITECTURE.md
+SECURITY.md
+QUALITY.md
+OPERATIONS.md
+```
 
-- protect default branch/ruleset;
-- require PRs for material changes;
-- configure required deterministic checks;
-- block force push/deletion;
-- keep Actions token permissions minimal;
-- choose merge method;
-- keep auto-merge off until L3 is proven.
+These are the durable product boundaries beneath the autonomous control plane. See `docs/PROJECT-CONTRACTS.md`.
+
+## Stage 3 - configure GitHub
+
+Follow `docs/GITHUB-SETUP.md`: protect the default branch/ruleset, require PRs for material changes, configure required deterministic checks, control force-push/deletion, minimize Actions token permissions, and keep auto-merge off until L3 is proven.
 
 Run:
 
@@ -49,94 +45,92 @@ python onecompany.py audit-github
 
 Understand every warning.
 
-## Stage 3 - create deterministic project CI
+## Stage 4 - create deterministic project CI
 
-OneCompany's own validation workflow does not replace your application's CI. Establish reproducible commands for format/lint/typecheck/tests/integration/migrations/build/security as appropriate. Record them in project docs/WU contracts and protect the corresponding checks.
+OneCompany validation does not replace application CI. Establish reproducible format/lint/typecheck/test/integration/migration/build/security checks as appropriate and record them in `QUALITY.md` plus WU contracts.
 
-## Stage 4 - configure workers
+## Stage 5 - configure workers
 
 Use `docs/agent-setup/README.md` and the provider guide for every actor you own.
 
-For each actor:
+For each actor: install/connect the intended surface, authenticate without committing secrets, grant minimum repository permissions, smoke-test read/write/review/merge separately as needed, record non-secret evidence in `readiness.json`, then set `configured/enabled` only for routes genuinely usable now.
 
-1. install/connect the intended surface;
-2. authenticate without committing secrets;
-3. grant minimum repository permissions;
-4. run read smoke;
-5. run write/review/merge smoke only for capabilities you intend to route;
-6. record non-secret results in `.onecompany/readiness.json`;
-7. set `configured=true` and then `enabled=true` only when the intended route is genuinely usable.
+A minimal safe company needs one implementer route, deterministic CI, and one independent reviewer route; the reviewer may initially be `human-owner`.
 
-You do **not** need every reference actor. A minimal safe company needs one implementer route, deterministic CI, and one independent review route (human review is acceptable initially).
+## Stage 6 - configure routing and actor lifecycle
 
-## Stage 5 - configure roles/routing
-
-Review `.onecompany/roles.json`, `.onecompany/actors.json`, and `.onecompany/readiness.json`.
-
-Test the router:
+Review `actors.json`, `readiness.json`, `roles.json`, and `routing.json`.
 
 ```bash
 python onecompany.py route --capability implementation
 python onecompany.py route --capability code_review --for-independent-gate --exclude-author <actor-id>
 ```
 
-If no eligible actor exists, that should fail visibly rather than invent capacity.
+Read `docs/ACTOR-LIFECYCLE.md` for capability degradation, recovery, credential rotation and retirement.
 
-## Stage 6 - choose patterns/overlays
+## Stage 7 - patterns and role overlays
 
-Review `.onecompany/patterns.json` and `.onecompany/overlays.json`. Keep core invariants. Select overlays per Work Unit only when useful; an overlay does not create a new worker.
+Review `patterns.json` and `overlays.json`. Keep core invariants. Overlays sharpen a real actor's lens but do not create capacity, leases, permissions or independence.
 
-## Stage 7 - Team Room / coordination
+## Stage 8 - Team Room / coordination
 
-Create one durable GitHub Team Room issue if multiple workers need cross-stream coordination. Use `docs/COORDINATION-BUS.md`. Slack/Discord/Teams are attention layers only.
+Create a permanent Team Room issue from `.github/ISSUE_TEMPLATE/team-room.md` when multi-worker coordination needs it. Put the issue number in `supervision.json` before enabling Team Room posting. Slack/Discord/Teams remain attention layers.
 
-Do not turn heartbeats into work. Durable artifacts are progress.
+## Stage 9 - seed the project queue
 
-## Stage 8 - first Work Unit
+Create bounded WUs and dependencies. The installed queue starts empty by design.
 
-Create a low-risk WU from `.github/ISSUE_TEMPLATE/work-unit.md`.
+Check dependency-ready work with:
 
-- objective + non-goals;
-- deterministic verification;
-- risk/security/budget constraints;
-- required capability;
-- role overlay if useful;
-- exactly one implementation lease;
-- one canonical branch/PR.
-
-## Stage 9 - prove the full loop
-
-Follow `docs/FIRST-RUN-ACCEPTANCE.md`. Prove:
-
-```text
-lease -> implement -> CI -> independent exact-head review
--> stale-review invalidation -> failover -> expected-head merge
--> reconcile -> release lease
+```bash
+python onecompany.py next-work
 ```
 
-Do this before L3/L4.
+The selector refuses to encourage new implementation while a canonical stream is already active.
 
-## Stage 10 - optional unattended actors
+## Stage 10 - prove the delivery loop
 
-Read `docs/UNATTENDED-AUTOMATION.md`. Templates live under `.onecompany/templates/` and are disabled/non-executable there.
+Run `docs/FIRST-RUN-ACCEPTANCE.md` on a harmless setup WU:
 
-Enable only after reviewing current provider docs and filling explicit version/cost guards. Generic unattended scout paths should start read-only.
+```text
+lease -> implement -> CI -> independent exact-head gate
+-> stale-review invalidation -> same-stream failover
+-> expected-head merge -> reconcile -> next work
+```
 
-## Stage 11 - no-idle / continuous operation
+## Stage 11 - optional unattended actors
 
-For L4:
+Read `docs/UNATTENDED-AUTOMATION.md`. Provider/wake templates under `.onecompany/templates/` are deliberately disabled. Enable only after current provider docs, version/cost guards, permissions, timeouts and redaction are verified.
 
-- `no_idle.enabled=true`;
-- ready-work dependencies are machine-readable;
-- stale work is reconciled against live GitHub before failover;
-- no idle-agent busywork;
-- an eligible route exists or the system surfaces a genuine blocker.
+## Stage 12 - round-the-clock supervision
 
-A watchdog is shipped disabled. Turn it on only after runner/provider cost and notification behavior are understood.
+Read `docs/SCHEDULED-SUPERVISION.md` and configure `supervision.json`.
 
-## Stage 12 - incident/stop drill
+Preferred model:
 
-Prove you can stop the company by disabling workflows/automations, revoking write credentials, disabling actors, and lowering autonomy. Review `docs/INCIDENT-RUNBOOK.md`.
+```text
+event-driven handoffs
+        +
+scheduled reconciliation safety net
+        +
+daily scheduler-health check
+```
+
+Optional profiles include an off-peak hourly GitHub Actions supervisor and four staggered hourly ChatGPT scheduled supervisors giving an effective ~15-minute liveness check. They are **supervisors**, not four writers.
+
+Before enabling 24/7 mode:
+
+```bash
+python onecompany.py validate
+python onecompany.py simulate-supervision
+python onecompany.py supervise --force-observe
+```
+
+For L4, also enable no-idle and continuous queue only after the full acceptance drills pass.
+
+## Stage 13 - stop/incident drill
+
+Prove you can pause/delete external schedules, disable workflows, revoke unattended write credentials, disable actors, and lower autonomy. Review `docs/INCIDENT-RUNBOOK.md`.
 
 ## Final pre-autonomy command set
 
@@ -144,8 +138,11 @@ Prove you can stop the company by disabling workflows/automations, revoking writ
 python onecompany.py doctor
 python onecompany.py validate
 python onecompany.py simulate
+python onecompany.py simulate-supervision
 python onecompany.py readiness --local-probe
 python onecompany.py audit-github
+python onecompany.py next-work
+python onecompany.py supervise --force-observe
 ```
 
-Then complete the adoption checklist and first-run acceptance evidence.
+Then complete `docs/ADOPTION-CHECKLIST.md` and `docs/FIRST-RUN-ACCEPTANCE.md`.

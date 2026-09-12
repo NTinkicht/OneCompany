@@ -1,154 +1,79 @@
 # Configuration Reference
 
-The reference control plane lives in `.onecompany/`. JSON is used intentionally so validation and automation do not require a YAML dependency.
+The reference control plane lives in `.onecompany/`. JSON keeps validation/automation dependency-light.
 
 ## `config.json`
 
-### `schema_version`
-Control-plane format version.
-
-### `project`
-- `name` — human project name.
-- `repository` — `owner/name` for GitHub-aware tooling.
-- `source_of_truth` — reference model requires `github`.
-- `default_branch` — normally `main`.
-
-### `autonomy`
-- `level` — L0-L5.
-- `continue_when_ready_work_exists` — enables continuous queue behavior; expected true at L4/L5.
-- `human_must_approve_autonomy_increase` — safe default true.
-
-### `delivery`
-- `single_canonical_stream` — exactly one implementation stream for a bounded WU/company policy scope.
-- `require_explicit_implementation_lease` — no inferred ownership.
-- `require_exact_head_gate` — final approval bound to SHA.
-- `require_independent_non_author_review` — separation of powers.
-- `required_finding_resolution_severity` — default `MEDIUM`.
-- `require_expected_head_merge` — merge executor verifies approved SHA.
-- `derive_state_from_github_before_consequential_actions` — stale cache cannot govern merge/failover.
-
-### `coordination`
-Defines which channels are authoritative. Reference settings keep chat/Slack advisory.
-
-### `no_idle`
-- `enabled` — turn on for continuous autonomy.
-- `fault_when_ready_work_has_no_valid_lease` — core no-idle invariant.
-- `measure_progress_by_durable_artifacts` — do not trust acknowledgements as heartbeat.
-- `allow_idle_specialists` — prevents utilization theater.
-
-### `human_only_decisions`
-Version-controlled list of action classes requiring a human.
+`project` identifies the target GitHub repository/default branch. `autonomy` chooses L0-L5. `delivery` enables single-stream leases, exact-head review, independent non-author gating and expected-head merge. `coordination` keeps GitHub authoritative. `no_idle` governs continuous-company liveness. `human_only_decisions` records actions automation may not silently take.
 
 ## `budget.json`
 
-### `ai.additional_monthly_spend_cap`
-Maximum new AI spend allowed beyond already-owned subscriptions/allowances/local compute.
+Defines additional AI spend cap, paid fallback/overage/top-up/new-vendor rules, CI-runner policy and actor cost classes. Unknown cost should normally fail closed. A valid provider key is not proof that its invocation is financially allowed.
 
-### Paid-switch booleans
-`allow_paid_fallback`, `allow_overage`, `allow_auto_topup`, `allow_new_paid_vendor` are separate because products can expose these independently.
+## `actors.json` - potential capability
 
-### `unknown_cost_behavior`
-- `forbid` — safest;
-- `human_approval` — stop and ask authorized human;
-- `allow_within_cap` — only appropriate with reliable metering/cap enforcement.
+Declares stable actor identity, possible execution modes, cost class, permissions summary and potential capabilities. It is not proof that today's account/runtime can perform them.
 
-### Cost classes
-Actors are routable only if their cost class is permitted by current budget.
+## `readiness.json` - proven current route
 
-## `actors.json` — declared potential
+Records setup state, verified surfaces/capabilities, capability-specific temporary degradation, proved repository read/write/review/merge access, unattended readiness and non-secret smoke evidence.
 
-Each actor has a stable ID plus its **potential** execution modes/capabilities. This file answers “what can this actor type plausibly do when configured?” It does not claim the current account/runtime is ready now.
+This distinction lets OneCompany represent states such as “implementation works; review quota is exhausted.”
 
-Important fields:
+## `routing.json`
 
-- `id`, `display_name`;
-- `enabled`, `configured`;
-- `execution_modes`;
-- `cost_class`;
-- permissions summary;
-- declared `capabilities`;
-- self-gate policy.
-
-`enabled=true` with `configured=false` is invalid.
-
-## `readiness.json` — proven current route
-
-This is the second half of actor routing. It records non-secret operational evidence for the exact configured surface.
-
-Per actor:
-
-- `setup_state`: `not_started`, `partially_ready`, `ready`, `degraded`, or `unavailable`;
-- `verified_surfaces`: e.g. `codex_cloud`, `claude_code`, `copilot_code_review`;
-- `verified_capabilities`: capabilities actually smoke-tested on those surfaces;
-- `temporarily_unavailable_capabilities`: current quota/runtime limitations;
-- `repository_access.read/write/review/merge`: permissions that have been proved, not assumed;
-- `unattended.configured/verified`;
-- `last_verified_at`;
-- `evidence`: non-secret references such as setup WU/PR/run IDs.
-
-Rules:
-
-- verified/unavailable capabilities must be declared in `actors.json`;
-- enabled actors must be `ready` or `degraded`, have at least one verified capability, and have repository read access;
-- `degraded` is allowed when some capabilities still work;
-- unattended verified requires unattended configured;
-- no credentials belong here.
-
-This separation handles cases such as “Codex implementation works but code-review quota is exhausted” without disabling the whole actor.
+Capability-specific preference order **after** hard eligibility filters. Live readiness, budget, permissions and reviewer independence outrank preference. A preference is never a lease and a recovered preferred actor does not preempt a healthy replacement mid-attempt.
 
 ## `roles.json`
 
-Roles define purpose, required capabilities, write scope, and conflicts. They are not bound permanently to actor IDs. `merge_executor` explicitly requires `merge_execution`; state reconciliation alone is not merge authority.
+Defines orchestrator, implementer, scout, test/failure roles, independent/security review, CI remediation and merge execution contracts. Roles belong to the company, not permanently to providers.
 
-## `patterns.json`
+## `supervision.json`
 
-Catalogs the organizational/technical patterns the company relies on. Each entry records an ID, adoption level, origin, source, and purpose. The corresponding human-readable contract lives under `patterns/<id>.md`.
+Controls round-the-clock liveness supervision.
 
-Adoption levels:
+Key areas:
 
-- `core` — part of the reference safety/coordination model;
-- `recommended` — broadly useful but may be replaced by an equivalent mechanism;
-- `optional` — project-dependent;
-- `experimental` — evaluate before granting authority.
+- `enabled` / `mode`: disabled/observe/notify/orchestrate posture;
+- `continuous_operation`: event-first, scheduled reconciliation, stale-candidate threshold and effective cadence;
+- `github_actions`: optional scheduled supervisor profile;
+- `chatgpt_tasks`: optional staggered external supervisor profile;
+- `scheduler_health`: daily health, visible failure, no exact-cron dependency, no assumption that ChatGPT Project files are available;
+- `coordination.team_room_issue_number`: optional durable reporting target;
+- `safety`: scheduler-not-implementer, live-reconcile-before-action, no duplicate streams, no budget/human-boundary override, autonomy floors for auto-merge/next-work.
 
-Pattern provenance is documentation, not execution permission.
-
-## `overlays.json`
-
-Registers optional professional role overlays plus provenance and hard non-authority rules.
-
-An overlay can focus an actor on backend architecture, database reliability, security, SRE, code review, persona testing, minimal-change remediation, or multi-agent-system design. It does **not** create a new actor or independent reviewer.
-
-The validator requires these overlay rules to remain false:
-
-- creates actor/capacity;
-- creates implementation lease;
-- grants repository permission;
-- overrides material authorship;
-- overrides self-gate rule;
-- grants merge authority.
+The safe template starts `enabled=false`, `mode=observe_only`, with no failover/merge/mutation authority.
 
 ## `queue.json`
 
-A compact dependency index for proposed/planned WUs. Once work begins, the GitHub issue/PR is the durable detailed record. Keep IDs/dependencies/statuses consistent.
+Dependency index for bounded WUs. A fresh bootstrap resets it to empty so OneCompany's own history cannot leak into a new project. `python onecompany.py next-work` derives candidates whose dependencies are `MERGED/DONE` and suppresses starting another stream while canonical work is active.
 
 ## `state.json`
 
-Operational cache. Important fields:
+Operational cache: current WU/PR/head, cumulative material authors, active leases, exact-head gate, ready count, blockers and human-decision flag. Live GitHub wins on conflict.
 
-- repository/default head;
-- current WU/PR/head;
-- active leases;
-- current exact-head gate summary;
-- ready-work count;
-- blockers/human-decision flag.
+## `patterns.json` and `overlays.json`
 
-Always reconcile before consequential action.
+Patterns document the operating techniques/invariants. Overlays provide bounded professional lenses. An overlay cannot create an actor, capacity, lease, permission, reviewer independence or merge authority.
 
-## Schemas
+## Project foundation contracts
 
-JSON schemas live under `.onecompany/schemas/`. The dependency-free validator also enforces cross-file invariants that ordinary schema validation cannot easily prove, such as actor↔readiness coherence, role capability coverage, single-stream leases, budget contradictions, and exact-head gate consistency.
+The control plane is not a substitute for product truth. Recommended root contracts are:
+
+```text
+PRODUCT.md
+ARCHITECTURE.md
+SECURITY.md
+QUALITY.md
+OPERATIONS.md
+```
+
+Templates are under `.onecompany/templates/contracts/`. See `docs/PROJECT-CONTRACTS.md`.
+
+## Schemas and cross-file validation
+
+Schemas live under `.onecompany/schemas/`. `python onecompany.py validate` also runs cross-file checks ordinary JSON Schema cannot prove: actor↔readiness coherence, role capability coverage, routing references, budget contradictions, single-stream leases, exact-head/authorship consistency and supervision safety.
 
 ## Adding project-specific fields
 
-Schemas intentionally allow some extension. Prefix project-specific concepts clearly and update validation if they affect safety or routing. Do not hide new spending/permission semantics in an opaque extension field.
+Schemas allow bounded extension where appropriate. Update validation when an extension affects safety, routing, spending or authority. Never hide a new paid path or permission expansion inside an opaque custom field.

@@ -18,6 +18,7 @@ def main() -> int:
     budget = load_json(CONTROL / "budget.json")
     state = load_json(CONTROL / "state.json")
     overlays = load_json(CONTROL / "overlays.json")
+    readiness = load_json(CONTROL / "readiness.json")
     results = []
 
     zero_spend = copy.deepcopy(budget)
@@ -48,6 +49,17 @@ def main() -> int:
     results.append(check("role overlay cannot create an implementation lease", rules.get("creates_implementation_lease") is False))
     results.append(check("role overlay cannot override self-gate rule", rules.get("overrides_self_gate_rule") is False))
     results.append(check("role overlay cannot grant merge authority", rules.get("grants_merge_authority") is False))
+
+    # Capability-level degradation must not imply whole-provider outage.
+    sample = copy.deepcopy(readiness.get("actors", [])[0])
+    sample["setup_state"] = "degraded"
+    sample["verified_capabilities"] = ["implementation", "code_review"]
+    sample["temporarily_unavailable_capabilities"] = ["code_review"]
+    results.append(check("degraded actor can retain unrelated verified capability", "implementation" in sample["verified_capabilities"] and "implementation" not in sample["temporarily_unavailable_capabilities"]))
+    results.append(check("temporary review outage is capability-specific", "code_review" in sample["temporarily_unavailable_capabilities"]))
+
+    # Declared capability is not readiness: a default actor with no verified capabilities must not be considered proven.
+    results.append(check("default readiness does not pretend capabilities are verified", all(not item.get("verified_capabilities") for item in readiness.get("actors", []))))
 
     results.append(check("GitHub remains source of truth", config.get("project", {}).get("source_of_truth") == "github"))
 

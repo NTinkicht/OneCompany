@@ -1,0 +1,1 @@
+{"type":"object","required":["$schema","version","waivers","rules"],"properties":{"$schema":{"type":"string"},"version":{"type":"integer"},"waivers":{"type":"array"},"rules":{"type":"object"}}}

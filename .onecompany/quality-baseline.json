@@ -1,4 +1,5 @@
 {
+  "$schema": "./schemas/quality-baseline.schema.json",
   "version": 1,
   "captured_at": null,
   "metrics": {},

@@ -1,13 +1,6 @@
 {
+  "$schema": "./schemas/waivers.schema.json",
   "version": 1,
   "waivers": [],
-  "rules": {
-    "reason_required": true,
-    "owner_required": true,
-    "issue_required": true,
-    "expiry_required": true,
-    "risk_required": true,
-    "expired_waiver_blocks_merge": true,
-    "permanent_waiver_forbidden": true
-  }
+  "rules": {"reason_required": true, "owner_required": true, "issue_required": true, "expiry_required": true, "risk_required": true, "expired_waiver_blocks_merge": true, "permanent_waiver_forbidden": true}
 }

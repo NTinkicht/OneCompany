@@ -1,4 +1,5 @@
 {
+  "$schema": "./schemas/architecture.schema.json",
   "version": 1,
   "architecture_style": "project-defined",
   "principles": {

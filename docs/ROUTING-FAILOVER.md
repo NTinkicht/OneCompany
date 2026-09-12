@@ -2,106 +2,133 @@
 
 ## Principle
 
-Route **capabilities**, not brands. A worker identity is an implementation detail of the company roster.
+Route **capabilities**, not brands. Provider tendencies are preferences; live readiness, budget, permissions, authorship, and policy are hard filters.
+
+Machine policy:
+
+```text
+.onecompany/actors.json      potential capability
+.onecompany/readiness.json   proven capability/access/current degradation
+.onecompany/routing.json     capability-specific preference order
+.onecompany/budget.json      financial eligibility
+.onecompany/state.json       current authorship/leases/gate cache
+```
 
 ## Routing pipeline
 
-### 1. Determine required role/capabilities
-Example implementation WU:
+### 1. Determine required capability
 
-```text
-required: implementation, TypeScript, tests
-preferred: repository_intelligence, failure_analysis
-write_access: required
-independent_gate_conflict: irrelevant for implementer
-```
+Examples: `implementation`, `code_review`, `repository_intelligence`, `test_design`, `failure_analysis`, `merge_execution`.
 
 ### 2. Apply hard eligibility filters
+
 Reject actors that:
 
-- lack required permission/environment;
+- are disabled/unconfigured;
+- do not declare the capability;
+- have not verified the capability on the intended surface;
+- are temporarily unavailable for that capability;
+- lack required read/write/review/merge access;
 - are forbidden by budget policy;
-- are unavailable/quota-exhausted;
-- cannot access required repository context;
-- are materially conflicted for the target review role;
+- are materially conflicted for independent review;
 - would violate data/security policy.
 
-### 3. Rank eligible actors
-Possible preference signals:
+### 3. Apply capability-specific preference
 
-- capability fit;
-- current capacity/headroom;
-- included/free vs metered cost;
-- latency;
-- context size;
-- recent task success;
-- environment/tool access;
-- task specialization.
-
-### 4. Produce fallback chain
-Record an ordered list of *eligible* alternatives. Do not list a paid actor when paid fallback is forbidden.
-
-## Example roster strategy
-
-A subscription-only project might prefer:
+Only after hard filters, rank using `.onecompany/routing.json`. The reference tendencies preserve lessons from Tabibi:
 
 ```text
-implementation: Codex → ChatGPT → GitHub Copilot → other eligible writer
-independent review: Claude → CodeRabbit/Copilot review → another non-author reviewer
-repository intelligence: Gemini CLI → local tooling → any read-capable actor
-test/failure analysis: Mistral Vibe → Claude → ChatGPT
+planning/orchestration      ChatGPT first
+implementation             Codex first
+independent code review    Claude first
+repository intelligence    Gemini CLI first
+failure analysis           Mistral Vibe first
+test design / QA           GitHub Copilot first
+merge execution            Codex first
 ```
 
-This is only an example. OneCompany does not require these brands or this order.
+These are replaceable preferences, not job ownership. The optional human owner is a fallback/safety route when its corresponding capabilities are explicitly verified.
+
+Use:
+
+```bash
+python onecompany.py route --capability implementation
+python onecompany.py route --capability code_review --for-independent-gate
+```
+
+The independent-gate route automatically excludes `state.current_material_authors`; `--exclude-author` can add additional conservative exclusions.
+
+The first eligible result is a **proposal, not a lease**.
+
+## Capability-specific degradation
+
+Do not disable an actor globally because one quota/surface fails. Example:
+
+```text
+Codex implementation: verified + available
+Codex code_review: temporarily unavailable
+```
+
+The router may still propose Codex for implementation and reject it for review.
 
 ## Failover triggers
 
 Recommended triggers:
 
 - explicit quota/capacity exhaustion;
-- actor unavailable/outage;
+- actor/runtime unavailable;
 - missing environment required to reproduce failure;
-- no durable progress before lease timeout/heartbeat threshold;
+- no durable progress **after live evidence is reconciled**;
 - repeated same failed remediation pattern;
 - permission failure;
 - human override;
 - security concern.
 
-## Failover procedure
+A timer/heartbeat alone is not sufficient evidence to wake a competing implementer.
+
+## Same-stream failover procedure
 
 1. Reconcile current branch/PR/head.
-2. Stop/release prior write lease.
-3. Preserve current canonical branch and PR.
-4. Record authorship accumulated so far.
-5. Grant replacement actor a lease from the exact current head.
-6. Hand off objective, acceptance contract, current blocker, logs, and prior attempts.
-7. Replacement actor must inspect current reality before editing.
-8. Continue existing CI/review lifecycle.
+2. Diagnose which capability is unavailable.
+3. Route an eligible replacement.
+4. Transfer the existing implementation lease atomically while preserving WU/branch/PR/history.
+5. Preserve cumulative material authorship.
+6. Hand off objective, acceptance contract, current blocker, CI/findings, prior attempts, budget/security constraints.
+7. Replacement inspects current reality before editing.
+8. Continue the existing CI/review lifecycle.
+
+Executable helper:
+
+```bash
+python onecompany.py lease transfer \
+  --actor <replacement-actor> \
+  --current-head <exact-current-sha> \
+  --reason quota_exhausted
+```
 
 Do **not** open another branch merely because the worker changed.
 
+## Non-preemption rule
+
+If a replacement is healthy and actively making progress on the canonical stream, recovery of the preferred actor does not automatically preempt it mid-attempt. Finish or perform an explicit safe handoff.
+
 ## Authorship after failover
 
-Material authorship is cumulative. If ChatGPT wrote product logic and Copilot later only formatted a test, ChatGPT remains a material author. Final independent gate eligibility must consider all material authors of the candidate head, not just the latest committer username.
+Material authorship is cumulative and stored conservatively in `state.current_material_authors`. Failover/cherry-pick/replay does not launder authorship. Final independent gate routing automatically excludes tracked authors.
 
 ## Capacity states
 
-- `AVAILABLE`
-- `DEGRADED`
-- `QUOTA_LIMITED`
-- `UNAVAILABLE`
-- `FORBIDDEN_BY_BUDGET`
-- `FORBIDDEN_BY_POLICY`
-- `UNKNOWN`
+Useful operational states include:
 
-Unknown should normally be treated conservatively for unattended spending/actions.
+- `ready`
+- `degraded`
+- `unavailable`
+- capability-specific temporary unavailability
+- forbidden by budget/policy
+- unknown
+
+Unknown should normally fail closed for unattended spending/actions.
 
 ## Zero-spend behavior
 
-If every eligible writer is temporarily unavailable and paid fallback is forbidden:
-
-```text
-CAPACITY_BLOCKED
-```
-
-is correct behavior. Silently spending money is not.
+If every eligible writer is temporarily unavailable and paid fallback is forbidden, a visible capacity blocker is correct behavior. Silently spending money is not.

@@ -10,13 +10,13 @@
     "unknown_actor_behavior": "reject"
   },
   "preference_by_capability": {
-    "planning": ["chatgpt", "claude", "codex", "mistral-vibe", "gemini-cli", "github-copilot", "human-owner"],
-    "architecture": ["chatgpt", "claude", "codex", "mistral-vibe", "gemini-cli", "human-owner"],
+    "planning": ["chatgpt", "claude", "codex", "human-owner"],
+    "architecture": ["chatgpt", "claude", "human-owner"],
     "state_reconciliation": ["chatgpt", "codex", "claude", "github-copilot", "human-owner"],
     "implementation": ["codex", "claude", "chatgpt", "mistral-vibe", "github-copilot", "gemini-cli", "human-owner"],
-    "ci_remediation": ["codex", "chatgpt", "claude", "github-copilot", "mistral-vibe", "gemini-cli", "human-owner"],
+    "ci_remediation": ["codex", "chatgpt", "claude", "github-copilot", "mistral-vibe", "human-owner"],
     "code_review": ["claude", "chatgpt", "codex", "gemini-cli", "mistral-vibe", "github-copilot", "human-owner"],
-    "security_review": ["claude", "chatgpt", "codex", "human-owner"],
+    "security_review": ["claude", "chatgpt", "human-owner"],
     "repository_intelligence": ["gemini-cli", "codex", "chatgpt", "claude", "mistral-vibe", "github-copilot", "human-owner"],
     "regression_scouting": ["gemini-cli", "human-owner"],
     "failure_analysis": ["mistral-vibe", "claude", "chatgpt", "codex", "github-copilot", "gemini-cli", "human-owner"],

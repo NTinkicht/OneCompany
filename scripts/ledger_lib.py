@@ -49,6 +49,8 @@ def _gh_json(args: list[str]) -> Any:
 def list_events() -> list[dict[str, Any]]:
     repo, issue = _repo_and_issue()
     trusted = _trusted_publishers()
+    if not trusted:
+        raise RuntimeError("ledger has no trusted publisher logins")
     raw = _gh_json(["api", "--paginate", "--slurp", f"repos/{repo}/issues/{issue}/comments?per_page=100"])
     pages = raw if isinstance(raw, list) else [raw]
     comments: list[dict[str, Any]] = []
@@ -61,7 +63,7 @@ def list_events() -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     for comment in comments:
         login = ((comment.get("user") or {}).get("login"))
-        if trusted and login not in trusted:
+        if login not in trusted:
             continue
         match = EVENT_RE.search(comment.get("body") or "")
         if not match:
@@ -73,8 +75,10 @@ def list_events() -> list[dict[str, Any]]:
         event["github_comment_id"] = comment.get("id")
         event["github_comment_url"] = comment.get("html_url")
         event["github_publisher"] = login
+        event["github_created_at"] = comment.get("created_at")
         events.append(event)
-    events.sort(key=lambda item: (item.get("timestamp") or "", item.get("event_id") or ""))
+    # Order by GitHub's durable append order, not actor-supplied clocks.
+    events.sort(key=lambda item: (item.get("github_created_at") or "", int(item.get("github_comment_id") or 0)))
     return events
 
 
@@ -107,6 +111,7 @@ def post_event(event_type: str, actor: str, payload: dict[str, Any]) -> dict[str
     event["github_comment_id"] = posted.get("id")
     event["github_comment_url"] = posted.get("html_url")
     event["github_publisher"] = login
+    event["github_created_at"] = posted.get("created_at")
     return event
 
 
@@ -114,6 +119,7 @@ def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any
     active: dict[str, dict[str, Any]] = {}
     authors_by_pr: dict[int, set[str]] = {}
     gates_by_pr: dict[int, dict[str, Any]] = {}
+    conflicts: list[dict[str, Any]] = []
 
     def normalize_pr(value: Any) -> int | None:
         if isinstance(value, int):
@@ -122,21 +128,21 @@ def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any
             return int(value)
         return None
 
-    def add_lease(lease_id: str, actor: str | None, payload: dict[str, Any], event: dict[str, Any]) -> None:
+    def current_implementation() -> dict[str, Any] | None:
+        return next((item for item in active.values() if item.get("role") == "implementation"), None)
+
+    def add_lease(lease_id: str, actor: str | None, payload: dict[str, Any], event: dict[str, Any]) -> bool:
+        role = payload.get("role", "implementation")
+        if role == "implementation":
+            winner = current_implementation()
+            if winner is not None:
+                conflicts.append({"event_id": event.get("event_id"), "type": event.get("type"), "reason": "implementation_lease_already_active", "winner_lease_id": winner.get("id"), "rejected_lease_id": lease_id})
+                return False
         event_pr = normalize_pr(payload.get("pr"))
-        active[lease_id] = {
-            "id": lease_id,
-            "role": payload.get("role", "implementation"),
-            "actor": actor,
-            "work_unit": payload.get("work_unit"),
-            "branch": payload.get("branch"),
-            "pr": event_pr,
-            "start_head": payload.get("start_head"),
-            "status": "active",
-            "event": event,
-        }
-        if payload.get("role", "implementation") == "implementation" and event_pr is not None and actor:
+        active[lease_id] = {"id": lease_id, "role": role, "actor": actor, "work_unit": payload.get("work_unit"), "branch": payload.get("branch"), "pr": event_pr, "start_head": payload.get("start_head"), "status": "active", "event": event}
+        if role == "implementation" and event_pr is not None and actor:
             authors_by_pr.setdefault(event_pr, set()).add(str(actor))
+        return True
 
     for event in events:
         event_type = event.get("type")
@@ -155,28 +161,21 @@ def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any
             if lease_id:
                 active.pop(str(lease_id), None)
         elif event_type == "ROLE_LEASE_TRANSFERRED":
-            old_id = payload.get("old_lease_id")
-            new_id = payload.get("new_lease_id")
-            if old_id:
-                active.pop(str(old_id), None)
+            old_id = str(payload.get("old_lease_id") or "")
+            new_id = str(payload.get("new_lease_id") or "")
+            old = active.get(old_id)
+            if not old or old.get("role") != "implementation":
+                conflicts.append({"event_id": event.get("event_id"), "type": event_type, "reason": "transfer_source_not_active", "old_lease_id": old_id, "new_lease_id": new_id})
+                continue
+            active.pop(old_id, None)
             if new_id:
-                add_lease(str(new_id), actor, payload, event)
+                # Transfer is atomic with respect to the canonical lease: the old lease
+                # is consumed by this same trusted event before the replacement is added.
+                add_lease(new_id, actor, payload, event)
         elif event_type == "MATERIAL_AUTHOR" and event_pr is not None and actor:
             authors_by_pr[event_pr].add(str(actor))
         elif event_type == "GATE" and event_pr is not None:
-            gates_by_pr[event_pr] = {
-                "pr": event_pr,
-                "sha": payload.get("sha"),
-                "reviewer_actor": actor,
-                "verdict": payload.get("verdict"),
-                "material_authors": payload.get("material_authors", []),
-                "evidence": payload.get("evidence", []),
-                "summary": payload.get("summary", ""),
-                "stale": False,
-                "github_comment_url": event.get("github_comment_url"),
-                "github_publisher": event.get("github_publisher"),
-                "timestamp": event.get("timestamp"),
-            }
+            gates_by_pr[event_pr] = {"pr": event_pr, "sha": payload.get("sha"), "reviewer_actor": actor, "verdict": payload.get("verdict"), "material_authors": payload.get("material_authors", []), "evidence": payload.get("evidence", []), "summary": payload.get("summary", ""), "stale": False, "github_comment_url": event.get("github_comment_url"), "github_publisher": event.get("github_publisher"), "timestamp": event.get("github_created_at") or event.get("timestamp")}
 
     active_values = list(active.values())
     if pr is not None:
@@ -186,5 +185,4 @@ def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any
     else:
         authors = sorted({author for values in authors_by_pr.values() for author in values})
         gate = None
-
-    return {"active_leases": active_values, "material_authors": authors, "current_gate": gate, "gates_by_pr": gates_by_pr}
+    return {"active_leases": active_values, "material_authors": authors, "current_gate": gate, "gates_by_pr": gates_by_pr, "conflicts": conflicts}

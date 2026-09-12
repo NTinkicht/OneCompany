@@ -1,16 +1,15 @@
 # Durable Coordination Ledger
 
-`.onecompany/state.json` is deliberately a cache. That means independent scheduled tasks, local CLIs and cloud agents must not rely on one process's private state for leases, material authorship or final gates.
+`.onecompany/state.json` is a cache. Independent scheduled tasks, local CLIs and cloud agents cannot safely coordinate leases, material authorship or exact-head gates through one process's private state.
 
-For L4/L5 and orchestrating scheduled supervision, OneCompany therefore uses an optional GitHub Team Room issue as a **durable append-only coordination ledger**.
+For L3 autonomous merge and L4/L5 continuous operation, OneCompany uses an optional GitHub Team Room issue as a durable append-only coordination ledger.
 
-## What belongs in the ledger
-
-Machine-readable events can include:
+## Events
 
 ```text
 ROLE_LEASE_ASSIGNED
 ROLE_LEASE_RELEASED
+ROLE_LEASE_TRANSFERRED
 MATERIAL_AUTHOR
 GATE
 CAPACITY_DEGRADED
@@ -20,11 +19,11 @@ HUMAN_DECISION
 MERGED
 ```
 
-The implementation branch does not need a coordination commit every time a lease/gate changes, so exact-head review is not invalidated merely by recording coordination state.
+Coordination changes do not require a commit to the implementation branch, so recording a gate/lease does not invalidate the exact reviewed SHA.
 
 ## Trust
 
-Configure:
+Configure the issue and trusted GitHub publishers in `.onecompany/ledger.json`. Only events posted by those accounts are accepted. The reader orders events using GitHub comment creation time/ID rather than actor-supplied timestamps.
 
 ```json
 {
@@ -34,31 +33,39 @@ Configure:
 }
 ```
 
-Only ledger events posted by configured trusted GitHub publishers are accepted by the reader. Keep the Team Room under repository permissions appropriate to the project; for high-assurance deployments, use dedicated bot/app identities with least privilege rather than a broad human token.
+For high-assurance deployments, prefer dedicated least-privilege bot/app identities. Provider credentials and sensitive payloads never belong in ledger events.
+
+## Concurrency rule
+
+The ledger implements **first valid implementation lease wins**. If two supervisors race to append implementation assignments, the first trusted GitHub event in durable comment order becomes canonical; later overlapping assignments are recorded as conflicts and ignored by derived state. `lease acquire` re-reads the ledger after posting and refuses to proceed unless its own lease is the canonical winner.
+
+A transfer uses one `ROLE_LEASE_TRANSFERRED` event so releasing the old lease and naming its replacement is a single durable coordination transition.
+
+When the durable ledger is enabled, autonomous implementation leases require a PR number. Open a draft/canonical PR before material autonomous writing; this gives authorship and lease history an unambiguous stream identity.
+
+## Dispatch coupling
+
+An unattended write dispatch must name the canonical active lease:
+
+```bash
+python onecompany.py dispatch \
+  --actor codex \
+  --capability implementation \
+  --unattended \
+  --lease-id <canonical-lease-id>
+```
+
+No active durable lease means no unattended writer.
 
 ## CLI
 
 ```bash
 python onecompany.py ledger read --pr 42 --events
-python onecompany.py ledger post \
-  --type CAPACITY_DEGRADED \
-  --actor codex \
-  --payload-json '{"capability":"code_review","reason":"quota"}'
+python onecompany.py ledger post --type CAPACITY_DEGRADED --actor codex --payload-json '{"capability":"code_review","reason":"quota"}'
 ```
 
-Provider credentials and sensitive payloads never belong in ledger events.
+## Why the four scheduled supervisors need this
 
-## Why this matters for scheduled tasks
+Four ChatGPT supervisors are four independent executions. They must converge on the same durable answer to who owns implementation, which actors have material authorship, whether a failover already occurred, and whether the exact live head has a trusted independent gate. The GitHub ledger + live PR/CI makes that coordination idempotent across runs.
 
-Four ChatGPT supervisors run in four independent task executions. They need the same durable answer to:
-
-- who holds the implementation lease;
-- which actors are already material authors;
-- whether the exact current head has a trusted independent gate;
-- whether a failover already happened.
-
-Without a shared ledger, four safe-looking supervisors could each start from a different stale local snapshot. The durable ledger plus live PR/CI state makes supervisory checks idempotent across runs.
-
-## Source-of-truth hierarchy
-
-Live GitHub code/PR/CI remains engineering truth. The Team Room ledger is durable coordination truth for facts that cannot safely be committed into the implementation head. `state.json` is derived convenience state.
+Live code/PR/CI is engineering truth. The Team Room ledger is coordination truth for facts that should not be committed into the implementation head. `state.json` is derived convenience state.

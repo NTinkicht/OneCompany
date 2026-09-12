@@ -48,9 +48,12 @@ def _gh_json(args: list[str]) -> Any:
 
 def list_events() -> list[dict[str, Any]]:
     repo, issue = _repo_and_issue()
+    ledger = ledger_config()
     trusted = _trusted_publishers()
     if not trusted:
         raise RuntimeError("ledger has no trusted publisher logins")
+    expected_version = int(ledger.get("event_format_version", 1))
+    accepted = set(ledger.get("accepted_event_types", []))
     raw = _gh_json(["api", "--paginate", "--slurp", f"repos/{repo}/issues/{issue}/comments?per_page=100"])
     pages = raw if isinstance(raw, list) else [raw]
     comments: list[dict[str, Any]] = []
@@ -65,19 +68,31 @@ def list_events() -> list[dict[str, Any]]:
         login = ((comment.get("user") or {}).get("login"))
         if login not in trusted:
             continue
-        match = EVENT_RE.search(comment.get("body") or "")
-        if not match:
+        body = comment.get("body") or ""
+        if MARKER not in body:
             continue
+        match = EVENT_RE.search(body)
+        if not match:
+            raise RuntimeError(f"malformed trusted ledger event in comment {comment.get('id')}")
         try:
             event = json.loads(match.group(1))
-        except json.JSONDecodeError:
-            continue
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"invalid JSON in trusted ledger comment {comment.get('id')}: {exc}") from exc
+        if event.get("version") != expected_version:
+            raise RuntimeError(f"unsupported ledger event version in comment {comment.get('id')}")
+        if event.get("type") not in accepted:
+            raise RuntimeError(f"unsupported ledger event type in comment {comment.get('id')}: {event.get('type')}")
+        if not isinstance(event.get("event_id"), str) or not event.get("event_id"):
+            raise RuntimeError(f"trusted ledger event missing event_id in comment {comment.get('id')}")
+        if not isinstance(event.get("actor"), str) or not event.get("actor"):
+            raise RuntimeError(f"trusted ledger event missing actor in comment {comment.get('id')}")
+        if not isinstance(event.get("payload"), dict):
+            raise RuntimeError(f"trusted ledger event payload must be object in comment {comment.get('id')}")
         event["github_comment_id"] = comment.get("id")
         event["github_comment_url"] = comment.get("html_url")
         event["github_publisher"] = login
         event["github_created_at"] = comment.get("created_at")
         events.append(event)
-    # Order by GitHub's durable append order, not actor-supplied clocks.
     events.sort(key=lambda item: (item.get("github_created_at") or "", int(item.get("github_comment_id") or 0)))
     return events
 
@@ -120,12 +135,11 @@ def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any
     authors_by_pr: dict[int, set[str]] = {}
     gates_by_pr: dict[int, dict[str, Any]] = {}
     conflicts: list[dict[str, Any]] = []
+    seen_event_ids: set[str] = set()
 
     def normalize_pr(value: Any) -> int | None:
-        if isinstance(value, int):
-            return value
-        if isinstance(value, str) and value.isdigit():
-            return int(value)
+        if isinstance(value, int): return value
+        if isinstance(value, str) and value.isdigit(): return int(value)
         return None
 
     def current_implementation() -> dict[str, Any] | None:
@@ -145,6 +159,12 @@ def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any
         return True
 
     for event in events:
+        event_id = str(event.get("event_id") or "")
+        if event_id in seen_event_ids:
+            conflicts.append({"event_id": event_id, "type": event.get("type"), "reason": "duplicate_event_id_ignored"})
+            continue
+        if event_id:
+            seen_event_ids.add(event_id)
         event_type = event.get("type")
         actor = event.get("actor")
         payload = event.get("payload") or {}
@@ -154,12 +174,10 @@ def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any
 
         if event_type == "ROLE_LEASE_ASSIGNED":
             lease_id = payload.get("lease_id")
-            if lease_id:
-                add_lease(str(lease_id), actor, payload, event)
+            if lease_id: add_lease(str(lease_id), actor, payload, event)
         elif event_type == "ROLE_LEASE_RELEASED":
             lease_id = payload.get("lease_id")
-            if lease_id:
-                active.pop(str(lease_id), None)
+            if lease_id: active.pop(str(lease_id), None)
         elif event_type == "ROLE_LEASE_TRANSFERRED":
             old_id = str(payload.get("old_lease_id") or "")
             new_id = str(payload.get("new_lease_id") or "")
@@ -168,14 +186,23 @@ def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any
                 conflicts.append({"event_id": event.get("event_id"), "type": event_type, "reason": "transfer_source_not_active", "old_lease_id": old_id, "new_lease_id": new_id})
                 continue
             active.pop(old_id, None)
-            if new_id:
-                # Transfer is atomic with respect to the canonical lease: the old lease
-                # is consumed by this same trusted event before the replacement is added.
-                add_lease(new_id, actor, payload, event)
+            if new_id: add_lease(new_id, actor, payload, event)
         elif event_type == "MATERIAL_AUTHOR" and event_pr is not None and actor:
             authors_by_pr[event_pr].add(str(actor))
         elif event_type == "GATE" and event_pr is not None:
             gates_by_pr[event_pr] = {"pr": event_pr, "sha": payload.get("sha"), "reviewer_actor": actor, "verdict": payload.get("verdict"), "material_authors": payload.get("material_authors", []), "evidence": payload.get("evidence", []), "summary": payload.get("summary", ""), "stale": False, "github_comment_url": event.get("github_comment_url"), "github_publisher": event.get("github_publisher"), "timestamp": event.get("github_created_at") or event.get("timestamp")}
+
+    for gate_pr, gate in gates_by_pr.items():
+        current_authors = set(authors_by_pr.get(gate_pr, set()))
+        gated_authors = set(gate.get("material_authors") or [])
+        reasons: list[str] = []
+        if gated_authors != current_authors:
+            reasons.append("material_authorship_changed")
+        if gate.get("reviewer_actor") in current_authors:
+            reasons.append("reviewer_is_now_material_author")
+        if reasons:
+            gate["stale"] = True
+            gate["stale_reasons"] = reasons
 
     active_values = list(active.values())
     if pr is not None:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Choose eligible actors by capability, readiness, budget, access, and authorship conflicts."""
+"""Choose eligible actors by capability-specific preference after readiness/budget/access/authorship filtering."""
 from __future__ import annotations
 
 import argparse
@@ -22,6 +22,7 @@ def main() -> int:
 
     actors_doc = load_json(CONTROL / "actors.json")
     readiness_doc = load_json(CONTROL / "readiness.json")
+    routing_doc = load_json(CONTROL / "routing.json")
     budget = load_json(CONTROL / "budget.json")
     state = load_json(CONTROL / "state.json")
     readiness = {item.get("actor_id"): item for item in readiness_doc.get("actors", [])}
@@ -30,9 +31,12 @@ def main() -> int:
     if args.for_independent_gate:
         excluded.update(state.get("current_material_authors", []))
 
+    preferences = routing_doc.get("preference_by_capability", {})
+    actor_order = {actor.get("id"): index for index, actor in enumerate(actors_doc.get("actors", []))}
+
     eligible = []
     rejected = []
-    for index, actor in enumerate(actors_doc.get("actors", [])):
+    for actor in actors_doc.get("actors", []):
         reasons = []
         actor_id = actor["id"]
         status = readiness.get(actor_id)
@@ -80,21 +84,34 @@ def main() -> int:
 
         if reasons:
             rejected.append({"actor": actor_id, "reasons": reasons})
-        else:
-            score = len(required & declared) * 100 - index
-            eligible.append({
-                "actor": actor_id,
-                "score": score,
-                "cost_class": actor.get("cost_class"),
-                "setup_state": status.get("setup_state") if status else None,
-            })
+            continue
 
-    eligible.sort(key=lambda item: item["score"], reverse=True)
+        ranks: dict[str, int] = {}
+        rank_total = 0
+        for capability in sorted(required):
+            ordered = preferences.get(capability, [])
+            try:
+                rank = ordered.index(actor_id)
+            except ValueError:
+                rank = len(ordered) + actor_order.get(actor_id, 999)
+            ranks[capability] = rank
+            rank_total += rank
+
+        eligible.append({
+            "actor": actor_id,
+            "preference_score": rank_total,
+            "preference_ranks": ranks,
+            "cost_class": actor.get("cost_class"),
+            "setup_state": status.get("setup_state") if status else None,
+        })
+
+    eligible.sort(key=lambda item: (item["preference_score"], actor_order.get(item["actor"], 999)))
     print(json.dumps({
         "required": sorted(required),
         "material_authors_excluded": sorted(excluded) if args.for_independent_gate else [],
         "eligible": eligible,
         "rejected": rejected,
+        "note": "Routing preference is advisory ordering after hard eligibility filters; the first eligible actor is the default proposal, not a lease."
     }, indent=2))
     return 0 if eligible else 2
 

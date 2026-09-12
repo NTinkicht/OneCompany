@@ -1,0 +1,16 @@
+{
+  "$schema": "./schemas/state.schema.json",
+  "schema_version": "1.0",
+  "generated_or_reconciled_at": null,
+  "repository_head": null,
+  "company_state": "INITIALIZING",
+  "current_work_unit": null,
+  "current_pr": null,
+  "current_pr_head": null,
+  "active_leases": [],
+  "current_gate": null,
+  "ready_work_count": 0,
+  "open_blockers": [],
+  "human_decision_required": false,
+  "note": "This file is a cache. Reconcile with live GitHub before consequential autonomous action."
+}

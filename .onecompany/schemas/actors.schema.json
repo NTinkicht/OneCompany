@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://onecompany.dev/schemas/actors.schema.json",
+  "title": "OneCompany Actors",
+  "type": "object",
+  "required": ["schema_version", "actors"],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "actors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "display_name", "enabled", "configured", "cost_class", "permissions", "capabilities", "may_independently_gate_own_material_authorship"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$"},
+          "display_name": {"type": "string", "minLength": 1},
+          "enabled": {"type": "boolean"},
+          "configured": {"type": "boolean"},
+          "execution_modes": {"type": "array", "items": {"type": "string"}},
+          "cost_class": {"enum": ["INCLUDED_SUBSCRIPTION", "FREE_ALLOWANCE", "LOCAL", "METERED_ALLOWED", "METERED_FORBIDDEN", "UNKNOWN_COST"]},
+          "permissions": {"type": "array", "items": {"type": "string"}},
+          "capabilities": {"type": "array", "items": {"type": "string"}, "minItems": 1},
+          "may_independently_gate_own_material_authorship": {"type": "boolean"}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,72 @@
+{
+  "$schema": "./schemas/actors.schema.json",
+  "schema_version": "1.0",
+  "actors": [
+    {
+      "id": "chatgpt",
+      "display_name": "ChatGPT",
+      "enabled": false,
+      "configured": false,
+      "execution_modes": ["interactive", "connector"],
+      "cost_class": "INCLUDED_SUBSCRIPTION",
+      "permissions": ["read", "write_if_connected"],
+      "capabilities": ["architecture", "planning", "implementation", "code_review", "failure_analysis", "documentation", "research", "state_reconciliation"],
+      "may_independently_gate_own_material_authorship": false
+    },
+    {
+      "id": "codex",
+      "display_name": "Codex",
+      "enabled": false,
+      "configured": false,
+      "execution_modes": ["github_native", "cloud_workspace"],
+      "cost_class": "INCLUDED_SUBSCRIPTION",
+      "permissions": ["read", "write_if_connected"],
+      "capabilities": ["implementation", "repository_intelligence", "ci_remediation", "code_review", "test_design"],
+      "may_independently_gate_own_material_authorship": false
+    },
+    {
+      "id": "claude",
+      "display_name": "Claude",
+      "enabled": false,
+      "configured": false,
+      "execution_modes": ["interactive", "github_native_if_available"],
+      "cost_class": "INCLUDED_SUBSCRIPTION",
+      "permissions": ["read", "write_if_connected"],
+      "capabilities": ["architecture", "code_review", "security_review", "implementation", "failure_analysis", "documentation"],
+      "may_independently_gate_own_material_authorship": false
+    },
+    {
+      "id": "github-copilot",
+      "display_name": "GitHub Copilot",
+      "enabled": false,
+      "configured": false,
+      "execution_modes": ["github_native", "ide"],
+      "cost_class": "INCLUDED_SUBSCRIPTION",
+      "permissions": ["read", "write_if_connected"],
+      "capabilities": ["implementation", "ci_remediation", "code_review", "test_design"],
+      "may_independently_gate_own_material_authorship": false
+    },
+    {
+      "id": "gemini-cli",
+      "display_name": "Gemini CLI",
+      "enabled": false,
+      "configured": false,
+      "execution_modes": ["local_cli", "unattended_if_configured"],
+      "cost_class": "FREE_ALLOWANCE",
+      "permissions": ["read", "write_if_connected"],
+      "capabilities": ["repository_intelligence", "regression_scouting", "implementation", "research"],
+      "may_independently_gate_own_material_authorship": false
+    },
+    {
+      "id": "mistral-vibe",
+      "display_name": "Mistral Vibe",
+      "enabled": false,
+      "configured": false,
+      "execution_modes": ["local_cli", "interactive"],
+      "cost_class": "INCLUDED_SUBSCRIPTION",
+      "permissions": ["read", "write_if_connected"],
+      "capabilities": ["failure_analysis", "test_design", "implementation", "repository_intelligence"],
+      "may_independently_gate_own_material_authorship": false
+    }
+  ]
+}

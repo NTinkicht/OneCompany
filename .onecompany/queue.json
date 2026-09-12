@@ -1,0 +1,15 @@
+{
+  "$schema": "./schemas/queue.schema.json",
+  "schema_version": "1.0",
+  "work_units": [
+    {
+      "id": "OC-WU01",
+      "title": "Establish OneCompany foundation",
+      "status": "IN_PROGRESS",
+      "priority": 100,
+      "dependencies": [],
+      "issue": null,
+      "risk_class": "MEDIUM"
+    }
+  ]
+}

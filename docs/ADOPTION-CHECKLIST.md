@@ -1,107 +1,97 @@
 # Adoption Checklist
 
-## Project contracts
-- [ ] Product problem/users/scope/non-goals captured in `PRODUCT.md` or equivalent
+## Product truth
+- [ ] Product problem/users/scope/non-goals captured
 - [ ] Architecture/data/interface/concurrency boundaries captured
 - [ ] Security/auth/authorization/secrets/sensitive-data invariants captured
 - [ ] Deterministic quality/CI contract captured
 - [ ] Deployment/rollback/operations boundaries captured where relevant
 
-## Governance
-- [ ] Source of truth declared as GitHub
-- [ ] Initial autonomy level selected (L1/L2 recommended)
+## Governance / budget
+- [ ] GitHub declared operational source of truth
+- [ ] Initial L1/L2 autonomy selected
 - [ ] Human-only decisions documented
 - [ ] Stop/revoke mechanism understood
-- [ ] Pattern library reviewed; project-specific replacements documented
-
-## Budget
-- [ ] Additional AI spend cap set
-- [ ] Paid fallback policy explicit
-- [ ] Overage/top-up policy explicit
+- [ ] Additional AI spend cap explicit
+- [ ] Paid fallback/overage/top-up/new-vendor rules explicit
 - [ ] CI/runner cost considered
-- [ ] Every enabled actor has an understood cost class
-- [ ] API-key paths are not assumed equivalent to subscription access
+- [ ] API-key billing paths not assumed equivalent to subscriptions
 
 ## GitHub
 - [ ] Default branch/ruleset/protection reviewed
-- [ ] PR flow for material changes established
-- [ ] Required deterministic checks configured
-- [ ] Force push/default-branch deletion controlled
-- [ ] Actions default token permissions reviewed
+- [ ] PR flow and required deterministic checks configured
+- [ ] Force push/deletion policy reviewed
+- [ ] Actions token permissions reviewed
 - [ ] `python onecompany.py audit-github` warnings understood
 
-## Workers
-- [ ] Each intended actor has its provider setup guide completed
-- [ ] Actor/readiness records exist
-- [ ] Enabled actors are actually configured
+## Actors / readiness
+- [ ] Each enabled actor completed its provider setup runbook
+- [ ] Actor/readiness records match
 - [ ] Read/write/review/merge capabilities smoke-tested separately as needed
-- [ ] Capability-specific quota degradation can be represented
-- [ ] Write permissions are least privilege
+- [ ] Capability-specific quota degradation is representable
 - [ ] Independent reviewer route exists
-- [ ] Fallback route exists or visible capacity-block behavior is accepted
-- [ ] No actor can sole-gate its own material authorship
-- [ ] Actor retirement/credential rotation process understood
+- [ ] Fallback route or explicit capacity-block behavior exists
+- [ ] No actor may sole-gate its own material authorship
+- [ ] Credential rotation/actor retirement process understood
 
-## Provider-specific
-- [ ] ChatGPT GitHub read connection is not mistaken for write authority
-- [ ] Codex native/workspace Git path verified if used
-- [ ] Claude interactive/Action auth and cost path understood if used
-- [ ] Copilot cloud-agent/review repository access and Actions implications reviewed if used
-- [ ] Gemini auth path classified; paid Vertex/API fallback not silently enabled
-- [ ] Mistral plan/PAYG state verified; key validity is not cost proof
-- [ ] Custom/local actors document auth, cost, permissions, stop path and smoke evidence
+## Dispatch
+- [ ] Every autonomous role has at least one real configured execution/wake path
+- [ ] `dispatch.json` evidence reflects tested mechanisms
+- [ ] Routing is never treated as proof that a worker actually started
+- [ ] Unattended write dispatch requires canonical durable lease
+- [ ] Generic scout wake remains non-gating/read-only unless separately authorized
+
+## Durable coordination
+- [ ] Team Room issue created if using distributed autonomy
+- [ ] `ledger.json` issue number configured
+- [ ] Trusted publisher GitHub logins explicitly configured
+- [ ] Untrusted ledger markers are ignored
+- [ ] First-valid implementation lease wins concurrent claims
+- [ ] Same-stream failover uses durable transfer
+- [ ] Material authorship survives failover/replay
+- [ ] Final L3+ gate lives outside the implementation SHA in durable GitHub evidence
 
 ## Delivery
 - [ ] WU template adopted
-- [ ] Queue contains project work only, not OneCompany template history
-- [ ] Dependency-ready selection tested with `python onecompany.py next-work`
-- [ ] Single-stream lease invariant accepted
-- [ ] Deterministic project CI contract defined
+- [ ] Fresh queue contains project work only
+- [ ] `python onecompany.py next-work` tested
+- [ ] Single canonical implementation stream accepted
 - [ ] Exact-head review required
 - [ ] Expected-head merge available/manual equivalent documented
-- [ ] Material authorship tracked across failover/cherry-pick/replay
+- [ ] Controlled same-stream failover tested
 
-## Coordination / 24x7
-- [ ] Team Room/durable coordination bus chosen when needed
-- [ ] Heartbeats are visibility, not proof of work
-- [ ] Stale lease requires live-evidence reconciliation before failover
-- [ ] Event-driven handoff path selected where available
+## 24/7 supervision
+- [ ] Event-driven handoff selected where available
 - [ ] Scheduled reconciliation policy reviewed
-- [ ] If using four ChatGPT supervisors, hourly tasks are staggered rather than racing together
-- [ ] Scheduled tasks read authoritative contracts/state from GitHub rather than assuming ChatGPT Project files are available
-- [ ] Scheduler health is checked and failures are visible
-- [ ] GitHub schedule cadence/Actions cost reviewed
-- [ ] Legitimate idle with no READY work is allowed
+- [ ] Four ChatGPT supervisors, if used, are staggered rather than concurrent by schedule
+- [ ] All supervisors read live GitHub + shared durable ledger
+- [ ] Scheduled task does not assume ChatGPT Project files are accessible
+- [ ] Healthy CI/work is not preempted
+- [ ] Stale suspicion is reconciled against live job/branch evidence before failover
+- [ ] Ready work creates at most one canonical durable lease
+- [ ] Scheduler health checked and failure is visible
+- [ ] GitHub Actions cadence/cost reviewed
+- [ ] Legitimate idle with no ready work is allowed
 
-## Unattended operation
-- [ ] Unattended execution remains disabled until explicitly reviewed
-- [ ] Trusted trigger restriction configured
-- [ ] Tool permissions/allow-list enforced
+## Unattended execution/security
+- [ ] Trusted triggers configured
+- [ ] Tool permissions/allowlists enforced
 - [ ] Hard timeout/turn/output limits configured
 - [ ] Log/result redaction tested
 - [ ] Provider/version pinned or deliberately controlled
 - [ ] Billing guard configured where needed
-- [ ] Generic scout wake is non-gating/read-only by default
-- [ ] Stop/revoke path tested
+- [ ] Secrets excluded from prompts/state/logs/coordination comments
+- [ ] Fork/untrusted content trust boundary understood
 
-## Security
-- [ ] Secrets excluded from prompts/state/logs
-- [ ] Credentials use the correct platform secret store
-- [ ] Untrusted PR/issue/source text treated as data, not governance
-- [ ] Prompt-injection hierarchy understood
-- [ ] Credential/permission expansion is human-only by default
-- [ ] Fork/untrusted PR workflow secret exposure reviewed
-
-## Operations
+## Acceptance
 - [ ] `python onecompany.py doctor` passes
 - [ ] `python onecompany.py validate` passes
 - [ ] `python onecompany.py simulate` passes
 - [ ] `python onecompany.py simulate-supervision` passes
 - [ ] `python onecompany.py readiness --local-probe` reviewed
-- [ ] `python onecompany.py supervise --force-observe` behaves correctly
-- [ ] Incident runbook reviewed
-- [ ] First-run acceptance plan completed
-- [ ] Controlled failover tested on same branch/PR
-- [ ] Stale exact-head review invalidation tested
-- [ ] Cost circuit breaker tested without a billable call
-- [ ] Scheduler stop/disable drill tested if 24/7 supervision is enabled
+- [ ] Bootstrap smoke is green in OneCompany CI
+- [ ] Exact-head stale-review invalidation tested
+- [ ] Concurrent lease race tested or understood through ledger invariant
+- [ ] Cost circuit breaker tested without billable call
+- [ ] Scheduler stop/disable drill tested when 24/7 mode is enabled
+- [ ] `docs/FIRST-RUN-ACCEPTANCE.md` completed before L3/L4 elevation

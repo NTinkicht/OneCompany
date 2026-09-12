@@ -1,14 +1,12 @@
 # OneCompany Setup From Zero
 
-This is the end-to-end path from a normal GitHub repository to a verified OneCompany installation. It starts safe and raises autonomy only after evidence.
+This is the end-to-end path from an ordinary GitHub repository to a verified autonomous company.
 
-## Stage 0 - decide policy before connecting AI
+## 0. Decide authority and budget first
 
-Write down repository scope, protected branches, sensitive data classes, AI spend cap, human-only actions, initial autonomy (L1/L2 recommended), deterministic CI commands, and whether unattended execution is allowed.
+Define repository scope, protected branches, sensitive data, deterministic CI, additional AI spend, human-only actions, intended autonomy and whether unattended operation is allowed. Start at L1/L2.
 
-## Stage 1 - bootstrap safely
-
-From a OneCompany checkout:
+## 1. Bootstrap
 
 ```bash
 python onecompany.py bootstrap \
@@ -17,122 +15,120 @@ python onecompany.py bootstrap \
   --initialize-contracts
 ```
 
-`--repository` may be omitted when bootstrap can infer a GitHub `origin`. Bootstrap initializes the target identity, resets queue/state for the **new** company, and never copies OneCompany's own operational WU history. It refuses an existing `.onecompany` install unless forced; use `docs/UPGRADING.md` for upgrades.
+Bootstrap initializes the target identity and fresh queue/state; it does not copy OneCompany's operational history. Existing `.onecompany` installs must use `docs/UPGRADING.md`.
 
-## Stage 2 - fill authoritative project contracts
+## 2. Fill project contracts
 
-Complete or map equivalents for:
+Complete/map equivalents for `PRODUCT.md`, `ARCHITECTURE.md`, `SECURITY.md`, `QUALITY.md`, and `OPERATIONS.md`. See `docs/PROJECT-CONTRACTS.md`.
 
-```text
-PRODUCT.md
-ARCHITECTURE.md
-SECURITY.md
-QUALITY.md
-OPERATIONS.md
-```
+## 3. Harden GitHub and CI
 
-These are the durable product boundaries beneath the autonomous control plane. See `docs/PROJECT-CONTRACTS.md`.
-
-## Stage 3 - configure GitHub
-
-Follow `docs/GITHUB-SETUP.md`: protect the default branch/ruleset, require PRs for material changes, configure required deterministic checks, control force-push/deletion, minimize Actions token permissions, and keep auto-merge off until L3 is proven.
-
-Run:
+Follow `docs/GITHUB-SETUP.md`, protect the default branch, require PRs/material checks, minimize Actions permissions and establish the application-specific deterministic CI recorded in `QUALITY.md`.
 
 ```bash
 python onecompany.py audit-github
 ```
 
-Understand every warning.
+## 4. Configure actors
 
-## Stage 4 - create deterministic project CI
+Use `docs/agent-setup/README.md`. For each worker: install/connect, authenticate using the intended cost path, grant least privilege, smoke-test read/write/review/merge separately, record non-secret readiness evidence, then enable only proven capabilities.
 
-OneCompany validation does not replace application CI. Establish reproducible format/lint/typecheck/test/integration/migration/build/security checks as appropriate and record them in `QUALITY.md` plus WU contracts.
+A minimum useful company has an implementation route, deterministic CI, and an independent reviewer (which may initially be `human-owner`).
 
-## Stage 5 - configure workers
-
-Use `docs/agent-setup/README.md` and the provider guide for every actor you own.
-
-For each actor: install/connect the intended surface, authenticate without committing secrets, grant minimum repository permissions, smoke-test read/write/review/merge separately as needed, record non-secret evidence in `readiness.json`, then set `configured/enabled` only for routes genuinely usable now.
-
-A minimal safe company needs one implementer route, deterministic CI, and one independent reviewer route; the reviewer may initially be `human-owner`.
-
-## Stage 6 - configure routing and actor lifecycle
+## 5. Configure routing
 
 Review `actors.json`, `readiness.json`, `roles.json`, and `routing.json`.
 
 ```bash
 python onecompany.py route --capability implementation
-python onecompany.py route --capability code_review --for-independent-gate --exclude-author <actor-id>
+python onecompany.py route --capability code_review --for-independent-gate --exclude-author <actor>
 ```
 
-Read `docs/ACTOR-LIFECYCLE.md` for capability degradation, recovery, credential rotation and retirement.
+## 6. Configure executable dispatch paths
 
-## Stage 7 - patterns and role overlays
+Routing says **who** should work; `dispatch.json` says **how they can actually be started**. Configure only mechanisms you have tested and record evidence.
 
-Review `patterns.json` and `overlays.json`. Keep core invariants. Overlays sharpen a real actor's lens but do not create capacity, leases, permissions or independence.
+```bash
+python onecompany.py dispatch --actor <actor> --capability <capability>
+```
 
-## Stage 8 - Team Room / coordination
+For unattended writing, OneCompany requires a durable active lease and the `--unattended --lease-id ...` path. See `docs/DISPATCH-AND-WAKE.md`.
 
-Create a permanent Team Room issue from `.github/ISSUE_TEMPLATE/team-room.md` when multi-worker coordination needs it. Put the issue number in `supervision.json` before enabling Team Room posting. Slack/Discord/Teams remain attention layers.
+## 7. Create the Team Room and durable ledger before L3+
 
-## Stage 9 - seed the project queue
+Create a permanent issue from `.github/ISSUE_TEMPLATE/team-room.md`. Configure `.onecompany/ledger.json` with that issue number and trusted GitHub publisher identities.
 
-Create bounded WUs and dependencies. The installed queue starts empty by design.
+The ledger stores lease/failover/material-authorship/gate events outside the implementation SHA. L3+ autonomous delivery and L4/L5 continuous supervision require it in the reference model.
 
-Check dependency-ready work with:
+```bash
+python onecompany.py ledger read --events
+```
+
+See `docs/DURABLE-COORDINATION-LEDGER.md`.
+
+## 8. Review patterns/overlays
+
+Keep core invariants and select only useful specialist overlays. An overlay never creates actor identity, capacity, credentials, lease, independence or merge authority.
+
+## 9. Seed bounded Work Units
+
+Fresh bootstrap leaves `queue.json` empty. Add project WUs/dependencies and verify:
 
 ```bash
 python onecompany.py next-work
 ```
 
-The selector refuses to encourage new implementation while a canonical stream is already active.
+## 10. Prove one complete delivery loop
 
-## Stage 10 - prove the delivery loop
-
-Run `docs/FIRST-RUN-ACCEPTANCE.md` on a harmless setup WU:
+On a harmless WU:
 
 ```text
-lease -> implement -> CI -> independent exact-head gate
--> stale-review invalidation -> same-stream failover
+route -> dispatch check -> durable lease -> implementation -> CI
+-> independent exact-head durable gate -> same-stream failover drill
 -> expected-head merge -> reconcile -> next work
 ```
 
-## Stage 11 - optional unattended actors
+Use `docs/FIRST-RUN-ACCEPTANCE.md`.
 
-Read `docs/UNATTENDED-AUTOMATION.md`. Provider/wake templates under `.onecompany/templates/` are deliberately disabled. Enable only after current provider docs, version/cost guards, permissions, timeouts and redaction are verified.
+## 11. Optional unattended provider lanes
 
-## Stage 12 - round-the-clock supervision
+Review `docs/UNATTENDED-AUTOMATION.md`. Templates under `.onecompany/templates/` are disabled by default. Verify current provider docs, cost/auth path, trusted triggers, version pins, tool allowlists, timeouts and redaction before enabling.
 
-Read `docs/SCHEDULED-SUPERVISION.md` and configure `supervision.json`.
+## 12. 24/7 supervision
 
-Preferred model:
+Use `docs/SCHEDULED-SUPERVISION.md`.
+
+Preferred architecture:
 
 ```text
-event-driven handoffs
+event-driven handoff
         +
-scheduled reconciliation safety net
+scheduled reconciliation
         +
-daily scheduler-health check
+durable shared ledger
+        +
+daily scheduler-health verification
 ```
 
-Optional profiles include an off-peak hourly GitHub Actions supervisor and four staggered hourly ChatGPT scheduled supervisors giving an effective ~15-minute liveness check. They are **supervisors**, not four writers.
+The optional ChatGPT profile uses four hourly supervisors staggered at approximately `:02`, `:17`, `:32`, `:47` for an effective ~15-minute check. They must all read the same live GitHub + ledger state, acquire the canonical lease before dispatching a writer, and stay quiet while healthy work is progressing.
 
-Before enabling 24/7 mode:
+For an unattended write transition:
 
-```bash
-python onecompany.py validate
-python onecompany.py simulate-supervision
-python onecompany.py supervise --force-observe
+```text
+supervisor detects work
+  -> route eligible actor
+  -> acquire durable canonical lease (first valid claim wins)
+  -> resolve verified unattended dispatch mechanism for that lease
+  -> start worker
 ```
 
-For L4, also enable no-idle and continuous queue only after the full acceptance drills pass.
+If any step fails, surface `CAPACITY_BLOCKED`/a real blocker; do not invent another paid path or competing branch.
 
-## Stage 13 - stop/incident drill
+## 13. Stop/incident drill
 
-Prove you can pause/delete external schedules, disable workflows, revoke unattended write credentials, disable actors, and lower autonomy. Review `docs/INCIDENT-RUNBOOK.md`.
+Prove you can pause/delete external schedules, disable event tasks/workflows, lower autonomy, disable actors and revoke unattended write credentials. Review `docs/INCIDENT-RUNBOOK.md`.
 
-## Final pre-autonomy command set
+## Final checks
 
 ```bash
 python onecompany.py doctor
@@ -145,4 +141,4 @@ python onecompany.py next-work
 python onecompany.py supervise --force-observe
 ```
 
-Then complete `docs/ADOPTION-CHECKLIST.md` and `docs/FIRST-RUN-ACCEPTANCE.md`.
+Then complete `docs/ADOPTION-CHECKLIST.md` and `docs/FIRST-RUN-ACCEPTANCE.md` before raising autonomy.

@@ -1,6 +1,6 @@
 # Bootstrap OneCompany
 
-This guide takes a repository from ordinary GitHub project to governed autonomous company.
+This guide takes a repository from ordinary GitHub project to governed autonomous company. For the complete zero-to-running sequence, also use [`docs/SETUP-FROM-ZERO.md`](docs/SETUP-FROM-ZERO.md).
 
 ## 1. Decide the trust boundary first
 
@@ -15,61 +15,64 @@ Record:
 - data classes that must never enter AI prompts or public logs;
 - additional monthly AI spend allowed;
 - actions requiring a human decision;
-- desired autonomy level L0-L5.
+- desired autonomy level L0-L5;
+- whether unattended execution is permitted at all.
 
-For the safest first adoption, use L2: autonomous bounded implementation, human merge.
+For the safest first adoption, use L1/L2: assisted or autonomous bounded implementation with human merge.
 
 ## 2. Install the control plane
 
-Copy these paths into the target project:
+From a OneCompany checkout:
 
-```text
-.onecompany/
-agents/
-company/
-docs/                 # or selected OneCompany docs
-scripts/doctor.py
-scripts/validate.py
-.github/PULL_REQUEST_TEMPLATE.md
-.github/ISSUE_TEMPLATE/
-.github/workflows/onecompany-validate.yml
+```bash
+python onecompany.py bootstrap --target /path/to/your/project
 ```
+
+The bootstrap copies the control plane, agent adapters, company/pattern/overlay docs, operational docs/scripts, root instruction entrypoints, GitHub templates, and the safe OneCompany validation workflow. It intentionally refuses to overwrite existing files by default.
 
 Do **not** copy provider secrets, access tokens, user IDs, private prompts, or historical state from another project.
 
-## 3. Configure the company
+## 3. Configure project identity and budget
 
-Edit `.onecompany/config.json`.
+Edit `.onecompany/config.json` and `.onecompany/budget.json` first.
 
-Minimum fields:
+Minimum project identity:
 
 ```json
 {
   "schema_version": "1.0",
   "project": {
     "name": "MyProduct",
+    "repository": "OWNER/REPO",
     "source_of_truth": "github",
     "default_branch": "main"
   },
   "autonomy": {
     "level": "L2",
-    "continue_when_ready_work_exists": true
-  },
-  "delivery": {
-    "single_canonical_stream": true,
-    "require_exact_head_gate": true,
-    "require_independent_non_author_review": true
+    "continue_when_ready_work_exists": false
   }
 }
 ```
 
-Then configure `.onecompany/budget.json` and `.onecompany/actors.json`.
+A zero-extra-spend policy should keep additional spend at `0`, paid fallback/overage/auto-top-up/new paid vendors disabled, and unknown cost behavior fail-closed.
 
-## 4. Register actors by capability
+## 4. Configure GitHub controls
 
-An actor entry describes what the company may ask the worker to do. It is not a permanent job title.
+Follow [`docs/GITHUB-SETUP.md`](docs/GITHUB-SETUP.md): protect the default branch, use PRs, configure deterministic checks, constrain Actions tokens, and review agent/app permissions.
 
-Useful capabilities:
+When `gh` is authenticated:
+
+```bash
+python onecompany.py audit-github
+```
+
+The audit is read-only/advisory. Understand every warning before raising autonomy.
+
+## 5. Register actors by potential capability
+
+`.onecompany/actors.json` describes what an actor type can potentially do. It is not proof that your account/runtime is currently ready.
+
+Common capabilities include:
 
 ```text
 architecture
@@ -83,26 +86,41 @@ code_review
 security_review
 documentation
 research
-ui_design
 ci_remediation
 merge_execution
 state_reconciliation
 ```
 
-For each actor record:
+Avoid permanent statements such as “Model X is always the developer.” Roles belong to the project and routing changes as capability/capacity changes.
 
-- availability mode: interactive, unattended, GitHub-native, local;
-- read/write scope;
-- capabilities and preference weights;
-- cost class: included, free_allowance, metered, forbidden;
-- constraints such as quota windows;
-- whether it may independently gate work it authored (normally false).
+## 6. Configure and smoke-test every worker
 
-Avoid hard-coding “Model X is always the developer.” A capable actor may be routed differently as capacity changes.
+This step is mandatory and was deliberately separated from actor declaration.
 
-## 5. Define deterministic CI
+Read [`docs/agent-setup/README.md`](docs/agent-setup/README.md) plus the provider guide for each worker you intend to use.
 
-OneCompany treats CI as the technical referee. Your project must state the commands that mean “deterministically acceptable.” Examples:
+For each actor:
+
+1. install/connect the exact execution surface;
+2. authenticate without committing credentials;
+3. grant least privilege;
+4. run a harmless repository read smoke;
+5. separately smoke-test write/review/merge only if those capabilities will be routed;
+6. record non-secret evidence in `.onecompany/readiness.json`;
+7. set `configured=true` / `enabled=true` only when the intended route is actually usable.
+
+Then inspect:
+
+```bash
+python onecompany.py readiness --local-probe
+python onecompany.py validate
+```
+
+`actors.json` = potential. `readiness.json` = proven current route. This lets OneCompany represent “review quota exhausted while implementation still works” without disabling the entire provider.
+
+## 7. Define deterministic product CI
+
+OneCompany treats CI as the technical referee. Your project must state reproducible commands/checks such as:
 
 ```text
 format check
@@ -116,134 +134,131 @@ production build
 dependency/security audit
 ```
 
-Only declare checks the repository can reproduce. Never let an AI review substitute for a failing deterministic check.
+The OneCompany validation workflow validates the **company control plane**; it does not replace application/product CI.
 
-## 6. Create the first Work Unit
+Never let an AI review substitute for a failing deterministic check.
+
+## 8. Create the first Work Unit
 
 A Work Unit (WU) is the smallest dependency-ready unit that can be implemented, verified, reviewed, and merged independently.
 
 Every WU should contain:
 
-- unique ID, e.g. `WU01`;
-- objective;
-- motivation/risk being closed;
+- unique ID;
+- objective and motivation/risk;
 - dependencies;
-- in-scope and explicitly out-of-scope items;
+- in-scope and non-goals;
 - acceptance criteria;
 - required tests;
 - security/privacy constraints;
 - budget restrictions;
 - human decisions required;
-- intended implementation capability;
-- intended independent review capability.
+- intended implementation/review capabilities;
+- smallest useful role overlay set.
 
 Use `.github/ISSUE_TEMPLATE/work-unit.md`.
 
-## 7. Grant exactly one implementation lease
+## 9. Grant exactly one implementation lease
 
 A lease binds:
 
 ```text
-work_unit → actor → branch → PR → start_head → scope
+work_unit -> actor -> branch -> PR -> start_head -> scope
 ```
 
-A valid lease prevents duplicate implementation. Other actors may research or review read-only if policy permits, but only the lease holder may modify the canonical implementation stream.
+Other actors may work in orthogonal lanes, but only the active implementation lease holder materially modifies that canonical stream. If the holder fails, release/fail over the lease while preserving the same branch/PR/history.
 
-If the holder becomes unavailable, expire/release the lease and grant a **failover lease on the same branch/PR**.
-
-## 8. Execute the delivery loop
+## 10. Execute the delivery loop
 
 For each WU:
 
-1. Reconcile repository state.
-2. Confirm dependencies are satisfied.
-3. Confirm budget/capacity allows the chosen actor.
+1. Reconcile live repository state.
+2. Confirm dependencies.
+3. Confirm budget and capability-level readiness.
 4. Grant one implementation lease.
-5. Implement only the bounded scope.
-6. Run CI on the exact head.
-7. If CI fails, classify the failure before editing.
-8. Remediate on the same branch.
-9. When CI is green, assign a non-author reviewer.
-10. Reviewer verifies the exact SHA and acceptance contract.
-11. Resolve every configured-severity finding.
-12. Obtain explicit exact-SHA `PASS — MERGE_READY` (or your equivalent machine-readable verdict).
-13. Merge only if the current PR head still equals the gated SHA.
-14. Close/reconcile the WU, release leases, and update state.
-15. Immediately select the next dependency-ready WU if autonomy policy allows.
+5. Implement bounded scope.
+6. Run deterministic CI on exact head.
+7. Diagnose failures before editing.
+8. Remediate on the same stream.
+9. Route an eligible non-author reviewer.
+10. Review the exact SHA and original evidence.
+11. Resolve configured-severity findings.
+12. Obtain explicit exact-head `PASS — MERGE_READY` (or configured equivalent).
+13. Merge only if current head still equals the gated SHA.
+14. Reconcile/close WU/release leases.
+15. Select next dependency-ready WU only if autonomy policy allows.
 
-## 9. Set budget policy before unattended operation
+## 11. Use a durable coordination bus when useful
 
-A zero-extra-spend company should declare, for example:
+For multi-actor work, create one GitHub Team Room issue and follow [`docs/COORDINATION-BUS.md`](docs/COORDINATION-BUS.md). Heartbeats are visibility, not progress. Slack/Discord/Teams remain optional attention layers.
 
-```json
-{
-  "additional_monthly_ai_spend": 0,
-  "allow_paid_fallback": false,
-  "allow_overage": false,
-  "allow_auto_topup": false,
-  "allow_new_paid_vendor": false
-}
-```
-
-When a preferred actor is quota-limited, the router must choose an allowed fallback or stop with a visible `CAPACITY_BLOCKED` state. It must never solve a quota problem by silently spending money.
-
-## 10. Configure human-only decisions
+## 12. Configure human-only decisions
 
 Recommended human-only classes by default:
 
-- changing financial/budget policy;
-- adding credentials or granting broader repository permissions;
-- production data deletion or irreversible migrations;
-- publishing secrets or sensitive datasets;
-- legal/compliance commitments;
-- changing the company constitution or autonomy level upward;
+- changing budget/financial policy;
+- adding/expanding credentials or repository permissions;
+- production data deletion/destructive actions;
+- irreversible migrations without tested recovery;
+- legal/compliance/business commitments;
+- raising autonomy level;
 - disabling required security/CI checks;
-- merging known high-severity unresolved findings;
-- purchasing services or accepting paid overage.
+- merging unresolved high-severity findings;
+- publishing sensitive data;
+- purchasing services/accepting overage.
 
-You may delegate some later, but delegation should be explicit and version-controlled.
+Delegation may evolve, but it should be explicit/version-controlled.
 
-## 11. Validate before going unattended
+## 13. Validate the company before unattended operation
 
 Run:
 
 ```bash
-python scripts/doctor.py
-python scripts/validate.py
+python onecompany.py doctor
+python onecompany.py validate
+python onecompany.py simulate
+python onecompany.py readiness --local-probe
+python onecompany.py audit-github
 ```
 
-Then execute the scenarios in `docs/SIMULATION.md`:
+Then complete [`docs/FIRST-RUN-ACCEPTANCE.md`](docs/FIRST-RUN-ACCEPTANCE.md) and the scenarios in [`docs/SIMULATION.md`](docs/SIMULATION.md), including quota failover, stale review, duplicate lease, forbidden paid fallback, stale state, prompt injection, and no-idle behavior.
 
-- implementer quota exhausted;
-- reviewer is also material author;
-- review targets an old SHA;
-- CI red;
-- two actors attempt same lease;
-- paid fallback forbidden;
-- ready work exists with no active lease;
-- stale state disagrees with GitHub;
-- untrusted PR content tries to alter operating instructions.
+## 14. Enable unattended paths only deliberately
 
-Do not call the company autonomous until those failures are handled predictably.
+Read [`docs/UNATTENDED-AUTOMATION.md`](docs/UNATTENDED-AUTOMATION.md). Reference provider workflows are stored under `.onecompany/templates/` with `.disabled` suffixes. Bootstrap does not activate them.
 
-## 12. Increase autonomy gradually
+Before enabling any unattended route, verify current provider documentation, exact version, credential/cost class, trusted trigger, tool permissions, timeout, output redaction, and stop path.
+
+Generic unattended scouting should start read-only/non-gating.
+
+## 15. Increase autonomy gradually
 
 Recommended progression:
 
 ```text
-L1 for planning → L2 for bounded implementation → L3 for autonomous gate/merge → L4 for continuous queue → L5 only after incident drills and strong observability
+L1 planning/assistance
+ -> L2 bounded autonomous implementation + human merge
+ -> L3 autonomous delivery/gate/merge
+ -> L4 continuous queue/no-idle
+ -> L5 governed continuous company only after drills/observability/incident maturity
 ```
 
-Autonomy is a permission level, not a marketing label. Raise it when evidence justifies it.
+Autonomy is permission backed by evidence, not a marketing label.
 
 ## Next reading
 
+- `docs/SETUP-FROM-ZERO.md`
+- `docs/AGENT-CONFIGURATION-MATRIX.md`
+- `docs/agent-setup/README.md`
+- `docs/SECRETS-AND-PERMISSIONS.md`
+- `docs/GITHUB-SETUP.md`
 - `company/CONSTITUTION.md`
-- `docs/ARCHITECTURE.md`
 - `docs/OPERATING-MODEL.md`
 - `docs/WORK-UNITS.md`
 - `docs/ROUTING-FAILOVER.md`
 - `docs/REVIEW-GATES.md`
-- `docs/BUDGET-CAPACITY.md`
-- `docs/SECURITY.md`
-- `docs/MIGRATION.md`
+- `docs/CONTEXT-ENGINEERING.md`
+- `docs/UNATTENDED-AUTOMATION.md`
+- `docs/FIRST-RUN-ACCEPTANCE.md`
+- `docs/INCIDENT-RUNBOOK.md`
+- `docs/TROUBLESHOOTING.md`

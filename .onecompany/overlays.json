@@ -1,4 +1,5 @@
 {
+  "$schema": "./schemas/overlays.schema.json",
   "version": 1,
   "provenance": {
     "concept_adapted_from": "NTinkicht/agency-agents",

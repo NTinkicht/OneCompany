@@ -17,7 +17,7 @@ def main() -> int:
     accepted = ledger.get("accepted_event_types", [])
     if len(accepted) != len(set(accepted)):
         errors.append("ledger.accepted_event_types must be unique")
-    for required in ("ROLE_LEASE_ASSIGNED", "ROLE_LEASE_RELEASED", "GATE"):
+    for required in ("ROLE_LEASE_ASSIGNED", "ROLE_LEASE_RELEASED", "ROLE_LEASE_TRANSFERRED", "GATE"):
         if required not in accepted:
             errors.append(f"ledger must accept {required}")
 
@@ -38,6 +38,8 @@ def main() -> int:
         errors.append(str(exc))
         level = 0
 
+    if ledger.get("required_for_autonomous_merge") and level >= 3 and not ledger.get("enabled"):
+        errors.append("L3+ autonomous delivery requires the durable ledger enabled for binding gates/leases")
     if ledger.get("required_for_continuous_autonomy") and level >= 4 and not ledger.get("enabled"):
         errors.append("L4/L5 continuous autonomy requires the durable ledger enabled")
     if supervision.get("enabled") and supervision.get("mode") == "orchestrate" and not ledger.get("enabled"):

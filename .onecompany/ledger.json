@@ -4,11 +4,13 @@
   "enabled": false,
   "issue_number": null,
   "trusted_publisher_logins": [],
+  "required_for_autonomous_merge": true,
   "required_for_continuous_autonomy": true,
   "event_format_version": 1,
   "accepted_event_types": [
     "ROLE_LEASE_ASSIGNED",
     "ROLE_LEASE_RELEASED",
+    "ROLE_LEASE_TRANSFERRED",
     "MATERIAL_AUTHOR",
     "GATE",
     "CAPACITY_DEGRADED",

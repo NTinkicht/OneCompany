@@ -115,39 +115,55 @@ def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any
     authors_by_pr: dict[int, set[str]] = {}
     gates_by_pr: dict[int, dict[str, Any]] = {}
 
+    def normalize_pr(value: Any) -> int | None:
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.isdigit():
+            return int(value)
+        return None
+
+    def add_lease(lease_id: str, actor: str | None, payload: dict[str, Any], event: dict[str, Any]) -> None:
+        event_pr = normalize_pr(payload.get("pr"))
+        active[lease_id] = {
+            "id": lease_id,
+            "role": payload.get("role", "implementation"),
+            "actor": actor,
+            "work_unit": payload.get("work_unit"),
+            "branch": payload.get("branch"),
+            "pr": event_pr,
+            "start_head": payload.get("start_head"),
+            "status": "active",
+            "event": event,
+        }
+        if payload.get("role", "implementation") == "implementation" and event_pr is not None and actor:
+            authors_by_pr.setdefault(event_pr, set()).add(str(actor))
+
     for event in events:
         event_type = event.get("type")
         actor = event.get("actor")
         payload = event.get("payload") or {}
-        event_pr = payload.get("pr")
-        if isinstance(event_pr, str) and event_pr.isdigit():
-            event_pr = int(event_pr)
-        if isinstance(event_pr, int):
+        event_pr = normalize_pr(payload.get("pr"))
+        if event_pr is not None:
             authors_by_pr.setdefault(event_pr, set())
 
         if event_type == "ROLE_LEASE_ASSIGNED":
             lease_id = payload.get("lease_id")
             if lease_id:
-                active[str(lease_id)] = {
-                    "id": str(lease_id),
-                    "role": payload.get("role", "implementation"),
-                    "actor": actor,
-                    "work_unit": payload.get("work_unit"),
-                    "branch": payload.get("branch"),
-                    "pr": event_pr,
-                    "start_head": payload.get("start_head"),
-                    "status": "active",
-                    "event": event,
-                }
-            if payload.get("role", "implementation") == "implementation" and isinstance(event_pr, int) and actor:
-                authors_by_pr[event_pr].add(str(actor))
+                add_lease(str(lease_id), actor, payload, event)
         elif event_type == "ROLE_LEASE_RELEASED":
             lease_id = payload.get("lease_id")
             if lease_id:
                 active.pop(str(lease_id), None)
-        elif event_type == "MATERIAL_AUTHOR" and isinstance(event_pr, int) and actor:
+        elif event_type == "ROLE_LEASE_TRANSFERRED":
+            old_id = payload.get("old_lease_id")
+            new_id = payload.get("new_lease_id")
+            if old_id:
+                active.pop(str(old_id), None)
+            if new_id:
+                add_lease(str(new_id), actor, payload, event)
+        elif event_type == "MATERIAL_AUTHOR" and event_pr is not None and actor:
             authors_by_pr[event_pr].add(str(actor))
-        elif event_type == "GATE" and isinstance(event_pr, int):
+        elif event_type == "GATE" and event_pr is not None:
             gates_by_pr[event_pr] = {
                 "pr": event_pr,
                 "sha": payload.get("sha"),
@@ -171,9 +187,4 @@ def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any
         authors = sorted({author for values in authors_by_pr.values() for author in values})
         gate = None
 
-    return {
-        "active_leases": active_values,
-        "material_authors": authors,
-        "current_gate": gate,
-        "gates_by_pr": gates_by_pr,
-    }
+    return {"active_leases": active_values, "material_authors": authors, "current_gate": gate, "gates_by_pr": gates_by_pr}

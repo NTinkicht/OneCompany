@@ -10,7 +10,13 @@ ROOT = Path(__file__).resolve().parent
 
 
 def main() -> int:
-    validators = ["validate.py", "dispatch_validate.py", "ledger_validate.py", "supervision_validate.py"]
+    validators = [
+        "validate.py",
+        "governance_validate.py",
+        "dispatch_validate.py",
+        "ledger_validate.py",
+        "supervision_validate.py",
+    ]
     failed = False
     for name in validators:
         result = subprocess.run([sys.executable, str(ROOT / name)], cwd=str(ROOT.parent), check=False)

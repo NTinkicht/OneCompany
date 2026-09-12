@@ -69,11 +69,7 @@ def infer_github_repo(target: Path) -> str | None:
     remote = run_git(target, "remote", "get-url", "origin")
     if not remote:
         return None
-    patterns = [
-        r"github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?$",
-        r"github\.com/([^/]+)/([^/]+?)(?:\.git)?$",
-    ]
-    for pattern in patterns:
+    for pattern in (r"github\.com[:/]([^/]+)/([^/]+?)(?:\.git)?$", r"github\.com/([^/]+)/([^/]+?)(?:\.git)?$"):
         match = re.search(pattern, remote)
         if match:
             return f"{match.group(1)}/{match.group(2)}"
@@ -84,8 +80,7 @@ def infer_default_branch(target: Path) -> str:
     symbolic = run_git(target, "symbolic-ref", "--short", "refs/remotes/origin/HEAD")
     if symbolic and "/" in symbolic:
         return symbolic.split("/", 1)[1]
-    current = run_git(target, "branch", "--show-current")
-    return current or "main"
+    return "main"
 
 
 def copy_item(source: Path, target: Path, force: bool) -> None:
@@ -96,7 +91,7 @@ def copy_item(source: Path, target: Path, force: bool) -> None:
             copy_item(child, target / child.relative_to(source), force)
         return
     if target.exists() and not force:
-        raise FileExistsError(f"refusing to overwrite {target}; use docs/UPGRADING.md for existing OneCompany deployments")
+        raise FileExistsError(f"refusing to overwrite {target}; use docs/UPGRADING.md for an existing OneCompany deployment")
     target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(source, target)
 
@@ -136,13 +131,17 @@ def main() -> int:
     parser.add_argument("--target", required=True, help="Path to target repository")
     parser.add_argument("--repository", help="GitHub owner/name; inferred from origin when possible")
     parser.add_argument("--project-name", help="Project display name; defaults to target directory name")
-    parser.add_argument("--default-branch", help="Default branch; inferred when possible")
+    parser.add_argument("--default-branch", help="Default branch; inferred from origin when possible")
     parser.add_argument("--initialize-contracts", action="store_true", help="Create missing product foundation contracts at target root")
-    parser.add_argument("--force", action="store_true", help="Overwrite files; not recommended for upgrades")
+    parser.add_argument("--force", action="store_true", help="Allow overwriting non-OneCompany file collisions during a first install")
     args = parser.parse_args()
 
     target = Path(args.target).resolve()
     target.mkdir(parents=True, exist_ok=True)
+    if (target / ".onecompany").exists():
+        print("ERROR: target already contains .onecompany. Bootstrap never overwrites an existing OneCompany installation; use docs/UPGRADING.md.")
+        return 2
+
     repository = args.repository or infer_github_repo(target)
     if not repository:
         print("ERROR: cannot infer GitHub repository. Pass --repository owner/name.")
@@ -152,11 +151,6 @@ def main() -> int:
         return 2
     project_name = args.project_name or target.name
     default_branch = args.default_branch or infer_default_branch(target)
-
-    existing_install = (target / ".onecompany").exists()
-    if existing_install and not args.force:
-        print("ERROR: target already contains .onecompany. Use docs/UPGRADING.md instead of bootstrap.")
-        return 2
 
     try:
         for relative in COPY_PATHS:

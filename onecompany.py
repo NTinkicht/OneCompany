@@ -16,6 +16,8 @@ COMMANDS = {
     "audit-github": "github_audit.py",
     "route": "router.py",
     "lease": "lease.py",
+    "gate": "gate.py",
+    "merge": "merge.py",
     "reconcile": "reconcile.py",
     "bootstrap": "bootstrap.py",
 }

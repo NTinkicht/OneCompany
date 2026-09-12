@@ -1,18 +1,21 @@
-.PHONY: doctor validate simulate supervise reconcile
+.PHONY: doctor status validate simulate check reconcile
 
 doctor:
 	python onecompany.py doctor
 
+status:
+	python onecompany.py status --live
+
 validate:
 	python onecompany.py validate
-	python -m compileall -q scripts
 
 simulate:
 	python onecompany.py simulate
+	python onecompany.py simulate-ledger
 	python onecompany.py simulate-supervision
 
-supervise:
-	python onecompany.py supervise --force-observe
+check:
+	python onecompany.py check
 
 reconcile:
 	python onecompany.py reconcile

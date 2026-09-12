@@ -1,19 +1,43 @@
 # Changelog
 
-## 0.1.0-foundation — 2026-09-12
+## 0.1.0-foundation — 2026-09-13
 
-Initial OneCompany operating system foundation:
+Initial OneCompany operating-system foundation.
 
-- GitHub-source-of-truth constitution;
-- Work Unit, single-stream lease, same-stream failover, material-authorship tracking, exact-head review and executable expected-head merge model;
-- machine-readable config, actors, readiness, capability-specific routing, supervision, roles, budget, queue, state, patterns, overlays, and schemas;
-- zero-extra-spend safe defaults and capacity circuit breaker;
-- dependency-free validation, diagnostics, routing, readiness, lease/failover, gate, merge, supervision, bootstrap, simulation, GitHub audit and reconciliation tooling;
-- worker onboarding and end-to-end setup runbooks for ChatGPT, Codex, Claude, Copilot, Gemini CLI, Mistral Vibe, human owner and custom/local agents;
-- Spotify-inspired aligned autonomy, role overlays, context-ladder/shadow-adoption and other Tabibi-derived patterns;
-- GitHub issue/PR templates, Team Room template and validation workflow;
-- disabled-by-default unattended provider and 24/7 supervisor workflow templates;
-- four-staggered-ChatGPT-task supervisory pattern for an effective ~15-minute liveness cadence where product limits/permissions allow it;
-- security, migration, upgrades, incident, no-idle, observability, first-run acceptance, scheduled supervision, simulation and troubleshooting documentation.
+### Autonomous company control plane
+- GitHub-source-of-truth constitution, bounded Work Units, single-stream leases and same-stream failover;
+- cumulative material authorship, independent non-author exact-head gate and expected-head merge;
+- capability/readiness/budget/routing/dispatch separation;
+- durable Team Room ledger with race-safe canonical leases and gate/authorship staleness;
+- deterministic READY-only dependency selection and queue-cycle validation;
+- L0-L5 autonomy, no-idle semantics and emergency stop.
 
-Licensing is intentionally left as a human governance decision before public open-source release.
+### 24/7 operation
+- event-driven handoff model plus scheduled reconciliation;
+- GitHub supervisor templates and four-staggered-hourly ChatGPT supervisor pattern;
+- scheduler-health checks, observe-only defaults and deterministic supervision simulation;
+- supervisors cannot create duplicate implementation streams.
+
+### Safety and governance
+- no self-escalation constitution;
+- candidate control-plane changes are proposals until trusted human/default-branch promotion;
+- human merge boundary for protected control-plane changes;
+- zero-extra-spend safe default and capacity circuit breaker;
+- supply-chain audit for immutable Action pins, no managed `pull_request_target`, no `write-all`;
+- idempotency, bounded retry, rollback/compensation and incident-containment requirements.
+
+### Quality and product experience
+- PRODUCT, ARCHITECTURE, SECURITY, QUALITY, DESIGN and OPERATIONS starter contracts;
+- framework-neutral UI design-system, accessibility, responsive, localization/RTL, visual-regression and performance guidance;
+- expanded WU/PR evidence contracts and specialist role overlays.
+
+### Setup and self-testing
+- provider setup guides for ChatGPT, Codex, Claude, Copilot, Gemini CLI, Mistral Vibe, human and custom/local workers;
+- safe `bootstrap` for existing repositories and one-time `init` for GitHub-template copies;
+- `status`, `doctor`, `check`, schema validation and GitHub configuration audit;
+- deterministic core/ledger/supervision simulations and bootstrap/init smoke tests;
+- JSON Schemas are now validated against every machine-readable root control-plane document.
+
+### Human follow-ups
+- software license remains an explicit owner decision before public release;
+- default-branch protection/required-check configuration remains an owner/platform setup step.

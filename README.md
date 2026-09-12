@@ -15,7 +15,7 @@ OneCompany gives a project a reusable control plane for:
 - automatic failover when an actor is unavailable, quota-limited, or unsuitable;
 - independent non-author review and exact-head merge gates;
 - deterministic CI as the technical referee;
-- machine-readable company state, queue, actors, roles, policies, and budgets;
+- machine-readable company state, queue, actors, roles, policies, patterns, overlays, and budgets;
 - no-idle detection when ready work exists but nobody holds a valid lease;
 - cost and capacity governance, including a hard zero-extra-spend mode;
 - privacy, secret, permissions, logging, and untrusted-input boundaries;
@@ -57,20 +57,34 @@ Repeat
 
 Autonomy does **not** mean every actor edits everything. OneCompany separates authority: implementation, deterministic verification, independent judgment, merge execution, and human decisions are distinct responsibilities.
 
+## Built from proven and adapted patterns
+
+OneCompany records its design lineage instead of pretending the model appeared from nowhere.
+
+- **Spotify-inspired aligned autonomy:** Tabibi's Epic restructuring adapted temporary squads, discipline chapters, and advisory guilds. OneCompany keeps the alignment/autonomy principle and rejects cargo-cult ceremony.
+- **Agency Agents-inspired role overlays:** specialist profiles sharpen a real worker's lens without creating fake extra employees, leases, permissions, or reviewer independence.
+- **Headroom-inspired shadow adoption:** experimental context infrastructure is evaluated read-only beside original evidence before it may gain authority.
+- **Tabibi-native coordination patterns:** single-stream leases, orthogonal parallelism, exact-head two-key gates, capacity circuit breakers, evidence-over-activity, expected-head merge, and failover that preserves the stream.
+
+The full catalog lives in [`patterns/`](patterns/README.md), the operational overlay library in [`overlays/`](overlays/README.md), and provenance in [`docs/DESIGN-LINEAGE.md`](docs/DESIGN-LINEAGE.md) / [`docs/REFERENCES.md`](docs/REFERENCES.md).
+
+OneCompany also tracks Spotify's later Honk background-agent work as **related modern evidence**, not as retroactive origin: its emphasis on pluggable agents, context engineering, constrained permissions, verification loops, and CI feedback independently reinforces several OneCompany choices.
+
 ## Quick start
 
 1. Read [`BOOTSTRAP.md`](BOOTSTRAP.md).
-2. Copy `.onecompany/` and the recommended GitHub templates/workflows into your project.
+2. Copy the OneCompany control plane and recommended GitHub templates/workflows into your project.
 3. Edit `.onecompany/config.json` with your project, budget, CI contract, actors, and autonomy level.
-4. Register available workers in `.onecompany/actors.json`.
+4. Register available workers in `.onecompany/actors.json` and review `.onecompany/patterns.json` / `.onecompany/overlays.json`.
 5. Run:
 
 ```bash
-python scripts/doctor.py
-python scripts/validate.py
+python onecompany.py doctor
+python onecompany.py validate
+python onecompany.py simulate
 ```
 
-6. Create your first Work Unit from `.github/ISSUE_TEMPLATE/work-unit.md`.
+6. Create your first Work Unit from `.github/ISSUE_TEMPLATE/work-unit.md`, selecting only useful role overlays.
 7. Assign a single implementation lease.
 8. Let CI and a non-author reviewer gate the exact head before merge.
 
@@ -96,13 +110,15 @@ See [`docs/AUTONOMY-LEVELS.md`](docs/AUTONOMY-LEVELS.md).
 3. **A lease is explicit.** Nobody should infer ownership from activity alone.
 4. **Failover keeps the stream.** If the worker changes, the branch, PR, objective, and acceptance contract remain the same.
 5. **The author cannot be the sole independent gate.**
-6. **Reviews target an exact SHA.** A verdict on an older head is stale after any commit.
+6. **Reviews target an exact SHA.** A verdict on an older head is stale after any material commit.
 7. **Green CI is necessary, not sufficient.** Independent review is necessary for configured risk classes.
 8. **Merge uses expected-head protection.** Never merge a commit different from the gated commit by accident.
 9. **Ready work + no valid lease = operational fault.**
 10. **Budgets are policy.** No agent may silently enable paid fallback, overage, credits, auto-top-up, or a new vendor.
 11. **Secrets and sensitive data stay out of prompts, logs, state files, issue bodies, and PR comments.**
-12. **Humans keep authority over irreversible, regulated, financial, credential, production-destructive, and policy-changing decisions unless explicitly delegated.
+12. **Humans keep authority over irreversible, regulated, financial, credential, production-destructive, and policy-changing decisions unless explicitly delegated.**
+13. **Role overlays are lenses, not identities.** They never manufacture independence or authority.
+14. **Experimental infrastructure earns authority through evidence.** Shadow/read-only evaluation is preferred when omissions could change consequential decisions.
 
 ## Repository map
 
@@ -111,13 +127,17 @@ See [`docs/AUTONOMY-LEVELS.md`](docs/AUTONOMY-LEVELS.md).
   config.json                Project and autonomy configuration
   actors.json                Worker registry and capabilities
   roles.json                 Role contracts and routing preferences
+  patterns.json              Reusable operating-pattern catalog
+  overlays.json              Specialist role-overlay registry
   state.json                 Reconciled operational snapshot
   queue.json                 Work Unit dependency queue
   budget.json                Spend/capacity policy
   schemas/                   JSON Schemas for control-plane files
 agents/                      Worker-specific onboarding guides
 company/                     Constitution and operating procedures
-docs/                        Architecture, security, migration, runbooks
+patterns/                    Reusable organizational/technical patterns
+overlays/                    Bounded specialist professional lenses
+docs/                        Architecture, lineage, security, migration, runbooks
 scripts/                     Dependency-light validation and diagnostics
 .github/                     PR/issue templates and safe workflows
 examples/                    Reference company/project examples
@@ -127,6 +147,8 @@ starter/                     Files intended to be copied into another repo
 ## What OneCompany is not
 
 OneCompany is not a promise that models are infallible, a hidden swarm that bypasses review, or a requirement to buy six AI products. A valid company may have one human plus two AI workers, or a larger heterogeneous roster. The operating model is deliberately stronger than any individual model.
+
+It is also not a literal copy of Spotify, Agency Agents, Headroom, or Tabibi. It extracts tested/relevant invariants and makes provenance explicit.
 
 ## The design principle
 

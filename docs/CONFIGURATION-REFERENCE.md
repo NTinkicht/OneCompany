@@ -74,6 +74,36 @@ Why both enabled/configured? A known actor template can exist without being conn
 
 Roles define purpose, required capabilities, write scope, and conflicts. They are not bound permanently to actor IDs.
 
+## `patterns.json`
+
+Catalogs the organizational/technical patterns the company relies on. Each entry records an ID, adoption level, origin, source, and purpose. The corresponding human-readable contract lives under `patterns/<id>.md`.
+
+Adoption levels:
+
+- `core` — part of the reference safety/coordination model;
+- `recommended` — broadly useful but may be replaced by an equivalent mechanism;
+- `optional` — project-dependent;
+- `experimental` — evaluate before granting authority.
+
+Pattern provenance is documentation, not execution permission.
+
+## `overlays.json`
+
+Registers optional professional role overlays plus their provenance and hard non-authority rules.
+
+An overlay can focus an actor on backend architecture, database reliability, security, SRE, code review, persona testing, minimal-change remediation, or multi-agent-system design. It does **not** create a new actor or independent reviewer.
+
+The reference validator requires these overlay rules to remain false:
+
+- creates actor/capacity;
+- creates implementation lease;
+- grants repository permission;
+- overrides material authorship;
+- overrides self-gate rule;
+- grants merge authority.
+
+Overlay files live under `overlays/`.
+
 ## `queue.json`
 
 A compact dependency index for proposed/planned WUs. Once work begins, the GitHub issue/PR is the durable detailed record. Keep IDs/dependencies/statuses consistent.

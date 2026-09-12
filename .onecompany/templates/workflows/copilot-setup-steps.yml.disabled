@@ -1,0 +1,25 @@
+# DISABLED TEMPLATE. Copy to .github/workflows/copilot-setup-steps.yml and customize for your stack.
+# GitHub requires the job name `copilot-setup-steps`. Keep permissions minimal.
+name: Copilot Setup Steps
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+  pull_request:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+
+jobs:
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+      # Add deterministic project-specific setup only.
+      # Examples: actions/setup-node + npm ci; setup-python + pip/uv sync; database service.
+      - name: OneCompany reminder
+        run: echo 'Replace this step with deterministic project setup before enabling Copilot cloud-agent work.'

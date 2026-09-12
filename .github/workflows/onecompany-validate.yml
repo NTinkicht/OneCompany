@@ -59,9 +59,9 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      # actions/checkout v6.1.0 - immutable pin resolved during the 0.1.0 audit.
+      # actions/checkout v6.1.0 — immutable pin.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-      # actions/setup-python v6.3.0 - immutable pin resolved during the 0.1.0 audit.
+      # actions/setup-python v6.3.0 — immutable pin.
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.12'
@@ -69,9 +69,13 @@ jobs:
         run: python onecompany.py validate
       - name: Simulate core policy invariants
         run: python onecompany.py simulate
+      - name: Simulate durable-ledger races
+        run: python onecompany.py simulate-ledger
       - name: Simulate 24/7 supervision invariants
         run: python onecompany.py simulate-supervision
       - name: Smoke-test fresh bootstrap
         run: python scripts/smoke_bootstrap.py
+      - name: Smoke-test GitHub-template initialization
+        run: python scripts/smoke_init.py
       - name: Compile Python helpers
         run: python -m compileall -q scripts

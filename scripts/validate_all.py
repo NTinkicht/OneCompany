@@ -16,6 +16,7 @@ def main() -> int:
         "dispatch_validate.py",
         "ledger_validate.py",
         "supervision_validate.py",
+        "hardening_audit.py",
     ]
     failed = False
     for name in validators:

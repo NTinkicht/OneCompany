@@ -1,0 +1,122 @@
+# DISABLED TEMPLATE. Review current Vibe CLI flags and pin a tested version before enabling.
+name: OneCompany Mistral Vibe Read-Only Wake
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+  actions: read
+
+jobs:
+  mistral-vibe:
+    if: >-
+      github.actor == vars.ONECOMPANY_OWNER_LOGIN &&
+      format('{0}', github.event.issue.number) == vars.ONECOMPANY_WAKE_ISSUE &&
+      contains(github.event.comment.body, '@mistral-vibe')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 20
+          persist-credentials: false
+
+      - name: Preflight guards
+        id: preflight
+        env:
+          PAYG_DISABLED_CONFIRMED: ${{ vars.ONECOMPANY_MISTRAL_PAYG_DISABLED_CONFIRMED }}
+          VIBE_VERSION: ${{ vars.ONECOMPANY_MISTRAL_VIBE_VERSION }}
+          PROVIDER_KEY: ${{ secrets.MISTRAL_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${PAYG_DISABLED_CONFIRMED:-}" != "true" || -z "${VIBE_VERSION:-}" || -z "${PROVIDER_KEY:-}" ]]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "reason=missing PAYG-disabled guard, pinned version, or credential" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-python@v6
+        if: steps.preflight.outputs.ready == 'true'
+        with:
+          python-version: '3.12'
+
+      - name: Install pinned Vibe
+        if: steps.preflight.outputs.ready == 'true'
+        env:
+          VIBE_VERSION: ${{ vars.ONECOMPANY_MISTRAL_VIBE_VERSION }}
+        run: python -m pip install --disable-pip-version-check "mistral-vibe==${VIBE_VERSION}"
+
+      - name: Run bounded read-only Vibe
+        if: steps.preflight.outputs.ready == 'true'
+        id: actor
+        env:
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          DISPATCH_BODY: ${{ github.event.comment.body }}
+          VIBE_HOME: /tmp/onecompany-vibe-home
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$VIBE_HOME"
+          cat > "$VIBE_HOME/config.toml" <<'EOF'
+          enable_auto_update = false
+          enable_notifications = false
+          enable_telemetry = false
+          enabled_tools = ["grep", "read_file"]
+          EOF
+          cat > /tmp/prompt.txt <<'EOF'
+          You are the mistral-vibe actor in a OneCompany repository. This is a READ-ONLY unattended scout wake.
+          Read AGENTS.md and only the minimum repository evidence needed. Do not edit, use shell, create commits/PRs,
+          submit binding reviews, change GitHub state, or expose credentials. Return concise reproducible findings.
+          EOF
+          printf '\nDispatch:\n%s\n' "$DISPATCH_BODY" >> /tmp/prompt.txt
+          set +e
+          timeout --signal=TERM --kill-after=15s 600s vibe \
+            --trust \
+            --workdir "$GITHUB_WORKSPACE" \
+            --enabled-tools grep \
+            --enabled-tools read_file \
+            --max-turns 8 \
+            --max-tokens 30000 \
+            --output text \
+            --prompt "$(cat /tmp/prompt.txt)" \
+            > /tmp/output.txt 2> /tmp/error.txt
+          code=$?
+          set -e
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+
+      - name: Publish safe result
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          READY: ${{ steps.preflight.outputs.ready }}
+          ACTOR_EXIT: ${{ steps.actor.outputs.exit_code }}
+          ONECOMPANY_WAKE_ISSUE: ${{ vars.ONECOMPANY_WAKE_ISSUE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${READY:-false}" == "true" && "${ACTOR_EXIT:-1}" == "0" ]]; then
+            python - <<'PY'
+          import os, re
+          from pathlib import Path
+          text = Path('/tmp/output.txt').read_text(encoding='utf-8', errors='replace') if Path('/tmp/output.txt').exists() else ''
+          secret = os.environ.get('MISTRAL_API_KEY', '')
+          if secret:
+              text = text.replace(secret, '[REDACTED]')
+          text = re.sub(r'(?i)(authorization\s*:\s*bearer\s+)\S+', r'\1[REDACTED]', text)
+          text = re.sub(r'(?i)(MISTRAL_API_KEY\s*[=:]\s*)\S+', r'\1[REDACTED]', text)
+          Path('/tmp/public.txt').write_text(text[:50000], encoding='utf-8')
+          PY
+            { echo '**mistral-vibe read-only wake**'; echo; cat /tmp/public.txt; } > /tmp/comment.md
+          else
+            echo '**mistral-vibe read-only wake**' > /tmp/comment.md
+            echo >> /tmp/comment.md
+            echo 'CAPACITY_DEGRADED - preflight/runtime failed. PAYG remains disabled; no paid fallback attempted.' >> /tmp/comment.md
+          fi
+          gh issue comment "$ONECOMPANY_WAKE_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/comment.md

@@ -2,6 +2,7 @@
 """Shared dependency-free helpers for OneCompany tooling."""
 from __future__ import annotations
 
+import fnmatch
 import json
 import os
 import shutil
@@ -31,13 +32,7 @@ def command_exists(name: str) -> bool:
 
 
 def run(command: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        command,
-        cwd=str(cwd or ROOT),
-        check=False,
-        text=True,
-        capture_output=True,
-    )
+    return subprocess.run(command, cwd=str(cwd or ROOT), check=False, text=True, capture_output=True)
 
 
 def autonomy_number(level: str) -> int:
@@ -47,11 +42,7 @@ def autonomy_number(level: str) -> int:
 
 
 def active_implementation_leases(state: dict[str, Any]) -> list[dict[str, Any]]:
-    return [
-        lease
-        for lease in state.get("active_leases", [])
-        if lease.get("status") == "active" and lease.get("role") == "implementation"
-    ]
+    return [lease for lease in state.get("active_leases", []) if lease.get("status") == "active" and lease.get("role") == "implementation"]
 
 
 def budget_allows(cost_class: str, budget: dict[str, Any]) -> bool:
@@ -68,3 +59,29 @@ def budget_allows(cost_class: str, budget: dict[str, Any]) -> bool:
 def github_repo_from_config(config: dict[str, Any]) -> str | None:
     value = config.get("project", {}).get("repository")
     return value if isinstance(value, str) and "/" in value else None
+
+
+def emergency_stop_active(config: dict[str, Any] | None = None) -> bool:
+    document = config if config is not None else load_json(CONTROL / "config.json")
+    return document.get("safety", {}).get("emergency_stop") is True
+
+
+def governance_config() -> dict[str, Any]:
+    return load_json(CONTROL / "governance.json")
+
+
+def path_matches_any(path: str, patterns: list[str]) -> bool:
+    normalized = path.replace("\\", "/")
+    return any(fnmatch.fnmatchcase(normalized, pattern) for pattern in patterns)
+
+
+def protected_control_plane_paths(paths: list[str]) -> list[str]:
+    governance = governance_config().get("control_plane", {})
+    patterns = governance.get("protected_paths", [])
+    return sorted(path for path in paths if path_matches_any(path, patterns))
+
+
+def always_human_paths(paths: list[str]) -> list[str]:
+    governance = governance_config().get("control_plane", {})
+    patterns = governance.get("always_human_paths", [])
+    return sorted(path for path in paths if path_matches_any(path, patterns))

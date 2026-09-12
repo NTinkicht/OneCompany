@@ -17,7 +17,7 @@
           "enabled": {"type": "boolean"},
           "configured": {"type": "boolean"},
           "execution_modes": {"type": "array", "items": {"type": "string"}},
-          "cost_class": {"enum": ["INCLUDED_SUBSCRIPTION", "FREE_ALLOWANCE", "LOCAL", "METERED_ALLOWED", "METERED_FORBIDDEN", "UNKNOWN_COST"]},
+          "cost_class": {"enum": ["HUMAN", "INCLUDED_SUBSCRIPTION", "FREE_ALLOWANCE", "LOCAL", "METERED_ALLOWED", "METERED_FORBIDDEN", "UNKNOWN_COST"]},
           "permissions": {"type": "array", "items": {"type": "string"}},
           "capabilities": {"type": "array", "items": {"type": "string"}, "minItems": 1},
           "may_independently_gate_own_material_authorship": {"type": "boolean"}

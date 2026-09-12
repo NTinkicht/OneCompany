@@ -1,0 +1,60 @@
+{
+  "$schema": "./schemas/governance.schema.json",
+  "schema_version": "1.0",
+  "control_plane": {
+    "human_merge_required": true,
+    "fail_closed_if_diff_unavailable": true,
+    "protected_paths": [
+      "company/CONSTITUTION.md",
+      ".onecompany/config.json",
+      ".onecompany/budget.json",
+      ".onecompany/actors.json",
+      ".onecompany/readiness.json",
+      ".onecompany/roles.json",
+      ".onecompany/routing.json",
+      ".onecompany/dispatch.json",
+      ".onecompany/ledger.json",
+      ".onecompany/supervision.json",
+      ".onecompany/governance.json",
+      ".onecompany/schemas/**",
+      "onecompany.py",
+      "scripts/bootstrap.py",
+      "scripts/dispatch.py",
+      "scripts/gate.py",
+      "scripts/lease.py",
+      "scripts/ledger.py",
+      "scripts/ledger_lib.py",
+      "scripts/merge.py",
+      "scripts/reconcile.py",
+      "scripts/router.py",
+      "scripts/supervise.py",
+      "scripts/validate.py",
+      "scripts/validate_all.py",
+      "scripts/governance_validate.py",
+      ".github/workflows/**",
+      "AGENTS.md",
+      "CLAUDE.md",
+      "GEMINI.md",
+      ".github/copilot-instructions.md"
+    ],
+    "always_human_paths": [
+      "company/CONSTITUTION.md",
+      ".onecompany/governance.json"
+    ]
+  },
+  "supply_chain": {
+    "onecompany_managed_actions_require_sha_pin": true,
+    "forbid_pull_request_target_in_managed_workflows": true,
+    "forbid_write_all_in_managed_workflows": true
+  },
+  "side_effects": {
+    "require_idempotency_or_natural_deduplication": true,
+    "require_rollback_or_compensation_for_destructive_actions": true,
+    "require_bounded_retry_policy": true
+  },
+  "policy": {
+    "no_self_escalation": true,
+    "control_plane_relaxation_requires_human": true,
+    "ambiguity_fails_closed": true
+  }
+}

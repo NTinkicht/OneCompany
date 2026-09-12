@@ -33,6 +33,12 @@
     "measure_progress_by_durable_artifacts": true,
     "allow_idle_specialists": true
   },
+  "safety": {
+    "emergency_stop": false,
+    "fail_closed_on_ambiguous_authority": true,
+    "external_side_effects_require_idempotency": true,
+    "destructive_change_requires_recovery_plan": true
+  },
   "human_only_decisions": [
     "increase_autonomy_level",
     "change_budget_policy",
@@ -41,6 +47,7 @@
     "production_destructive_operation",
     "publish_sensitive_data",
     "disable_required_security_or_ci_gate",
-    "amend_company_constitution"
+    "amend_company_constitution",
+    "relax_control_plane_guardrails"
   ]
 }

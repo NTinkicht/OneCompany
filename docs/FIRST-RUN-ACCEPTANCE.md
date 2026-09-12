@@ -1,6 +1,10 @@
 # First-Run Company Acceptance
 
-Do not raise a fresh installation to continuous autonomy because the configuration files parse. Prove the company loop in a disposable setup Work Unit first.
+Do not raise a fresh installation to continuous autonomy because configuration files parse. Prove the company loop in a disposable setup Work Unit first.
+
+## Phase 0 - authoritative project contracts
+
+Before testing autonomy, verify the repository has a usable product, architecture, security, quality/CI and operations contract (or explicit equivalents). Ask two workers to independently summarize a key invariant; disagreement means the contract is still ambiguous.
 
 ## Phase A - static control plane
 
@@ -8,88 +12,66 @@ Do not raise a fresh installation to continuous autonomy because the configurati
 python onecompany.py doctor
 python onecompany.py validate
 python onecompany.py simulate
+python onecompany.py simulate-supervision
 python onecompany.py readiness --local-probe
 python onecompany.py audit-github
+python onecompany.py supervise --force-observe
 ```
 
-Expected: control-plane invariants pass; GitHub protection/permission warnings are understood; no actor is considered ready merely from subscription ownership.
+Expected: invariants pass; GitHub warnings are understood; no actor is ready merely from subscription ownership; supervision starts disabled/observe-only.
 
 ## Phase B - read mesh
 
-For every enabled actor:
-
-1. read `AGENTS.md`;
-2. identify repository + default branch;
-3. inspect a known Work Unit/PR/head;
-4. produce a bounded artifact;
-5. prove a read-only task leaves `git status` clean when local/CLI based.
-
-Record surface/capability evidence in `.onecompany/readiness.json`.
+For every enabled actor, read `AGENTS.md`, relevant project contracts, repository/default branch and a known WU/PR/head; produce a bounded artifact and prove read-only tasks stay read-only. Record readiness evidence.
 
 ## Phase C - single writer
 
-Create `WU-SETUP-001` with a harmless documentation change.
+Create a harmless setup WU. Grant one implementation lease, use one canonical branch/PR, make one small change, run CI, and prove no other actor writes to the stream.
 
-- grant one implementation lease;
-- use one branch/PR;
-- implementer pushes one small change;
-- CI runs;
-- no other actor writes to the stream.
+## Phase D - independent exact-head review
 
-Prove the lease/stream discipline before using a production feature.
-
-## Phase D - independent review
-
-Assign a different, non-author actor. The review must:
-
-- name the exact candidate SHA;
-- inspect original evidence;
-- verify acceptance criteria;
-- check required CI;
-- publish the canonical verdict.
-
-Then make a tiny additional material commit and confirm the previous gate is treated as stale.
+Use a different non-author actor. Review the exact SHA, original evidence, acceptance criteria and CI. Then make a small material commit and confirm the old gate becomes stale.
 
 ## Phase E - remediation/failover
 
-Exercise at least one controlled failover:
-
-1. mark the primary implementer's `implementation` capability temporarily unavailable;
-2. route a replacement;
-3. preserve the same WU/branch/PR/history;
-4. continue work;
-5. preserve all material authors;
-6. use an eligible non-author final reviewer.
-
-Also test capability-specific degradation: mark only `code_review` unavailable while leaving implementation routable.
+Simulate one implementer capability becoming unavailable. Route a replacement **on the same WU/branch/PR**, preserve material authorship, and complete with an eligible non-author reviewer. Also simulate only review quota degrading while implementation remains available.
 
 ## Phase F - expected-head merge
 
-With human approval at L1/L2, verify the mechanical merge path refuses or stops if the PR head differs from the approved SHA. Then merge the unchanged approved head.
+At L1/L2 with human approval, prove the mechanical merge path refuses a head different from the approved SHA, then merge the unchanged approved head.
 
-## Phase G - cost circuit breaker
+## Phase G - queue progression
 
-Attempt to route a cost class forbidden by `.onecompany/budget.json`. Confirm it is rejected. Do not perform a billable provider call for this test.
+Use `python onecompany.py next-work` on a small dependency graph. Confirm completed dependencies unlock the next WU, missing/unfinished/cancelled dependencies do not, and an active canonical stream suppresses starting new implementation.
 
-## Phase H - unattended lanes (only if enabled)
+## Phase H - cost circuit breaker
 
-For each unattended actor:
+Attempt to route a forbidden cost class and confirm rejection without making a billable provider call.
 
-- trusted trigger works;
-- untrusted trigger is ignored;
-- tool permissions enforce the intended boundary;
-- timeout works;
-- secrets do not appear in logs/output;
-- a harmless task produces a durable result;
-- provider/quota failure produces a safe classified status without paid fallback;
-- generic scout wake cannot merge/write/gate unless separately authorized.
+## Phase I - unattended lanes (only if enabled)
 
-## Phase I - no-idle / stale lease
+For each unattended actor prove trusted trigger, untrusted-trigger rejection, tool boundary, timeout, secret redaction, durable result, safe provider/quota failure, and no unauthorized write/gate/merge.
 
-At L4+, simulate ready work with no lease and verify the company detects the fault. Simulate a stale-looking lease while CI is actively running and verify it does **not** duplicate implementation before reconciling live evidence.
+## Phase J - 24/7 supervision (only if enabled)
+
+Prove:
+
+- event-driven transition can request the next bounded action;
+- scheduled supervisor observes healthy work and does nothing;
+- four staggered external supervisors do not create duplicate leases/PRs;
+- a stale-looking lease with live CI/job movement is **not** failed over;
+- ready work with no lease produces one routing action, not four competing writers;
+- scheduler failure/disablement becomes visible;
+- scheduled-task GitHub access works without relying on ChatGPT Project files;
+- any action requiring approval becomes a visible blocker rather than assumed success;
+- pause/delete/disable of all supervisors cleanly stops continuous operation.
+
+## Phase K - no-idle
+
+At L4+, simulate READY work with no lease and verify the company detects the fault. Also verify legitimate idle when no dependency-ready work exists.
 
 ## Acceptance record
 
-Keep a setup issue containing links to the WU, branch, PR, CI, review, failover evidence, merge evidence, and any unattended smoke runs. Do not paste credentials.
+Keep a setup issue with links to contracts, WU, branch, PR, CI, review, failover, merge, scheduler and unattended smoke evidence. Never paste credentials.
 
 Only raise autonomy when the relevant phases are green and incident/stop procedures are understood.

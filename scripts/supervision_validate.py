@@ -39,6 +39,16 @@ def main() -> int:
         if safety.get(key) is not True:
             errors.append(f"supervision.safety.{key} must be true")
 
+    health = supervision.get("scheduler_health", {})
+    for key in (
+        "verify_active_daily",
+        "scheduler_failure_must_be_visible",
+        "do_not_depend_on_exact_cron_timing",
+        "scheduled_task_project_files_are_not_assumed_available",
+    ):
+        if health.get(key) is not True:
+            errors.append(f"supervision.scheduler_health.{key} must be true")
+
     try:
         level = autonomy_number(config.get("autonomy", {}).get("level", "L0"))
         merge_min = autonomy_number(safety.get("automatic_merge_minimum_autonomy_level", "L3"))

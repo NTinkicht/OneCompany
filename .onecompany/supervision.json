@@ -25,6 +25,12 @@
     "required_connected_app": "GitHub",
     "may_mutate": false
   },
+  "scheduler_health": {
+    "verify_active_daily": true,
+    "scheduler_failure_must_be_visible": true,
+    "do_not_depend_on_exact_cron_timing": true,
+    "scheduled_task_project_files_are_not_assumed_available": true
+  },
   "coordination": {
     "team_room_issue_number": null,
     "post_only_actionable_states": true,

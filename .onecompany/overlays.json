@@ -18,45 +18,14 @@
     "max_primary_overlays_per_work_unit": 1
   },
   "profiles": [
-    {
-      "id": "backend-architect",
-      "path": "overlays/backend-architect.md",
-      "recommended_for": ["domain", "api", "service", "integration", "data-flow"]
-    },
-    {
-      "id": "database-reliability",
-      "path": "overlays/database-reliability.md",
-      "recommended_for": ["database", "migration", "concurrency", "transaction", "queue", "outbox"]
-    },
-    {
-      "id": "code-reviewer",
-      "path": "overlays/code-reviewer.md",
-      "recommended_for": ["binding-review", "correctness", "maintainability"]
-    },
-    {
-      "id": "security-reviewer",
-      "path": "overlays/security-reviewer.md",
-      "recommended_for": ["authentication", "authorization", "secrets", "privacy", "tenant-isolation", "untrusted-input"]
-    },
-    {
-      "id": "sre",
-      "path": "overlays/sre.md",
-      "recommended_for": ["deployment", "reliability", "external-provider", "observability", "recovery", "capacity"]
-    },
-    {
-      "id": "persona-walkthrough",
-      "path": "overlays/persona-walkthrough.md",
-      "recommended_for": ["ui", "accessibility", "localization", "mobile", "workflow-usability"]
-    },
-    {
-      "id": "minimal-change",
-      "path": "overlays/minimal-change.md",
-      "recommended_for": ["bugfix", "hotfix", "ci-remediation", "low-blast-radius"]
-    },
-    {
-      "id": "multi-agent-systems",
-      "path": "overlays/multi-agent-systems.md",
-      "recommended_for": ["orchestration", "routing", "leases", "review-independence", "agent-security", "failover"]
-    }
+    {"id": "backend-architect", "path": "overlays/backend-architect.md", "recommended_for": ["domain", "api", "service", "integration", "data-flow"]},
+    {"id": "database-reliability", "path": "overlays/database-reliability.md", "recommended_for": ["database", "migration", "concurrency", "transaction", "queue", "outbox"]},
+    {"id": "code-reviewer", "path": "overlays/code-reviewer.md", "recommended_for": ["binding-review", "correctness", "maintainability"]},
+    {"id": "security-reviewer", "path": "overlays/security-reviewer.md", "recommended_for": ["authentication", "authorization", "secrets", "privacy", "tenant-isolation", "untrusted-input"]},
+    {"id": "sre", "path": "overlays/sre.md", "recommended_for": ["deployment", "reliability", "external-provider", "observability", "recovery", "capacity"]},
+    {"id": "persona-walkthrough", "path": "overlays/persona-walkthrough.md", "recommended_for": ["ui", "accessibility", "localization", "mobile", "workflow-usability"]},
+    {"id": "design-system-reviewer", "path": "overlays/design-system-reviewer.md", "recommended_for": ["ui", "design-system", "accessibility", "responsive", "localization", "rtl", "visual-regression", "performance"]},
+    {"id": "minimal-change", "path": "overlays/minimal-change.md", "recommended_for": ["bugfix", "hotfix", "ci-remediation", "low-blast-radius"]},
+    {"id": "multi-agent-systems", "path": "overlays/multi-agent-systems.md", "recommended_for": ["orchestration", "routing", "leases", "review-independence", "agent-security", "failover"]}
   ]
 }

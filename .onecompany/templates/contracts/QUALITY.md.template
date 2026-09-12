@@ -1,33 +1,67 @@
 # Quality and Deterministic CI Contract
 
 ## Definition of deterministic green
-List the exact commands/jobs required for a merge candidate.
+List the exact commands/jobs required for a merge candidate. Keep the list project-specific; do not add tools merely because OneCompany mentions them.
 
 ```text
 format/check:
-lint:
-typecheck:
+lint/static analysis:
+typecheck/compile:
 unit tests:
 integration tests:
-smoke/browser tests:
+migration/compatibility tests:
+smoke/browser/journey tests:
 build/package:
 security/dependency audit:
+UI/accessibility/visual checks when applicable:
+performance/budget checks when applicable:
 ```
+
+## Reproducibility controls
+Document what must be fixed or deliberately varied:
+- runtime/tool versions and lockfiles;
+- locale/timezone/clock;
+- random seed;
+- test data/fixtures;
+- browser/device/runtime image;
+- external network/provider mocks or test environments;
+- fonts/assets for visual tests.
+
+A test should fail for a meaningful behavior change, not because the clock, locale, random generator or public network happened to differ.
 
 ## Test strategy
 - Unit:
 - Integration:
-- End-to-end:
+- End-to-end/user journey:
+- Contract/API/schema:
 - Concurrency/property/adversarial:
+- Migration/restart/replay:
+- Security/privacy:
+- Accessibility/visual/performance when user-facing:
 
-## Required environments
--
+## Test isolation
+Tests must not depend on execution order unless that order is itself the contract. Clean up durable external fixtures. Parallel execution must not create cross-test data races.
+
+## Retry policy
+Retries are bounded and reserved for explicitly classified transient infrastructure failures. Product assertions are not retried until green.
 
 ## Flaky-test policy
-A flaky required test is a defect to fix or explicitly quarantine through reviewed policy; it is not permission to ignore red CI.
+A flaky required test is a defect to fix or explicitly quarantine through reviewed policy. Quarantine must remain visible and time-bounded; it is not permission to silently ignore red CI.
 
 ## Regression policy
-Material BLOCKER/MAJOR defects should become durable regressions when technically meaningful.
+Material BLOCKER/MAJOR defects should become durable regressions when technically meaningful. Prefer the smallest test that proves the original failure and its boundary conditions.
+
+## Coverage policy
+Coverage is diagnostic evidence, not the definition of quality. High coverage does not substitute for assertions on contracts, failure paths, concurrency, authorization, recovery or user journeys.
+
+## Dependency and supply-chain policy
+- use lockfiles/reproducible resolution where the ecosystem supports them;
+- pin behavior-bearing CI actions/tools according to governance policy;
+- review new runtime dependencies for necessity, license, maintenance, security and cost;
+- do not make a hidden network download part of deterministic green without an explicit cache/provenance strategy.
+
+## Performance policy
+Define measurable budgets only where stable and useful. A noisy benchmark should inform review rather than create retry-until-green behavior.
 
 ## Exact-head rule
-All required checks for merge must correspond to the same candidate SHA that receives the independent final gate.
+All required checks for merge correspond to the same candidate SHA that receives the independent final gate.

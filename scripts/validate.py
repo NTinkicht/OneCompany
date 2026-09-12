@@ -7,13 +7,23 @@ from pathlib import Path
 
 from onecompany_lib import CONTROL, active_implementation_leases, autonomy_number, load_json
 
-REQUIRED = ["config.json", "actors.json", "roles.json", "budget.json", "state.json", "queue.json"]
+REQUIRED = [
+    "config.json",
+    "actors.json",
+    "roles.json",
+    "budget.json",
+    "state.json",
+    "queue.json",
+    "patterns.json",
+    "overlays.json",
+]
 
 
 def main() -> int:
     errors: list[str] = []
     warnings: list[str] = []
     docs: dict[str, dict] = {}
+    repo_root = CONTROL.parent
 
     for name in REQUIRED:
         path = CONTROL / name
@@ -22,7 +32,7 @@ def main() -> int:
             continue
         try:
             docs[name] = load_json(path)
-        except Exception as exc:  # JSON parse details are useful here.
+        except Exception as exc:
             errors.append(f"{name}: invalid JSON: {exc}")
 
     if errors:
@@ -34,6 +44,8 @@ def main() -> int:
     budget = docs["budget.json"]
     state = docs["state.json"]
     queue = docs["queue.json"]
+    patterns = docs["patterns.json"]
+    overlays = docs["overlays.json"]
 
     if config.get("project", {}).get("source_of_truth") != "github":
         errors.append("config.project.source_of_truth must be 'github'")
@@ -99,6 +111,50 @@ def main() -> int:
         role_ids.add(role_id)
         if not role.get("required_capabilities"):
             warnings.append(f"role {role_id} has no required capabilities")
+
+    pattern_ids: set[str] = set()
+    for pattern in patterns.get("patterns", []):
+        pattern_id = pattern.get("id")
+        if not pattern_id:
+            errors.append("pattern missing id")
+            continue
+        if pattern_id in pattern_ids:
+            errors.append(f"duplicate pattern id: {pattern_id}")
+        pattern_ids.add(pattern_id)
+        if pattern.get("adoption") not in {"core", "recommended", "optional", "experimental"}:
+            errors.append(f"pattern {pattern_id} has invalid adoption level")
+        doc_path = repo_root / "patterns" / f"{pattern_id}.md"
+        if not doc_path.exists():
+            errors.append(f"pattern {pattern_id} is missing documentation at {doc_path.relative_to(repo_root)}")
+
+    overlay_rules = overlays.get("rules", {})
+    forbidden_true = (
+        "creates_actor",
+        "creates_capacity",
+        "creates_implementation_lease",
+        "grants_repository_permission",
+        "overrides_material_authorship",
+        "overrides_self_gate_rule",
+        "grants_merge_authority",
+    )
+    for key in forbidden_true:
+        if overlay_rules.get(key) is not False:
+            errors.append(f"overlays.rules.{key} must be false")
+
+    overlay_ids: set[str] = set()
+    for overlay in overlays.get("profiles", []):
+        overlay_id = overlay.get("id")
+        path = overlay.get("path")
+        if not overlay_id:
+            errors.append("overlay missing id")
+            continue
+        if overlay_id in overlay_ids:
+            errors.append(f"duplicate overlay id: {overlay_id}")
+        overlay_ids.add(overlay_id)
+        if not path:
+            errors.append(f"overlay {overlay_id} missing path")
+        elif not (repo_root / path).exists():
+            errors.append(f"overlay {overlay_id} points to missing path {path}")
 
     wu_ids: set[str] = set()
     for wu in queue.get("work_units", []):

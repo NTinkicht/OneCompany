@@ -17,6 +17,7 @@ def main() -> int:
     config = load_json(CONTROL / "config.json")
     budget = load_json(CONTROL / "budget.json")
     state = load_json(CONTROL / "state.json")
+    overlays = load_json(CONTROL / "overlays.json")
     results = []
 
     zero_spend = copy.deepcopy(budget)
@@ -41,6 +42,12 @@ def main() -> int:
     results.append(check("independent reviewer is non-author", reviewer not in authors))
     reviewer = "codex"
     results.append(check("material author conflict is detectable", reviewer in authors))
+
+    rules = overlays.get("rules", {})
+    results.append(check("role overlay cannot create an actor", rules.get("creates_actor") is False))
+    results.append(check("role overlay cannot create an implementation lease", rules.get("creates_implementation_lease") is False))
+    results.append(check("role overlay cannot override self-gate rule", rules.get("overrides_self_gate_rule") is False))
+    results.append(check("role overlay cannot grant merge authority", rules.get("grants_merge_authority") is False))
 
     results.append(check("GitHub remains source of truth", config.get("project", {}).get("source_of_truth") == "github"))
 

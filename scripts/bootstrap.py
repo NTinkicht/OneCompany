@@ -13,7 +13,15 @@ COPY_PATHS = [
     ".onecompany",
     "agents",
     "company",
+    "patterns",
+    "overlays",
+    "docs",
     "scripts",
+    "onecompany.py",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "GEMINI.md",
+    ".github/copilot-instructions.md",
     ".github/ISSUE_TEMPLATE",
     ".github/PULL_REQUEST_TEMPLATE.md",
     ".github/workflows/onecompany-validate.yml",
@@ -54,7 +62,7 @@ def main() -> int:
         return 2
 
     print(f"OneCompany files copied to {target}")
-    print("Next: edit .onecompany/config.json, budget.json, actors.json; then run python scripts/doctor.py and validate.py")
+    print("Next: edit .onecompany/config.json, budget.json, actors.json; review patterns/overlays; then run python scripts/doctor.py and validate.py")
     return 0
 
 

@@ -45,6 +45,10 @@ One sentence describing the desired post-merge behavior.
 ## Routing
 - Required implementation capabilities:
 - Required independent review capabilities:
+- Primary role overlay: none / overlay id
+- Optional orthogonal specialist overlay(s): none / overlay ids
+
+> Overlays sharpen a real actor's lens. They do not create actors, leases, permissions, reviewer independence, or merge authority.
 
 ## Lease / canonical stream
 - Actor:

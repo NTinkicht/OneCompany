@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OneCompany Routing Preferences",
+  "type": "object",
+  "required": ["schema_version", "policy", "preference_by_capability"],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "policy": {
+      "type": "object",
+      "required": ["preferences_are_not_leases", "live_readiness_outranks_preference", "budget_outranks_preference", "reviewer_independence_outranks_preference", "healthy_replacement_is_not_preempted_mid_attempt"],
+      "properties": {
+        "preferences_are_not_leases": {"const": true},
+        "live_readiness_outranks_preference": {"const": true},
+        "budget_outranks_preference": {"const": true},
+        "reviewer_independence_outranks_preference": {"const": true},
+        "healthy_replacement_is_not_preempted_mid_attempt": {"const": true},
+        "unknown_actor_behavior": {"enum": ["reject", "append_after_known"]}
+      },
+      "additionalProperties": true
+    },
+    "preference_by_capability": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {"type": "string"},
+        "uniqueItems": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

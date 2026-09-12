@@ -1,163 +1,213 @@
 # OneCompany
 
-**One human. A team of AI workers. One autonomous company.**
+**One human. A team of AI workers. One governed autonomous company.**
 
-OneCompany is a reusable operating system for running software projects as governed autonomous, multi-agent companies from GitHub. It coordinates work, permissions, budgets, agent readiness, dispatch, leases, CI, independent review, merge integrity, state reconciliation, and round-the-clock liveness without binding the company to one model vendor.
+OneCompany is a reusable operating system for turning a GitHub repository into a multi-agent software company with explicit work ownership, deterministic verification, independent review, budget/security guardrails, real execution paths, durable cross-run coordination, and round-the-clock supervision.
 
-OneCompany was shaped by real operating experience building Tabibi with ChatGPT, Codex, Claude, GitHub Copilot, Gemini CLI, Mistral Vibe, GitHub Actions, strict budget constraints, repeated failovers, CI incidents, and exact-head review/merge discipline.
+It was shaped by real operating experience building Tabibi with ChatGPT, Codex, Claude, GitHub Copilot, Gemini CLI, Mistral Vibe, GitHub Actions, strict budget constraints, provider limits, failovers, CI incidents, and exact-head review/merge discipline.
 
-## What it gives a project
+## 60-second start
+
+### If you created a repository from the OneCompany GitHub template
+
+```bash
+python onecompany.py init \
+  --repository OWNER/REPO \
+  --project-name "My Product" \
+  --initialize-contracts
+
+python onecompany.py check
+python onecompany.py doctor
+python onecompany.py status --live
+```
+
+### If you already have a product repository
+
+From a trusted OneCompany checkout:
+
+```bash
+python onecompany.py bootstrap \
+  --target /path/to/product \
+  --repository OWNER/REPO \
+  --project-name "My Product" \
+  --initialize-contracts
+```
+
+Then configure GitHub protection, deterministic product CI, workers/readiness, routing/dispatch, and complete [`docs/FIRST-RUN-ACCEPTANCE.md`](docs/FIRST-RUN-ACCEPTANCE.md). Do **not** raise autonomy merely because configuration files exist.
+
+Full setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) and [`docs/SETUP-FROM-ZERO.md`](docs/SETUP-FROM-ZERO.md).
+
+## What OneCompany provides
 
 - bounded Work Units and one canonical implementation stream;
-- capability-level actor readiness rather than “provider is up/down” guesses;
-- capability-specific routing after budget/permission/authorship filters;
-- explicit executable dispatch/wake paths — routing is not mistaken for execution;
-- durable distributed leases and cumulative material authorship;
+- explicit, durable implementation leases with first-valid-lease-wins race handling;
+- capability-level readiness instead of provider-wide up/down guesses;
+- capability routing after permission, budget and authorship filters;
+- executable dispatch/wake paths — choosing an actor is not mistaken for starting it;
+- cumulative material authorship across failover/replay/cherry-pick;
 - deterministic CI plus independent non-author exact-head review;
-- durable exact-head gates outside the implementation SHA;
+- durable exact-head gates outside the implementation commit;
+- merge-time revalidation of reviewer independence, evidence, CI and exact head;
 - expected-head mechanical merge;
-- same-stream failover and race-safe first-valid-lease-wins coordination;
+- same-stream failover;
 - zero-extra-spend and other explicit financial policies;
-- project contracts for product, architecture, security, quality and operations;
-- role overlays and Spotify-inspired aligned autonomy;
-- context-efficiency/shadow-adoption patterns;
-- unattended-agent templates that start disabled/read-only;
+- product contracts for product, architecture, security, deterministic quality, design/UX and operations;
+- provider-neutral role overlays and Spotify-inspired aligned autonomy;
+- deterministic-first context routing and shadow-before-authority adoption;
+- disabled-by-default provider/supervisor templates;
 - L0-L5 autonomy;
-- event-driven handoffs plus scheduled liveness reconciliation for 24/7 operation;
-- self-validation, simulations and fresh-bootstrap smoke testing.
+- event-driven handoffs plus scheduled liveness reconciliation;
+- emergency stop, no-self-escalation and human control-plane sovereignty;
+- schemas, validators, supply-chain audit, simulations and fresh-install smoke tests.
 
-## Core loop
+## The autonomous loop
 
 ```text
 live GitHub + durable coordination ledger
-            ↓
-reconcile
-            ↓
-select dependency-ready Work Unit
-            ↓
-route verified capability
-            ↓
-resolve a real dispatch/wake mechanism
-            ↓
-acquire one canonical implementation lease
-            ↓
-implement on one branch / PR
-            ↓
-deterministic CI
-            ↓
+             ↓
+reconcile authoritative evidence
+             ↓
+select READY dependency-safe Work Unit
+             ↓
+route verified capability + budget + permission + independence
+             ↓
+resolve a real execution/dispatch mechanism
+             ↓
+acquire exactly one canonical implementation lease
+             ↓
+implement on one canonical branch / PR
+             ↓
+deterministic project CI
+             ↓
 independent exact-head gate
-            ↓
-expected-head merge
-            ↓
-reconcile / release / select next work
-            ↓
+             ↓
+merge-time revalidation + expected-head merge
+             ↓
+release / durable MERGED evidence / reconcile
+             ↓
+select next READY work at L4+
+             ↓
 repeat
 ```
 
-## The control plane
+`PROPOSED` means backlog/planning. `READY` means executable. Continuous autonomy never promotes an idea to implementation merely because the queue is otherwise empty.
+
+## Machine control plane
 
 ```text
 .onecompany/
-  config.json       project + autonomy policy
-  budget.json       spend/capacity policy
-  actors.json       potential worker capabilities
-  readiness.json    proved capability/access/current degradation
-  routing.json      capability-specific preference order
-  dispatch.json     executable wake/run mechanisms
-  roles.json        durable role contracts
-  ledger.json       durable GitHub coordination ledger policy
-  supervision.json  round-the-clock liveness policy
-  state.json        derived local/cache snapshot
-  queue.json        dependency-ready work index
-  patterns.json     reusable operating patterns
-  overlays.json     specialist lens registry
-  schemas/          machine schemas
-  templates/        disabled provider/supervisor/project templates
+  config.json        project/autonomy/safety policy
+  governance.json    no-self-escalation + protected control-plane policy
+  budget.json        spend/capacity policy
+  actors.json        potential worker capabilities
+  readiness.json     verified current capability/access/degradation
+  routing.json       capability-specific preference order
+  dispatch.json      executable wake/run mechanisms
+  roles.json         durable company roles
+  ledger.json        distributed GitHub coordination policy
+  supervision.json   24/7 liveness policy
+  state.json         local/reconciled cache only
+  queue.json         Work Unit dependency graph
+  patterns.json      reusable operating patterns
+  overlays.json      specialist review/work lenses
+  schemas/           machine contracts
+  templates/         disabled provider/supervisor/project templates
 ```
 
-The crucial distinction is:
+Core distinction:
 
 ```text
-actors.json      = what an actor type could do
-readiness.json   = what this configured installation has actually proved now
-routing.json     = who is preferred after hard eligibility checks
-dispatch.json    = how that actor can actually be started
-ledger.json      = how independent runs share leases/authorship/gates
-supervision.json = how the company notices missed/stale transitions
+actor declaration  != verified readiness
+routing decision   != executable dispatch
+heartbeat          != progress
+local state        != durable distributed truth
+PASS text          != valid current exact-head gate
+scheduled task     != implementation lease
 ```
 
-## 24/7 operation
+## Product and UI quality
 
-OneCompany treats round-the-clock operation as a **liveness and coordination problem**, not a reason to wake every worker repeatedly.
+OneCompany does not force React, Storybook, Playwright, Chromatic, or any paid stack. It requires **evidence appropriate to the product**.
+
+Starter contracts:
+
+- `PRODUCT.md` — user promise, scope and non-goals;
+- `ARCHITECTURE.md` — boundaries, invariants, data/concurrency;
+- `SECURITY.md` — auth/authz/privacy/trust boundaries;
+- `QUALITY.md` — deterministic commands, reproducibility, flaky-test/retry policy;
+- `DESIGN.md` — design system, complete UI states, accessibility, responsive behavior, localization/RTL, themes, visual regression and performance;
+- `OPERATIONS.md` — deploy, observability, rollback, restore/recovery.
+
+For web UI, the reference design contract targets WCAG 2.2 Level AA unless project/legal policy is stricter. Automated scans are useful evidence, not a substitute for semantic/keyboard/task-level review on important journeys.
+
+See [`docs/UI-AND-EXPERIENCE-QUALITY.md`](docs/UI-AND-EXPERIENCE-QUALITY.md).
+
+## 24/7 operation
 
 > **Events move the company; schedules make sure no transition was missed.**
 
 Recommended layers:
 
 1. event-driven PR/CI/review/merge handoffs;
-2. scheduled reconciliation as a safety net;
+2. scheduled reconciliation as redundancy;
 3. durable Team Room ledger shared by independent runs;
 4. scheduler-health monitoring;
-5. human escalation only for explicit human-only decisions.
+5. human escalation only for human-only decisions.
 
-A documented profile uses four hourly ChatGPT tasks staggered at approximately `:02`, `:17`, `:32`, and `:47` for an effective ~15-minute liveness cadence where current plan limits allow it. They are replicas of **one supervisor**, not four orchestrators. The durable ledger applies first-valid-lease-wins ordering so races cannot create two canonical writers.
+A Tabibi-derived profile uses four hourly ChatGPT tasks staggered around `:02`, `:17`, `:32`, and `:47`, yielding an effective ~15-minute supervisory cadence where platform limits allow. They are four replicas of **one supervisor**, not four orchestrators. Every run re-reads live GitHub and the durable lease; healthy work produces no duplicate implementation.
 
-See:
+See [`docs/SCHEDULED-SUPERVISION.md`](docs/SCHEDULED-SUPERVISION.md), [`examples/chatgpt-scheduled-supervisors.md`](examples/chatgpt-scheduled-supervisors.md), [`docs/DURABLE-COORDINATION-LEDGER.md`](docs/DURABLE-COORDINATION-LEDGER.md), and [`docs/DISPATCH-AND-WAKE.md`](docs/DISPATCH-AND-WAKE.md).
 
-- [`docs/SCHEDULED-SUPERVISION.md`](docs/SCHEDULED-SUPERVISION.md)
-- [`examples/chatgpt-scheduled-supervisors.md`](examples/chatgpt-scheduled-supervisors.md)
-- [`docs/DURABLE-COORDINATION-LEDGER.md`](docs/DURABLE-COORDINATION-LEDGER.md)
-- [`docs/DISPATCH-AND-WAKE.md`](docs/DISPATCH-AND-WAKE.md)
+All scheduled and provider automation ships disabled by default.
 
-All supervisors and provider automations ship disabled by default.
+## Safety model
 
-## Start a new project
+Reference defaults are conservative: L1, zero additional AI spend, all workers unconfigured/disabled, durable ledger disabled, unattended dispatch disabled, supervision disabled/observe-only.
 
-From a OneCompany checkout:
+Important safeguards:
 
-```bash
-python onecompany.py bootstrap \
-  --target /path/to/project \
-  --repository owner/repo \
-  --initialize-contracts
-```
+- **Emergency stop:** freezes autonomous mutation while permitting read-only diagnosis/reconciliation and safe lease release.
+- **No self-escalation:** an actor cannot grant itself credentials, budget, autonomy, reviewer independence, merge authority or trusted-publisher status.
+- **Trusted base control plane:** a candidate PR changing governance/instructions is proposed data until merged; it cannot make its own weaker rules authoritative.
+- **Human control-plane boundary:** reference policy requires human merge for protected OneCompany runtime/governance changes; constitution/governance policy are always-human paths.
+- **Supply chain:** managed workflows reject floating external Actions, `pull_request_target`, and `permissions: write-all`.
+- **Side effects:** idempotency/natural deduplication + bounded retries; destructive actions require recovery/rollback/compensation.
+- **Budget:** quota exhaustion is capacity degradation, never automatic permission to spend.
 
-Then follow [`docs/SETUP-FROM-ZERO.md`](docs/SETUP-FROM-ZERO.md).
+Read [`company/CONSTITUTION.md`](company/CONSTITUTION.md), [`docs/TRUSTED-CONTROL-PLANE.md`](docs/TRUSTED-CONTROL-PLANE.md), and [`docs/INCIDENT-RUNBOOK.md`](docs/INCIDENT-RUNBOOK.md).
 
-Before raising autonomy, run:
+## Golden commands
 
 ```bash
+# deterministic local acceptance — no provider call required
+python onecompany.py check
+
+# environment + live-account/repository reality
 python onecompany.py doctor
-python onecompany.py validate
-python onecompany.py simulate
-python onecompany.py simulate-supervision
 python onecompany.py readiness --local-probe
 python onecompany.py audit-github
-python onecompany.py next-work
+python onecompany.py status --live
+
+# observe liveness without enabling mutation
 python onecompany.py supervise --force-observe
 ```
 
-Then complete [`docs/FIRST-RUN-ACCEPTANCE.md`](docs/FIRST-RUN-ACCEPTANCE.md).
-
-## Main commands
+Main operational commands:
 
 ```text
-doctor                 environment diagnostics
-validate               cross-file policy validation
-simulate               core policy simulations
-simulate-supervision   liveness/scheduling simulations
-readiness              local capability probes
- audit-github           GitHub configuration audit
-next-work               dependency-ready work selection
-route                   eligible actor selection
-dispatch                executable mechanism resolution
-ledger                  durable coordination read/post
-lease                   acquire/release/transfer canonical implementation lease
-gate                    exact-head independent gate
-merge                   expected-head mechanical merge
-reconcile               rebuild cache from live GitHub/ledger
-supervise               liveness state decision
-bootstrap               fresh-project installer
+init / bootstrap     safe project installation paths
+check                full deterministic local acceptance suite
+validate             schema + cross-file + governance + hardening validation
+status               compact local/live operating view
+next-work            READY-only dependency-safe selection
+route                eligible actor selection
+dispatch             real execution/wake mechanism resolution
+ledger               durable coordination inspection/publication
+lease                canonical lease acquire/release/transfer
+gate                 exact-head independent verdict publication
+merge                expected-head merge with reviewer/governance revalidation
+reconcile            rebuild cache from authoritative evidence
+supervise            liveness decision, not an extra implementer
 ```
 
 ## Autonomy levels
@@ -165,53 +215,30 @@ bootstrap               fresh-project installer
 | Level | Meaning |
 | --- | --- |
 | L0 | Manual |
-| L1 | AI-assisted planning/work |
-| L2 | Autonomous bounded implementation, human merge gate |
-| L3 | Autonomous delivery with durable independent gate/merge |
-| L4 | Continuous company: selects and continues dependency-ready work |
-| L5 | Governed autonomous company including ongoing maintenance/incident/liveness operation |
+| L1 | Assisted planning/work |
+| L2 | Autonomous bounded implementation, human merge |
+| L3 | Autonomous product delivery inside policy with durable independent gate/merge |
+| L4 | Continuous company that selects the next READY dependency-safe WU |
+| L5 | Governed autonomous company including maintenance, incidents, planning and liveness |
 
-L3+ autonomous delivery requires a durable coordination ledger in the reference model. L4+ additionally requires continuous supervision/no-idle readiness.
-
-## Non-negotiable invariants
-
-1. GitHub is operational source of truth.
-2. One bounded WU has one canonical implementation stream.
-3. A lease is explicit and durable for distributed autonomy.
-4. First valid implementation lease wins concurrent claims.
-5. Failover changes the worker, not the stream.
-6. Material authors cannot sole-gate their exact head.
-7. Required CI and independent judgment target the same SHA.
-8. Merge verifies the approved SHA still equals the live head.
-9. Routing does not equal execution; a real dispatch path must exist.
-10. Unattended writers require the canonical active lease.
-11. Ready work + no valid lease is a fault only when continuous autonomy says it should be working.
-12. Budgets are policy; no silent paid fallback/overage/top-up/new vendor.
-13. Secrets/sensitive data stay out of prompts, state, logs and coordination comments.
-14. Human-only boundaries remain human-only until explicitly changed.
-15. Role overlays are lenses, not identities/permissions.
-16. Experimental infrastructure earns authority through evidence.
-17. Scheduled supervisors supervise; they do not create extra implementation streams.
-18. Local `state.json` is a cache, not durable multi-agent coordination truth.
+L3+ requires the durable ledger in the reference model. L4+ additionally requires proven deterministic queue progression, no-idle reconciliation and continuous supervision. Governance/control-plane changes remain within the human merge boundary unless a prior human-approved stricter policy changes the model.
 
 ## Design lineage
 
-OneCompany explicitly documents what was adapted rather than inventing a mythology:
+OneCompany documents provenance rather than inventing mythology:
 
 - Spotify-inspired aligned autonomy: temporary delivery squads, reusable discipline chapters, advisory guilds;
 - Agency Agents-inspired specialist role overlays;
 - Headroom-derived shadow-before-authority and deterministic-first context routing;
-- Tabibi-native leases, failover, exact-head gates, capacity circuit breakers, evidence-over-activity, no-idle, Team Room coordination and scheduled stale-work reconciliation;
+- Tabibi-native leases, same-stream failover, exact-head gates, capacity circuit breakers, evidence-over-activity, Team Room coordination, no-idle and scheduled stale-work reconciliation;
 - later Spotify Honk work as convergent evidence, not retroactive origin.
 
 See [`docs/DESIGN-LINEAGE.md`](docs/DESIGN-LINEAGE.md) and [`docs/REFERENCES.md`](docs/REFERENCES.md).
 
-## Safety posture
+## Before production or public release
 
-The foundation deliberately starts conservative: L1, zero additional AI spend, workers disabled/unconfigured, durable ledger disabled, unattended provider paths disabled, and supervision disabled/observe-only. Authority is raised only after setup evidence and first-run drills.
-
-OneCompany is not a promise that models are infallible and is not a requirement to buy six AI products. The operating system is meant to be stronger than any individual worker.
+Complete [`docs/RELEASE-CHECKLIST.md`](docs/RELEASE-CHECKLIST.md). In particular, configure default-branch protection/required checks, choose the repository license, prove emergency stop/failover/stale-gate behavior, and enable the GitHub repository's **Template repository** setting if OneCompany is meant to be cloned through GitHub's template UX.
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md). OneCompany itself follows the same model: bounded work, deterministic CI, independent exact-head review, and no self-gating.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md). OneCompany itself follows the same rules: bounded work, deterministic CI, independent exact-head review, no self-gating, and human promotion of protected control-plane changes.

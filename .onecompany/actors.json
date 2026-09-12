@@ -10,7 +10,7 @@
       "execution_modes": ["human_github"],
       "cost_class": "HUMAN",
       "permissions": ["owner_defined"],
-      "capabilities": ["architecture", "planning", "implementation", "repository_intelligence", "ci_remediation", "code_review", "security_review", "test_design", "failure_analysis", "documentation", "research", "state_reconciliation", "merge_execution"],
+      "capabilities": ["architecture", "planning", "implementation", "repository_intelligence", "regression_scouting", "ci_remediation", "code_review", "security_review", "test_design", "failure_analysis", "documentation", "research", "state_reconciliation", "merge_execution"],
       "may_independently_gate_own_material_authorship": false
     },
     {

@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Optional fallback pattern when a Codex workspace does not already have a native GitHub write connection.
+# Store ONECOMPANY_GITHUB_PAT only in the Codex/workspace secret store. Never commit it.
+set -euo pipefail
+
+: "${ONECOMPANY_REPO_URL:?Set ONECOMPANY_REPO_URL, e.g. https://github.com/OWNER/REPO.git}"
+: "${ONECOMPANY_GITHUB_PAT:?Store a fine-grained repository-scoped PAT in the execution environment secret store}"
+
+command -v git >/dev/null 2>&1 || { echo "git is required" >&2; exit 2; }
+if ! command -v gh >/dev/null 2>&1; then
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get update -qq
+    apt-get install -y -qq gh
+  else
+    echo "gh is required; install it using your environment's approved package manager" >&2
+    exit 2
+  fi
+fi
+
+printf '%s' "$ONECOMPANY_GITHUB_PAT" | gh auth login --hostname github.com --with-token >/dev/null
+unset ONECOMPANY_GITHUB_PAT
+gh auth setup-git >/dev/null
+
+if git remote get-url origin >/dev/null 2>&1; then
+  git remote set-url origin "$ONECOMPANY_REPO_URL"
+else
+  git remote add origin "$ONECOMPANY_REPO_URL"
+fi
+
+gh auth status --hostname github.com
+git ls-remote --exit-code origin HEAD >/dev/null
+
+echo "OneCompany Codex GitHub authentication preflight: PASS"

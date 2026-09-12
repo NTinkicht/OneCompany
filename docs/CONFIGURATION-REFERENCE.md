@@ -53,26 +53,52 @@ Maximum new AI spend allowed beyond already-owned subscriptions/allowances/local
 - `allow_within_cap` — only appropriate with reliable metering/cap enforcement.
 
 ### Cost classes
-Actors are routed only if their cost class is allowed/conditionally allowed by current budget.
+Actors are routable only if their cost class is permitted by current budget.
 
-## `actors.json`
+## `actors.json` — declared potential
 
-Each actor has:
+Each actor has a stable ID plus its **potential** execution modes/capabilities. This file answers “what can this actor type plausibly do when configured?” It does not claim the current account/runtime is ready now.
 
-- stable `id`;
-- display name;
-- `enabled` and `configured` separately;
-- execution modes;
-- cost class;
-- permission summary;
-- capabilities;
+Important fields:
+
+- `id`, `display_name`;
+- `enabled`, `configured`;
+- `execution_modes`;
+- `cost_class`;
+- permissions summary;
+- declared `capabilities`;
 - self-gate policy.
 
-Why both enabled/configured? A known actor template can exist without being connected. `enabled=true` with `configured=false` is a validation error.
+`enabled=true` with `configured=false` is invalid.
+
+## `readiness.json` — proven current route
+
+This is the second half of actor routing. It records non-secret operational evidence for the exact configured surface.
+
+Per actor:
+
+- `setup_state`: `not_started`, `partially_ready`, `ready`, `degraded`, or `unavailable`;
+- `verified_surfaces`: e.g. `codex_cloud`, `claude_code`, `copilot_code_review`;
+- `verified_capabilities`: capabilities actually smoke-tested on those surfaces;
+- `temporarily_unavailable_capabilities`: current quota/runtime limitations;
+- `repository_access.read/write/review/merge`: permissions that have been proved, not assumed;
+- `unattended.configured/verified`;
+- `last_verified_at`;
+- `evidence`: non-secret references such as setup WU/PR/run IDs.
+
+Rules:
+
+- verified/unavailable capabilities must be declared in `actors.json`;
+- enabled actors must be `ready` or `degraded`, have at least one verified capability, and have repository read access;
+- `degraded` is allowed when some capabilities still work;
+- unattended verified requires unattended configured;
+- no credentials belong here.
+
+This separation handles cases such as “Codex implementation works but code-review quota is exhausted” without disabling the whole actor.
 
 ## `roles.json`
 
-Roles define purpose, required capabilities, write scope, and conflicts. They are not bound permanently to actor IDs.
+Roles define purpose, required capabilities, write scope, and conflicts. They are not bound permanently to actor IDs. `merge_executor` explicitly requires `merge_execution`; state reconciliation alone is not merge authority.
 
 ## `patterns.json`
 
@@ -89,11 +115,11 @@ Pattern provenance is documentation, not execution permission.
 
 ## `overlays.json`
 
-Registers optional professional role overlays plus their provenance and hard non-authority rules.
+Registers optional professional role overlays plus provenance and hard non-authority rules.
 
 An overlay can focus an actor on backend architecture, database reliability, security, SRE, code review, persona testing, minimal-change remediation, or multi-agent-system design. It does **not** create a new actor or independent reviewer.
 
-The reference validator requires these overlay rules to remain false:
+The validator requires these overlay rules to remain false:
 
 - creates actor/capacity;
 - creates implementation lease;
@@ -101,8 +127,6 @@ The reference validator requires these overlay rules to remain false:
 - overrides material authorship;
 - overrides self-gate rule;
 - grants merge authority.
-
-Overlay files live under `overlays/`.
 
 ## `queue.json`
 
@@ -120,6 +144,10 @@ Operational cache. Important fields:
 - blockers/human-decision flag.
 
 Always reconcile before consequential action.
+
+## Schemas
+
+JSON schemas live under `.onecompany/schemas/`. The dependency-free validator also enforces cross-file invariants that ordinary schema validation cannot easily prove, such as actor↔readiness coherence, role capability coverage, single-stream leases, budget contradictions, and exact-head gate consistency.
 
 ## Adding project-specific fields
 

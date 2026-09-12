@@ -16,6 +16,7 @@
   },
   "cost_classes": {
     "allowed": [
+      "HUMAN",
       "INCLUDED_SUBSCRIPTION",
       "FREE_ALLOWANCE",
       "LOCAL"

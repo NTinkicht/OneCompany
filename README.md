@@ -2,145 +2,219 @@
 
 **One human. A team of AI workers. One governed autonomous company.**
 
-OneCompany is a reusable operating system for turning a GitHub repository into a multi-agent software company with explicit work ownership, deterministic verification, independent review, budget/security guardrails, real execution paths, durable cross-run coordination, and round-the-clock supervision.
+OneCompany is a reusable **CompanyOS** for running a software company from a GitHub repository. It combines strategy, requirements, planning, safe parallel execution, multi-agent routing, deterministic engineering assurance, independent review, release governance, continuous supervision and organizational learning without surrendering human sovereignty over critical decisions.
 
-It was shaped by real operating experience building Tabibi with ChatGPT, Codex, Claude, GitHub Copilot, Gemini CLI, Mistral Vibe, GitHub Actions, strict budget constraints, provider limits, failovers, CI incidents, and exact-head review/merge discipline.
+It was shaped by real operating experience building Tabibi with ChatGPT, Codex, Claude, GitHub Copilot, Gemini CLI, Mistral, GitHub Actions, strict budget limits, provider capacity constraints, failovers, CI incidents and exact-head review discipline.
 
-## 60-second start
+## Start here
 
-### If you created a repository from the OneCompany GitHub template
+For a new **or existing** repository, the primary experience is one read-only-first command:
 
 ```bash
-python onecompany.py init \
-  --repository OWNER/REPO \
-  --project-name "My Product" \
-  --initialize-contracts
+python onecompany.py onboard --target .
+```
 
-python onecompany.py check
+It inspects the repository, identifies the adoption mode, detects stack/tests/CI/contracts, shows collisions and proposes the safe installation path **without mutating anything**.
+
+After reviewing the plan:
+
+```bash
+python onecompany.py onboard --target . --apply
+```
+
+Then:
+
+```bash
+python onecompany.py validate
 python onecompany.py doctor
+python onecompany.py plan summary
 python onecompany.py status --live
 ```
 
-### If you already have a product repository
+See [`docs/ONBOARDING.md`](docs/ONBOARDING.md) for new-project, existing-project and template-copy flows.
 
-From a trusted OneCompany checkout:
+## How CompanyOS works
 
-```bash
-python onecompany.py bootstrap \
-  --target /path/to/product \
-  --repository OWNER/REPO \
-  --project-name "My Product" \
-  --initialize-contracts
+The canonical end-to-end diagram is in [`docs/COMPANYOS-FLOW.md`](docs/COMPANYOS-FLOW.md).
+
+```text
+Human mission / sovereignty boundaries
+              ↓
+Approved strategy + requirements + risks
+              ↓
+Planning & Flow Engine
+(priority + dependencies + critical path + safe parallel set)
+              ↓
+Capability Router
+(budget + readiness + capacity + independence)
+              ↓
+One canonical stream per Work Unit
+      ↙          ↓          ↘
+    WU-A        WU-B       WU-C held
+      ↓          ↓
+  branch/PR  branch/PR
+      ↓          ↓
+ deterministic CI + engineering assurance
+      ↓          ↓
+ independent exact-head + exact-base gate
+       ↘        ↙
+          merge
+            ↓
+ release → observe → measure → learn
+            ↓
+      re-plan continuously
 ```
 
-Then configure GitHub protection, deterministic product CI, workers/readiness, routing/dispatch, and complete [`docs/FIRST-RUN-ACCEPTANCE.md`](docs/FIRST-RUN-ACCEPTANCE.md). Do **not** raise autonomy merely because configuration files exist.
+## Planning model
 
-Full setup: [`BOOTSTRAP.md`](BOOTSTRAP.md) and [`docs/SETUP-FROM-ZERO.md`](docs/SETUP-FROM-ZERO.md).
+OneCompany does not force Scrum or SAFe. The hierarchy is flexible:
+
+```text
+Objective
+  ↓
+Epic
+  ↓
+Feature / Capability       optional
+  ↓
+User Story                 optional
+  ↓
+Formal Requirement
+  ↓
+Acceptance Criterion
+  ↓
+Work Unit
+  ↓
+Task / Enabler / Spike / Defect / Chore
+  ↓
+Test / Evidence / Release / Outcome
+```
+
+Formal requirements remain classified independently as `BR`, `UR`, `FR`, `NFR`, `SEC`, `DATA`, `OPS`, `UX`, and `CON`.
+
+The versioned `.onecompany` graph is the approved machine baseline. GitHub Issues/Projects are the collaborative human UI. Editing issue prose does not silently re-baseline approved requirements, risks or scope.
+
+## Safe parallel execution
+
+OneCompany enforces **one canonical implementation stream per Work Unit**, not one stream for the entire company.
+
+Independent WUs may run concurrently only when the planner can prove compatibility using:
+
+- dependency relationships;
+- declared write scopes;
+- semantic resource locks;
+- risk class;
+- global WIP limits;
+- per-actor verified implementation capacity.
+
+Unknown scope fails closed to serialization. Critical-risk work serializes by default. The live PR diff is checked against the declared WU scope before a binding gate and again before merge.
+
+Parallel merge safety is base-aware: a merge-ready gate records both the candidate **head SHA** and the **base SHA** it was validated against. If `main` moves, the previous integration evidence becomes stale and the branch must be updated/revalidated.
 
 ## What OneCompany provides
 
-- bounded Work Units and one canonical implementation stream;
-- explicit, durable implementation leases with first-valid-lease-wins race handling;
-- capability-level readiness instead of provider-wide up/down guesses;
-- capability routing after permission, budget and authorship filters;
-- executable dispatch/wake paths — choosing an actor is not mistaken for starting it;
+- strategy-to-execution portfolio graph;
+- canonical requirements, acceptance criteria and risk registers;
+- deterministic priority scoring, dependency analysis and critical-path visibility;
+- conflict-safe parallel-set computation;
+- bounded Work Units with one canonical writer per WU;
+- durable implementation leases and first-valid-claim race handling;
+- per-actor readiness and implementation-capacity constraints;
+- capability routing after permission, budget, readiness and authorship filters;
+- executable dispatch/wake paths — routing is not mistaken for execution;
 - cumulative material authorship across failover/replay/cherry-pick;
-- deterministic CI plus independent non-author exact-head review;
-- durable exact-head gates outside the implementation commit;
-- merge-time revalidation of reviewer independence, evidence, CI and exact head;
-- expected-head mechanical merge;
-- same-stream failover;
-- zero-extra-spend and other explicit financial policies;
-- product contracts for product, architecture, security, deterministic quality, design/UX and operations;
-- provider-neutral role overlays and Spotify-inspired aligned autonomy;
-- deterministic-first context routing and shadow-before-authority adoption;
-- disabled-by-default provider/supervisor templates;
-- L0-L5 autonomy;
+- deterministic CI plus Engineering Excellence / OCES assurance;
+- requirements quality, bidirectional traceability and risk governance;
+- code quality, architecture fitness, testing, coverage, mutation and nonfunctional evidence;
+- independent non-author exact-head/exact-base gates;
+- expected-head merge with live scope and governance revalidation;
+- stream-scoped failover, blockers and human-decision handling;
+- zero-extra-spend and explicit budget policies;
+- L0-L5 autonomy with no-self-escalation;
 - event-driven handoffs plus scheduled liveness reconciliation;
-- emergency stop, no-self-escalation and human control-plane sovereignty;
-- schemas, validators, supply-chain audit, simulations and fresh-install smoke tests.
-
-## The autonomous loop
-
-```text
-live GitHub + durable coordination ledger
-             ↓
-reconcile authoritative evidence
-             ↓
-select READY dependency-safe Work Unit
-             ↓
-route verified capability + budget + permission + independence
-             ↓
-resolve a real execution/dispatch mechanism
-             ↓
-acquire exactly one canonical implementation lease
-             ↓
-implement on one canonical branch / PR
-             ↓
-deterministic project CI
-             ↓
-independent exact-head gate
-             ↓
-merge-time revalidation + expected-head merge
-             ↓
-release / durable MERGED evidence / reconcile
-             ↓
-select next READY work at L4+
-             ↓
-repeat
-```
-
-`PROPOSED` means backlog/planning. `READY` means executable. Continuous autonomy never promotes an idea to implementation merely because the queue is otherwise empty.
+- emergency stop and human control-plane sovereignty;
+- fresh-install/bootstrap/self-test simulations;
+- release/outcome learning loop.
 
 ## Machine control plane
 
 ```text
 .onecompany/
-  config.json        project/autonomy/safety policy
-  governance.json    no-self-escalation + protected control-plane policy
-  budget.json        spend/capacity policy
-  actors.json        potential worker capabilities
-  readiness.json     verified current capability/access/degradation
-  routing.json       capability-specific preference order
-  dispatch.json      executable wake/run mechanisms
-  roles.json         durable company roles
-  ledger.json        distributed GitHub coordination policy
-  supervision.json   24/7 liveness policy
-  state.json         local/reconciled cache only
-  queue.json         Work Unit dependency graph
-  patterns.json      reusable operating patterns
-  overlays.json      specialist review/work lenses
-  schemas/           machine contracts
-  templates/         disabled provider/supervisor/project templates
+  config.json                 project/autonomy/safety policy
+  governance.json             protected control-plane policy
+  budget.json                 spend/cost policy
+  actors.json                 potential workers/capabilities
+  readiness.json              verified capability/access/capacity
+  routing.json                capability preference order
+  dispatch.json               executable wake/run mechanisms
+  roles.json                  durable company roles
+  planning.json               hierarchy, priority and flow policy
+  portfolio.json              objectives/epics/features/capabilities
+  requirements-catalog.json   formal requirements + acceptance criteria
+  risk-register.json          planning risks/treatments
+  queue.json                  WUs/dependencies/scopes/locks/PR mapping
+  ledger.json                 durable distributed coordination policy
+  supervision.json            24/7 liveness policy
+  state.json                  reconciled cache only
+  quality*.json               engineering-quality policy/baselines
+  architecture.json           declared architecture constraints
+  traceability.json           assurance traceability policy
+  schemas/                    machine contracts
+  selftest/                   embedded CompanyOS self-tests
+  reference/                  reference assurance evidence
 ```
 
-Core distinction:
+Core distinctions:
 
 ```text
-actor declaration  != verified readiness
-routing decision   != executable dispatch
-heartbeat          != progress
-local state        != durable distributed truth
-PASS text          != valid current exact-head gate
-scheduled task     != implementation lease
+Issue discussion        != approved planning baseline
+actor declaration       != verified readiness
+routing decision        != executable dispatch
+heartbeat               != progress
+local state             != durable/live truth
+PASS text               != valid current exact-head/base gate
+scheduled supervisor    != implementation lease
+READY work              != necessarily executable capacity
 ```
 
-## Product and UI quality
+## Engineering assurance
 
-OneCompany does not force React, Storybook, Playwright, Chromatic, or any paid stack. It requires **evidence appropriate to the product**.
+OneCompany Engineering Standard / OCES makes quality evidence-based rather than model-opinion-based.
 
-Starter contracts:
+> An AI saying “the code looks good” is not quality evidence.
 
-- `PRODUCT.md` — user promise, scope and non-goals;
-- `ARCHITECTURE.md` — boundaries, invariants, data/concurrency;
-- `SECURITY.md` — auth/authz/privacy/trust boundaries;
-- `QUALITY.md` — deterministic commands, reproducibility, flaky-test/retry policy;
-- `DESIGN.md` — design system, complete UI states, accessibility, responsive behavior, localization/RTL, themes, visual regression and performance;
-- `OPERATIONS.md` — deploy, observability, rollback, restore/recovery.
+Depending on risk/profile, assurance may require static checks, unit/component/integration/contract/API/E2E/acceptance/regression/property/fuzz/mutation/security/migration/performance/reliability/accessibility/visual/compatibility/operations/AI-evaluation evidence.
 
-For web UI, the reference design contract targets WCAG 2.2 Level AA unless project/legal policy is stricter. Automated scans are useful evidence, not a substitute for semantic/keyboard/task-level review on important journeys.
+Requirements, architecture, risks, tests and exact-SHA evidence are traceable. Waivers are explicit, owned and expiring; silent permanent suppressions are forbidden.
 
-See [`docs/UI-AND-EXPERIENCE-QUALITY.md`](docs/UI-AND-EXPERIENCE-QUALITY.md).
+See [`docs/engineering/ENGINEERING_STANDARD.md`](docs/engineering/ENGINEERING_STANDARD.md).
+
+## Autonomous loop
+
+```text
+reconcile live GitHub + durable ledger
+              ↓
+compute dependency-ready conflict-safe candidates
+              ↓
+rank / critical-path / WIP admission
+              ↓
+route verified capability + budget + capacity
+              ↓
+acquire one implementation lease per admitted WU
+              ↓
+execute independent streams concurrently
+              ↓
+CI + assurance + independent exact-head/base review
+              ↓
+merge one stream without destroying unrelated leases
+              ↓
+recompute graph / release newly unblocked work
+              ↓
+release → observe → outcome review → update baseline
+              ↓
+repeat when autonomy policy permits
+```
+
+`PROPOSED` is backlog/planning. `READY` is eligible for execution, but actual start still requires dependency, conflict, WIP, worker-capacity, budget and authority checks.
 
 ## 24/7 operation
 
@@ -152,63 +226,60 @@ Recommended layers:
 2. scheduled reconciliation as redundancy;
 3. durable Team Room ledger shared by independent runs;
 4. scheduler-health monitoring;
-5. human escalation only for human-only decisions.
+5. nightly/low-priority maintenance;
+6. human escalation only for human-only decisions.
 
-A Tabibi-derived profile uses four hourly ChatGPT tasks staggered around `:02`, `:17`, `:32`, and `:47`, yielding an effective ~15-minute supervisory cadence where platform limits allow. They are four replicas of **one supervisor**, not four orchestrators. Every run re-reads live GitHub and the durable lease; healthy work produces no duplicate implementation.
+Scheduled supervisors are replicas of one liveness function, not extra implementers. They reconcile the portfolio and may fill available safe WIP slots; they never create duplicate writers for an existing WU.
 
-See [`docs/SCHEDULED-SUPERVISION.md`](docs/SCHEDULED-SUPERVISION.md), [`examples/chatgpt-scheduled-supervisors.md`](examples/chatgpt-scheduled-supervisors.md), [`docs/DURABLE-COORDINATION-LEDGER.md`](docs/DURABLE-COORDINATION-LEDGER.md), and [`docs/DISPATCH-AND-WAKE.md`](docs/DISPATCH-AND-WAKE.md).
+See [`docs/SCHEDULED-SUPERVISION.md`](docs/SCHEDULED-SUPERVISION.md) and [`docs/DURABLE-COORDINATION-LEDGER.md`](docs/DURABLE-COORDINATION-LEDGER.md).
 
-All scheduled and provider automation ships disabled by default.
+## Safety and sovereignty
 
-## Safety model
-
-Reference defaults are conservative: L1, zero additional AI spend, all workers unconfigured/disabled, durable ledger disabled, unattended dispatch disabled, supervision disabled/observe-only.
+Reference defaults remain conservative: L1, zero additional AI spend, workers unconfigured/disabled, unattended dispatch disabled, durable ledger disabled, and supervision observe-only.
 
 Important safeguards:
 
-- **Emergency stop:** freezes autonomous mutation while permitting read-only diagnosis/reconciliation and safe lease release.
-- **No self-escalation:** an actor cannot grant itself credentials, budget, autonomy, reviewer independence, merge authority or trusted-publisher status.
-- **Trusted base control plane:** a candidate PR changing governance/instructions is proposed data until merged; it cannot make its own weaker rules authoritative.
-- **Human control-plane boundary:** reference policy requires human merge for protected OneCompany runtime/governance changes; constitution/governance policy are always-human paths.
-- **Supply chain:** managed workflows reject floating external Actions, `pull_request_target`, and `permissions: write-all`.
-- **Side effects:** idempotency/natural deduplication + bounded retries; destructive actions require recovery/rollback/compensation.
-- **Budget:** quota exhaustion is capacity degradation, never automatic permission to spend.
+- **Emergency stop** freezes autonomous mutation while permitting diagnosis/reconciliation and safe lease release.
+- **No self-escalation** prevents workers from granting themselves credentials, budget, autonomy, reviewer independence or merge authority.
+- **Trusted-base governance** means a control-plane PR cannot use its proposed weaker rules to approve itself.
+- **Human-only decisions** remain human for budget policy, new credentials, legal/governance changes, destructive production actions, sensitive publication and critical-risk acceptance unless a prior reviewed policy explicitly delegates them.
+- **Budget exhaustion** degrades capacity; it never silently enables paid fallback, overage, top-up or a new vendor.
+- **Side effects** require idempotency/deduplication and bounded retries; destructive work requires tested recovery/rollback/compensation.
 
 Read [`company/CONSTITUTION.md`](company/CONSTITUTION.md), [`docs/TRUSTED-CONTROL-PLANE.md`](docs/TRUSTED-CONTROL-PLANE.md), and [`docs/INCIDENT-RUNBOOK.md`](docs/INCIDENT-RUNBOOK.md).
 
 ## Golden commands
 
 ```bash
-# deterministic local acceptance — no provider call required
-python onecompany.py check
+# adoption
+python onecompany.py onboard --target .
+python onecompany.py onboard --target . --apply
 
-# environment + live-account/repository reality
+# deterministic acceptance + environment
+python onecompany.py check
+python onecompany.py validate
 python onecompany.py doctor
-python onecompany.py readiness --local-probe
 python onecompany.py audit-github
 python onecompany.py status --live
 
-# observe liveness without enabling mutation
+# planning
+python onecompany.py plan summary
+python onecompany.py plan validate
+python onecompany.py plan rank
+python onecompany.py plan parallel
+python onecompany.py plan critical-path
+
+# liveness / execution
+python onecompany.py next-work
+python onecompany.py route ...
+python onecompany.py lease ...
+python onecompany.py gate ...
+python onecompany.py merge ...
+python onecompany.py reconcile
 python onecompany.py supervise --force-observe
 ```
 
-Main operational commands:
-
-```text
-init / bootstrap     safe project installation paths
-check                full deterministic local acceptance suite
-validate             schema + cross-file + governance + hardening validation
-status               compact local/live operating view
-next-work            READY-only dependency-safe selection
-route                eligible actor selection
-dispatch             real execution/wake mechanism resolution
-ledger               durable coordination inspection/publication
-lease                canonical lease acquire/release/transfer
-gate                 exact-head independent verdict publication
-merge                expected-head merge with reviewer/governance revalidation
-reconcile            rebuild cache from authoritative evidence
-supervise            liveness decision, not an extra implementer
-```
+Main commands include `onboard`, `init`, `bootstrap`, `check`, `validate`, `status`, `plan`, `next-work`, `route`, `dispatch`, `ledger`, `lease`, `gate`, `merge`, `reconcile`, `supervise`, `assurance`, `trace`, `risk`, and `evidence`.
 
 ## Autonomy levels
 
@@ -218,27 +289,20 @@ supervise            liveness decision, not an extra implementer
 | L1 | Assisted planning/work |
 | L2 | Autonomous bounded implementation, human merge |
 | L3 | Autonomous product delivery inside policy with durable independent gate/merge |
-| L4 | Continuous company that selects the next READY dependency-safe WU |
-| L5 | Governed autonomous company including maintenance, incidents, planning and liveness |
+| L4 | Continuous company that keeps safe dependency-ready WIP flowing |
+| L5 | Governed autonomous company including delivery, maintenance, incidents, planning and liveness |
 
-L3+ requires the durable ledger in the reference model. L4+ additionally requires proven deterministic queue progression, no-idle reconciliation and continuous supervision. Governance/control-plane changes remain within the human merge boundary unless a prior human-approved stricter policy changes the model.
+Higher autonomy never lowers quality, evidence, budget or governance requirements.
 
-## Design lineage
+## Before public/production release
 
-OneCompany documents provenance rather than inventing mythology:
+Complete [`docs/RELEASE-CHECKLIST.md`](docs/RELEASE-CHECKLIST.md). Two repository-owner items are intentionally not decided by autonomous workers:
 
-- Spotify-inspired aligned autonomy: temporary delivery squads, reusable discipline chapters, advisory guilds;
-- Agency Agents-inspired specialist role overlays;
-- Headroom-derived shadow-before-authority and deterministic-first context routing;
-- Tabibi-native leases, same-stream failover, exact-head gates, capacity circuit breakers, evidence-over-activity, Team Room coordination, no-idle and scheduled stale-work reconciliation;
-- later Spotify Honk work as convergent evidence, not retroactive origin.
+1. choose the repository license before public open-source release;
+2. configure/verify default-branch protection and required checks in GitHub administration.
 
-See [`docs/DESIGN-LINEAGE.md`](docs/DESIGN-LINEAGE.md) and [`docs/REFERENCES.md`](docs/REFERENCES.md).
-
-## Before production or public release
-
-Complete [`docs/RELEASE-CHECKLIST.md`](docs/RELEASE-CHECKLIST.md). In particular, configure default-branch protection/required checks, choose the repository license, prove emergency stop/failover/stale-gate behavior, and enable the GitHub repository's **Template repository** setting if OneCompany is meant to be cloned through GitHub's template UX.
+Those are tracked as human decisions rather than being silently guessed.
 
 ## Contributing
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md). OneCompany itself follows the same rules: bounded work, deterministic CI, independent exact-head review, no self-gating, and human promotion of protected control-plane changes.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md). OneCompany itself follows the same principles: bounded work, deterministic CI, conflict-safe parallelism, cumulative authorship, independent exact-head/base review, no self-gating and human promotion of protected control-plane changes.

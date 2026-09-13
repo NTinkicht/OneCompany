@@ -17,8 +17,8 @@ from onecompany_lib import ROOT
 
 COPY_PATHS = [
     ".onecompany", "agents", "company", "patterns", "overlays", "docs", "scripts", "onecompany.py",
-    "AGENTS.md", "CLAUDE.md", "GEMINI.md", ".github/copilot-instructions.md", ".github/ISSUE_TEMPLATE",
-    ".github/PULL_REQUEST_TEMPLATE.md", ".github/workflows/onecompany-validate.yml",
+    "AGENTS.md", "CLAUDE.md", "GEMINI.md", ".github/copilot-instructions.md", ".github/CODEOWNERS",
+    ".github/ISSUE_TEMPLATE", ".github/PULL_REQUEST_TEMPLATE.md", ".github/workflows/onecompany-validate.yml",
 ]
 CONTRACTS = {
     "PRODUCT.md.template": "PRODUCT.md", "ARCHITECTURE.md.template": "ARCHITECTURE.md",

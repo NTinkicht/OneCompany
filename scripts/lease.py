@@ -306,10 +306,10 @@ def acquire(args: argparse.Namespace) -> int:
     if ledger_enabled():
         try:
             events = list_events()
-            durable_done = set(derive(events).get("merged_work_units", []))
+            durable_done = set(derive(events).get("verified_merged_work_units", []))
             trusted_ref = trusted_pr_base(int(args.pr))
             context, context_error = trusted_admission_context(
-                trusted_ref, args.actor, args.wu, active
+                trusted_ref, args.actor, args.wu, active, pr=int(args.pr)
             )
             if context is None:
                 print(f"REFUSED: cannot verify base-trusted lease admission: {context_error}")
@@ -534,7 +534,7 @@ def transfer(args: argparse.Namespace) -> int:
         try:
             trusted_ref = trusted_pr_base(pr)
             context, context_error = trusted_admission_context(
-                trusted_ref, args.actor, None, other_active
+                trusted_ref, args.actor, None, other_active, pr=pr
             )
             if context is None:
                 print(f"REFUSED: cannot verify base-trusted failover admission: {context_error}")

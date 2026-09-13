@@ -48,11 +48,16 @@ def planning_snapshot(item: dict, work_map: dict[str, dict] | None = None) -> di
         "risk_class": item.get("risk_class", "MEDIUM"),
         "dependencies": direct_dependencies,
     }
-    existing_closure = item.get("dependency_closure")
-    if isinstance(existing_closure, list):
-        snapshot["dependency_closure"] = sorted({str(value) for value in existing_closure if value})
-    elif work_map and item.get("id"):
+    # When the complete authoritative queue graph is available (new acquisition),
+    # recompute the transitive closure instead of trusting a caller-supplied cache.
+    # Immutable failover snapshots deliberately call this without work_map, so an
+    # existing closure is preserved there and an absent closure remains unknown.
+    if work_map and item.get("id"):
         snapshot["dependency_closure"] = sorted(dependency_closure(work_map, str(item.get("id"))))
+    else:
+        existing_closure = item.get("dependency_closure")
+        if isinstance(existing_closure, list):
+            snapshot["dependency_closure"] = sorted({str(value) for value in existing_closure if value})
     # If neither an immutable closure nor a complete work graph is available,
     # preserve that uncertainty. Omitting dependency_closure is intentional:
     # planning_lib treats it as unknown and serializes fail-closed. Never stamp

@@ -1,0 +1,23 @@
+{
+  "risks": [
+    {
+      "id": "RISK-000",
+      "title": "Replace with concise risk title",
+      "domain": "security",
+      "cause": "Because ...",
+      "event": "... may occur",
+      "consequence": "resulting in ...",
+      "likelihood": 1,
+      "impact": 1,
+      "inherent_score": 1,
+      "owner": "role-or-actor",
+      "treatment": "reduce",
+      "mitigations": [{"id": "MIT-000", "description": "Control description"}],
+      "residual_likelihood": 1,
+      "residual_impact": 1,
+      "residual_score": 1,
+      "status": "open",
+      "review_trigger": "Describe the change/event that forces reassessment"
+    }
+  ]
+}

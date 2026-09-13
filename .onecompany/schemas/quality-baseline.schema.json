@@ -1,0 +1,1 @@
+{"type":"object","required":["$schema","version","captured_at","metrics","rule"],"properties":{"$schema":{"type":"string"},"version":{"type":"integer"},"captured_at":{"type":["string","null"]},"metrics":{"type":"object"},"rule":{"type":"string","minLength":1}}}

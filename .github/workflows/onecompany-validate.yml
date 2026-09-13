@@ -10,6 +10,8 @@ on:
       - 'overlays/**'
       - 'docs/**'
       - 'scripts/**'
+      - 'schemas/**'
+      - 'tests/**'
       - 'examples/**'
       - 'AGENTS.md'
       - 'CLAUDE.md'
@@ -35,6 +37,8 @@ on:
       - 'overlays/**'
       - 'docs/**'
       - 'scripts/**'
+      - 'schemas/**'
+      - 'tests/**'
       - 'examples/**'
       - 'AGENTS.md'
       - 'CLAUDE.md'
@@ -61,12 +65,16 @@ jobs:
     steps:
       # actions/checkout v6.1.0 — immutable pin.
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-      # actions/setup-python v6.3.0 — immutable pin.
+      # actions/setup-python v7.0.0 — immutable pin.
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.12'
-      - name: Validate complete control plane
+      - name: Validate complete control plane and assurance policy
         run: python onecompany.py validate
+      - name: Validate reference high-risk assurance packet
+        run: python onecompany.py assurance examples/assurance/WU900.json
+      - name: Test assurance invariants
+        run: python -m unittest discover -s tests -p 'test_*.py'
       - name: Simulate core policy invariants
         run: python onecompany.py simulate
       - name: Simulate durable-ledger races
@@ -78,4 +86,4 @@ jobs:
       - name: Smoke-test GitHub-template initialization
         run: python scripts/smoke_init.py
       - name: Compile Python helpers
-        run: python -m compileall -q scripts
+        run: python -m compileall -q scripts tests onecompany.py

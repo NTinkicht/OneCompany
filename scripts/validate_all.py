@@ -14,8 +14,13 @@ def main() -> int:
     failed = False
     for name in validators:
         result = subprocess.run([sys.executable, str(ROOT / name)], cwd=str(ROOT.parent), check=False)
-        if result.returncode != 0: failed = True
+        if result.returncode != 0:
+            failed = True
+    assurance = subprocess.run([sys.executable, str(ROOT / "assurance.py"), "policy"], cwd=str(ROOT.parent), check=False)
+    if assurance.returncode != 0:
+        failed = True
     return 1 if failed else 0
 
 
-if __name__ == "__main__": sys.exit(main())
+if __name__ == "__main__":
+    sys.exit(main())

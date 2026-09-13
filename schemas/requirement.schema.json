@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OneCompany Requirement",
+  "type": "object",
+  "required": ["id", "type", "statement", "rationale", "source", "priority", "status", "verification_method", "acceptance_criteria", "risk_ids"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^(BR|UR|FR|NFR|SEC|DATA|OPS|UX|CON)-[0-9]{3,}$"},
+    "type": {"enum": ["business", "user", "functional", "nonfunctional", "security", "data", "operations", "ux", "constraint"]},
+    "statement": {"type": "string", "minLength": 10},
+    "rationale": {"type": "string", "minLength": 3},
+    "source": {"type": "string", "minLength": 1},
+    "priority": {"enum": ["must", "should", "could", "wont_now"]},
+    "status": {"enum": ["proposed", "approved", "implemented", "verified", "retired"]},
+    "verification_method": {"enum": ["test", "analysis", "inspection", "demonstration"]},
+    "acceptance_criteria": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "^AC-[0-9]{3,}$"}},
+    "risk_ids": {"type": "array", "items": {"type": "string", "pattern": "^RISK-[0-9]{3,}$"}},
+    "nfr_measure": {"type": ["object", "null"]},
+    "depends_on": {"type": "array", "items": {"type": "string"}}
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,10 @@
+{
+  "$schema": "./schemas/requirements-policy.schema.json",
+  "version": 1,
+  "standard": "ISO/IEC/IEEE 29148-inspired; not a certification claim",
+  "requirement_id_prefixes": ["BR", "UR", "FR", "NFR", "SEC", "DATA", "OPS", "UX", "CON"],
+  "mandatory_attributes": ["id", "type", "statement", "rationale", "source", "priority", "status", "verification_method", "acceptance_criteria", "risk_ids"],
+  "quality_rules": {"necessary": true, "implementation_free": true, "unambiguous": true, "complete": true, "singular": true, "feasible": true, "verifiable": true, "correct": true, "conforming": true, "traceable": true},
+  "language_rules": {"normative_keyword": "shall", "avoid": ["fast", "easy", "user-friendly", "robust", "etc.", "and/or", "as needed", "appropriate", "normal", "sufficient"], "quantify_nonfunctional_requirements": true, "one_obligation_per_requirement": true},
+  "change_control": {"baseline_before_implementation": true, "changed_requirement_requires_impact_analysis": true, "changed_requirement_invalidates_stale_test_evidence": true, "deleted_requirement_requires_rationale": true}
+}

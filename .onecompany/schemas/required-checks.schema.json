@@ -12,7 +12,7 @@
       "minItems": 1,
       "items": {
         "type": "object",
-        "required": ["name", "allowed_conclusions"],
+        "required": ["name", "allowed_conclusions", "workflow_path"],
         "properties": {
           "name": {"type": "string", "minLength": 1},
           "allowed_conclusions": {
@@ -21,7 +21,8 @@
             "items": {"type": "string", "minLength": 1},
             "uniqueItems": true
           },
-          "app_slug": {"type": ["string", "null"]}
+          "app_slug": {"type": ["string", "null"]},
+          "workflow_path": {"type": "string", "pattern": "^\\.github/workflows/.+\\.ya?ml$"}
         },
         "additionalProperties": false
       }

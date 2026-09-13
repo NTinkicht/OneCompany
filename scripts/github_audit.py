@@ -45,6 +45,18 @@ def main() -> int:
     else:
         errors.append(".github/CODEOWNERS is missing on the default branch")
 
+    if enforcement.get("codeowners_valid"):
+        print("OK CODEOWNERS owners are valid and every protected CompanyOS path family is covered")
+    else:
+        missing_paths = enforcement.get("codeowners_missing_protected_paths", [])
+        live_errors = enforcement.get("codeowners_errors", [])
+        if missing_paths:
+            errors.append("CODEOWNERS does not cover protected paths: " + ", ".join(str(v) for v in missing_paths))
+        if live_errors:
+            errors.append(f"GitHub reports CODEOWNERS errors or validity could not be verified: {live_errors}")
+        if enforcement.get("codeowners_exists") and not missing_paths and not live_errors:
+            errors.append("CODEOWNERS validity could not be established")
+
     classic = enforcement.get("classic", {})
     if classic.get("configured"):
         print(

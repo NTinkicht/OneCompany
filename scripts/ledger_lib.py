@@ -7,12 +7,14 @@ import re
 import uuid
 from typing import Any
 
-from capacity_lib import implementation_availability, implementation_capacity_limit
+from capacity_lib import implementation_availability
 from onecompany_lib import CONTROL, command_exists, github_repo_from_config, load_json, run
 from planning_lib import implementation_admission_violations
 
 MARKER = "<!-- onecompany-ledger-v1 -->"
 EVENT_RE = re.compile(r"<!-- onecompany-ledger-v1 -->\s*```json\s*(\{.*?\})\s*```", re.DOTALL)
+ADMISSION_SCHEMA = "onecompany-lease-admission-v1"
+LEASE_EVENT_TYPES = {"ROLE_LEASE_ASSIGNED", "ROLE_LEASE_TRANSFERRED"}
 
 
 def ledger_config() -> dict[str, Any]:
@@ -48,15 +50,38 @@ def _gh_json(args: list[str]) -> Any:
     return json.loads(result.stdout)
 
 
+def _event_version_allowed(ledger: dict[str, Any], version: Any, comment_id: Any) -> bool:
+    current = int(ledger.get("event_format_version", 1))
+    accepted = {
+        int(value)
+        for value in ledger.get("accepted_event_versions", [current])
+        if isinstance(value, int) or (isinstance(value, str) and value.isdigit())
+    }
+    if not isinstance(version, int) or version not in accepted:
+        return False
+    if version == current:
+        return True
+    # Legacy versions are accepted only below an explicit, human-recorded
+    # migration boundary. A future publisher cannot self-select v1 to bypass v2
+    # admission evidence.
+    if version == 1:
+        try:
+            return int(comment_id or 0) <= int(ledger.get("legacy_event_max_comment_id", 0) or 0)
+        except (TypeError, ValueError):
+            return False
+    return False
+
+
 def list_events() -> list[dict[str, Any]]:
     repo, issue = _repo_and_issue()
     ledger = ledger_config()
     trusted = _trusted_publishers()
     if not trusted:
         raise RuntimeError("ledger has no trusted publisher logins")
-    expected_version = int(ledger.get("event_format_version", 1))
-    accepted = set(ledger.get("accepted_event_types", []))
-    raw = _gh_json(["api", "--paginate", "--slurp", f"repos/{repo}/issues/{issue}/comments?per_page=100"])
+    accepted_types = set(ledger.get("accepted_event_types", []))
+    raw = _gh_json(
+        ["api", "--paginate", "--slurp", f"repos/{repo}/issues/{issue}/comments?per_page=100"]
+    )
     pages = raw if isinstance(raw, list) else [raw]
     comments: list[dict[str, Any]] = []
     for page in pages:
@@ -76,29 +101,77 @@ def list_events() -> list[dict[str, Any]]:
         match = EVENT_RE.search(body)
         if not match:
             raise RuntimeError(f"malformed trusted ledger event in comment {comment.get('id')}")
-        if comment.get("updated_at") and comment.get("created_at") and comment.get("updated_at") != comment.get("created_at"):
-            raise RuntimeError(f"trusted ledger event was edited after append in comment {comment.get('id')}")
+        if (
+            comment.get("updated_at")
+            and comment.get("created_at")
+            and comment.get("updated_at") != comment.get("created_at")
+        ):
+            raise RuntimeError(
+                f"trusted ledger event was edited after append in comment {comment.get('id')}"
+            )
         try:
             event = json.loads(match.group(1))
         except json.JSONDecodeError as exc:
-            raise RuntimeError(f"invalid JSON in trusted ledger comment {comment.get('id')}: {exc}") from exc
-        if event.get("version") != expected_version:
-            raise RuntimeError(f"unsupported ledger event version in comment {comment.get('id')}")
-        if event.get("type") not in accepted:
-            raise RuntimeError(f"unsupported ledger event type in comment {comment.get('id')}: {event.get('type')}")
+            raise RuntimeError(
+                f"invalid JSON in trusted ledger comment {comment.get('id')}: {exc}"
+            ) from exc
+        if not _event_version_allowed(ledger, event.get("version"), comment.get("id")):
+            raise RuntimeError(
+                f"unsupported or post-cutoff legacy ledger event version in comment {comment.get('id')}"
+            )
+        if event.get("type") not in accepted_types:
+            raise RuntimeError(
+                f"unsupported ledger event type in comment {comment.get('id')}: {event.get('type')}"
+            )
         if not isinstance(event.get("event_id"), str) or not event.get("event_id"):
             raise RuntimeError(f"trusted ledger event missing event_id in comment {comment.get('id')}")
         if not isinstance(event.get("actor"), str) or not event.get("actor"):
             raise RuntimeError(f"trusted ledger event missing actor in comment {comment.get('id')}")
         if not isinstance(event.get("payload"), dict):
-            raise RuntimeError(f"trusted ledger event payload must be object in comment {comment.get('id')}")
+            raise RuntimeError(
+                f"trusted ledger event payload must be object in comment {comment.get('id')}"
+            )
         event["github_comment_id"] = comment.get("id")
         event["github_comment_url"] = comment.get("html_url")
         event["github_publisher"] = login
         event["github_created_at"] = comment.get("created_at")
         events.append(event)
-    events.sort(key=lambda item: (item.get("github_created_at") or "", int(item.get("github_comment_id") or 0)))
+    events.sort(
+        key=lambda item: (
+            item.get("github_created_at") or "",
+            int(item.get("github_comment_id") or 0),
+        )
+    )
     return events
+
+
+def _v2_payload_error(event_type: str, actor: str, payload: dict[str, Any]) -> str | None:
+    if event_type not in LEASE_EVENT_TYPES:
+        return None
+    admission = payload.get("admission_snapshot")
+    if not isinstance(admission, dict):
+        return "v2 implementation lease event requires admission_snapshot"
+    if admission.get("schema") != ADMISSION_SCHEMA:
+        return f"unsupported lease admission schema: {admission.get('schema')!r}"
+    if admission.get("actor") != actor:
+        return "lease admission actor does not match event actor"
+    limit = admission.get("actor_limit")
+    if not isinstance(limit, int) or limit <= 0:
+        return "lease admission actor_limit must be a positive integer"
+    dependencies = admission.get("dependencies")
+    if not isinstance(dependencies, list) or any(not isinstance(value, str) for value in dependencies):
+        return "lease admission dependencies must be a string array"
+    if event_type == "ROLE_LEASE_ASSIGNED":
+        if admission.get("transfer_source_lease_id") not in {None, ""}:
+            return "assignment admission cannot name a transfer source"
+        if admission.get("dependencies_inherited_from_source") is True:
+            return "assignment admission cannot inherit dependencies from a source lease"
+    if event_type == "ROLE_LEASE_TRANSFERRED":
+        if admission.get("transfer_source_lease_id") != payload.get("old_lease_id"):
+            return "transfer admission source does not match old_lease_id"
+        if admission.get("dependencies_inherited_from_source") is not True:
+            return "transfer admission must inherit dependency acceptance from source lease"
+    return None
 
 
 def post_event(event_type: str, actor: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -110,17 +183,27 @@ def post_event(event_type: str, actor: str, payload: dict[str, Any]) -> dict[str
     trusted = _trusted_publishers()
     if not trusted:
         raise RuntimeError("ledger requires at least one trusted publisher login")
+    version = int(ledger.get("event_format_version", 1))
+    if version >= 2:
+        payload_error = _v2_payload_error(event_type, actor, payload)
+        if payload_error:
+            raise RuntimeError(payload_error)
     repo, issue = _repo_and_issue()
     event = {
-        "version": int(ledger.get("event_format_version", 1)),
+        "version": version,
         "event_id": str(uuid.uuid4()),
         "type": event_type,
         "actor": actor,
         "timestamp": dt.datetime.now(dt.timezone.utc).isoformat(),
         "payload": payload,
     }
-    body = f"{MARKER}\n```json\n{json.dumps(event, separators=(',', ':'), ensure_ascii=False)}\n```\n"
-    posted = _gh_json(["api", "--method", "POST", f"repos/{repo}/issues/{issue}/comments", "-f", f"body={body}"])
+    body = (
+        f"{MARKER}\n```json\n"
+        f"{json.dumps(event, separators=(',', ':'), ensure_ascii=False)}\n```\n"
+    )
+    posted = _gh_json(
+        ["api", "--method", "POST", f"repos/{repo}/issues/{issue}/comments", "-f", f"body={body}"]
+    )
     login = ((posted.get("user") or {}).get("login"))
     if login not in trusted:
         comment_id = posted.get("id")
@@ -144,13 +227,13 @@ def derive(
     *,
     enforce_actor_policy: bool = True,
 ) -> dict[str, Any]:
-    """Replay durable events into the current authoritative coordination view.
+    """Replay durable events into the authoritative coordination view.
 
-    Runtime actor eligibility is deliberately re-evaluated while replaying.
-    Repository readiness/budget/access policy is current authority, so a disabled
-    or no-longer-eligible actor cannot retain implementation authority merely
-    because an older event once named it. Tests/simulators may explicitly disable
-    this runtime-policy layer when exercising pure ledger race algebra.
+    Lease admission is evaluated from evidence immutable at grant time. Current
+    readiness, repository access, budget and capacity are reported separately as
+    runtime eligibility; they never retroactively erase accepted lease lineage or
+    material-authorship history. ``enforce_actor_policy=False`` only disables that
+    current-status projection for pure race-algebra simulations.
     """
     active: dict[str, dict[str, Any]] = {}
     authors_by_pr: dict[int, set[str]] = {}
@@ -183,11 +266,6 @@ def derive(
         for item in readiness_doc.get("actors", [])
         if isinstance(item, dict) and item.get("actor_id")
     }
-    actor_capacities = {
-        actor_id: implementation_capacity_limit(ready)
-        for actor_id, ready in readiness_by_actor.items()
-    }
-
     try:
         actors_doc = load_json(CONTROL / "actors.json")
     except Exception:
@@ -246,57 +324,77 @@ def derive(
             }
         )
 
-    def durable_dependency_violations(candidate: dict[str, Any]) -> list[dict[str, Any]]:
-        unfinished = sorted(
-            {
-                str(dep)
-                for dep in candidate.get("dependencies", [])
-                if dep and str(dep) not in merged_work_units
-            }
-        )
-        if not unfinished:
-            return []
-        return [
-            {
-                "reason": "dependency_not_durably_complete",
-                "work_unit": candidate.get("id"),
-                "dependencies": unfinished,
-            }
-        ]
-
-    def actor_policy_violations(actor: str | None) -> list[dict[str, Any]]:
-        if not enforce_actor_policy:
-            return []
+    def v2_admission(
+        event: dict[str, Any], actor: str | None, payload: dict[str, Any]
+    ) -> tuple[dict[str, Any] | None, list[dict[str, Any]], str | None]:
+        if int(event.get("version") or 1) < 2:
+            # V1 claims below the ingestion migration cutoff were admitted by the
+            # previous kernel. Grandfather their historical admission; later
+            # runtime eligibility is projected separately below.
+            return None, [], None
         actor_id = str(actor or "")
-        actor_record = actors_by_id.get(actor_id)
-        if actor_record is None:
-            return [{"reason": "actor_implementation_ineligible", "actor": actor_id, "details": ["unknown_actor"]}]
-        _slots, reasons = implementation_availability(
-            actor_record,
-            readiness_by_actor.get(actor_id),
-            budget_doc,
-            implementations(),
+        error = _v2_payload_error(str(event.get("type") or ""), actor_id, payload)
+        if error:
+            return None, [], error
+        admission = payload["admission_snapshot"]
+        planning_snapshot = payload.get("planning_snapshot")
+        if not isinstance(planning_snapshot, dict):
+            return None, [], "v2 implementation lease requires planning_snapshot"
+        expected_dependencies = sorted(
+            {str(value) for value in planning_snapshot.get("dependencies", []) if value}
         )
-        hard_reasons = sorted({reason for reason in reasons if reason != "actor_capacity"})
-        if not hard_reasons:
-            return []
-        return [
-            {
-                "reason": "actor_implementation_ineligible",
-                "actor": actor_id,
-                "details": hard_reasons,
-            }
-        ]
+        recorded_dependencies = sorted(set(admission.get("dependencies", [])))
+        if recorded_dependencies != expected_dependencies:
+            return None, [], "lease admission dependency set differs from immutable planning snapshot"
+        violations: list[dict[str, Any]] = []
+        if admission.get("actor_eligible") is not True:
+            violations.append(
+                {
+                    "reason": "actor_implementation_ineligible_at_admission",
+                    "actor": actor_id,
+                    "details": list(admission.get("actor_ineligibility_reasons") or []),
+                }
+            )
+        if event.get("type") == "ROLE_LEASE_ASSIGNED" and admission.get("dependencies_complete") is not True:
+            violations.append(
+                {
+                    "reason": "dependency_not_complete_at_admission",
+                    "work_unit": payload.get("work_unit"),
+                    "dependencies": recorded_dependencies,
+                }
+            )
+        if event.get("type") == "ROLE_LEASE_TRANSFERRED" and admission.get("dependencies_complete") is not True:
+            violations.append(
+                {
+                    "reason": "transfer_did_not_preserve_dependency_acceptance",
+                    "work_unit": payload.get("work_unit"),
+                }
+            )
+        return admission, violations, None
 
-    def add_lease(lease_id: str, actor: str | None, payload: dict[str, Any], event: dict[str, Any]) -> bool:
+    def add_lease(
+        lease_id: str,
+        actor: str | None,
+        payload: dict[str, Any],
+        event: dict[str, Any],
+    ) -> bool:
         role = payload.get("role", "implementation")
+        admission: dict[str, Any] | None = None
         if role == "implementation":
             known_implementation_leases.add(lease_id)
             candidate = snapshot_item(payload)
-            actor_limit = actor_capacities.get(str(actor), 1) if actor else None
+            admission, frozen_violations, admission_error = v2_admission(event, actor, payload)
+            if admission_error:
+                record_integrity_conflict(
+                    event,
+                    "invalid_lease_admission_evidence",
+                    lease_id=lease_id,
+                    detail=admission_error,
+                )
+                return False
+            actor_limit = admission.get("actor_limit") if admission else None
             violations = [
-                *durable_dependency_violations(candidate),
-                *actor_policy_violations(actor),
+                *frozen_violations,
                 *implementation_admission_violations(
                     candidate,
                     implementations(),
@@ -320,6 +418,7 @@ def derive(
             "pr": event_pr,
             "start_head": payload.get("start_head"),
             "planning_snapshot": payload.get("planning_snapshot", {}),
+            "admission_snapshot": admission or payload.get("admission_snapshot"),
             "status": "active",
             "event": event,
         }
@@ -379,6 +478,16 @@ def derive(
                     new_lease_id=new_id,
                 )
                 continue
+            if int(event.get("version") or 1) >= 2:
+                admission = payload.get("admission_snapshot")
+                if not isinstance(admission, dict) or admission.get("transfer_source_lease_id") != old_id:
+                    record_integrity_conflict(
+                        event,
+                        "invalid_lease_admission_evidence",
+                        lease_id=new_id,
+                        detail="transfer admission does not bind active source lease",
+                    )
+                    continue
             active.pop(old_id, None)
             if new_id and not add_lease(new_id, actor, payload, event):
                 active[old_id] = old
@@ -423,12 +532,42 @@ def derive(
             gate["stale"] = True
             gate["stale_reasons"] = reasons
 
+    current_actor_eligibility: dict[str, dict[str, Any]] = {}
+    if enforce_actor_policy:
+        all_active = implementations()
+        for lease in all_active:
+            lease_id = str(lease.get("id") or "")
+            actor_id = str(lease.get("actor") or "")
+            actor_record = actors_by_id.get(actor_id)
+            if actor_record is None:
+                reasons = ["unknown_actor"]
+            else:
+                _slots, reasons = implementation_availability(
+                    actor_record,
+                    readiness_by_actor.get(actor_id),
+                    budget_doc,
+                    all_active,
+                    exclude_lease_id=lease_id,
+                )
+                reasons = sorted(set(reasons))
+            current_actor_eligibility[lease_id] = {
+                "actor": actor_id,
+                "eligible": not reasons,
+                "reasons": reasons,
+            }
+
     unresolved_integrity_conflicts = list(open_integrity_conflicts.values())
     active_values = list(active.values())
     if pr is not None:
         active_values = [item for item in active_values if item.get("pr") == pr]
         authors = sorted(authors_by_pr.get(pr, set()))
         gate = gates_by_pr.get(pr)
+        allowed_ids = {str(item.get("id") or "") for item in active_values}
+        current_actor_eligibility = {
+            key: value
+            for key, value in current_actor_eligibility.items()
+            if key in allowed_ids
+        }
     else:
         authors = sorted({author for values in authors_by_pr.values() for author in values})
         gate = None
@@ -443,4 +582,5 @@ def derive(
         "conflicts": unresolved_integrity_conflicts,
         "resolved_conflict_ids": sorted(resolved_conflict_ids),
         "merged_work_units": sorted(merged_work_units),
+        "current_actor_eligibility": current_actor_eligibility,
     }

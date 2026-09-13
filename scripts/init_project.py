@@ -45,8 +45,7 @@ def reset_control_plane(project_name: str, repository: str, default_branch: str)
     save_json(CONTROL / "config.json", config)
 
     actors = load_json(CONTROL / "actors.json")
-    for actor in actors.get("actors", []):
-        actor["enabled"] = False; actor["configured"] = False
+    for actor in actors.get("actors", []): actor["enabled"] = False; actor["configured"] = False
     save_json(CONTROL / "actors.json", actors)
 
     readiness = load_json(CONTROL / "readiness.json")
@@ -59,8 +58,7 @@ def reset_control_plane(project_name: str, repository: str, default_branch: str)
 
     dispatch = load_json(CONTROL / "dispatch.json")
     for actor in dispatch.get("actors", []):
-        for mechanism in actor.get("mechanisms", []):
-            mechanism["configured"] = False; mechanism["evidence"] = []
+        for mechanism in actor.get("mechanisms", []): mechanism["configured"] = False; mechanism["evidence"] = []
     save_json(CONTROL / "dispatch.json", dispatch)
 
     ledger = load_json(CONTROL / "ledger.json")
@@ -77,7 +75,8 @@ def reset_control_plane(project_name: str, repository: str, default_branch: str)
 
     save_json(CONTROL / "queue.json", {"$schema": "./schemas/queue.schema.json", "schema_version": "1.1", "work_units": []})
     save_json(CONTROL / "portfolio.json", {"$schema": "./schemas/portfolio.schema.json", "schema_version": "1.0", "entities": [], "links": []})
-    save_json(CONTROL / "requirements-catalog.json", {"$schema": "./schemas/requirements-catalog.schema.json", "schema_version": "1.0", "requirements": []})
+    save_json(CONTROL / "requirements-catalog.json", {"$schema": "./schemas/requirements-catalog.schema.json", "schema_version": "1.0", "requirements": [], "acceptance_criteria": []})
+    save_json(CONTROL / "risk-register.json", {"$schema": "./schemas/risk-register.schema.json", "schema_version": "1.0", "risks": []})
     save_json(CONTROL / "state.json", {
         "$schema": "./schemas/state.schema.json", "schema_version": "1.1", "generated_or_reconciled_at": None,
         "repository_head": None, "company_state": "INITIALIZING", "current_work_unit": None, "current_pr": None,
@@ -92,8 +91,7 @@ def initialize_contracts() -> None:
     for template, destination_name in CONTRACTS.items():
         destination = ROOT / destination_name
         if destination.exists(): print(f"KEEP existing {destination_name}")
-        else:
-            shutil.copy2(source / template, destination); print(f"INIT {destination_name}")
+        else: shutil.copy2(source / template, destination); print(f"INIT {destination_name}")
 
 
 def main() -> int:
@@ -108,15 +106,13 @@ def main() -> int:
     if current_repo != SOURCE_REPOSITORY:
         print(f"REFUSED: this installation already identifies as {current_repo!r}; init is only for an untouched OneCompany template copy. Use docs/UPGRADING.md for an existing company."); return 2
     repository = args.repository or infer_repo()
-    if not repository or not re.fullmatch(r"[^/\s]+/[^/\s]+", repository):
-        print("REFUSED: cannot infer target repository; pass --repository owner/name"); return 2
-    if repository == SOURCE_REPOSITORY:
-        print("REFUSED: target repository must differ from the OneCompany source repository"); return 2
+    if not repository or not re.fullmatch(r"[^/\s]+/[^/\s]+", repository): print("REFUSED: cannot infer target repository; pass --repository owner/name"); return 2
+    if repository == SOURCE_REPOSITORY: print("REFUSED: target repository must differ from the OneCompany source repository"); return 2
     project_name = args.project_name or repository.split("/", 1)[1]; default_branch = args.default_branch or infer_default_branch()
     reset_control_plane(project_name, repository, default_branch)
     if args.initialize_contracts: initialize_contracts()
     print(f"INITIALIZED OneCompany for {project_name} ({repository}, default={default_branch})")
-    print("Portfolio, requirements catalog, queue, workers, dispatch paths, ledger and supervisors start empty/disabled until configured and verified.")
+    print("Portfolio, requirements, acceptance criteria, risk register, queue, workers, dispatch paths, ledger and supervisors start empty/disabled until configured and verified.")
     print("Next: python onecompany.py validate && python onecompany.py plan summary && python onecompany.py status")
     return 0
 

@@ -7,46 +7,30 @@ import datetime as dt
 import sys
 import uuid
 
+from capacity_lib import implementation_active_count, implementation_availability, implementation_capacity_limit
 from ledger_lib import derive, ledger_enabled, list_events, post_event
-from onecompany_lib import CONTROL, active_implementation_leases, budget_allows, emergency_stop_active, load_json, save_json
+from onecompany_lib import CONTROL, active_implementation_leases, emergency_stop_active, load_json, save_json
 from planning_lib import by_id, work_item_for_lease, work_units_conflict
 
 
-def readiness_record(actor_id: str) -> dict | None:
-    readiness_doc = load_json(CONTROL / "readiness.json")
-    return next((item for item in readiness_doc.get("actors", []) if item.get("actor_id") == actor_id), None)
-
-
-def actor_capacity(actor_id: str, key: str) -> int:
-    ready = readiness_record(actor_id)
-    try:
-        return max(int((ready or {}).get("capacity", {}).get(key, 1)), 1)
-    except (TypeError, ValueError):
-        return 1
-
-
-def actor_eligible_for_implementation(actor_id: str) -> tuple[bool, list[str]]:
+def actor_capacity_state(actor_id: str, active: list[dict], exclude_lease_id: str | None = None) -> tuple[int, list[str], int, int]:
     actors = load_json(CONTROL / "actors.json")
+    readiness_doc = load_json(CONTROL / "readiness.json")
     budget = load_json(CONTROL / "budget.json")
     actor = next((item for item in actors.get("actors", []) if item.get("id") == actor_id), None)
-    ready = readiness_record(actor_id)
-    reasons: list[str] = []
     if actor is None:
-        return False, ["unknown_actor"]
-    if not actor.get("enabled"): reasons.append("disabled")
-    if not actor.get("configured"): reasons.append("not_configured")
-    if "implementation" not in actor.get("capabilities", []): reasons.append("implementation_not_declared")
-    if not budget_allows(actor.get("cost_class", "UNKNOWN_COST"), budget): reasons.append("forbidden_by_budget")
-    if ready is None:
-        reasons.append("missing_readiness")
-    else:
-        if ready.get("setup_state") not in {"ready", "degraded"}: reasons.append(f"setup_state:{ready.get('setup_state')}")
-        if "implementation" not in ready.get("verified_capabilities", []): reasons.append("implementation_not_verified")
-        if "implementation" in ready.get("temporarily_unavailable_capabilities", []): reasons.append("implementation_temporarily_unavailable")
-        access = ready.get("repository_access", {})
-        if not access.get("read"): reasons.append("repository_read_not_verified")
-        if not access.get("write"): reasons.append("repository_write_not_verified")
-    return not reasons, reasons
+        return 0, ["unknown_actor"], 0, 0
+    ready = next((item for item in readiness_doc.get("actors", []) if item.get("actor_id") == actor_id), None)
+    slots, reasons = implementation_availability(
+        actor,
+        ready,
+        budget,
+        active,
+        exclude_lease_id=exclude_lease_id,
+    )
+    current = implementation_active_count(actor_id, active, exclude_lease_id)
+    limit = implementation_capacity_limit(ready)
+    return slots, sorted(set(reasons)), current, limit
 
 
 def planning_snapshot(item: dict) -> dict:
@@ -61,8 +45,14 @@ def planning_snapshot(item: dict) -> dict:
 
 def new_lease(actor: str, wu: str, branch: str, pr: int | None, start_head: str, item: dict, parent_lease_id: str | None = None) -> dict:
     value = {
-        "id": str(uuid.uuid4()), "work_unit": wu, "role": "implementation", "actor": actor,
-        "branch": branch, "pr": pr, "start_head": start_head, "status": "active",
+        "id": str(uuid.uuid4()),
+        "work_unit": wu,
+        "role": "implementation",
+        "actor": actor,
+        "branch": branch,
+        "pr": pr,
+        "start_head": start_head,
+        "status": "active",
         "granted_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "planning_snapshot": planning_snapshot(item),
         "failover_conditions": ["quota_exhausted", "unavailable", "no_durable_progress_after_reconciliation", "human_override"],
@@ -94,10 +84,17 @@ def authoritative(state: dict) -> tuple[list[dict], list[dict]]:
 
 def _stream_from_lease(lease: dict) -> dict:
     return {
-        "work_unit": lease.get("work_unit"), "lease_id": lease.get("id"), "actor": lease.get("actor"),
-        "branch": lease.get("branch"), "pr": lease.get("pr"), "head": lease.get("start_head"),
-        "base_sha": None, "status": "ACTIVE_IMPLEMENTATION", "gate": None,
-        "open_blockers": [], "human_decision_required": False,
+        "work_unit": lease.get("work_unit"),
+        "lease_id": lease.get("id"),
+        "actor": lease.get("actor"),
+        "branch": lease.get("branch"),
+        "pr": lease.get("pr"),
+        "head": lease.get("start_head"),
+        "base_sha": None,
+        "status": "ACTIVE_IMPLEMENTATION",
+        "gate": None,
+        "open_blockers": [],
+        "human_decision_required": False,
     }
 
 
@@ -136,22 +133,18 @@ def sync_cache(state: dict, pr: int | None) -> None:
         stream.setdefault("open_blockers", [])
         stream.setdefault("human_decision_required", False)
         stream.setdefault("base_sha", None)
-        stream.update({"actor": lease.get("actor"), "branch": lease.get("branch"), "pr": lease.get("pr"), "work_unit": lease.get("work_unit")})
+        stream.update({
+            "actor": lease.get("actor"),
+            "branch": lease.get("branch"),
+            "pr": lease.get("pr"),
+            "work_unit": lease.get("work_unit"),
+        })
         streams.append(stream)
     state["active_streams"] = streams
     sync_legacy_aliases(state)
     if len(streams) == 1:
         state["current_material_authors"] = streams[0].get("material_authors", state.get("current_material_authors", []))
         state["current_gate"] = streams[0].get("gate", state.get("current_gate"))
-
-
-def capacity_available(actor_id: str, active: list[dict], exclude_lease_id: str | None = None) -> tuple[bool, int, int]:
-    limit = actor_capacity(actor_id, "implementation_streams")
-    current = sum(
-        1 for item in active
-        if item.get("actor") == actor_id and item.get("id") != exclude_lease_id and item.get("role") == "implementation"
-    )
-    return current < limit, current, limit
 
 
 def acquire(args: argparse.Namespace) -> int:
@@ -172,6 +165,7 @@ def acquire(args: argparse.Namespace) -> int:
     if ledger_enabled() and args.pr is None:
         print("REFUSED: durable autonomous implementation lease requires a PR number")
         return 2
+
     active, conflicts = authoritative(state)
     if conflicts:
         print(f"REFUSED: durable coordination conflicts must be reconciled first: {conflicts}")
@@ -179,6 +173,7 @@ def acquire(args: argparse.Namespace) -> int:
     if any(item.get("work_unit") == args.wu for item in active):
         print(f"REFUSED: implementation lease already active for {args.wu}")
         return 2
+
     limit = int(planning.get("parallel_execution", {}).get("max_concurrent_implementation_streams", 1) or 1)
     if len(active) >= limit:
         print(f"REFUSED: implementation WIP limit reached ({len(active)}/{limit})")
@@ -190,13 +185,10 @@ def acquire(args: argparse.Namespace) -> int:
         if conflict:
             print(f"REFUSED: {args.wu} conflicts with active {other_wu}: {','.join(reasons)}")
             return 2
-    eligible, reasons = actor_eligible_for_implementation(args.actor)
-    if not eligible:
-        print(f"REFUSED: actor {args.actor} is not implementation-ready: {','.join(reasons)}")
-        return 2
-    capacity_ok, actor_active, actor_limit = capacity_available(args.actor, active)
-    if not capacity_ok:
-        print(f"REFUSED: actor {args.actor} implementation capacity reached ({actor_active}/{actor_limit})")
+
+    slots, reasons, actor_active, actor_limit = actor_capacity_state(args.actor, active)
+    if slots <= 0:
+        print(f"REFUSED: actor {args.actor} is not implementation-available: {','.join(reasons)}")
         return 2
 
     lease = new_lease(args.actor, args.wu, args.branch, args.pr, args.start_head, candidate)
@@ -210,12 +202,16 @@ def acquire(args: argparse.Namespace) -> int:
         except Exception as exc:
             print(f"REFUSED: durable lease record failed: {exc}")
             return 2
+
     state.setdefault("active_leases", []).append(lease)
     state.setdefault("active_streams", []).append(_stream_from_lease(lease))
     sync_cache(state, args.pr)
     state["company_state"] = "ACTIVE_PARALLEL_IMPLEMENTATION" if len(active) + 1 > 1 else "ACTIVE_IMPLEMENTATION"
     save_json(CONTROL / "state.json", state)
-    print(f"LEASED {args.wu} to {args.actor} on {args.branch} ({lease['id']}); active_streams={len(active)+1}/{limit}; actor_capacity={actor_active+1}/{actor_limit}")
+    print(
+        f"LEASED {args.wu} to {args.actor} on {args.branch} ({lease['id']}); "
+        f"active_streams={len(active)+1}/{limit}; actor_capacity={actor_active+1}/{actor_limit}"
+    )
     return 0
 
 
@@ -235,10 +231,16 @@ def release(args: argparse.Namespace) -> int:
     now = dt.datetime.now(dt.timezone.utc).isoformat()
     for lease in state.get("active_leases", []):
         if lease.get("id") == args.lease_id and lease.get("status") == "active":
-            lease["status"] = "released"; lease["released_at"] = now; lease["release_reason"] = args.reason
+            lease["status"] = "released"
+            lease["released_at"] = now
+            lease["release_reason"] = args.reason
     state["active_streams"] = [stream for stream in state.get("active_streams", []) if stream.get("lease_id") != args.lease_id]
     sync_cache(state, old.get("pr"))
-    state["company_state"] = "ACTIVE_PARALLEL_IMPLEMENTATION" if len(state.get("active_streams", [])) > 1 else ("ACTIVE_IMPLEMENTATION" if state.get("active_streams") else "POST_LEASE_RECONCILE")
+    state["company_state"] = (
+        "ACTIVE_PARALLEL_IMPLEMENTATION"
+        if len(state.get("active_streams", [])) > 1
+        else ("ACTIVE_IMPLEMENTATION" if state.get("active_streams") else "POST_LEASE_RECONCILE")
+    )
     save_json(CONTROL / "state.json", state)
     print("LEASE RELEASED")
     return 0
@@ -251,7 +253,10 @@ def transfer(args: argparse.Namespace) -> int:
     state = load_json(CONTROL / "state.json")
     queue = load_json(CONTROL / "queue.json")
     work_map = by_id(queue.get("work_units", []))
-    active, _ = authoritative(state)
+    active, conflicts = authoritative(state)
+    if conflicts:
+        print(f"REFUSED: durable coordination conflicts must be reconciled first: {conflicts}")
+        return 2
     if args.lease_id:
         old = next((item for item in active if item.get("id") == args.lease_id), None)
         if old is None:
@@ -262,20 +267,33 @@ def transfer(args: argparse.Namespace) -> int:
     else:
         print(f"REFUSED: transfer is ambiguous with {len(active)} active implementation leases; pass --lease-id")
         return 2
-    eligible, reasons = actor_eligible_for_implementation(args.actor)
-    if not eligible:
-        print(f"REFUSED: replacement actor {args.actor} is not implementation-ready: {','.join(reasons)}")
-        return 2
     if old.get("actor") == args.actor:
         print("REFUSED: replacement actor already holds lease")
         return 2
-    capacity_ok, actor_active, actor_limit = capacity_available(args.actor, active, str(old.get("id")))
-    if not capacity_ok:
-        print(f"REFUSED: replacement actor {args.actor} implementation capacity reached ({actor_active}/{actor_limit})")
+
+    slots, reasons, actor_active, actor_limit = actor_capacity_state(args.actor, active, str(old.get("id")))
+    if slots <= 0:
+        print(f"REFUSED: replacement actor {args.actor} is not implementation-available: {','.join(reasons)}")
         return 2
+
+    # Failover inherits the original lease planning snapshot. Queue edits require
+    # an explicit release/re-plan/re-acquire rather than silently changing scope.
     item = work_item_for_lease(old, work_map)
-    replacement = new_lease(args.actor, str(old.get("work_unit")), str(old.get("branch")), old.get("pr"), args.current_head, item, str(old.get("id")))
-    payload = lease_payload(replacement) | {"old_lease_id": old.get("id"), "new_lease_id": replacement.get("id"), "old_actor": old.get("actor"), "reason": args.reason}
+    replacement = new_lease(
+        args.actor,
+        str(old.get("work_unit")),
+        str(old.get("branch")),
+        old.get("pr"),
+        args.current_head,
+        item,
+        str(old.get("id")),
+    )
+    payload = lease_payload(replacement) | {
+        "old_lease_id": old.get("id"),
+        "new_lease_id": replacement.get("id"),
+        "old_actor": old.get("actor"),
+        "reason": args.reason,
+    }
     if ledger_enabled():
         try:
             post_event("ROLE_LEASE_TRANSFERRED", args.actor, payload)
@@ -286,10 +304,13 @@ def transfer(args: argparse.Namespace) -> int:
         except Exception as exc:
             print(f"REFUSED: durable failover record failed: {exc}")
             return 2
+
     now = dt.datetime.now(dt.timezone.utc).isoformat()
     for lease in state.get("active_leases", []):
         if lease.get("id") == old.get("id") and lease.get("status") == "active":
-            lease["status"] = "released"; lease["released_at"] = now; lease["release_reason"] = args.reason
+            lease["status"] = "released"
+            lease["released_at"] = now
+            lease["release_reason"] = args.reason
     state.setdefault("active_leases", []).append(replacement)
     old_stream = next((stream for stream in state.get("active_streams", []) if stream.get("lease_id") == old.get("id")), None)
     state["active_streams"] = [stream for stream in state.get("active_streams", []) if stream.get("lease_id") != old.get("id")]
@@ -302,7 +323,10 @@ def transfer(args: argparse.Namespace) -> int:
     sync_cache(state, old.get("pr"))
     state["company_state"] = "ACTIVE_PARALLEL_IMPLEMENTATION" if len(state.get("active_streams", [])) > 1 else "ACTIVE_IMPLEMENTATION"
     save_json(CONTROL / "state.json", state)
-    print(f"LEASE FAILOVER {old.get('actor')} -> {args.actor}; WU={old.get('work_unit')} branch={old.get('branch')} pr={old.get('pr')}")
+    print(
+        f"LEASE FAILOVER {old.get('actor')} -> {args.actor}; WU={old.get('work_unit')} "
+        f"branch={old.get('branch')} pr={old.get('pr')}; actor_capacity={actor_active+1}/{actor_limit}"
+    )
     return 0
 
 
@@ -310,11 +334,22 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
     acquire_p = sub.add_parser("acquire")
-    acquire_p.add_argument("--wu", required=True); acquire_p.add_argument("--actor", required=True); acquire_p.add_argument("--branch", required=True); acquire_p.add_argument("--start-head", required=True); acquire_p.add_argument("--pr", type=int); acquire_p.set_defaults(func=acquire)
+    acquire_p.add_argument("--wu", required=True)
+    acquire_p.add_argument("--actor", required=True)
+    acquire_p.add_argument("--branch", required=True)
+    acquire_p.add_argument("--start-head", required=True)
+    acquire_p.add_argument("--pr", type=int)
+    acquire_p.set_defaults(func=acquire)
     release_p = sub.add_parser("release")
-    release_p.add_argument("--lease-id", required=True); release_p.add_argument("--reason", default="completed_or_failover"); release_p.set_defaults(func=release)
+    release_p.add_argument("--lease-id", required=True)
+    release_p.add_argument("--reason", default="completed_or_failover")
+    release_p.set_defaults(func=release)
     transfer_p = sub.add_parser("transfer")
-    transfer_p.add_argument("--lease-id"); transfer_p.add_argument("--actor", required=True); transfer_p.add_argument("--current-head", required=True); transfer_p.add_argument("--reason", default="capability_failover"); transfer_p.set_defaults(func=transfer)
+    transfer_p.add_argument("--lease-id")
+    transfer_p.add_argument("--actor", required=True)
+    transfer_p.add_argument("--current-head", required=True)
+    transfer_p.add_argument("--reason", default="capability_failover")
+    transfer_p.set_defaults(func=transfer)
     args = parser.parse_args()
     return args.func(args)
 

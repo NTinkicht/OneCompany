@@ -9,7 +9,7 @@ import uuid
 
 from ledger_lib import derive, ledger_enabled, list_events, post_event
 from onecompany_lib import CONTROL, active_implementation_leases, budget_allows, emergency_stop_active, load_json, save_json
-from planning_lib import by_id, work_units_conflict
+from planning_lib import by_id, work_item_for_lease, work_units_conflict
 
 
 def readiness_record(actor_id: str) -> dict | None:
@@ -185,10 +185,7 @@ def acquire(args: argparse.Namespace) -> int:
         return 2
     for other in active:
         other_wu = str(other.get("work_unit") or "")
-        other_item = work_map.get(other_wu)
-        if other_item is None:
-            snapshot = other.get("planning_snapshot", {})
-            other_item = {"id": other_wu, **snapshot}
+        other_item = work_item_for_lease(other, work_map)
         conflict, reasons = work_units_conflict(candidate, other_item, planning, work_map)
         if conflict:
             print(f"REFUSED: {args.wu} conflicts with active {other_wu}: {','.join(reasons)}")
@@ -276,7 +273,7 @@ def transfer(args: argparse.Namespace) -> int:
     if not capacity_ok:
         print(f"REFUSED: replacement actor {args.actor} implementation capacity reached ({actor_active}/{actor_limit})")
         return 2
-    item = work_map.get(str(old.get("work_unit"))) or {"id": old.get("work_unit"), **old.get("planning_snapshot", {})}
+    item = work_item_for_lease(old, work_map)
     replacement = new_lease(args.actor, str(old.get("work_unit")), str(old.get("branch")), old.get("pr"), args.current_head, item, str(old.get("id")))
     payload = lease_payload(replacement) | {"old_lease_id": old.get("id"), "new_lease_id": replacement.get("id"), "old_actor": old.get("actor"), "reason": args.reason}
     if ledger_enabled():

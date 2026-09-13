@@ -3,7 +3,7 @@
   "$id": "https://onecompany.dev/schemas/ledger.schema.json",
   "title": "OneCompany Durable Coordination Ledger",
   "type": "object",
-  "required": ["schema_version", "enabled", "issue_number", "trusted_publisher_logins", "required_for_autonomous_merge", "required_for_continuous_autonomy", "event_format_version", "accepted_event_types", "policy"],
+  "required": ["schema_version", "enabled", "issue_number", "trusted_publisher_logins", "required_for_autonomous_merge", "required_for_continuous_autonomy", "event_format_version", "accepted_event_versions", "legacy_event_max_comment_id", "accepted_event_types", "policy"],
   "properties": {
     "schema_version": {"type": "string"},
     "enabled": {"type": "boolean"},
@@ -12,6 +12,8 @@
     "required_for_autonomous_merge": {"type": "boolean"},
     "required_for_continuous_autonomy": {"type": "boolean"},
     "event_format_version": {"type": "integer", "minimum": 1},
+    "accepted_event_versions": {"type": "array", "items": {"type": "integer", "minimum": 1}, "minItems": 1, "uniqueItems": true},
+    "legacy_event_max_comment_id": {"type": "integer", "minimum": 0},
     "accepted_event_types": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
     "policy": {"type": "object"}
   },

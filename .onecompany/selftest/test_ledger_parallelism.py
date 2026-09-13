@@ -34,6 +34,17 @@ def snapshot(scope: str, locks=None, dependencies=None, dependency_closure=None)
     }
 
 
+def legacy_snapshot(scope: str, dependencies=None) -> dict:
+    """Pre-0.4 snapshot: direct dependencies only, no provable transitive closure."""
+    return {
+        "write_scope": [scope],
+        "resource_locks": [],
+        "parallelism": "auto",
+        "risk_class": "LOW",
+        "dependencies": dependencies or [],
+    }
+
+
 class LedgerParallelismTests(unittest.TestCase):
     def test_disjoint_work_units_can_hold_parallel_leases(self):
         events = [
@@ -92,6 +103,47 @@ class LedgerParallelismTests(unittest.TestCase):
         rejected = result["rejected_claims"][0]
         details = {detail for item in rejected["violations"] for detail in item.get("details", [])}
         self.assertIn("dependency_relationship", details)
+
+    def test_legacy_snapshot_without_transitive_closure_serializes(self):
+        events = [
+            event(1, "ROLE_LEASE_ASSIGNED", "codex", {"lease_id": "LC", "role": "implementation", "work_unit": "WU-C", "pr": 1, "planning_snapshot": snapshot("src/c/**")}),
+            event(2, "ROLE_LEASE_ASSIGNED", "claude", {"lease_id": "LA", "role": "implementation", "work_unit": "WU-A", "pr": 2, "planning_snapshot": legacy_snapshot("src/a/**", dependencies=["WU-B"])}),
+        ]
+        result = derive(events)
+        self.assertEqual([x["id"] for x in result["active_leases"]], ["LC"])
+        rejected = next(item for item in result["rejected_claims"] if item["rejected_lease_id"] == "LA")
+        details = {detail for item in rejected["violations"] for detail in item.get("details", [])}
+        self.assertIn("unknown_dependency_closure", details)
+        self.assertEqual(result["integrity_conflicts"], [])
+
+    def test_losing_concurrent_transfer_is_informational_rejection(self):
+        transfer_payload = {
+            "role": "implementation",
+            "work_unit": "WU-A",
+            "branch": "wu-a",
+            "pr": 1,
+            "start_head": "b" * 40,
+            "planning_snapshot": snapshot("src/a/**"),
+        }
+        events = [
+            event(1, "ROLE_LEASE_ASSIGNED", "codex", {"lease_id": "L1", "role": "implementation", "work_unit": "WU-A", "branch": "wu-a", "pr": 1, "start_head": "a" * 40, "planning_snapshot": snapshot("src/a/**")}),
+            event(2, "ROLE_LEASE_TRANSFERRED", "claude", {**transfer_payload, "old_lease_id": "L1", "new_lease_id": "L2", "lease_id": "L2"}),
+            event(3, "ROLE_LEASE_TRANSFERRED", "chatgpt", {**transfer_payload, "old_lease_id": "L1", "new_lease_id": "L3", "lease_id": "L3"}),
+        ]
+        result = derive(events)
+        self.assertEqual([x["id"] for x in result["active_leases"]], ["L2"])
+        self.assertEqual(result["integrity_conflicts"], [])
+        rejected = next(item for item in result["rejected_claims"] if item["rejected_lease_id"] == "L3")
+        self.assertEqual(rejected["violations"][0]["reason"], "transfer_source_no_longer_active")
+
+    def test_unknown_transfer_source_remains_integrity_conflict(self):
+        events = [
+            event(1, "ROLE_LEASE_TRANSFERRED", "claude", {"old_lease_id": "NEVER", "new_lease_id": "L2", "lease_id": "L2", "role": "implementation", "work_unit": "WU-A", "pr": 1, "planning_snapshot": snapshot("src/a/**")}),
+        ]
+        result = derive(events)
+        self.assertEqual(result["active_leases"], [])
+        self.assertEqual(len(result["integrity_conflicts"]), 1)
+        self.assertEqual(result["integrity_conflicts"][0]["reason"], "transfer_source_unknown")
 
     def test_integrity_conflict_requires_explicit_resolution_event(self):
         events = [

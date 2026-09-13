@@ -4,9 +4,14 @@ from __future__ import annotations
 
 import sys
 
-from ledger_lib import derive
+from ledger_lib import derive as derive_live
 from onecompany_lib import CONTROL, load_json
 from planning_lib import by_id, work_units_conflict
+
+
+def derive(events, pr=None):
+    """Simulation isolates ledger race algebra from live actor-readiness state."""
+    return derive_live(events, pr, enforce_actor_policy=False)
 
 
 def event(index: int, event_type: str, actor: str, payload: dict, event_id: str | None = None) -> dict:

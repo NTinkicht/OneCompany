@@ -35,7 +35,7 @@
       "path": "/parallel_execution/max_concurrent_implementation_streams",
       "classification": "ENFORCED",
       "owner": "planning_lib.py",
-      "tests": [".onecompany/selftest/test_parallel_admission_consistency.py"]
+      "tests": [".onecompany/selftest/test_planning.py"]
     }
   ]
 }

@@ -1,7 +1,7 @@
 ---
 name: Work Unit
 title: "WU__: "
-about: Bounded autonomous delivery unit
+about: Bounded autonomous delivery unit with engineering assurance
 labels: "work-unit"
 ---
 
@@ -10,39 +10,67 @@ labels: "work-unit"
 - Parent objective/epic:
 - Priority:
 - Risk class: LOW / MEDIUM / HIGH / CRITICAL
+- Quality profile: PROTOTYPE / STANDARD / PRODUCTION / HIGH_ASSURANCE / REGULATED
 - Change class: product / backend / UI / security / data-migration / dependency / operations / governance / docs
 
-## Problem
-What observable gap/risk exists?
+## Problem and value
+- Observable gap/risk:
+- User/business value:
+- Success measure:
 
 ## Objective
-One sentence describing the desired post-merge behavior.
+One observable post-merge outcome.
 
-## In scope
+## Scope
+### In
+-
+### Non-goals
 -
 
-## Non-goals
--
+## Requirements and acceptance
+- Stable BR/UR/FR/NFR/SEC/DATA/OPS/UX/CON IDs:
+- Stable AC IDs, including negative/failure behaviour where relevant:
+- Requirement quality review complete: yes / no
+
+## Traceability
+- Objective -> requirements:
+- Requirements -> ACs:
+- Requirements -> WU/design/tests:
+- Risks -> mitigations -> tests:
+- Assurance packet path:
+
+## Risk assessment
+- Risk register IDs:
+- Highest inherent risk:
+- Highest residual risk:
+- Human risk acceptance required?:
+- Reassessment triggers:
 
 ## Dependencies
 -
 
-## Acceptance criteria
-- [ ]
+## Engineering impact
+- Architecture/design / ADR:
+- Security/privacy/safety:
+- Data/migration:
+- UX/accessibility:
+- Performance/reliability:
+- Operations/observability:
 
 ## Verification contract
 - Required deterministic checks:
+- Required test families:
+- Coverage/mutation expectations:
 - Special/adversarial tests:
 - Reproducibility controls (seed/time/locale/network/browser/etc. if relevant):
+- Independent test-design reviewer:
 
 ## Reversibility / side effects
 - External side effects:
 - Idempotency / deduplication invariant:
+- Rollout strategy:
 - Rollback / compensation / recovery:
 - Blast radius:
-
-## Security / privacy constraints
--
 
 ## User-facing experience (if applicable)
 - Design-system impact:
@@ -51,6 +79,9 @@ One sentence describing the desired post-merge behavior.
 - Responsive/device evidence:
 - Localization/RTL/theme evidence:
 - Visual/performance regression evidence:
+
+## Documentation impact
+- User / developer / API / ADR / security / runbook / configuration / migration / release notes / none:
 
 ## Budget / capacity constraints
 -
@@ -71,6 +102,7 @@ One sentence describing the desired post-merge behavior.
 > Overlays sharpen a real actor's lens. They do not create actors, leases, permissions, reviewer independence, or merge authority.
 
 ## Readiness evidence
+- Definition of Ready passed:
 - Implementer surface/capability verified:
 - Reviewer surface/capability verified:
 - Merge executor capability verified (if autonomous merge):
@@ -85,12 +117,18 @@ One sentence describing the desired post-merge behavior.
 
 ## Material authorship
 List every actor that materially authored the candidate across implementation, remediation, failover, cherry-pick/replay, or equivalent patch transfer.
-
 - Material authors:
 
 ## Completion evidence
 - Exact candidate SHA:
 - Required CI:
+- Requirements verified:
+- Acceptance criteria verified:
+- Traceability complete:
+- Risk gate:
+- Architecture gate:
+- QA/coverage/mutation gates:
+- Documentation/operations gate:
 - Independent reviewer actor:
 - Reviewed exact SHA:
 - Independent verdict:

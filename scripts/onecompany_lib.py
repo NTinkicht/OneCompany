@@ -62,6 +62,25 @@ def github_repo_from_config(config: dict[str, Any]) -> str | None:
 
 
 def emergency_stop_active(config: dict[str, Any] | None = None) -> bool:
+    """Return true if either repository or out-of-band containment is asserted.
+
+    STOP assertion is intentionally permissionless and monotonic-safe. A host,
+    operator, or incident wrapper can freeze OneCompany without trusting the
+    repository checkout by exporting ``ONECOMPANY_EMERGENCY_STOP`` or by
+    pointing ``ONECOMPANY_EMERGENCY_STOP_FILE`` at an external sentinel file.
+    Repository code cannot override an asserted external stop.
+    """
+    external = str(os.environ.get("ONECOMPANY_EMERGENCY_STOP", "")).strip().casefold()
+    if external in {"1", "true", "yes", "on", "stop", "stopped"}:
+        return True
+    sentinel = str(os.environ.get("ONECOMPANY_EMERGENCY_STOP_FILE", "")).strip()
+    if sentinel:
+        try:
+            if Path(sentinel).expanduser().exists():
+                return True
+        except OSError:
+            # An unreadable/ambiguous external containment path fails closed.
+            return True
     document = config if config is not None else load_json(CONTROL / "config.json")
     return document.get("safety", {}).get("emergency_stop") is True
 

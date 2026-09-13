@@ -49,6 +49,64 @@ class AssuranceTests(unittest.TestCase):
         self.assertEqual(errors, [])
         self.assertEqual(warnings, [])
 
+    def test_review_lifecycle_state_is_supported(self):
+        packet = self.packet()
+        packet["status"] = "review"
+        errors, warnings = assurance.validate_packet(packet)
+        self.assertEqual(errors, [])
+        self.assertEqual(warnings, [])
+
+    def test_merge_ready_requires_material_authorship_snapshot(self):
+        packet = self.packet()
+        packet.pop("material_authors")
+        self.assert_fails_with(packet, "complete non-empty material_authors snapshot")
+
+    def test_empty_merge_ready_material_authorship_snapshot_fails(self):
+        packet = self.packet()
+        packet["material_authors"] = []
+        self.assert_fails_with(packet, "complete non-empty material_authors snapshot")
+
+    def test_low_risk_ready_mitigation_need_not_have_test_trace_yet(self):
+        packet = self.packet()
+        packet["status"] = "ready"
+        packet["risk_level"] = "low"
+        risk = packet["risks"][0]
+        risk["likelihood"] = 1
+        risk["impact"] = 4
+        risk["inherent_score"] = 4
+        risk["residual_likelihood"] = 1
+        risk["residual_impact"] = 1
+        risk["residual_score"] = 1
+        packet["traceability"] = [
+            link for link in packet["traceability"] if link["relationship"] != "mitigation_to_test"
+        ]
+        errors, _ = assurance.validate_packet(packet)
+        self.assertFalse(any("lacks verification test trace" in error for error in errors), errors)
+
+    def test_high_risk_merge_mitigation_without_test_trace_fails(self):
+        packet = self.packet()
+        packet["traceability"] = [
+            link for link in packet["traceability"] if link["relationship"] != "mitigation_to_test"
+        ]
+        self.assert_fails_with(packet, "mitigation MIT-900 lacks verification test trace")
+
+    def test_regression_defect_test_target_is_supported(self):
+        packet = self.packet()
+        packet["test_plan"]["tests"][0]["covers"].append("DEFECT-42")
+        errors, _ = assurance.validate_packet(packet)
+        self.assertFalse(any("DEFECT-42" in error for error in errors), errors)
+
+    def test_quality_fitness_test_target_is_supported(self):
+        packet = self.packet()
+        packet["test_plan"]["tests"][0]["covers"].append("FITNESS-kernel-import-direction")
+        errors, _ = assurance.validate_packet(packet)
+        self.assertFalse(any("FITNESS-kernel-import-direction" in error for error in errors), errors)
+
+    def test_unknown_non_catalog_test_target_still_fails_closed(self):
+        packet = self.packet()
+        packet["test_plan"]["tests"][0]["covers"].append("MYSTERY-42")
+        self.assert_fails_with(packet, "covers unknown trace target MYSTERY-42")
+
     def test_ambiguous_requirement_fails(self):
         packet = self.packet(); packet["requirements"][0]["statement"] = "The system shall be user-friendly."
         self.assert_fails_with(packet, "ambiguous/discouraged")

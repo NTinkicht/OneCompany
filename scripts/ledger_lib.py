@@ -1,20 +1,30 @@
 """Durable GitHub Team Room ledger helpers for distributed OneCompany runs."""
 from __future__ import annotations
 
+import base64
 import datetime as dt
 import json
 import re
 import uuid
 from typing import Any
+from urllib.parse import quote
 
-from capacity_lib import implementation_availability
+from capacity_lib import implementation_availability, implementation_capacity_limit
 from onecompany_lib import CONTROL, command_exists, github_repo_from_config, load_json, run
-from planning_lib import implementation_admission_violations
+from planning_lib import by_id, dependency_closure, implementation_admission_violations
 
 MARKER = "<!-- onecompany-ledger-v1 -->"
 EVENT_RE = re.compile(r"<!-- onecompany-ledger-v1 -->\s*```json\s*(\{.*?\})\s*```", re.DOTALL)
 ADMISSION_SCHEMA = "onecompany-lease-admission-v1"
 LEASE_EVENT_TYPES = {"ROLE_LEASE_ASSIGNED", "ROLE_LEASE_TRANSFERRED"}
+SHA40_RE = re.compile(r"^[0-9a-fA-F]{40}$")
+TRUSTED_POLICY_PATHS = {
+    "queue": ".onecompany/queue.json",
+    "planning": ".onecompany/planning.json",
+    "actors": ".onecompany/actors.json",
+    "readiness": ".onecompany/readiness.json",
+    "budget": ".onecompany/budget.json",
+}
 
 
 def ledger_config() -> dict[str, Any]:
@@ -25,13 +35,17 @@ def ledger_enabled() -> bool:
     return bool(ledger_config().get("enabled"))
 
 
-def _repo_and_issue() -> tuple[str, int]:
+def _repository() -> str:
     config = load_json(CONTROL / "config.json")
-    ledger = ledger_config()
     repo = github_repo_from_config(config)
-    issue = ledger.get("issue_number")
     if not repo:
         raise RuntimeError("config.project.repository must be owner/name")
+    return repo
+
+
+def _repo_and_issue() -> tuple[str, int]:
+    repo = _repository()
+    issue = ledger_config().get("issue_number")
     if not isinstance(issue, int) or issue <= 0:
         raise RuntimeError("ledger.issue_number must be configured")
     return repo, issue
@@ -46,8 +60,11 @@ def _gh_json(args: list[str]) -> Any:
         raise RuntimeError("gh CLI is required for durable ledger access")
     result = run(["gh", *args])
     if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or "gh command failed")
-    return json.loads(result.stdout)
+        raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "gh command failed")
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"GitHub returned invalid JSON: {exc}") from exc
 
 
 def _event_version_allowed(ledger: dict[str, Any], version: Any, comment_id: Any) -> bool:
@@ -57,7 +74,7 @@ def _event_version_allowed(ledger: dict[str, Any], version: Any, comment_id: Any
         for value in ledger.get("accepted_event_versions", [current])
         if isinstance(value, int) or (isinstance(value, str) and value.isdigit())
     }
-    if not isinstance(version, int) or version not in accepted:
+    if not isinstance(version, int) or isinstance(version, bool) or version not in accepted:
         return False
     if version == current:
         return True
@@ -142,6 +159,146 @@ def list_events() -> list[dict[str, Any]]:
     return events
 
 
+def _trusted_json_at_ref(repo: str, path: str, ref: str) -> tuple[dict[str, Any], str]:
+    encoded_path = quote(path, safe="/")
+    encoded_ref = quote(ref, safe="")
+    payload = _gh_json(["api", f"repos/{repo}/contents/{encoded_path}?ref={encoded_ref}"])
+    if not isinstance(payload, dict):
+        raise RuntimeError(f"trusted policy path {path} at {ref} did not resolve to an object")
+    blob_sha = payload.get("sha")
+    if payload.get("encoding") != "base64" or not isinstance(payload.get("content"), str):
+        raise RuntimeError(f"trusted policy path {path} at {ref} is not decodable base64")
+    if not isinstance(blob_sha, str) or not blob_sha:
+        raise RuntimeError(f"trusted policy path {path} at {ref} has no blob identity")
+    try:
+        value = json.loads(base64.b64decode(payload["content"]).decode("utf-8"))
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"trusted policy path {path} at {ref} is invalid JSON: {exc}") from exc
+    if not isinstance(value, dict):
+        raise RuntimeError(f"trusted policy path {path} at {ref} is not a JSON object")
+    return value, blob_sha
+
+
+def _assert_trusted_default_branch_history(repo: str, ref: str) -> None:
+    if not SHA40_RE.fullmatch(ref):
+        raise RuntimeError("lease trusted_ref must be an exact 40-hex commit SHA")
+    repository = _gh_json(["api", f"repos/{repo}"])
+    default_branch = repository.get("default_branch") if isinstance(repository, dict) else None
+    if not isinstance(default_branch, str) or not default_branch:
+        raise RuntimeError("cannot resolve repository default branch for lease admission")
+    branch = _gh_json(["api", f"repos/{repo}/branches/{quote(default_branch, safe='')}"])
+    tip = ((branch or {}).get("commit") or {}).get("sha") if isinstance(branch, dict) else None
+    if not isinstance(tip, str) or not tip:
+        raise RuntimeError("cannot resolve default-branch tip for lease admission")
+    comparison = _gh_json(["api", f"repos/{repo}/compare/{ref}...{tip}"])
+    status = comparison.get("status") if isinstance(comparison, dict) else None
+    if status not in {"ahead", "identical"}:
+        raise RuntimeError(
+            f"lease trusted_ref {ref} is not verifiably in protected default-branch history (status={status})"
+        )
+
+
+def trusted_pr_base(pr: int) -> str:
+    repo = _repository()
+    value = _gh_json(["api", f"repos/{repo}/pulls/{pr}"])
+    base_sha = ((value or {}).get("base") or {}).get("sha") if isinstance(value, dict) else None
+    if not isinstance(base_sha, str) or not SHA40_RE.fullmatch(base_sha):
+        raise RuntimeError(f"cannot resolve exact PR #{pr} base SHA")
+    _assert_trusted_default_branch_history(repo, base_sha)
+    return base_sha
+
+
+def _normalized_planning_snapshot(item: dict[str, Any], work_map: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    wu = str(item.get("id") or "")
+    if not wu:
+        raise RuntimeError("trusted work unit has no id")
+    return {
+        "write_scope": list(item.get("write_scope", [])),
+        "resource_locks": list(item.get("resource_locks", [])),
+        "parallelism": item.get("parallelism", "auto"),
+        "risk_class": item.get("risk_class", "MEDIUM"),
+        "dependencies": [str(value) for value in item.get("dependencies", [])],
+        "dependency_closure": sorted(dependency_closure(work_map, wu)),
+    }
+
+
+def trusted_admission_context(
+    trusted_ref: str,
+    actor: str,
+    work_unit: str | None,
+    active: list[dict[str, Any]],
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Reconstruct immutable admission authority from protected Git history.
+
+    The event may name a trusted ref, but it cannot define the facts at that ref.
+    Queue/planning/actor/readiness/budget are fetched from the commit and their
+    blob identities are returned for event binding. Only refs in default-branch
+    history are accepted.
+    """
+    try:
+        repo = _repository()
+        _assert_trusted_default_branch_history(repo, trusted_ref)
+        docs: dict[str, dict[str, Any]] = {}
+        blobs: dict[str, str] = {}
+        for key, path in TRUSTED_POLICY_PATHS.items():
+            docs[key], blobs[key] = _trusted_json_at_ref(repo, path, trusted_ref)
+
+        actors = docs["actors"].get("actors", [])
+        readiness = docs["readiness"].get("actors", [])
+        actor_record = next(
+            (item for item in actors if isinstance(item, dict) and item.get("id") == actor),
+            None,
+        )
+        ready = next(
+            (
+                item
+                for item in readiness
+                if isinstance(item, dict) and item.get("actor_id") == actor
+            ),
+            None,
+        )
+        if actor_record is None:
+            hard_reasons = ["unknown_actor"]
+            actor_limit = 0
+        else:
+            _slots, reasons = implementation_availability(
+                actor_record,
+                ready,
+                docs["budget"],
+                [],
+            )
+            hard_reasons = sorted({reason for reason in reasons if reason != "actor_capacity"})
+            actor_limit = implementation_capacity_limit(ready)
+
+        work_map = by_id(docs["queue"].get("work_units", []))
+        work_item = None
+        planning_snapshot = None
+        if work_unit is not None:
+            work_item = work_map.get(work_unit)
+            if work_item is None:
+                raise RuntimeError(f"work unit {work_unit} does not exist at trusted_ref {trusted_ref}")
+            if work_item.get("status") != "READY":
+                raise RuntimeError(
+                    f"work unit {work_unit} is not READY at trusted_ref {trusted_ref} "
+                    f"(status={work_item.get('status')})"
+                )
+            planning_snapshot = _normalized_planning_snapshot(work_item, work_map)
+
+        return {
+            "trusted_ref": trusted_ref,
+            "policy_blobs": blobs,
+            "planning": docs["planning"],
+            "work_map": work_map,
+            "work_item": work_item,
+            "planning_snapshot": planning_snapshot,
+            "actor_limit": actor_limit,
+            "actor_eligible": not hard_reasons,
+            "actor_ineligibility_reasons": hard_reasons,
+        }, None
+    except Exception as exc:
+        return None, str(exc)
+
+
 def _v2_payload_error(event_type: str, actor: str, payload: dict[str, Any]) -> str | None:
     if event_type not in LEASE_EVENT_TYPES:
         return None
@@ -152,18 +309,25 @@ def _v2_payload_error(event_type: str, actor: str, payload: dict[str, Any]) -> s
         return f"unsupported lease admission schema: {admission.get('schema')!r}"
     if admission.get("actor") != actor:
         return "lease admission actor does not match event actor"
+    trusted_ref = admission.get("trusted_ref")
+    if not isinstance(trusted_ref, str) or not SHA40_RE.fullmatch(trusted_ref):
+        return "lease admission trusted_ref must be an exact 40-hex commit SHA"
+    policy_blobs = admission.get("policy_blobs")
+    if not isinstance(policy_blobs, dict) or any(
+        not isinstance(policy_blobs.get(key), str) or not policy_blobs.get(key)
+        for key in TRUSTED_POLICY_PATHS
+    ):
+        return "lease admission policy_blobs must bind every trusted admission policy file"
     limit = admission.get("actor_limit")
-    if not isinstance(limit, int) or limit <= 0:
+    if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
         return "lease admission actor_limit must be a positive integer"
     dependencies = admission.get("dependencies")
     if not isinstance(dependencies, list) or any(not isinstance(value, str) for value in dependencies):
         return "lease admission dependencies must be a string array"
-    if event_type == "ROLE_LEASE_ASSIGNED":
-        if admission.get("transfer_source_lease_id") not in {None, ""}:
-            return "assignment admission cannot name a transfer source"
-    if event_type == "ROLE_LEASE_TRANSFERRED":
-        if admission.get("transfer_source_lease_id") != payload.get("old_lease_id"):
-            return "transfer admission source does not match old_lease_id"
+    if event_type == "ROLE_LEASE_ASSIGNED" and admission.get("transfer_source_lease_id") not in {None, ""}:
+        return "assignment admission cannot name a transfer source"
+    if event_type == "ROLE_LEASE_TRANSFERRED" and admission.get("transfer_source_lease_id") != payload.get("old_lease_id"):
+        return "transfer admission source does not match old_lease_id"
     return None
 
 
@@ -195,8 +359,6 @@ def post_event(event_type: str, actor: str, payload: dict[str, Any]) -> dict[str
         f"{json.dumps(event, separators=(',', ':'), ensure_ascii=False)}\n```\n"
     )
     posted = _gh_json(
-        ["gh", "noop"]
-    ) if False else _gh_json(
         ["api", "--method", "POST", f"repos/{repo}/issues/{issue}/comments", "-f", f"body={body}"]
     )
     login = ((posted.get("user") or {}).get("login"))
@@ -221,13 +383,18 @@ def derive(
     pr: int | None = None,
     *,
     enforce_actor_policy: bool = True,
+    verify_admission_provenance: bool | None = None,
 ) -> dict[str, Any]:
     """Replay durable events into the authoritative coordination view.
 
-    Historical admission is replayed under immutable event-order facts. Current
-    readiness/access/budget are projected separately and never erase accepted
-    lease lineage or material-authorship history.
+    V2 historical admission is reconstructed from protected versioned policy.
+    Current readiness is projected separately and never erases accepted lineage.
+    `verify_admission_provenance=False` exists only for deterministic race-algebra
+    simulations; production callers should use the default fail-closed behavior.
     """
+    if verify_admission_provenance is None:
+        verify_admission_provenance = enforce_actor_policy
+
     active: dict[str, dict[str, Any]] = {}
     authors_by_pr: dict[int, set[str]] = {}
     gates_by_pr: dict[int, dict[str, Any]] = {}
@@ -245,16 +412,16 @@ def derive(
     legacy_limits = {
         str(actor): int(limit)
         for actor, limit in (ledger_settings.get("legacy_v1_actor_limits") or {}).items()
-        if isinstance(limit, int) and limit > 0
+        if isinstance(limit, int) and not isinstance(limit, bool) and limit > 0
     }
     legacy_unknown_limit = int(ledger_settings.get("legacy_v1_unknown_actor_limit", 1) or 1)
     if legacy_unknown_limit <= 0:
         legacy_unknown_limit = 1
 
     try:
-        planning = load_json(CONTROL / "planning.json")
+        current_planning = load_json(CONTROL / "planning.json")
     except Exception:
-        planning = {
+        current_planning = {
             "parallel_execution": {
                 "enabled": False,
                 "max_concurrent_implementation_streams": 1,
@@ -262,7 +429,6 @@ def derive(
                 "critical_risk_default": "serialize",
             }
         }
-
     try:
         readiness_doc = load_json(CONTROL / "readiness.json")
     except Exception:
@@ -287,7 +453,7 @@ def derive(
         budget_doc = {}
 
     def normalize_pr(value: Any) -> int | None:
-        if isinstance(value, int):
+        if isinstance(value, int) and not isinstance(value, bool):
             return value
         if isinstance(value, str) and value.isdigit():
             return int(value)
@@ -331,35 +497,76 @@ def derive(
         )
 
     def v2_admission(
-        event: dict[str, Any], actor: str | None, payload: dict[str, Any]
-    ) -> tuple[dict[str, Any] | None, list[dict[str, Any]], str | None]:
+        event: dict[str, Any],
+        actor: str | None,
+        payload: dict[str, Any],
+        source_lease: dict[str, Any] | None = None,
+    ) -> tuple[dict[str, Any] | None, list[dict[str, Any]], str | None, int | None, dict[str, Any]]:
         if int(event.get("version") or 1) < 2:
-            return None, [], None
+            return None, [], None, None, current_planning
         actor_id = str(actor or "")
         error = _v2_payload_error(str(event.get("type") or ""), actor_id, payload)
         if error:
-            return None, [], error
+            return None, [], error, None, current_planning
         admission = payload["admission_snapshot"]
         planning_snapshot = payload.get("planning_snapshot")
         if not isinstance(planning_snapshot, dict):
-            return None, [], "v2 implementation lease requires planning_snapshot"
-        expected_dependencies = sorted(
-            {str(value) for value in planning_snapshot.get("dependencies", []) if value}
-        )
-        recorded_dependencies = sorted(set(admission.get("dependencies", [])))
-        if recorded_dependencies != expected_dependencies:
-            return None, [], "lease admission dependency set differs from immutable planning snapshot"
+            return None, [], "v2 implementation lease requires planning_snapshot", None, current_planning
+        recorded_dependencies = sorted({str(value) for value in admission.get("dependencies", []) if value})
+        payload_dependencies = sorted({str(value) for value in planning_snapshot.get("dependencies", []) if value})
+        if recorded_dependencies != payload_dependencies:
+            return None, [], "lease admission dependency set differs from planning snapshot", None, current_planning
+
+        trusted_planning = current_planning
+        actor_limit = int(admission.get("actor_limit"))
+        derived_actor_eligible = admission.get("actor_eligible") is True
+        derived_actor_reasons = list(admission.get("actor_ineligibility_reasons") or [])
+        authoritative_dependencies = recorded_dependencies
+
+        if verify_admission_provenance:
+            trusted_ref = str(admission.get("trusted_ref") or "")
+            assignment = event.get("type") == "ROLE_LEASE_ASSIGNED"
+            context, context_error = trusted_admission_context(
+                trusted_ref,
+                actor_id,
+                str(payload.get("work_unit")) if assignment else None,
+                implementations(),
+            )
+            if context is None:
+                return None, [], f"cannot verify lease admission trusted_ref: {context_error}", None, current_planning
+            if admission.get("policy_blobs") != context.get("policy_blobs"):
+                return None, [], "lease admission policy blob identities do not match trusted_ref", None, current_planning
+            if actor_limit != context.get("actor_limit"):
+                return None, [], "lease admission actor_limit differs from base-trusted actor policy", None, current_planning
+            if (admission.get("actor_eligible") is True) != bool(context.get("actor_eligible")):
+                return None, [], "lease admission actor_eligible differs from base-trusted actor policy", None, current_planning
+            recorded_reasons = sorted({str(value) for value in admission.get("actor_ineligibility_reasons", [])})
+            if recorded_reasons != sorted(context.get("actor_ineligibility_reasons", [])):
+                return None, [], "lease admission actor eligibility reasons differ from base-trusted actor policy", None, current_planning
+            derived_actor_eligible = bool(context.get("actor_eligible"))
+            derived_actor_reasons = list(context.get("actor_ineligibility_reasons", []))
+            trusted_planning = context.get("planning") or current_planning
+            if assignment:
+                authoritative_snapshot = context.get("planning_snapshot")
+                if planning_snapshot != authoritative_snapshot:
+                    return None, [], "lease planning snapshot differs from base-trusted versioned work unit", None, trusted_planning
+                authoritative_dependencies = sorted(
+                    {str(value) for value in (authoritative_snapshot or {}).get("dependencies", []) if value}
+                )
+            elif source_lease is not None and planning_snapshot != source_lease.get("planning_snapshot"):
+                return None, [], "transfer planning snapshot differs from canonical source lease", None, trusted_planning
+
         violations: list[dict[str, Any]] = []
-        if admission.get("actor_eligible") is not True:
+        if not derived_actor_eligible:
             violations.append(
                 {
                     "reason": "actor_implementation_ineligible_at_admission",
                     "actor": actor_id,
-                    "details": list(admission.get("actor_ineligibility_reasons") or []),
+                    "details": derived_actor_reasons,
                 }
             )
         if event.get("type") == "ROLE_LEASE_ASSIGNED":
-            unfinished = sorted(set(recorded_dependencies) - merged_work_units)
+            unfinished = sorted(set(authoritative_dependencies) - merged_work_units)
             if unfinished:
                 violations.append(
                     {
@@ -368,20 +575,23 @@ def derive(
                         "dependencies": unfinished,
                     }
                 )
-        return admission, violations, None
+        return admission, violations, None, actor_limit, trusted_planning
 
     def add_lease(
         lease_id: str,
         actor: str | None,
         payload: dict[str, Any],
         event: dict[str, Any],
+        source_lease: dict[str, Any] | None = None,
     ) -> bool:
         role = payload.get("role", "implementation")
         admission: dict[str, Any] | None = None
         if role == "implementation":
             known_implementation_leases.add(lease_id)
             candidate = snapshot_item(payload)
-            admission, frozen_violations, admission_error = v2_admission(event, actor, payload)
+            admission, frozen_violations, admission_error, verified_limit, trusted_planning = v2_admission(
+                event, actor, payload, source_lease
+            )
             if admission_error:
                 record_integrity_conflict(
                     event,
@@ -390,16 +600,17 @@ def derive(
                     detail=admission_error,
                 )
                 return False
-            if admission is not None:
-                actor_limit = int(admission.get("actor_limit"))
-            else:
-                actor_limit = legacy_limits.get(str(actor or ""), legacy_unknown_limit)
+            actor_limit = (
+                int(verified_limit)
+                if verified_limit is not None
+                else legacy_limits.get(str(actor or ""), legacy_unknown_limit)
+            )
             violations = [
                 *frozen_violations,
                 *implementation_admission_violations(
                     candidate,
                     implementations(),
-                    planning,
+                    trusted_planning,
                     None,
                     actor=actor,
                     actor_limit=actor_limit,
@@ -498,19 +709,24 @@ def derive(
                     )
                     continue
             active.pop(old_id, None)
-            if new_id and not add_lease(new_id, actor, payload, event):
+            if new_id and not add_lease(new_id, actor, payload, event, old):
                 active[old_id] = old
         elif event_type == "MATERIAL_AUTHOR" and event_pr is not None and actor:
             authors_by_pr[event_pr].add(str(actor))
         elif event_type == "GATE" and event_pr is not None:
             gates_by_pr[event_pr] = {
                 "pr": event_pr,
+                "work_unit": payload.get("work_unit"),
                 "sha": payload.get("sha"),
                 "base_sha": payload.get("base_sha"),
                 "reviewer_actor": actor,
+                "review_id": payload.get("review_id"),
+                "reviewer_login": payload.get("reviewer_login"),
+                "review_identity": payload.get("review_identity"),
                 "verdict": payload.get("verdict"),
                 "material_authors": payload.get("material_authors", []),
                 "evidence": payload.get("evidence", []),
+                "required_checks": payload.get("required_checks", []),
                 "scope_verified": payload.get("scope_verified") is True,
                 "changed_files": payload.get("changed_files", []),
                 "summary": payload.get("summary", ""),

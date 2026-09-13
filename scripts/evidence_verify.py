@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import sys
 import tempfile
 import xml.etree.ElementTree as ET
@@ -20,12 +21,13 @@ from typing import Any
 
 from onecompany_lib import CONTROL, command_exists, load_json, run
 
-SUPPORTED_PARSERS = {
-    "onecompany_quality_json_v1",
-    "cobertura_xml",
-    "junit_xml",
-    "onecompany_mutation_json_v1",
+SUPPORTED_PARSER_VERSIONS = {
+    "onecompany_quality_json_v1": {1},
+    "cobertura_xml": {1},
+    "junit_xml": {1},
+    "onecompany_mutation_json_v1": {1},
 }
+SUPPORTED_PARSERS = set(SUPPORTED_PARSER_VERSIONS)
 
 
 def _gh_json(path: str) -> tuple[dict[str, Any] | None, str | None]:
@@ -60,13 +62,9 @@ def _artifacts_for_run(repo: str, run_id: int) -> tuple[list[dict[str, Any]] | N
         return None, "gh CLI is required to verify GitHub artifacts"
     result = run(
         [
-            "gh",
-            "api",
-            "--paginate",
-            "--slurp",
+            "gh", "api", "--paginate", "--slurp",
             f"repos/{repo}/actions/runs/{run_id}/artifacts?per_page=100",
-            "-H",
-            "Accept: application/vnd.github+json",
+            "-H", "Accept: application/vnd.github+json",
         ]
     )
     if result.returncode != 0:
@@ -91,16 +89,8 @@ def _download_artifact(repo: str, run_id: int, artifact_name: str, destination: 
         return "gh CLI is required to download GitHub artifacts"
     result = run(
         [
-            "gh",
-            "run",
-            "download",
-            str(run_id),
-            "--repo",
-            repo,
-            "--name",
-            artifact_name,
-            "--dir",
-            str(destination),
+            "gh", "run", "download", str(run_id), "--repo", repo,
+            "--name", artifact_name, "--dir", str(destination),
         ]
     )
     if result.returncode != 0:
@@ -140,13 +130,26 @@ def _report_path(root: Path, parser: dict[str, Any]) -> tuple[Path | None, str |
     return candidate, None
 
 
+def _parser_version_error(parser: dict[str, Any]) -> str | None:
+    kind = parser.get("kind")
+    allowed = SUPPORTED_PARSER_VERSIONS.get(str(kind or ""))
+    if allowed is None:
+        return f"unsupported evidence parser: {kind!r}"
+    version = parser.get("version", 1)
+    if not isinstance(version, int) or isinstance(version, bool) or version not in allowed:
+        return f"unsupported parser version for {kind}: {version!r}; supported={sorted(allowed)}"
+    return None
+
+
 def _percent(value: Any, field: str) -> float:
     try:
         number = float(value)
-    except (TypeError, ValueError) as exc:
+    except (TypeError, ValueError, OverflowError) as exc:
         raise ValueError(f"{field} must be numeric") from exc
-    if number < 0:
-        raise ValueError(f"{field} cannot be negative")
+    if not math.isfinite(number):
+        raise ValueError(f"{field} must be finite")
+    if number < 0 or number > 100:
+        raise ValueError(f"{field} must be within 0..100")
     return number
 
 
@@ -197,6 +200,10 @@ def _junit_totals(element: ET.Element) -> tuple[int, int, int, int]:
     failures = int(element.attrib.get("failures", 0) or 0)
     errors = int(element.attrib.get("errors", 0) or 0)
     skipped = int(element.attrib.get("skipped", element.attrib.get("disabled", 0)) or 0)
+    if min(tests, failures, errors, skipped) < 0:
+        raise ValueError("JUnit counters cannot be negative")
+    if failures + errors + skipped > tests:
+        raise ValueError("JUnit failure/error/skipped counters exceed tests")
     return tests, failures, errors, skipped
 
 
@@ -232,7 +239,7 @@ def _parse_mutation_json(path: Path, candidate_sha: str) -> dict[str, Any]:
     if value.get("candidate_sha") != candidate_sha:
         raise ValueError("mutation JSON candidate_sha does not match exact candidate head")
     score = _percent(value.get("mutation_score"), "mutation_score")
-    return {"coverage": {"mutation": score}, "test_families": {"mutation": "pass" if score >= 0 else "fail"}}
+    return {"coverage": {"mutation": score}, "test_families": {"mutation": "pass"}}
 
 
 def parse_report(
@@ -241,9 +248,10 @@ def parse_report(
     candidate_sha: str,
     base_sha: str | None,
 ) -> tuple[dict[str, Any] | None, str | None]:
-    kind = parser.get("kind")
-    if kind not in SUPPORTED_PARSERS:
-        return None, f"unsupported evidence parser: {kind!r}"
+    version_error = _parser_version_error(parser)
+    if version_error:
+        return None, version_error
+    kind = str(parser.get("kind") or "")
     report, error = _report_path(root, parser)
     if report is None:
         return None, error
@@ -299,14 +307,18 @@ def verify_artifact_reference(
     artifact_id = reference.get("artifact_id")
     artifact_name = reference.get("artifact_name")
     parser = reference.get("parser")
-    if not isinstance(run_id, int) or run_id <= 0:
+    if not isinstance(run_id, int) or isinstance(run_id, bool) or run_id <= 0:
         result["errors"].append("workflow_run_id must be a positive integer")
-    if not isinstance(artifact_id, int) or artifact_id <= 0:
+    if not isinstance(artifact_id, int) or isinstance(artifact_id, bool) or artifact_id <= 0:
         result["errors"].append("artifact_id must be a positive integer")
     if not isinstance(artifact_name, str) or not artifact_name:
         result["errors"].append("artifact_name is required")
     if not isinstance(parser, dict):
         result["errors"].append("parser object is required")
+    else:
+        parser_error = _parser_version_error(parser)
+        if parser_error:
+            result["errors"].append(parser_error)
     if result["errors"]:
         return result
 
@@ -408,7 +420,7 @@ def verify_review_reference(repo: str, pr: int, candidate_sha: str, reference: d
         "errors": [],
     }
     review_id = reference.get("review_id")
-    if not isinstance(review_id, int) or review_id <= 0:
+    if not isinstance(review_id, int) or isinstance(review_id, bool) or review_id <= 0:
         result["errors"].append("review_id must be a positive integer")
         return result
     review, error = _review(repo, pr, review_id)
@@ -446,10 +458,18 @@ def aggregate_extracted(verified: list[dict[str, Any]]) -> tuple[dict[str, float
             continue
         extracted = item.get("extracted") or {}
         for metric, value in (extracted.get("coverage") or {}).items():
-            if metric in coverage and coverage[metric] != value:
-                errors.append(f"conflicting extracted coverage values for {metric}: {coverage[metric]} vs {value}")
+            try:
+                normalized = _percent(value, f"coverage.{metric}")
+            except ValueError as exc:
+                errors.append(str(exc))
+                continue
+            if metric in coverage and coverage[metric] != normalized:
+                errors.append(
+                    f"conflicting extracted coverage values for {metric}: "
+                    f"{coverage[metric]} vs {normalized}"
+                )
             else:
-                coverage[str(metric)] = float(value)
+                coverage[str(metric)] = normalized
         for family, status in (extracted.get("test_families") or {}).items():
             normalized = str(status).lower()
             current = families.get(str(family))
@@ -485,9 +505,15 @@ def evaluate_quality(
         for metric, threshold_key in metrics.items():
             threshold = profile.get(threshold_key)
             value = coverage.get(metric)
-            if not isinstance(value, (int, float)):
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
                 errors.append(f"verified evidence missing required {metric} metric")
-            elif isinstance(threshold, (int, float)) and value < threshold:
+                continue
+            try:
+                value = _percent(value, f"verified {metric}")
+            except ValueError as exc:
+                errors.append(str(exc))
+                continue
+            if isinstance(threshold, (int, float)) and not isinstance(threshold, bool) and value < threshold:
                 errors.append(f"verified {metric}={value} is below {profile_name} threshold {threshold}")
     required_families = quality.get("risk_required_families", {}).get(risk_level, [])
     for family in required_families:

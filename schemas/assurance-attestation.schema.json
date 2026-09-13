@@ -3,7 +3,7 @@
   "$id": "assurance-attestation.schema.json",
   "title": "OneCompany Assurance Attestation",
   "type": "object",
-  "required": ["schema", "repository", "work_unit", "pr", "head_sha", "base_sha", "quality_profile", "risk_level", "material_authors", "review", "artifacts", "extracted", "policy_revision", "verdict"],
+  "required": ["schema", "repository", "work_unit", "pr", "head_sha", "base_sha", "quality_profile", "risk_level", "material_authors", "review", "required_checks", "artifacts", "extracted", "policy_revision", "generated_at", "verdict"],
   "properties": {
     "schema": {"const": "onecompany-assurance-attestation-v1"},
     "repository": {"type": "string", "pattern": "^[^/]+/[^/]+$"},
@@ -28,14 +28,35 @@
       },
       "additionalProperties": true
     },
+    "required_checks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "id", "workflow_run_id", "workflow_path", "status", "conclusion", "head_sha", "trusted_ref", "trusted_workflow_blob_sha"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "id": {"type": ["integer", "null"]},
+          "workflow_run_id": {"type": ["integer", "null"]},
+          "workflow_path": {"type": ["string", "null"]},
+          "status": {"type": ["string", "null"]},
+          "conclusion": {"type": ["string", "null"]},
+          "head_sha": {"type": ["string", "null"]},
+          "trusted_ref": {"type": ["string", "null"]},
+          "trusted_workflow_blob_sha": {"type": ["string", "null"]}
+        },
+        "additionalProperties": true
+      }
+    },
     "artifacts": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["evidence_id", "workflow_run_id", "artifact_id", "artifact_name", "digest_sha256", "parser"],
+        "required": ["evidence_id", "workflow_run_id", "workflow_path", "artifact_id", "artifact_name", "digest_sha256", "parser"],
         "properties": {
           "evidence_id": {"type": ["string", "null"]},
           "workflow_run_id": {"type": ["integer", "null"]},
+          "workflow_path": {"type": ["string", "null"]},
           "artifact_id": {"type": ["integer", "null"]},
           "artifact_name": {"type": ["string", "null"]},
           "digest_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
@@ -54,6 +75,7 @@
       "additionalProperties": false
     },
     "policy_revision": {"type": "string", "minLength": 1},
+    "generated_at": {"type": "string", "format": "date-time"},
     "verdict": {"enum": ["PASS", "UNVERIFIED"]}
   },
   "additionalProperties": false

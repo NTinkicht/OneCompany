@@ -8,6 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 COMMANDS = {
+    "onboard": ["onboard.py"],
     "doctor": ["doctor.py"], "status": ["status.py"], "check": ["check.py"], "validate": ["validate_all.py"], "schema-validate": ["schema_validate.py"],
     "simulate": ["simulate.py"], "simulate-ledger": ["simulate_ledger.py"], "simulate-supervision": ["simulate_supervision.py"], "simulate-parallel": ["simulate_parallelism.py"], "hardening-audit": ["hardening_audit.py"],
     "readiness": ["readiness.py"], "audit-github": ["github_audit.py"], "next-work": ["next_work.py"], "plan": ["planner.py"], "route": ["router.py"], "dispatch": ["dispatch.py"],
@@ -20,20 +21,19 @@ COMMANDS = {
 def usage() -> int:
     print("OneCompany 0.3.0-planning-flow-control")
     print("usage: python onecompany.py <command> [args]")
-    print("commands:")
+    print("\nStart here:")
+    print("  onboard    assess a new/existing repository; read-only unless --apply")
+    print("\nCommands:")
     for command in COMMANDS:
-        print(f"  {command}")
+        if command != "onboard": print(f"  {command}")
     return 2
 
 
 def main() -> int:
-    if len(sys.argv) < 2 or sys.argv[1] in {"-h", "--help", "help"}:
-        return usage()
-    command = sys.argv[1]
-    spec = COMMANDS.get(command)
+    if len(sys.argv) < 2 or sys.argv[1] in {"-h", "--help", "help"}: return usage()
+    command = sys.argv[1]; spec = COMMANDS.get(command)
     if not spec:
-        print(f"unknown command: {command}")
-        return usage()
+        print(f"unknown command: {command}"); return usage()
     return subprocess.run([sys.executable, str(ROOT / "scripts" / spec[0]), *spec[1:], *sys.argv[2:]], cwd=str(ROOT), check=False).returncode
 
 

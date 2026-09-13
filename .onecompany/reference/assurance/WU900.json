@@ -52,6 +52,10 @@
     "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
     "verified_requirements": ["FR-900"],
     "verified_acceptance_criteria": ["AC-900"],
+    "artifacts": [
+      {"id": "EVID-900", "kind": "test-result", "reference": "ci://acceptance/TEST-900"},
+      {"id": "EVID-901", "kind": "test-result", "reference": "ci://security/TEST-901"}
+    ],
     "coverage": {"line": 92, "branch": 88, "changed_line": 100, "mutation": 76},
     "test_family_results": {"static": "pass", "unit": "pass", "integration": "pass", "contract": "pass", "e2e": "pass", "acceptance": "pass", "regression": "pass", "security": "pass", "operations": "pass"},
     "gates": {"requirements": "pass", "risk": "pass", "architecture": "pass", "code_quality": "pass", "functional_qa": "pass", "nonfunctional_qa": "pass", "documentation": "pass", "independent_review": "pass"},

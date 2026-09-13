@@ -1,8 +1,11 @@
 {
   "work_unit": "WU000",
-  "status": "proposed",
+  "status": "draft",
   "objective": "Replace with an observable post-change outcome.",
   "risk_level": "medium",
+  "quality_profile": "production",
+  "code_change": true,
+  "material_authors": [],
   "requirements": [],
   "acceptance_criteria": [],
   "risks": [],

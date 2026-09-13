@@ -6,8 +6,8 @@ import argparse
 import json
 import sys
 
-from ledger_lib import derive, ledger_enabled, list_events
-from onecompany_lib import CONTROL, active_implementation_leases, emergency_stop_active, load_json
+from lease_lifecycle import coordination_view
+from onecompany_lib import CONTROL, emergency_stop_active, load_json
 from planning_lib import priority_score, select_parallel_set
 
 
@@ -22,18 +22,14 @@ def main() -> int:
 
     queue = load_json(CONTROL / "queue.json")
     planning = load_json(CONTROL / "planning.json")
-    state = load_json(CONTROL / "state.json")
     work = queue.get("work_units", [])
-    active = active_implementation_leases(state)
-    durable_done: set[str] = set()
-    if ledger_enabled():
-        try:
-            view = derive(list_events())
-            active = [item for item in view.get("active_leases", []) if item.get("role") == "implementation"]
-            durable_done = set(view.get("merged_work_units", []))
-        except Exception as exc:
-            print(json.dumps({"status": "BLOCKED_LEDGER_UNAVAILABLE", "candidates": [], "error": str(exc)}, indent=2))
-            return 2
+    try:
+        view = coordination_view()
+    except Exception as exc:
+        print(json.dumps({"status": "BLOCKED_COORDINATION_UNAVAILABLE", "candidates": [], "error": str(exc)}, indent=2))
+        return 2
+    active = [item for item in view.get("active_leases", []) if item.get("role") == "implementation"]
+    durable_done = set(view.get("verified_merged_work_units", view.get("merged_work_units", [])))
 
     result = select_parallel_set(work, planning, active, durable_done, args.include_proposed)
     selected = result["ranked"] if args.all else result["selected"]

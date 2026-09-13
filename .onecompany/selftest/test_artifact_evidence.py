@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import math
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -120,9 +122,56 @@ class ArtifactEvidenceTests(unittest.TestCase):
         self.assertEqual(len(digest), 64)
         self.assertEqual(result["artifact"]["files"], ["quality.json"])
 
-    def test_cobertura_and_junit_are_deterministically_parsed(self):
-        import tempfile
+    def test_non_finite_and_out_of_range_percentages_are_rejected(self):
+        for value in (float("nan"), float("inf"), -1, 101, 999):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    evidence_verify._percent(value, "coverage.line")
 
+        quality = {
+            "profiles": {
+                "production": {
+                    "line_coverage_min": 85,
+                    "branch_coverage_min": 80,
+                    "changed_line_coverage_min": 95,
+                    "mutation_score_min": 70,
+                }
+            },
+            "risk_required_families": {"low": []},
+        }
+        errors = evidence_verify.evaluate_quality(
+            quality,
+            "production",
+            "low",
+            True,
+            {
+                "line": math.nan,
+                "branch": math.inf,
+                "changed_line": 999,
+                "mutation": -1,
+            },
+            {},
+        )
+        self.assertEqual(len(errors), 4, errors)
+
+    def test_unsupported_parser_version_is_rejected_before_download(self):
+        reference = self.reference()
+        reference["parser"]["version"] = 999
+        with (
+            patch.object(evidence_verify, "_workflow_run") as workflow,
+            patch.object(evidence_verify, "_artifacts_for_run") as artifacts,
+            patch.object(evidence_verify, "_download_artifact") as download,
+        ):
+            result = evidence_verify.verify_artifact_reference(
+                "owner/repo", CANDIDATE, BASE, reference
+            )
+        self.assertFalse(result["verified"])
+        self.assertTrue(any("unsupported parser version" in error for error in result["errors"]), result)
+        workflow.assert_not_called()
+        artifacts.assert_not_called()
+        download.assert_not_called()
+
+    def test_cobertura_and_junit_are_deterministically_parsed(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             (root / "coverage.xml").write_text(
@@ -130,7 +179,7 @@ class ArtifactEvidenceTests(unittest.TestCase):
             )
             coverage, error = evidence_verify.parse_report(
                 root,
-                {"kind": "cobertura_xml", "path": "coverage.xml"},
+                {"kind": "cobertura_xml", "version": 1, "path": "coverage.xml"},
                 CANDIDATE,
                 BASE,
             )
@@ -143,7 +192,7 @@ class ArtifactEvidenceTests(unittest.TestCase):
             )
             junit, error = evidence_verify.parse_report(
                 root,
-                {"kind": "junit_xml", "path": "junit.xml", "family": "unit"},
+                {"kind": "junit_xml", "version": 1, "path": "junit.xml", "family": "unit"},
                 CANDIDATE,
                 BASE,
             )

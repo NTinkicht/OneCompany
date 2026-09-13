@@ -80,6 +80,20 @@ class PlanningTests(unittest.TestCase):
         self.assertEqual([item["id"] for item in result["selected"]], ["WU-B"])
         self.assertTrue(any(row["id"] == "WU-C" for row in result["blocked"]))
 
+    def test_active_lease_snapshot_outranks_later_queue_scope_edit(self):
+        active_queue_record = self.wu("WU-A", ["src/new/**"], priority=10)
+        candidate = self.wu("WU-B", ["src/old/file.py"], priority=9)
+        active = [{
+            "id": "L1", "role": "implementation", "status": "active", "work_unit": "WU-A",
+            "planning_snapshot": {
+                "write_scope": ["src/old/**"], "resource_locks": [], "parallelism": "auto",
+                "risk_class": "LOW", "dependencies": [],
+            },
+        }]
+        result = select_parallel_set([active_queue_record, candidate], self.planning, active)
+        self.assertEqual(result["selected"], [])
+        self.assertTrue(any(row["id"] == "WU-B" and any("write_scope_overlap" in reason for reason in row["reasons"]) for row in result["blocked"]))
+
     def test_critical_path(self):
         a = self.wu("WU-A", ["a"], size=2)
         a["status"] = "DONE"

@@ -66,9 +66,15 @@ def main() -> int:
     if repo and gh_authenticated:
         required = set(required_check_names())
         enforcement = inspect_enforcement(repo, branch, required)
-        codeowners_ok = enforcement.get("codeowners_exists") is True
-        line(codeowners_ok, "CODEOWNERS on default branch", ".github/CODEOWNERS present" if codeowners_ok else "missing")
-        failures += 0 if codeowners_ok else 1
+        codeowners_exists = enforcement.get("codeowners_exists") is True
+        line(codeowners_exists, "CODEOWNERS on default branch", ".github/CODEOWNERS present" if codeowners_exists else "missing")
+        failures += 0 if codeowners_exists else 1
+        codeowners_valid = enforcement.get("codeowners_valid") is True
+        codeowners_detail = "valid owners + complete protected-path coverage" if codeowners_valid else (
+            f"errors={enforcement.get('codeowners_errors', [])}; missing={enforcement.get('codeowners_missing_protected_paths', [])}"
+        )
+        line(codeowners_valid, "Effective CODEOWNERS", codeowners_detail)
+        failures += 0 if codeowners_valid else 1
         review_ok = enforcement.get("code_owner_review_enforced") is True
         line(review_ok, "Code Owner review enforcement", "required" if review_ok else "not required by branch/ruleset protection")
         failures += 0 if review_ok else 1

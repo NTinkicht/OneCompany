@@ -14,13 +14,15 @@ SPEC.loader.exec_module(onboard)
 
 
 class OnboardTests(unittest.TestCase):
-    def test_empty_target_is_new_project(self):
+    def test_empty_target_is_new_project_without_creation(self):
         with tempfile.TemporaryDirectory() as temp:
             target = Path(temp) / "new-product"
+            self.assertFalse(target.exists())
             report = onboard.analyze(target, repository="example/new-product")
             self.assertEqual(report["mode"], "NEW_PROJECT")
             self.assertTrue(report["can_apply"])
             self.assertEqual(report["safe_defaults"]["autonomy"], "L1")
+            self.assertFalse(target.exists(), "read-only assessment must not create the target directory")
 
     def test_existing_stack_is_detected_without_mutation(self):
         with tempfile.TemporaryDirectory() as temp:

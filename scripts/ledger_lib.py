@@ -159,56 +159,182 @@ def list_events() -> list[dict[str, Any]]:
     return events
 
 
-def _trusted_json_at_ref(repo: str, path: str, ref: str) -> tuple[dict[str, Any], str]:
-    encoded_path = quote(path, safe="/")
-    encoded_ref = quote(ref, safe="")
-    payload = _gh_json(["api", f"repos/{repo}/contents/{encoded_path}?ref={encoded_ref}"])
-    if not isinstance(payload, dict):
-        raise RuntimeError(f"trusted policy path {path} at {ref} did not resolve to an object")
-    blob_sha = payload.get("sha")
-    if payload.get("encoding") != "base64" or not isinstance(payload.get("content"), str):
-        raise RuntimeError(f"trusted policy path {path} at {ref} is not decodable base64")
-    if not isinstance(blob_sha, str) or not blob_sha:
-        raise RuntimeError(f"trusted policy path {path} at {ref} has no blob identity")
-    try:
-        value = json.loads(base64.b64decode(payload["content"]).decode("utf-8"))
-    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"trusted policy path {path} at {ref} is invalid JSON: {exc}") from exc
-    if not isinstance(value, dict):
-        raise RuntimeError(f"trusted policy path {path} at {ref} is not a JSON object")
-    return value, blob_sha
+def _cache_get(cache: dict[tuple[Any, ...], Any] | None, key: tuple[Any, ...], loader):
+    if cache is None:
+        return loader()
+    if key not in cache:
+        cache[key] = loader()
+    return cache[key]
 
 
-def _assert_trusted_default_branch_history(repo: str, ref: str) -> None:
+def _trusted_json_at_ref(
+    repo: str,
+    path: str,
+    ref: str,
+    cache: dict[tuple[Any, ...], Any] | None = None,
+) -> tuple[dict[str, Any], str]:
+    def load() -> tuple[dict[str, Any], str]:
+        encoded_path = quote(path, safe="/")
+        encoded_ref = quote(ref, safe="")
+        payload = _gh_json(["api", f"repos/{repo}/contents/{encoded_path}?ref={encoded_ref}"])
+        if not isinstance(payload, dict):
+            raise RuntimeError(f"trusted policy path {path} at {ref} did not resolve to an object")
+        blob_sha = payload.get("sha")
+        if payload.get("encoding") != "base64" or not isinstance(payload.get("content"), str):
+            raise RuntimeError(f"trusted policy path {path} at {ref} is not decodable base64")
+        if not isinstance(blob_sha, str) or not blob_sha:
+            raise RuntimeError(f"trusted policy path {path} at {ref} has no blob identity")
+        try:
+            value = json.loads(base64.b64decode(payload["content"]).decode("utf-8"))
+        except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"trusted policy path {path} at {ref} is invalid JSON: {exc}") from exc
+        if not isinstance(value, dict):
+            raise RuntimeError(f"trusted policy path {path} at {ref} is not a JSON object")
+        return value, blob_sha
+
+    return _cache_get(cache, ("trusted-json", repo, path, ref), load)
+
+
+def _repository_metadata(
+    repo: str, cache: dict[tuple[Any, ...], Any] | None = None
+) -> dict[str, Any]:
+    def load() -> dict[str, Any]:
+        value = _gh_json(["api", f"repos/{repo}"])
+        if not isinstance(value, dict):
+            raise RuntimeError("cannot resolve repository metadata for lease admission")
+        return value
+
+    return _cache_get(cache, ("repo", repo), load)
+
+
+def _default_branch_tip(
+    repo: str, cache: dict[tuple[Any, ...], Any] | None = None
+) -> tuple[str, str]:
+    def load() -> tuple[str, str]:
+        repository = _repository_metadata(repo, cache)
+        default_branch = repository.get("default_branch")
+        if not isinstance(default_branch, str) or not default_branch:
+            raise RuntimeError("cannot resolve repository default branch for lease admission")
+        branch = _gh_json(["api", f"repos/{repo}/branches/{quote(default_branch, safe='')}"])
+        tip = ((branch or {}).get("commit") or {}).get("sha") if isinstance(branch, dict) else None
+        if not isinstance(tip, str) or not SHA40_RE.fullmatch(tip):
+            raise RuntimeError("cannot resolve default-branch tip for lease admission")
+        return default_branch, tip
+
+    return _cache_get(cache, ("default-tip", repo), load)
+
+
+def _compare(
+    repo: str,
+    base: str,
+    head: str,
+    cache: dict[tuple[Any, ...], Any] | None = None,
+) -> dict[str, Any]:
+    def load() -> dict[str, Any]:
+        value = _gh_json(["api", f"repos/{repo}/compare/{base}...{head}"])
+        if not isinstance(value, dict):
+            raise RuntimeError(f"cannot compare GitHub commits {base}...{head}")
+        return value
+
+    return _cache_get(cache, ("compare", repo, base, head), load)
+
+
+def _pull_request(
+    repo: str, pr: int, cache: dict[tuple[Any, ...], Any] | None = None
+) -> dict[str, Any]:
+    def load() -> dict[str, Any]:
+        value = _gh_json(["api", f"repos/{repo}/pulls/{pr}"])
+        if not isinstance(value, dict):
+            raise RuntimeError(f"cannot resolve GitHub PR #{pr}")
+        return value
+
+    return _cache_get(cache, ("pr", repo, pr), load)
+
+
+def _assert_trusted_default_branch_history(
+    repo: str,
+    ref: str,
+    cache: dict[tuple[Any, ...], Any] | None = None,
+) -> None:
     if not SHA40_RE.fullmatch(ref):
         raise RuntimeError("lease trusted_ref must be an exact 40-hex commit SHA")
-    repository = _gh_json(["api", f"repos/{repo}"])
-    default_branch = repository.get("default_branch") if isinstance(repository, dict) else None
-    if not isinstance(default_branch, str) or not default_branch:
-        raise RuntimeError("cannot resolve repository default branch for lease admission")
-    branch = _gh_json(["api", f"repos/{repo}/branches/{quote(default_branch, safe='')}"])
-    tip = ((branch or {}).get("commit") or {}).get("sha") if isinstance(branch, dict) else None
-    if not isinstance(tip, str) or not tip:
-        raise RuntimeError("cannot resolve default-branch tip for lease admission")
-    comparison = _gh_json(["api", f"repos/{repo}/compare/{ref}...{tip}"])
-    status = comparison.get("status") if isinstance(comparison, dict) else None
-    if status not in {"ahead", "identical"}:
+
+    def verify() -> bool:
+        _default_branch, tip = _default_branch_tip(repo, cache)
+        comparison = _compare(repo, ref, tip, cache)
+        status = comparison.get("status")
+        if status not in {"ahead", "identical"}:
+            raise RuntimeError(
+                f"lease trusted_ref {ref} is not verifiably in protected default-branch history "
+                f"(status={status})"
+            )
+        return True
+
+    _cache_get(cache, ("default-history", repo, ref), verify)
+
+
+def _trusted_policy_snapshot(
+    repo: str,
+    ref: str,
+    cache: dict[tuple[Any, ...], Any] | None = None,
+) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
+    def load() -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
+        _assert_trusted_default_branch_history(repo, ref, cache)
+        docs: dict[str, dict[str, Any]] = {}
+        blobs: dict[str, str] = {}
+        for key, path in TRUSTED_POLICY_PATHS.items():
+            docs[key], blobs[key] = _trusted_json_at_ref(repo, path, ref, cache)
+        return docs, blobs
+
+    return _cache_get(cache, ("policy-snapshot", repo, ref), load)
+
+
+def _normalize_pr(value: Any) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool) and value > 0:
+        return value
+    if isinstance(value, str) and value.isdigit() and int(value) > 0:
+        return int(value)
+    return None
+
+
+def _verify_pr_base_binding(
+    repo: str,
+    pr: int,
+    trusted_ref: str,
+    cache: dict[tuple[Any, ...], Any] | None = None,
+) -> dict[str, Any]:
+    value = _pull_request(repo, pr, cache)
+    base = value.get("base") or {}
+    base_sha = base.get("sha") if isinstance(base, dict) else None
+    base_ref = base.get("ref") if isinstance(base, dict) else None
+    default_branch, _tip = _default_branch_tip(repo, cache)
+    if base_ref != default_branch:
         raise RuntimeError(
-            f"lease trusted_ref {ref} is not verifiably in protected default-branch history (status={status})"
+            f"lease PR #{pr} targets {base_ref!r}, not protected default branch {default_branch!r}"
         )
+    if base_sha != trusted_ref:
+        raise RuntimeError(
+            f"lease trusted_ref {trusted_ref} does not match GitHub PR #{pr} base {base_sha}"
+        )
+    _assert_trusted_default_branch_history(repo, trusted_ref, cache)
+    return value
 
 
 def trusted_pr_base(pr: int) -> str:
     repo = _repository()
-    value = _gh_json(["api", f"repos/{repo}/pulls/{pr}"])
-    base_sha = ((value or {}).get("base") or {}).get("sha") if isinstance(value, dict) else None
+    cache: dict[tuple[Any, ...], Any] = {}
+    value = _pull_request(repo, pr, cache)
+    base = value.get("base") or {}
+    base_sha = base.get("sha") if isinstance(base, dict) else None
     if not isinstance(base_sha, str) or not SHA40_RE.fullmatch(base_sha):
         raise RuntimeError(f"cannot resolve exact PR #{pr} base SHA")
-    _assert_trusted_default_branch_history(repo, base_sha)
+    _verify_pr_base_binding(repo, pr, base_sha, cache)
     return base_sha
 
 
-def _normalized_planning_snapshot(item: dict[str, Any], work_map: dict[str, dict[str, Any]]) -> dict[str, Any]:
+def _normalized_planning_snapshot(
+    item: dict[str, Any], work_map: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
     wu = str(item.get("id") or "")
     if not wu:
         raise RuntimeError("trusted work unit has no id")
@@ -227,21 +353,23 @@ def trusted_admission_context(
     actor: str,
     work_unit: str | None,
     active: list[dict[str, Any]],
+    *,
+    pr: int | None = None,
+    cache: dict[tuple[Any, ...], Any] | None = None,
 ) -> tuple[dict[str, Any] | None, str | None]:
-    """Reconstruct immutable admission authority from protected Git history.
+    """Reconstruct admission authority from the exact platform-bound PR base.
 
-    The event may name a trusted ref, but it cannot define the facts at that ref.
-    Queue/planning/actor/readiness/budget are fetched from the commit and their
-    blob identities are returned for event binding. Only refs in default-branch
-    history are accepted.
+    Event booleans and policy values are descriptive only. The protected policy
+    snapshot is loaded from the exact GitHub PR base, and all reads are cached for
+    the duration of one replay so append-only history cannot amplify API calls.
     """
     try:
+        del active
         repo = _repository()
-        _assert_trusted_default_branch_history(repo, trusted_ref)
-        docs: dict[str, dict[str, Any]] = {}
-        blobs: dict[str, str] = {}
-        for key, path in TRUSTED_POLICY_PATHS.items():
-            docs[key], blobs[key] = _trusted_json_at_ref(repo, path, trusted_ref)
+        if pr is None:
+            raise RuntimeError("v2 implementation lease requires a PR number")
+        _verify_pr_base_binding(repo, pr, trusted_ref, cache)
+        docs, blobs = _trusted_policy_snapshot(repo, trusted_ref, cache)
 
         actors = docs["actors"].get("actors", [])
         readiness = docs["readiness"].get("actors", [])
@@ -276,7 +404,14 @@ def trusted_admission_context(
         if work_unit is not None:
             work_item = work_map.get(work_unit)
             if work_item is None:
-                raise RuntimeError(f"work unit {work_unit} does not exist at trusted_ref {trusted_ref}")
+                raise RuntimeError(
+                    f"work unit {work_unit} does not exist at trusted_ref {trusted_ref}"
+                )
+            mapped_pr = _normalize_pr(work_item.get("pr"))
+            if mapped_pr != pr:
+                raise RuntimeError(
+                    f"work unit {work_unit} is mapped to PR {mapped_pr}, not lease PR {pr}"
+                )
             if work_item.get("status") != "READY":
                 raise RuntimeError(
                     f"work unit {work_unit} is not READY at trusted_ref {trusted_ref} "
@@ -294,6 +429,75 @@ def trusted_admission_context(
             "actor_limit": actor_limit,
             "actor_eligible": not hard_reasons,
             "actor_ineligibility_reasons": hard_reasons,
+        }, None
+    except Exception as exc:
+        return None, str(exc)
+
+
+def _verify_merged_event(
+    event: dict[str, Any],
+    cache: dict[tuple[Any, ...], Any] | None = None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    """Verify a MERGED claim against GitHub before it can unlock dependencies."""
+    try:
+        payload = event.get("payload") or {}
+        pr = _normalize_pr(payload.get("pr"))
+        work_unit = payload.get("work_unit")
+        merge_sha = payload.get("merge_sha")
+        if pr is None:
+            raise RuntimeError("MERGED event requires a positive PR number")
+        if not isinstance(work_unit, str) or not work_unit:
+            raise RuntimeError("MERGED event requires work_unit")
+        if not isinstance(merge_sha, str) or not SHA40_RE.fullmatch(merge_sha):
+            raise RuntimeError("MERGED event requires exact merge_sha")
+
+        repo = _repository()
+        pr_doc = _pull_request(repo, pr, cache)
+        if not pr_doc.get("merged_at"):
+            raise RuntimeError(f"GitHub PR #{pr} is not merged")
+        if pr_doc.get("merge_commit_sha") != merge_sha:
+            raise RuntimeError(
+                f"MERGED event merge_sha {merge_sha} does not match GitHub PR #{pr} "
+                f"merge commit {pr_doc.get('merge_commit_sha')}"
+            )
+        base = pr_doc.get("base") or {}
+        head = pr_doc.get("head") or {}
+        base_sha = base.get("sha") if isinstance(base, dict) else None
+        head_sha = head.get("sha") if isinstance(head, dict) else None
+        default_branch, _tip = _default_branch_tip(repo, cache)
+        if (base.get("ref") if isinstance(base, dict) else None) != default_branch:
+            raise RuntimeError(f"merged PR #{pr} did not target protected default branch")
+        if not isinstance(base_sha, str) or not SHA40_RE.fullmatch(base_sha):
+            raise RuntimeError(f"cannot resolve merged PR #{pr} base SHA")
+        if not isinstance(head_sha, str) or not SHA40_RE.fullmatch(head_sha):
+            raise RuntimeError(f"cannot resolve merged PR #{pr} head SHA")
+        if payload.get("approved_base") not in {None, "", base_sha}:
+            raise RuntimeError("MERGED event approved_base differs from GitHub PR base")
+        if payload.get("approved_head") not in {None, "", head_sha}:
+            raise RuntimeError("MERGED event approved_head differs from GitHub PR head")
+        _assert_trusted_default_branch_history(repo, base_sha, cache)
+        _assert_trusted_default_branch_history(repo, merge_sha, cache)
+
+        queue, queue_blob = _trusted_json_at_ref(
+            repo, TRUSTED_POLICY_PATHS["queue"], base_sha, cache
+        )
+        item = by_id(queue.get("work_units", [])).get(work_unit)
+        if item is None:
+            raise RuntimeError(
+                f"MERGED work unit {work_unit} does not exist at verified PR base {base_sha}"
+            )
+        if _normalize_pr(item.get("pr")) != pr:
+            raise RuntimeError(
+                f"MERGED work unit {work_unit} is not mapped to GitHub PR #{pr} at verified base"
+            )
+        return {
+            "pr": pr,
+            "work_unit": work_unit,
+            "approved_base": base_sha,
+            "approved_head": head_sha,
+            "merge_sha": merge_sha,
+            "queue_blob_sha": queue_blob,
+            "merged_at": pr_doc.get("merged_at"),
         }, None
     except Exception as exc:
         return None, str(exc)
@@ -322,11 +526,16 @@ def _v2_payload_error(event_type: str, actor: str, payload: dict[str, Any]) -> s
     if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
         return "lease admission actor_limit must be a positive integer"
     dependencies = admission.get("dependencies")
-    if not isinstance(dependencies, list) or any(not isinstance(value, str) for value in dependencies):
+    if not isinstance(dependencies, list) or any(
+        not isinstance(value, str) for value in dependencies
+    ):
         return "lease admission dependencies must be a string array"
     if event_type == "ROLE_LEASE_ASSIGNED" and admission.get("transfer_source_lease_id") not in {None, ""}:
         return "assignment admission cannot name a transfer source"
-    if event_type == "ROLE_LEASE_TRANSFERRED" and admission.get("transfer_source_lease_id") != payload.get("old_lease_id"):
+    if (
+        event_type == "ROLE_LEASE_TRANSFERRED"
+        and admission.get("transfer_source_lease_id") != payload.get("old_lease_id")
+    ):
         return "transfer admission source does not match old_lease_id"
     return None
 
@@ -359,7 +568,14 @@ def post_event(event_type: str, actor: str, payload: dict[str, Any]) -> dict[str
         f"{json.dumps(event, separators=(',', ':'), ensure_ascii=False)}\n```\n"
     )
     posted = _gh_json(
-        ["api", "--method", "POST", f"repos/{repo}/issues/{issue}/comments", "-f", f"body={body}"]
+        [
+            "api",
+            "--method",
+            "POST",
+            f"repos/{repo}/issues/{issue}/comments",
+            "-f",
+            f"body={body}",
+        ]
     )
     login = ((posted.get("user") or {}).get("login"))
     if login not in trusted:
@@ -387,8 +603,11 @@ def derive(
 ) -> dict[str, Any]:
     """Replay durable events into the authoritative coordination view.
 
-    V2 historical admission is reconstructed from protected versioned policy.
-    Current readiness is projected separately and never erases accepted lineage.
+    V2 historical admission is reconstructed from protected versioned policy and
+    the exact GitHub PR base. MERGED claims only unlock dependencies after live
+    GitHub merge verification. A per-replay provenance cache prevents history
+    growth from multiplying identical GitHub API reads.
+
     `verify_admission_provenance=False` exists only for deterministic race-algebra
     simulations; production callers should use the default fail-closed behavior.
     """
@@ -404,6 +623,21 @@ def derive(
     seen_event_ids: set[str] = set()
     known_implementation_leases: set[str] = set()
     merged_work_units: set[str] = set()
+    verified_merged_work_units: set[str] = set()
+    provenance_cache: dict[tuple[Any, ...], Any] = {}
+    verified_merges: dict[str, dict[str, Any]] = {}
+    merge_errors: dict[str, str] = {}
+
+    if verify_admission_provenance:
+        for candidate_event in events:
+            if candidate_event.get("type") != "MERGED":
+                continue
+            event_id = str(candidate_event.get("event_id") or "")
+            context, error = _verify_merged_event(candidate_event, provenance_cache)
+            if context is not None:
+                verified_merges[event_id] = context
+            else:
+                merge_errors[event_id] = error or "cannot verify MERGED event"
 
     try:
         ledger_settings = ledger_config()
@@ -414,7 +648,9 @@ def derive(
         for actor, limit in (ledger_settings.get("legacy_v1_actor_limits") or {}).items()
         if isinstance(limit, int) and not isinstance(limit, bool) and limit > 0
     }
-    legacy_unknown_limit = int(ledger_settings.get("legacy_v1_unknown_actor_limit", 1) or 1)
+    legacy_unknown_limit = int(
+        ledger_settings.get("legacy_v1_unknown_actor_limit", 1) or 1
+    )
     if legacy_unknown_limit <= 0:
         legacy_unknown_limit = 1
 
@@ -453,14 +689,14 @@ def derive(
         budget_doc = {}
 
     def normalize_pr(value: Any) -> int | None:
-        if isinstance(value, int) and not isinstance(value, bool):
-            return value
-        if isinstance(value, str) and value.isdigit():
-            return int(value)
-        return None
+        return _normalize_pr(value)
 
     def implementations() -> list[dict[str, Any]]:
-        return [item for item in active.values() if item.get("role") == "implementation"]
+        return [
+            item
+            for item in active.values()
+            if item.get("role") == "implementation"
+        ]
 
     def snapshot_item(actor_payload: dict[str, Any]) -> dict[str, Any]:
         snapshot = actor_payload.get("planning_snapshot")
@@ -468,7 +704,9 @@ def derive(
             snapshot = {}
         return {"id": actor_payload.get("work_unit"), **snapshot}
 
-    def record_integrity_conflict(event: dict[str, Any], reason: str, **details: Any) -> None:
+    def record_integrity_conflict(
+        event: dict[str, Any], reason: str, **details: Any
+    ) -> None:
         conflict = {
             "conflict_id": _conflict_id(event, reason),
             "event_id": event.get("event_id"),
@@ -501,7 +739,13 @@ def derive(
         actor: str | None,
         payload: dict[str, Any],
         source_lease: dict[str, Any] | None = None,
-    ) -> tuple[dict[str, Any] | None, list[dict[str, Any]], str | None, int | None, dict[str, Any]]:
+    ) -> tuple[
+        dict[str, Any] | None,
+        list[dict[str, Any]],
+        str | None,
+        int | None,
+        dict[str, Any],
+    ]:
         if int(event.get("version") or 1) < 2:
             return None, [], None, None, current_planning
         actor_id = str(actor or "")
@@ -511,11 +755,27 @@ def derive(
         admission = payload["admission_snapshot"]
         planning_snapshot = payload.get("planning_snapshot")
         if not isinstance(planning_snapshot, dict):
-            return None, [], "v2 implementation lease requires planning_snapshot", None, current_planning
-        recorded_dependencies = sorted({str(value) for value in admission.get("dependencies", []) if value})
-        payload_dependencies = sorted({str(value) for value in planning_snapshot.get("dependencies", []) if value})
+            return (
+                None,
+                [],
+                "v2 implementation lease requires planning_snapshot",
+                None,
+                current_planning,
+            )
+        recorded_dependencies = sorted(
+            {str(value) for value in admission.get("dependencies", []) if value}
+        )
+        payload_dependencies = sorted(
+            {str(value) for value in planning_snapshot.get("dependencies", []) if value}
+        )
         if recorded_dependencies != payload_dependencies:
-            return None, [], "lease admission dependency set differs from planning snapshot", None, current_planning
+            return (
+                None,
+                [],
+                "lease admission dependency set differs from planning snapshot",
+                None,
+                current_planning,
+            )
 
         trusted_planning = current_planning
         actor_limit = int(admission.get("actor_limit"))
@@ -526,35 +786,97 @@ def derive(
         if verify_admission_provenance:
             trusted_ref = str(admission.get("trusted_ref") or "")
             assignment = event.get("type") == "ROLE_LEASE_ASSIGNED"
+            event_pr = normalize_pr(payload.get("pr"))
             context, context_error = trusted_admission_context(
                 trusted_ref,
                 actor_id,
                 str(payload.get("work_unit")) if assignment else None,
                 implementations(),
+                pr=event_pr,
+                cache=provenance_cache,
             )
             if context is None:
-                return None, [], f"cannot verify lease admission trusted_ref: {context_error}", None, current_planning
+                return (
+                    None,
+                    [],
+                    f"cannot verify lease admission trusted_ref: {context_error}",
+                    None,
+                    current_planning,
+                )
             if admission.get("policy_blobs") != context.get("policy_blobs"):
-                return None, [], "lease admission policy blob identities do not match trusted_ref", None, current_planning
+                return (
+                    None,
+                    [],
+                    "lease admission policy blob identities do not match trusted_ref",
+                    None,
+                    current_planning,
+                )
             if actor_limit != context.get("actor_limit"):
-                return None, [], "lease admission actor_limit differs from base-trusted actor policy", None, current_planning
-            if (admission.get("actor_eligible") is True) != bool(context.get("actor_eligible")):
-                return None, [], "lease admission actor_eligible differs from base-trusted actor policy", None, current_planning
-            recorded_reasons = sorted({str(value) for value in admission.get("actor_ineligibility_reasons", [])})
-            if recorded_reasons != sorted(context.get("actor_ineligibility_reasons", [])):
-                return None, [], "lease admission actor eligibility reasons differ from base-trusted actor policy", None, current_planning
+                return (
+                    None,
+                    [],
+                    "lease admission actor_limit differs from base-trusted actor policy",
+                    None,
+                    current_planning,
+                )
+            if (admission.get("actor_eligible") is True) != bool(
+                context.get("actor_eligible")
+            ):
+                return (
+                    None,
+                    [],
+                    "lease admission actor_eligible differs from base-trusted actor policy",
+                    None,
+                    current_planning,
+                )
+            recorded_reasons = sorted(
+                {str(value) for value in admission.get("actor_ineligibility_reasons", [])}
+            )
+            if recorded_reasons != sorted(
+                context.get("actor_ineligibility_reasons", [])
+            ):
+                return (
+                    None,
+                    [],
+                    "lease admission actor eligibility reasons differ from base-trusted actor policy",
+                    None,
+                    current_planning,
+                )
             derived_actor_eligible = bool(context.get("actor_eligible"))
-            derived_actor_reasons = list(context.get("actor_ineligibility_reasons", []))
+            derived_actor_reasons = list(
+                context.get("actor_ineligibility_reasons", [])
+            )
             trusted_planning = context.get("planning") or current_planning
             if assignment:
                 authoritative_snapshot = context.get("planning_snapshot")
                 if planning_snapshot != authoritative_snapshot:
-                    return None, [], "lease planning snapshot differs from base-trusted versioned work unit", None, trusted_planning
+                    return (
+                        None,
+                        [],
+                        "lease planning snapshot differs from base-trusted versioned work unit",
+                        None,
+                        trusted_planning,
+                    )
                 authoritative_dependencies = sorted(
-                    {str(value) for value in (authoritative_snapshot or {}).get("dependencies", []) if value}
+                    {
+                        str(value)
+                        for value in (authoritative_snapshot or {}).get(
+                            "dependencies", []
+                        )
+                        if value
+                    }
                 )
-            elif source_lease is not None and planning_snapshot != source_lease.get("planning_snapshot"):
-                return None, [], "transfer planning snapshot differs from canonical source lease", None, trusted_planning
+            elif (
+                source_lease is not None
+                and planning_snapshot != source_lease.get("planning_snapshot")
+            ):
+                return (
+                    None,
+                    [],
+                    "transfer planning snapshot differs from canonical source lease",
+                    None,
+                    trusted_planning,
+                )
 
         violations: list[dict[str, Any]] = []
         if not derived_actor_eligible:
@@ -566,7 +888,12 @@ def derive(
                 }
             )
         if event.get("type") == "ROLE_LEASE_ASSIGNED":
-            unfinished = sorted(set(authoritative_dependencies) - merged_work_units)
+            completed = (
+                verified_merged_work_units
+                if verify_admission_provenance
+                else merged_work_units
+            )
+            unfinished = sorted(set(authoritative_dependencies) - completed)
             if unfinished:
                 violations.append(
                     {
@@ -589,9 +916,13 @@ def derive(
         if role == "implementation":
             known_implementation_leases.add(lease_id)
             candidate = snapshot_item(payload)
-            admission, frozen_violations, admission_error, verified_limit, trusted_planning = v2_admission(
-                event, actor, payload, source_lease
-            )
+            (
+                admission,
+                frozen_violations,
+                admission_error,
+                verified_limit,
+                trusted_planning,
+            ) = v2_admission(event, actor, payload, source_lease)
             if admission_error:
                 record_integrity_conflict(
                     event,
@@ -671,7 +1002,12 @@ def derive(
                         event,
                         new_id,
                         payload,
-                        [{"reason": "transfer_source_no_longer_active", "old_lease_id": old_id}],
+                        [
+                            {
+                                "reason": "transfer_source_no_longer_active",
+                                "old_lease_id": old_id,
+                            }
+                        ],
                         old_lease_id=old_id,
                     )
                 else:
@@ -692,7 +1028,10 @@ def derive(
                 continue
             if int(event.get("version") or 1) >= 2:
                 admission = payload.get("admission_snapshot")
-                if not isinstance(admission, dict) or admission.get("transfer_source_lease_id") != old_id:
+                if (
+                    not isinstance(admission, dict)
+                    or admission.get("transfer_source_lease_id") != old_id
+                ):
                     record_integrity_conflict(
                         event,
                         "invalid_lease_admission_evidence",
@@ -742,8 +1081,21 @@ def derive(
                 open_integrity_conflicts.pop(conflict_id, None)
         elif event_type == "MERGED":
             work_unit = payload.get("work_unit")
-            if isinstance(work_unit, str) and work_unit:
+            if verify_admission_provenance:
+                verified = verified_merges.get(event_id)
+                if verified is None:
+                    record_integrity_conflict(
+                        event,
+                        "invalid_merged_evidence",
+                        detail=merge_errors.get(event_id, "MERGED event was not verified"),
+                    )
+                    continue
+                verified_work_unit = str(verified.get("work_unit") or "")
+                merged_work_units.add(verified_work_unit)
+                verified_merged_work_units.add(verified_work_unit)
+            elif isinstance(work_unit, str) and work_unit:
                 merged_work_units.add(work_unit)
+                verified_merged_work_units.add(work_unit)
 
     for gate_pr, gate in gates_by_pr.items():
         current_authors = set(authors_by_pr.get(gate_pr, set()))
@@ -794,7 +1146,9 @@ def derive(
             if key in allowed_ids
         }
     else:
-        authors = sorted({author for values in authors_by_pr.values() for author in values})
+        authors = sorted(
+            {author for values in authors_by_pr.values() for author in values}
+        )
         gate = None
 
     return {
@@ -807,5 +1161,6 @@ def derive(
         "conflicts": unresolved_integrity_conflicts,
         "resolved_conflict_ids": sorted(resolved_conflict_ids),
         "merged_work_units": sorted(merged_work_units),
+        "verified_merged_work_units": sorted(verified_merged_work_units),
         "current_actor_eligibility": current_actor_eligibility,
     }

@@ -145,6 +145,7 @@ def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any
     integrity_conflicts: list[dict[str, Any]] = []
     resolved_conflict_ids: set[str] = set()
     seen_event_ids: set[str] = set()
+    known_implementation_leases: set[str] = set()
     merged_work_units: set[str] = set()
 
     try:
@@ -195,6 +196,24 @@ def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any
             }
         )
 
+    def record_rejected_claim(
+        event: dict[str, Any],
+        lease_id: str,
+        payload: dict[str, Any],
+        violations: list[dict[str, Any]],
+        **details: Any,
+    ) -> None:
+        rejected_claims.append(
+            {
+                "event_id": event.get("event_id"),
+                "type": event.get("type"),
+                "work_unit": payload.get("work_unit"),
+                "rejected_lease_id": lease_id,
+                "violations": violations,
+                **details,
+            }
+        )
+
     def add_lease(lease_id: str, actor: str | None, payload: dict[str, Any], event: dict[str, Any]) -> bool:
         role = payload.get("role", "implementation")
         if role == "implementation":
@@ -209,15 +228,7 @@ def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any
                 actor_limit=actor_limit,
             )
             if violations:
-                rejected_claims.append(
-                    {
-                        "event_id": event.get("event_id"),
-                        "type": event.get("type"),
-                        "work_unit": payload.get("work_unit"),
-                        "rejected_lease_id": lease_id,
-                        "violations": violations,
-                    }
-                )
+                record_rejected_claim(event, lease_id, payload, violations)
                 return False
 
         event_pr = normalize_pr(payload.get("pr"))
@@ -233,8 +244,10 @@ def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any
             "status": "active",
             "event": event,
         }
-        if role == "implementation" and event_pr is not None and actor:
-            authors_by_pr.setdefault(event_pr, set()).add(str(actor))
+        if role == "implementation":
+            known_implementation_leases.add(lease_id)
+            if event_pr is not None and actor:
+                authors_by_pr.setdefault(event_pr, set()).add(str(actor))
         return True
 
     for event in events:
@@ -262,10 +275,27 @@ def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any
             old_id = str(payload.get("old_lease_id") or "")
             new_id = str(payload.get("new_lease_id") or "")
             old = active.get(old_id)
-            if not old or old.get("role") != "implementation":
+            if old is None:
+                if old_id in known_implementation_leases:
+                    record_rejected_claim(
+                        event,
+                        new_id,
+                        payload,
+                        [{"reason": "transfer_source_no_longer_active", "old_lease_id": old_id}],
+                        old_lease_id=old_id,
+                    )
+                else:
+                    record_integrity_conflict(
+                        event,
+                        "transfer_source_unknown",
+                        old_lease_id=old_id,
+                        new_lease_id=new_id,
+                    )
+                continue
+            if old.get("role") != "implementation":
                 record_integrity_conflict(
                     event,
-                    "transfer_source_not_active",
+                    "transfer_source_not_implementation",
                     old_lease_id=old_id,
                     new_lease_id=new_id,
                 )

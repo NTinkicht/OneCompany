@@ -17,9 +17,17 @@ def derive(events, pr=None):
     return derive_live(events, pr, enforce_actor_policy=False)
 
 
-def event(i: int, kind: str, actor: str, payload: dict, event_id: str | None = None) -> dict:
+def event(
+    i: int,
+    kind: str,
+    actor: str,
+    payload: dict,
+    event_id: str | None = None,
+    *,
+    version: int = 1,
+) -> dict:
     return {
-        "version": 1,
+        "version": version,
         "event_id": event_id or f"e{i}",
         "type": kind,
         "actor": actor,
@@ -49,6 +57,28 @@ def legacy_snapshot(scope: str, dependencies=None) -> dict:
         "parallelism": "auto",
         "risk_class": "LOW",
         "dependencies": dependencies or [],
+    }
+
+
+def admission(
+    actor: str,
+    *,
+    dependencies=None,
+    dependencies_complete: bool = True,
+    actor_eligible: bool = True,
+    actor_limit: int = 2,
+    source: str | None = None,
+) -> dict:
+    return {
+        "schema": "onecompany-lease-admission-v1",
+        "actor": actor,
+        "actor_eligible": actor_eligible,
+        "actor_ineligibility_reasons": [] if actor_eligible else ["disabled"],
+        "actor_limit": actor_limit,
+        "dependencies": sorted(dependencies or []),
+        "dependencies_complete": dependencies_complete,
+        "transfer_source_lease_id": source,
+        "dependencies_inherited_from_source": source is not None,
     }
 
 
@@ -100,8 +130,9 @@ class LedgerParallelismTests(unittest.TestCase):
         self.assertEqual(result["integrity_conflicts"], [])
         self.assertTrue(result["rejected_claims"])
 
-    def test_unfinished_dependency_is_rejected_by_durable_arbitration(self):
-        claim = event(
+    def test_v2_unfinished_dependency_is_rejected_at_admission(self):
+        planning = snapshot("src/a/**", dependencies=["WU-B"], dependency_closure=["WU-B"])
+        blocked_claim = event(
             2,
             "ROLE_LEASE_ASSIGNED",
             "codex",
@@ -110,38 +141,165 @@ class LedgerParallelismTests(unittest.TestCase):
                 "role": "implementation",
                 "work_unit": "WU-A",
                 "pr": 2,
-                "planning_snapshot": snapshot("src/a/**", dependencies=["WU-B"], dependency_closure=["WU-B"]),
+                "planning_snapshot": planning,
+                "admission_snapshot": admission(
+                    "codex", dependencies=["WU-B"], dependencies_complete=False
+                ),
             },
+            version=2,
         )
-        blocked = derive([claim])
+        blocked = derive([blocked_claim])
         self.assertEqual(blocked["active_leases"], [])
         rejection = blocked["rejected_claims"][0]
-        self.assertIn("dependency_not_durably_complete", {item["reason"] for item in rejection["violations"]})
+        self.assertIn(
+            "dependency_not_complete_at_admission",
+            {item["reason"] for item in rejection["violations"]},
+        )
 
+        accepted_claim = event(
+            3,
+            "ROLE_LEASE_ASSIGNED",
+            "codex",
+            {
+                "lease_id": "LA2",
+                "role": "implementation",
+                "work_unit": "WU-A",
+                "pr": 2,
+                "planning_snapshot": planning,
+                "admission_snapshot": admission(
+                    "codex", dependencies=["WU-B"], dependencies_complete=True
+                ),
+            },
+            version=2,
+        )
         unlocked = derive([
             event(1, "MERGED", "human-owner", {"pr": 1, "work_unit": "WU-B", "merge_sha": "m"}),
-            claim,
+            accepted_claim,
         ])
-        self.assertEqual([item["id"] for item in unlocked["active_leases"]], ["LA"])
+        self.assertEqual([item["id"] for item in unlocked["active_leases"]], ["LA2"])
 
-    def test_live_durable_arbitration_reapplies_actor_eligibility(self):
+    def test_v2_ineligible_actor_claim_is_rejected_at_admission(self):
+        claim = event(
+            1,
+            "ROLE_LEASE_ASSIGNED",
+            "rogue",
+            {
+                "lease_id": "LR",
+                "role": "implementation",
+                "work_unit": "WU-R",
+                "pr": 9,
+                "planning_snapshot": snapshot("src/r/**"),
+                "admission_snapshot": admission("rogue", actor_eligible=False),
+            },
+            version=2,
+        )
+        result = derive([claim])
+        self.assertEqual(result["active_leases"], [])
+        rejection = result["rejected_claims"][0]
+        self.assertIn(
+            "actor_implementation_ineligible_at_admission",
+            {item["reason"] for item in rejection["violations"]},
+        )
+
+    def test_runtime_actor_ineligibility_preserves_accepted_lease_and_authorship(self):
         real_load = ledger_lib.load_json
 
         def fake_load(path):
             name = Path(path).name
             if name == "actors.json":
-                return {"actors": [{"id": "rogue", "enabled": False, "configured": True, "capabilities": ["implementation"], "cost_class": "FREE"}]}
+                return {
+                    "actors": [
+                        {"id": "worker", "enabled": False, "configured": True, "capabilities": ["implementation"], "cost_class": "FREE"},
+                        {"id": "replacement", "enabled": True, "configured": True, "capabilities": ["implementation"], "cost_class": "FREE"},
+                    ]
+                }
             if name == "readiness.json":
-                return {"actors": [{"actor_id": "rogue", "setup_state": "ready", "verified_capabilities": ["implementation"], "temporarily_unavailable_capabilities": [], "repository_access": {"read": True, "write": True}, "capacity": {"implementation_streams": 1}}]}
+                return {
+                    "actors": [
+                        {"actor_id": "worker", "setup_state": "ready", "verified_capabilities": ["implementation"], "temporarily_unavailable_capabilities": [], "repository_access": {"read": True, "write": True}, "capacity": {"implementation_streams": 1}},
+                        {"actor_id": "replacement", "setup_state": "ready", "verified_capabilities": ["implementation"], "temporarily_unavailable_capabilities": [], "repository_access": {"read": True, "write": True}, "capacity": {"implementation_streams": 1}},
+                    ]
+                }
             return real_load(path)
 
-        claim = event(1, "ROLE_LEASE_ASSIGNED", "rogue", {"lease_id": "LR", "role": "implementation", "work_unit": "WU-R", "pr": 9, "planning_snapshot": snapshot("src/r/**")})
+        assignment = event(
+            1,
+            "ROLE_LEASE_ASSIGNED",
+            "worker",
+            {
+                "lease_id": "L1",
+                "role": "implementation",
+                "work_unit": "WU-A",
+                "pr": 10,
+                "planning_snapshot": snapshot("src/a/**"),
+                "admission_snapshot": admission("worker", actor_limit=1),
+            },
+            version=2,
+        )
+        transfer = event(
+            2,
+            "ROLE_LEASE_TRANSFERRED",
+            "replacement",
+            {
+                "lease_id": "L2",
+                "new_lease_id": "L2",
+                "old_lease_id": "L1",
+                "role": "implementation",
+                "work_unit": "WU-A",
+                "pr": 10,
+                "planning_snapshot": snapshot("src/a/**"),
+                "admission_snapshot": admission("replacement", actor_limit=1, source="L1"),
+            },
+            version=2,
+        )
         with patch.object(ledger_lib, "load_json", side_effect=fake_load):
-            result = derive_live([claim], enforce_actor_policy=True)
+            before = derive_live([assignment], enforce_actor_policy=True)
+            after = derive_live([assignment, transfer], 10, enforce_actor_policy=True)
+
+        self.assertEqual([item["id"] for item in before["active_leases"]], ["L1"])
+        self.assertEqual(before["material_authors"], ["worker"])
+        self.assertFalse(before["current_actor_eligibility"]["L1"]["eligible"])
+        self.assertIn("disabled", before["current_actor_eligibility"]["L1"]["reasons"])
+        self.assertEqual([item["id"] for item in after["active_leases"]], ["L2"])
+        self.assertEqual(set(after["material_authors"]), {"worker", "replacement"})
+
+    def test_legacy_pre_v2_dependency_completion_is_grandfathered(self):
+        claim = event(
+            1,
+            "ROLE_LEASE_ASSIGNED",
+            "codex",
+            {
+                "lease_id": "LEGACY",
+                "role": "implementation",
+                "work_unit": "WU-A",
+                "pr": 1,
+                "planning_snapshot": snapshot(
+                    "src/a/**", dependencies=["WU-B"], dependency_closure=["WU-B"]
+                ),
+            },
+            version=1,
+        )
+        result = derive([claim])
+        self.assertEqual([item["id"] for item in result["active_leases"]], ["LEGACY"])
+        self.assertEqual(result["rejected_claims"], [])
+
+    def test_malformed_v2_admission_is_integrity_conflict(self):
+        claim = event(
+            1,
+            "ROLE_LEASE_ASSIGNED",
+            "codex",
+            {
+                "lease_id": "BROKEN",
+                "role": "implementation",
+                "work_unit": "WU-A",
+                "pr": 1,
+                "planning_snapshot": snapshot("src/a/**"),
+            },
+            version=2,
+        )
+        result = derive([claim])
         self.assertEqual(result["active_leases"], [])
-        rejection = result["rejected_claims"][0]
-        eligibility = next(item for item in rejection["violations"] if item["reason"] == "actor_implementation_ineligible")
-        self.assertIn("disabled", eligibility["details"])
+        self.assertEqual(result["integrity_conflicts"][0]["reason"], "invalid_lease_admission_evidence")
 
     def test_transitive_dependency_closure_is_enforced_from_snapshot(self):
         events = [

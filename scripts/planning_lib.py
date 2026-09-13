@@ -147,11 +147,26 @@ def work_item_for_lease(lease: dict[str, Any], work_map: dict[str, dict[str, Any
     }
 
 
-def _declared_dependency_closure(item: dict[str, Any]) -> set[str]:
+def _dependency_view(
+    item: dict[str, Any],
+    work_map: dict[str, dict[str, Any]] | None,
+) -> tuple[set[str], bool]:
+    """Return dependency closure and whether it is provably complete.
+
+    New lease snapshots persist ``dependency_closure``. A legacy snapshot that lacks
+    it is deliberately *not* upgraded from only its direct dependency list: doing so
+    would silently treat an incomplete graph as authoritative. If the exact item is
+    the current canonical work-map record, however, the full graph is available and
+    can be traversed safely.
+    """
     closure = item.get("dependency_closure")
     if isinstance(closure, list):
-        return {str(value) for value in closure if value}
-    return {str(value) for value in item.get("dependencies", []) if value}
+        return {str(value) for value in closure if value}, True
+
+    item_id = str(item.get("id") or "")
+    if work_map and item_id and item_id in work_map and item is work_map[item_id]:
+        return dependency_closure(work_map, item_id), True
+    return set(), False
 
 
 def work_units_conflict(
@@ -173,13 +188,16 @@ def work_units_conflict(
         if parallel.get("critical_risk_default") == "serialize":
             reasons.append("critical_risk_serialized")
 
-    left_closure = _declared_dependency_closure(left)
-    right_closure = _declared_dependency_closure(right)
+    left_closure, left_complete = _dependency_view(left, work_map)
+    right_closure, right_complete = _dependency_view(right, work_map)
+    if not left_complete or not right_complete:
+        reasons.append("unknown_dependency_closure")
     if right_id and right_id in left_closure:
         reasons.append("dependency_relationship")
     if left_id and left_id in right_closure:
         reasons.append("dependency_relationship")
-    if work_map and left_id and right_id:
+
+    if work_map and left_id and right_id and left is work_map.get(left_id) and right is work_map.get(right_id):
         if right_id in dependency_closure(work_map, left_id) or left_id in dependency_closure(work_map, right_id):
             reasons.append("dependency_relationship")
 

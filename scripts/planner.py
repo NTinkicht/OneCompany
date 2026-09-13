@@ -6,18 +6,18 @@ import argparse
 import json
 import sys
 
-from ledger_lib import derive, ledger_enabled, list_events
+from lease_lifecycle import coordination_view
 from onecompany_lib import CONTROL, load_json
 from planning_lib import by_id, critical_path, priority_score, rank_work, select_parallel_set
 from planning_validate import validate_documents
 
 
 def active_leases() -> tuple[list[dict], set[str]]:
-    if ledger_enabled():
-        view = derive(list_events())
-        return [item for item in view.get("active_leases", []) if item.get("role") == "implementation"], set(view.get("merged_work_units", []))
-    state = load_json(CONTROL / "state.json")
-    return [item for item in state.get("active_leases", []) if item.get("status") == "active" and item.get("role") == "implementation"], set()
+    view = coordination_view()
+    return (
+        [item for item in view.get("active_leases", []) if item.get("role") == "implementation"],
+        set(view.get("verified_merged_work_units", view.get("merged_work_units", []))),
+    )
 
 
 def main() -> int:

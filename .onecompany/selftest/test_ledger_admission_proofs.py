@@ -127,7 +127,7 @@ class DurableAdmissionProofTests(unittest.TestCase):
             for claim in result["rejected_claims"]
             for item in claim.get("violations", [])
         }
-        self.assertIn("actor_capacity_exhausted", reasons)
+        self.assertIn("actor_implementation_capacity_reached", reasons)
 
     def test_v2_transfer_binds_source_snapshot_instead_of_new_dependency_claim(self):
         source = event(

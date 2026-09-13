@@ -42,6 +42,15 @@ def _stream_for_pr(state: dict, pr: int) -> dict | None:
     return next((stream for stream in state.get("active_streams", []) if stream.get("pr") == pr), None)
 
 
+def _work_unit_for_pr(queue: dict, state: dict, pr: int) -> dict | None:
+    work = queue.get("work_units", [])
+    direct = next((item for item in work if item.get("pr") == pr), None)
+    if direct is not None: return direct
+    stream = _stream_for_pr(state, pr)
+    wu_id = (stream or {}).get("work_unit") or state.get("current_work_unit")
+    return by_id(work).get(str(wu_id)) if wu_id else None
+
+
 def _default_pr(state: dict) -> int | None:
     streams = [s for s in state.get("active_streams", []) if isinstance(s.get("pr"), int)]
     if len(streams) == 1: return streams[0].get("pr")
@@ -67,7 +76,8 @@ def main() -> int:
     if live_head != args.sha: print(f"REFUSED: exact-head mismatch; live={live_head} reviewed={args.sha}"); return 2
     if not isinstance(base_sha, str) or not base_sha: print("REFUSED: live PR base SHA is unavailable"); return 2
 
-    stream = _stream_for_pr(state, pr)
+    stream = _stream_for_pr(state, pr); work_unit = _work_unit_for_pr(queue, state, pr)
+    if work_unit is None: print(f"REFUSED: PR #{pr} is not mapped to a versioned Work Unit"); return 2
     material_authors = set((stream or {}).get("material_authors", state.get("current_material_authors", [])))
     if ledger_enabled():
         try: material_authors = set(derive(list_events(), pr).get("material_authors", []))
@@ -77,8 +87,6 @@ def main() -> int:
 
     paths, diff_error = changed_files(repo, pr)
     if paths is None: print(f"REFUSED: cannot establish live PR change set: {diff_error}"); return 2
-    work_map = by_id(queue.get("work_units", [])); wu_id = (stream or {}).get("work_unit") or state.get("current_work_unit")
-    work_unit = work_map.get(str(wu_id)) if wu_id else None
     scope_problems = scope_errors(paths, work_unit)
 
     if args.verdict == "PASS — MERGE_READY":
@@ -94,7 +102,7 @@ def main() -> int:
         if checks.returncode != 0 or not checks.stdout.strip(): print("REFUSED: required PR checks are not all green/reported"); return 2
 
     gate = {
-        "pr": pr, "sha": args.sha, "base_sha": base_sha, "reviewer_actor": args.reviewer,
+        "pr": pr, "work_unit": work_unit.get("id"), "sha": args.sha, "base_sha": base_sha, "reviewer_actor": args.reviewer,
         "verdict": args.verdict, "reviewed_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "material_authors": sorted(material_authors), "evidence": args.evidence, "summary": args.summary,
         "scope_verified": not scope_problems, "changed_files": paths, "stale": False,
@@ -102,7 +110,7 @@ def main() -> int:
     if ledger_enabled():
         try:
             event = post_event("GATE", args.reviewer, {
-                "pr": pr, "sha": args.sha, "base_sha": base_sha, "verdict": args.verdict,
+                "pr": pr, "work_unit": work_unit.get("id"), "sha": args.sha, "base_sha": base_sha, "verdict": args.verdict,
                 "material_authors": sorted(material_authors), "evidence": args.evidence,
                 "summary": args.summary, "scope_verified": not scope_problems, "changed_files": paths,
             })
@@ -116,19 +124,19 @@ def main() -> int:
     for item in state.setdefault("active_streams", []):
         if item.get("pr") == pr:
             item.setdefault("open_blockers", []); item.setdefault("human_decision_required", False)
-            item["head"] = live_head; item["base_sha"] = base_sha; item["material_authors"] = sorted(material_authors); item["gate"] = gate
+            item["work_unit"] = work_unit.get("id"); item["head"] = live_head; item["base_sha"] = base_sha; item["material_authors"] = sorted(material_authors); item["gate"] = gate
             item["status"] = "MERGE_READY" if args.verdict == "PASS — MERGE_READY" else "REVIEW_BLOCKED"; matched = True
     if not matched:
         state.setdefault("active_streams", []).append({
-            "work_unit": state.get("current_work_unit") or "UNKNOWN", "lease_id": "unreconciled", "actor": None,
-            "branch": None, "pr": pr, "head": live_head, "base_sha": base_sha, "material_authors": sorted(material_authors),
+            "work_unit": work_unit.get("id"), "lease_id": "unreconciled", "actor": None,
+            "branch": work_unit.get("branch"), "pr": pr, "head": live_head, "base_sha": base_sha, "material_authors": sorted(material_authors),
             "gate": gate, "status": "MERGE_READY" if args.verdict == "PASS — MERGE_READY" else "REVIEW_BLOCKED",
             "open_blockers": [], "human_decision_required": False,
         })
     if len(state.get("active_streams", [])) == 1:
-        state["current_pr"] = pr; state["current_pr_head"] = live_head; state["current_material_authors"] = sorted(material_authors); state["current_gate"] = gate
+        state["current_work_unit"] = work_unit.get("id"); state["current_pr"] = pr; state["current_pr_head"] = live_head; state["current_material_authors"] = sorted(material_authors); state["current_gate"] = gate
     else:
-        state["current_pr"] = None; state["current_pr_head"] = None; state["current_material_authors"] = []; state["current_gate"] = None
+        state["current_work_unit"] = None; state["current_pr"] = None; state["current_pr_head"] = None; state["current_material_authors"] = []; state["current_gate"] = None
     state["company_state"] = "MERGE_READY" if len(state.get("active_streams", [])) == 1 and args.verdict == "PASS — MERGE_READY" else ("ACTIVE_PARALLEL_IMPLEMENTATION" if len(state.get("active_streams", [])) > 1 else "REVIEW_BLOCKED")
     save_json(CONTROL / "state.json", state)
     print(json.dumps(gate, indent=2)); return 0

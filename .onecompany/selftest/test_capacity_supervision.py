@@ -34,8 +34,12 @@ class CapacityAndSupervisionTests(unittest.TestCase):
 
     def budget(self):
         return {
-            "allowed_cost_classes": ["INCLUDED_SUBSCRIPTION"],
-            "forbidden_cost_classes": [],
+            "ai": {"additional_monthly_spend_cap": 0, "allow_paid_fallback": False},
+            "cost_classes": {
+                "allowed": ["INCLUDED_SUBSCRIPTION", "FREE_ALLOWANCE", "LOCAL", "HUMAN"],
+                "conditionally_allowed": [],
+                "forbidden": ["METERED_ALLOWED", "METERED_FORBIDDEN", "UNKNOWN_COST"],
+            },
         }
 
     def dispatch(self, configured=True):

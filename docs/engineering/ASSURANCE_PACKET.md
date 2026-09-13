@@ -67,6 +67,18 @@ python onecompany.py assurance <packet.json> --repo owner/repo --pr N --base-sha
 
 `python onecompany.py verify-evidence ...` is the lower-level artifact resolver/parser. It proves artifact provenance and extracted facts but does not by itself establish the base-trusted producer boundary.
 
+### Merge enforcement
+
+A PASS attestation is not merely advisory. The merge executor requires the repository-relative packet explicitly:
+
+```text
+python onecompany.py merge --actor <merge-actor> --pr N --assurance-packet path/to/WU-assurance.json
+```
+
+Before issuing GitHub's merge mutation, `merge.py` re-checks the exact approved head/base, required checks, scope, reviewer eligibility and durable authorship, then validates the packet structure and recomputes `trusted_assurance` against the live PR. It refuses the merge when the packet is absent, not `merge_ready`/`done`, mapped to another WU, bound to another candidate SHA, carries a different material-authorship snapshot, or yields anything other than a base-trusted `PASS` attestation.
+
+On success the merge ledger/state records the packet path, attestation SHA-256 and base-policy revision. This makes artifact-backed assurance part of the mechanical promotion boundary rather than a report that workers may ignore.
+
 ### Trust boundary
 
 Candidate code may nominate evidence references. Candidate code may **not** be trusted to declare the extracted value, review verdict, artifact digest, quality policy, required-check policy, trusted workflow, or final attestation. Those are rooted in the reviewed base revision and live GitHub platform evidence.

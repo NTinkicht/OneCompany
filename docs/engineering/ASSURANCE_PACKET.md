@@ -43,16 +43,26 @@ Supported first-wave artifact parsers are deliberately small and deterministic:
 
 Unsupported formats are `UNVERIFIED`; they never degrade to a prose waiver or implicit PASS.
 
-Use the unified CLI for the authoritative merge-grade decision:
+### Commands
+
+Offline structure validation remains available for CI, authoring and reference fixtures:
 
 ```text
-python onecompany.py assurance <packet.json> --repo owner/repo --pr N --base-sha <reviewed-base-sha>
+python onecompany.py assurance <packet.json>
 ```
 
-For direct attestation generation/debugging:
+For a `merge_ready`/`done` packet this command explicitly reports that structural PASS is **not merge evidence**. It does not contact GitHub unless complete live context is supplied.
+
+The authoritative merge-grade attestation is:
 
 ```text
 python onecompany.py attest <packet.json> --repo owner/repo --pr N --base-sha <reviewed-base-sha>
+```
+
+The assurance command can also invoke the same trusted path when all live arguments are supplied:
+
+```text
+python onecompany.py assurance <packet.json> --repo owner/repo --pr N --base-sha <reviewed-base-sha>
 ```
 
 `python onecompany.py verify-evidence ...` is the lower-level artifact resolver/parser. It proves artifact provenance and extracted facts but does not by itself establish the base-trusted producer boundary.

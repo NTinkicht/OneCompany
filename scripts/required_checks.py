@@ -1,16 +1,19 @@
 #!/usr/bin/env python3
-"""Verify exact-SHA deterministic checks against the versioned CompanyOS manifest."""
+"""Verify exact-SHA deterministic checks against base-trusted CompanyOS policy."""
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import re
 import sys
 from typing import Any
+from urllib.parse import quote
 
 from onecompany_lib import CONTROL, command_exists, load_json, run
 
 RUN_ID_RE = re.compile(r"/actions/runs/(\d+)(?:/|$)")
+MANIFEST_PATH = ".onecompany/required-checks.json"
 
 
 def required_check_manifest() -> dict[str, Any]:
@@ -34,6 +37,28 @@ def _gh_json(path: str) -> tuple[dict[str, Any] | None, str | None]:
     if not isinstance(value, dict):
         return None, f"GitHub response was not an object: {path}"
     return value, None
+
+
+def _contents(repo: str, path: str, ref: str) -> tuple[dict[str, Any] | None, str | None]:
+    encoded_path = quote(path, safe="/")
+    encoded_ref = quote(ref, safe="")
+    return _gh_json(f"repos/{repo}/contents/{encoded_path}?ref={encoded_ref}")
+
+
+def _manifest_from_ref(repo: str, ref: str) -> tuple[dict[str, Any] | None, str | None]:
+    payload, error = _contents(repo, MANIFEST_PATH, ref)
+    if payload is None:
+        return None, error or f"cannot load trusted required-check manifest at {ref}"
+    if payload.get("encoding") != "base64" or not isinstance(payload.get("content"), str):
+        return None, f"trusted required-check manifest at {ref} is not decodable base64 content"
+    try:
+        text = base64.b64decode(payload["content"]).decode("utf-8")
+        manifest = json.loads(text)
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return None, f"trusted required-check manifest at {ref} is invalid: {exc}"
+    if not isinstance(manifest, dict):
+        return None, f"trusted required-check manifest at {ref} is not an object"
+    return manifest, None
 
 
 def _check_runs(repo: str, sha: str) -> tuple[list[dict[str, Any]] | None, str | None]:
@@ -108,22 +133,77 @@ def _trusted_matches(
     return trusted, rejected
 
 
-def evaluate_required_checks(repo: str, sha: str) -> tuple[bool, list[str], list[dict[str, Any]]]:
-    """Return whether every manifest-required check passed on exactly ``sha``.
+def _verify_trusted_workflow_unchanged(
+    repo: str,
+    workflow_path: str,
+    trusted_ref: str,
+    candidate_sha: str,
+) -> tuple[bool, str | None, str | None]:
+    base_payload, base_error = _contents(repo, workflow_path, trusted_ref)
+    if base_payload is None:
+        return False, None, base_error or f"trusted workflow {workflow_path} missing at {trusted_ref}"
+    candidate_payload, candidate_error = _contents(repo, workflow_path, candidate_sha)
+    if candidate_payload is None:
+        return False, None, candidate_error or f"candidate workflow {workflow_path} missing at {candidate_sha}"
+    base_blob = base_payload.get("sha")
+    candidate_blob = candidate_payload.get("sha")
+    if not isinstance(base_blob, str) or not base_blob:
+        return False, None, f"trusted workflow {workflow_path} has no blob identity at {trusted_ref}"
+    if candidate_blob != base_blob:
+        return (
+            False,
+            base_blob,
+            f"trusted workflow {workflow_path} changed relative to base {trusted_ref}; candidate CI cannot self-attest that change",
+        )
+    return True, base_blob, None
 
-    Required evidence is bound to the exact check name, GitHub App, and trusted
-    workflow path declared in the manifest. A same-name job emitted by another
-    workflow is rejected rather than allowed to supersede the trusted referee.
+
+def evaluate_required_checks(
+    repo: str,
+    sha: str,
+    trusted_ref: str | None = None,
+) -> tuple[bool, list[str], list[dict[str, Any]]]:
+    """Return whether every required check passed on exactly ``sha``.
+
+    Merge/gate callers pass the reviewed base SHA as ``trusted_ref``. In that
+    mode the required-check manifest is loaded from the base revision, and every
+    trusted workflow must be byte-identical between base and candidate. Candidate
+    code therefore cannot redefine either the referee list or the referee itself
+    and then use that redefinition as merge evidence.
     """
-    manifest = required_check_manifest()
+    if trusted_ref:
+        manifest, manifest_error = _manifest_from_ref(repo, trusted_ref)
+        if manifest is None:
+            return False, [manifest_error or "cannot load base-trusted required-check manifest"], []
+    else:
+        manifest = required_check_manifest()
+
     required = manifest.get("checks", [])
     if not required:
         return False, ["required-check manifest is empty"], []
+
+    workflow_blobs: dict[str, str] = {}
+    reasons: list[str] = []
+    if trusted_ref:
+        for spec in required:
+            workflow_path = str(spec.get("workflow_path") or "")
+            if not workflow_path:
+                reasons.append("base-trusted required check is missing workflow_path")
+                continue
+            unchanged, blob_sha, workflow_error = _verify_trusted_workflow_unchanged(
+                repo, workflow_path, trusted_ref, sha
+            )
+            if blob_sha:
+                workflow_blobs[workflow_path] = blob_sha
+            if not unchanged:
+                reasons.append(workflow_error or f"trusted workflow {workflow_path} could not be verified")
+        if reasons:
+            return False, reasons, []
+
     runs, error = _check_runs(repo, sha)
     if runs is None:
         return False, [error or "cannot read check runs"], []
 
-    reasons: list[str] = []
     evidence: list[dict[str, Any]] = []
     for spec in required:
         name = str(spec.get("name") or "")
@@ -136,6 +216,7 @@ def evaluate_required_checks(repo: str, sha: str) -> tuple[bool, list[str], list
         observed, workflow = max(trusted, key=lambda pair: int(pair[0].get("id") or 0))
         status = observed.get("status")
         conclusion = observed.get("conclusion")
+        workflow_path = str(spec.get("workflow_path") or "")
         record = {
             "name": name,
             "id": observed.get("id"),
@@ -147,6 +228,8 @@ def evaluate_required_checks(repo: str, sha: str) -> tuple[bool, list[str], list
             "workflow_run_id": workflow.get("id"),
             "workflow_path": workflow.get("path"),
             "workflow_event": workflow.get("event"),
+            "trusted_ref": trusted_ref,
+            "trusted_workflow_blob_sha": workflow_blobs.get(workflow_path),
         }
         evidence.append(record)
         if observed.get("head_sha") != sha:
@@ -162,9 +245,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Verify CompanyOS required checks on an exact commit SHA")
     parser.add_argument("--repo", required=True)
     parser.add_argument("--sha", required=True)
+    parser.add_argument("--trusted-ref", help="Base/trusted revision that defines the required-check manifest and workflow")
     args = parser.parse_args()
-    ok, reasons, evidence = evaluate_required_checks(args.repo, args.sha)
-    print(json.dumps({"ok": ok, "sha": args.sha, "checks": evidence, "reasons": reasons}, indent=2))
+    ok, reasons, evidence = evaluate_required_checks(args.repo, args.sha, trusted_ref=args.trusted_ref)
+    print(json.dumps({"ok": ok, "sha": args.sha, "trusted_ref": args.trusted_ref, "checks": evidence, "reasons": reasons}, indent=2))
     return 0 if ok else 1
 
 

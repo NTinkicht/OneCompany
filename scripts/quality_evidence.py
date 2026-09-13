@@ -662,7 +662,7 @@ def produce(root: Path, candidate_sha: str, base_sha: str, max_mutants: int) -> 
     }
 
 
-def main() -> int:
+def main(_trusted_json_dumps=json.dumps) -> int:
     parser = argparse.ArgumentParser(description="Produce exact-head OneCompany quality evidence")
     parser.add_argument("--repo-root", type=Path, required=True)
     parser.add_argument("--candidate-sha")
@@ -679,7 +679,7 @@ def main() -> int:
         except Exception as exc:
             print(f"coverage worker failed: {exc}", file=sys.stderr)
             return 2
-        print(WORKER_MARKER + json.dumps(raw, separators=(",", ":"), ensure_ascii=False))
+        print(WORKER_MARKER + _trusted_json_dumps(raw, separators=(",", ":"), ensure_ascii=False))
         return 0 if raw.get("tests_successful") is True else 1
 
     if not args.candidate_sha or not args.base_sha or args.output is None:

@@ -10,6 +10,9 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import ledger_lib
 
+TRUSTED_REF = "b" * 40
+POLICY_BLOBS = {key: (str(index) * 40)[:40] for index, key in enumerate(ledger_lib.TRUSTED_POLICY_PATHS, start=1)}
+
 
 def event(index: int, kind: str, actor: str, payload: dict, *, version: int) -> dict:
     return {
@@ -35,18 +38,52 @@ def planning(scope: str, dependencies=None) -> dict:
     }
 
 
-def admission(actor: str, dependencies=None, *, source=None) -> dict:
+def admission(
+    actor: str,
+    dependencies=None,
+    *,
+    source=None,
+    actor_eligible=True,
+    actor_limit=1,
+    actor_reasons=None,
+) -> dict:
     return {
         "schema": "onecompany-lease-admission-v1",
         "actor": actor,
-        "actor_eligible": True,
-        "actor_ineligibility_reasons": [],
-        "actor_limit": 1,
+        "actor_eligible": actor_eligible,
+        "actor_ineligibility_reasons": list(actor_reasons or []),
+        "actor_limit": actor_limit,
         "dependencies": list(dependencies or []),
-        # Deliberately forged/descriptive: replay must not trust this boolean.
         "dependencies_complete": True,
         "transfer_source_lease_id": source,
         "dependencies_inherited_from_source": source is not None,
+        "trusted_ref": TRUSTED_REF,
+        "policy_blobs": dict(POLICY_BLOBS),
+    }
+
+
+def trusted_context(
+    *,
+    actor_eligible=True,
+    actor_limit=1,
+    actor_reasons=None,
+    authoritative_planning=None,
+) -> dict:
+    return {
+        "trusted_ref": TRUSTED_REF,
+        "policy_blobs": dict(POLICY_BLOBS),
+        "planning": {
+            "parallel_execution": {
+                "enabled": True,
+                "max_concurrent_implementation_streams": 3,
+                "require_write_scope_for_parallel": True,
+                "critical_risk_default": "serialize",
+            }
+        },
+        "actor_limit": actor_limit,
+        "actor_eligible": actor_eligible,
+        "actor_ineligibility_reasons": list(actor_reasons or []),
+        "planning_snapshot": authoritative_planning,
     }
 
 
@@ -87,6 +124,84 @@ class DurableAdmissionProofTests(unittest.TestCase):
         assignment["github_created_at"] = "2026-01-01T00:00:02Z"
         accepted = ledger_lib.derive([merged, assignment], enforce_actor_policy=False)
         self.assertEqual([item["id"] for item in accepted["active_leases"]], ["L-A"])
+
+    def test_matching_forged_payload_lists_cannot_override_versioned_work_unit(self):
+        forged = planning("src/a/**", [])
+        assignment = event(
+            1,
+            "ROLE_LEASE_ASSIGNED",
+            "codex",
+            {
+                "lease_id": "L-FORGE",
+                "role": "implementation",
+                "work_unit": "WU-A",
+                "pr": 2,
+                "planning_snapshot": forged,
+                "admission_snapshot": admission("codex", []),
+            },
+            version=2,
+        )
+        authoritative = planning("src/a/**", ["WU-B"])
+        context = trusted_context(authoritative_planning=authoritative)
+        with patch.object(
+            ledger_lib,
+            "trusted_admission_context",
+            return_value=(context, None),
+        ):
+            result = ledger_lib.derive(
+                [assignment],
+                enforce_actor_policy=False,
+                verify_admission_provenance=True,
+            )
+        self.assertEqual(result["active_leases"], [])
+        self.assertEqual(len(result["integrity_conflicts"]), 1)
+        self.assertIn(
+            "base-trusted versioned work unit",
+            result["integrity_conflicts"][0]["detail"],
+        )
+
+    def test_forged_actor_eligibility_or_limit_cannot_override_trusted_policy(self):
+        assignment = event(
+            1,
+            "ROLE_LEASE_ASSIGNED",
+            "rogue",
+            {
+                "lease_id": "L-ROGUE",
+                "role": "implementation",
+                "work_unit": "WU-A",
+                "pr": 2,
+                "planning_snapshot": planning("src/a/**"),
+                "admission_snapshot": admission(
+                    "rogue", [], actor_eligible=True, actor_limit=99
+                ),
+            },
+            version=2,
+        )
+        context = trusted_context(
+            actor_eligible=False,
+            actor_limit=1,
+            actor_reasons=["disabled"],
+            authoritative_planning=planning("src/a/**"),
+        )
+        with patch.object(
+            ledger_lib,
+            "trusted_admission_context",
+            return_value=(context, None),
+        ):
+            result = ledger_lib.derive(
+                [assignment],
+                enforce_actor_policy=False,
+                verify_admission_provenance=True,
+            )
+        self.assertEqual(result["active_leases"], [])
+        self.assertEqual(len(result["integrity_conflicts"]), 1)
+        self.assertTrue(
+            any(
+                phrase in result["integrity_conflicts"][0]["detail"]
+                for phrase in ("actor_limit", "actor_eligible")
+            ),
+            result,
+        )
 
     def test_pre_cutoff_v1_replay_keeps_one_slot_actor_arbitration(self):
         first = event(

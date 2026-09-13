@@ -18,8 +18,8 @@ BASE = "b" * 40
 
 
 class MergeAssuranceTests(unittest.TestCase):
-    def state(self) -> dict:
-        gate = {
+    def gate(self) -> dict:
+        return {
             "verdict": "PASS — MERGE_READY",
             "stale": False,
             "work_unit": "WU900",
@@ -32,6 +32,33 @@ class MergeAssuranceTests(unittest.TestCase):
             "sha": HEAD,
             "base_sha": BASE,
         }
+
+    def active_lease(self) -> dict:
+        return {
+            "id": "L-WU900",
+            "role": "implementation",
+            "actor": "implementer-example",
+            "work_unit": "WU900",
+            "branch": "wu-900",
+            "pr": 1,
+            "start_head": HEAD,
+            "status": "active",
+        }
+
+    def coordination(self) -> dict:
+        gate = self.gate()
+        return {
+            "active_leases": [self.active_lease()],
+            "material_authors": ["implementer-example"],
+            "current_gate": gate,
+            "gates_by_pr": {1: gate},
+            "integrity_conflicts": [],
+            "rejected_claims": [],
+            "current_actor_eligibility": {},
+        }
+
+    def state(self) -> dict:
+        gate = self.gate()
         return {
             "open_blockers": [],
             "human_decision_required": False,
@@ -119,6 +146,14 @@ class MergeAssuranceTests(unittest.TestCase):
         stack.enter_context(patch.object(merge, "scope_errors", return_value=[]))
         stack.enter_context(patch.object(merge, "live_pr", return_value=(self.live(), None)))
         stack.enter_context(patch.object(merge, "evaluate_required_checks", return_value=(True, [], [])))
+        stack.enter_context(patch.object(merge, "coordination_view", return_value=self.coordination()))
+        stack.enter_context(
+            patch.object(
+                merge,
+                "append_coordination_event",
+                return_value={"event_id": "event-test"},
+            )
+        )
         stack.enter_context(patch.object(merge, "save_json"))
         stack.enter_context(
             patch.object(

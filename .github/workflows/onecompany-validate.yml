@@ -69,6 +69,12 @@ jobs:
     steps:
       # actions/checkout v7.0.1 — immutable pin.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          # Pull-request validation must execute the exact candidate head, not the
+          # synthetic merge ref. Full history is required to resolve the reviewed
+          # base and derive changed-line/mutation evidence.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
       # actions/setup-python v7.0.0 — immutable pin.
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
@@ -93,3 +99,40 @@ jobs:
         run: python scripts/smoke_init.py
       - name: Compile Python helpers
         run: python -m compileall -q scripts .onecompany/selftest onecompany.py
+
+      # The candidate may nominate artifact IDs later, but it may not choose the
+      # program that measures itself. On PRs, execute quality_evidence.py exactly
+      # as stored in the reviewed base commit. If the base predates this producer
+      # (the one-time 0.4 bootstrap), skip rather than falling back to candidate code.
+      - name: Produce base-trusted exact-head quality evidence
+        id: trusted_quality
+        if: github.event_name == 'pull_request'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          mkdir -p .onecompany-evidence
+          if git cat-file -e "$BASE_SHA:scripts/quality_evidence.py" 2>/dev/null; then
+            git show "$BASE_SHA:scripts/quality_evidence.py" > "$RUNNER_TEMP/onecompany-quality-evidence.py"
+            python "$RUNNER_TEMP/onecompany-quality-evidence.py" \
+              --repo-root "$GITHUB_WORKSPACE" \
+              --candidate-sha "$CANDIDATE_SHA" \
+              --base-sha "$BASE_SHA" \
+              --output .onecompany-evidence/quality.json \
+              --max-mutants 30
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Trusted base does not yet contain scripts/quality_evidence.py; bootstrap artifact generation skipped."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # actions/upload-artifact v7.0.1 — immutable pin.
+      - name: Upload trusted quality evidence
+        if: github.event_name == 'pull_request' && steps.trusted_quality.outputs.ready == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: onecompany-quality-evidence
+          path: .onecompany-evidence/quality.json
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 9

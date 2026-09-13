@@ -91,6 +91,13 @@ def normalize_code_owner(value: str) -> str:
     return owner
 
 
+def normalize_platform_login(value: str) -> str:
+    login = value.strip().lstrip("@")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", login):
+        raise ValueError("root principal must be one concrete GitHub user login, such as octocat")
+    return login
+
+
 def configure_codeowners(target: Path, owner: str) -> None:
     path = target / ".github" / "CODEOWNERS"
     if not path.exists():
@@ -98,6 +105,26 @@ def configure_codeowners(target: Path, owner: str) -> None:
     text = path.read_text(encoding="utf-8")
     text = re.sub(r"(?<!\S)@NTinkicht(?!\S)", owner, text)
     path.write_text(text, encoding="utf-8")
+
+
+def configure_root_identity(target: Path, login: str) -> None:
+    path = target / ".onecompany" / "identity.json"
+    if not path.exists():
+        raise FileNotFoundError("bootstrap copy did not contain .onecompany/identity.json")
+    identity = json.loads(path.read_text(encoding="utf-8"))
+    principals = identity.get("principals", [])
+    roots = [
+        item
+        for item in principals
+        if isinstance(item, dict) and "root" in item.get("authorities", [])
+    ]
+    if len(roots) != 1:
+        raise ValueError("template identity policy must contain exactly one root principal before bootstrap")
+    root = roots[0]
+    if root.get("actor_id") != "human-owner":
+        raise ValueError("template root principal must map to actor_id human-owner")
+    root["login"] = login
+    write_json(path, identity)
 
 
 def initialize_control_plane(target: Path, project_name: str, repository: str, default_branch: str) -> None:
@@ -121,6 +148,13 @@ def main() -> int:
     parser.add_argument("--project-name")
     parser.add_argument("--default-branch")
     parser.add_argument("--code-owner", help="GitHub user/team for protected CompanyOS paths; defaults to repository owner")
+    parser.add_argument(
+        "--root-principal",
+        help=(
+            "Concrete GitHub user receiving human-owner/root platform authority; "
+            "defaults to repository owner. For organization-owned repositories, pass the human login explicitly."
+        ),
+    )
     parser.add_argument("--initialize-contracts", action="store_true")
     parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
@@ -135,8 +169,10 @@ def main() -> int:
         return 2
     project_name = args.project_name or target.name
     default_branch = args.default_branch or infer_default_branch(target)
+    repository_owner = repository.split("/", 1)[0]
     try:
-        code_owner = normalize_code_owner(args.code_owner or repository.split("/", 1)[0])
+        code_owner = normalize_code_owner(args.code_owner or repository_owner)
+        root_principal = normalize_platform_login(args.root_principal or repository_owner)
     except ValueError as exc:
         print(f"ERROR: {exc}")
         return 2
@@ -146,16 +182,20 @@ def main() -> int:
             if source.exists():
                 copy_item(source, target / relative, args.force)
         configure_codeowners(target, code_owner)
-    except (FileExistsError, FileNotFoundError) as exc:
+        configure_root_identity(target, root_principal)
+    except (FileExistsError, FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
         print(f"ERROR: {exc}")
         return 2
     initialize_control_plane(target, project_name, repository, default_branch)
     if args.initialize_contracts:
         initialize_contracts(target)
     print(f"OneCompany installed into {target}")
-    print(f"Project: {project_name}; repository: {repository}; default branch: {default_branch}; code owner: {code_owner}")
+    print(
+        f"Project: {project_name}; repository: {repository}; default branch: {default_branch}; "
+        f"code owner: {code_owner}; root principal: {root_principal}"
+    )
     print("Portfolio/requirements/acceptance-criteria/risk-register/queue/state were reset; source work history was not copied. Unattended paths remain disabled.")
-    print("Run `python onecompany.py github-audit` after pushing to verify the selected Code Owner is valid and live protections enforce it.")
+    print("Run `python onecompany.py github-audit` after pushing to verify the selected Code Owner and root principal are valid and live protections enforce them.")
     return 0
 
 

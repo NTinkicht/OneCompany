@@ -1,21 +1,25 @@
 #!/usr/bin/env python3
-"""Mechanically merge only an exact-head, base-aware, independently approved PR."""
+"""Mechanically merge only an exact-head/base, independently approved and assured PR."""
 from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import sys
+from pathlib import Path
 
+from assurance_gate import validate_structure
 from ledger_lib import derive, ledger_config, ledger_enabled, list_events, post_event
 from onecompany_lib import (
-    CONTROL, always_human_paths, autonomy_number, budget_allows, command_exists,
+    CONTROL, ROOT, always_human_paths, autonomy_number, budget_allows, command_exists,
     emergency_stop_active, github_repo_from_config, governance_config, load_json,
     protected_control_plane_paths, run, save_json,
 )
 from planning_lib import by_id
 from required_checks import evaluate_required_checks
 from scope_guard import changed_files, live_pr, scope_errors
+from trusted_assurance import verify_trusted_packet
 
 
 def capability_eligible(actor_id: str, capability: str, access_key: str, excluded_authors: set[str] | None = None) -> tuple[bool, list[str]]:
@@ -71,10 +75,38 @@ def _sync_legacy(state: dict) -> None:
         state["current_material_authors"] = []; state["current_gate"] = None
 
 
+def _load_assurance_packet(value: str | None) -> tuple[dict | None, str | None, str | None]:
+    if not value:
+        return None, None, "merge requires --assurance-packet; structural/review gates cannot substitute for artifact-backed assurance"
+    path = Path(value)
+    if not path.is_absolute():
+        path = ROOT / path
+    try:
+        resolved = path.resolve()
+        resolved.relative_to(ROOT.resolve())
+    except (OSError, ValueError):
+        return None, None, "assurance packet must be a file inside the repository checkout"
+    if not resolved.is_file():
+        return None, None, f"assurance packet does not exist: {resolved.relative_to(ROOT)}"
+    try:
+        packet = json.loads(resolved.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return None, None, f"cannot read assurance packet: {exc}"
+    if not isinstance(packet, dict):
+        return None, None, "assurance packet must be a JSON object"
+    return packet, resolved.relative_to(ROOT).as_posix(), None
+
+
+def _attestation_digest(attestation: dict) -> str:
+    canonical = json.dumps(attestation, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--actor", required=True); parser.add_argument("--pr", type=int)
     parser.add_argument("--method", choices=["merge", "squash", "rebase"], default="squash")
+    parser.add_argument("--assurance-packet", help="repository-relative merge-ready assurance packet")
     args = parser.parse_args()
     if emergency_stop_active(): print("REFUSED: emergency stop is active; autonomous merge is frozen"); return 2
     if not command_exists("gh") or run(["gh", "auth", "status"]).returncode != 0: print("REFUSED: authenticated gh CLI is required"); return 2
@@ -131,12 +163,39 @@ def main() -> int:
     if live_head != approved_sha: print(f"REFUSED: expected-head mismatch; approved={approved_sha} live={live_head}"); return 2
     if live_base != approved_base:
         print(f"REFUSED: base drift invalidated gate; reviewed_base={approved_base} live_base={live_base}. Rebase/update and rerun CI/review."); return 2
-    checks_ok, check_reasons, _ = evaluate_required_checks(
-        repo, approved_sha, trusted_ref=approved_base
-    )
+    checks_ok, check_reasons, _ = evaluate_required_checks(repo, approved_sha, trusted_ref=approved_base)
     if not checks_ok:
         for reason in check_reasons: print(f"REFUSED: {reason}")
         return 2
+
+    packet, packet_path, packet_error = _load_assurance_packet(args.assurance_packet)
+    if packet is None:
+        print(f"REFUSED: {packet_error}")
+        return 2
+    structural_errors, structural_warnings = validate_structure(packet)
+    if structural_errors:
+        for error in structural_errors: print(f"REFUSED: assurance structure: {error}")
+        return 2
+    for warning in structural_warnings: print(f"WARN: assurance structure: {warning}")
+    if packet.get("status") not in {"merge_ready", "done"}:
+        print(f"REFUSED: assurance packet status must be merge_ready/done, got {packet.get('status')}")
+        return 2
+    if packet.get("work_unit") != work_unit_record.get("id"):
+        print(f"REFUSED: assurance packet Work Unit {packet.get('work_unit')} does not match {work_unit_record.get('id')}")
+        return 2
+    if packet.get("candidate_sha") != approved_sha:
+        print("REFUSED: assurance packet candidate_sha does not equal approved exact head")
+        return 2
+    packet_authors = {str(value) for value in packet.get("material_authors", []) if value}
+    if packet_authors != material_authors:
+        print("REFUSED: assurance packet material-authorship snapshot differs from durable authorship")
+        return 2
+    attestation, assurance_errors = verify_trusted_packet(packet, repo=repo, pr=pr, base_sha=approved_base)
+    if assurance_errors or not attestation or attestation.get("verdict") != "PASS":
+        for error in assurance_errors: print(f"REFUSED: assurance evidence: {error}")
+        print("REFUSED: no current base-trusted PASS assurance attestation")
+        return 2
+    assurance_digest = _attestation_digest(attestation)
 
     merge = run(["gh", "api", "--method", "PUT", f"repos/{repo}/pulls/{pr}/merge", "-f", f"sha={approved_sha}", "-f", f"merge_method={args.method}"])
     if merge.returncode != 0: print("MERGE FAILED:", merge.stderr.strip() or merge.stdout.strip()); return 2
@@ -147,7 +206,7 @@ def main() -> int:
     if ledger_enabled():
         try:
             for lease in active: post_event("ROLE_LEASE_RELEASED", str(lease.get("actor") or args.actor), {"lease_id": lease.get("id"), "pr": pr, "reason": "merged"})
-            post_event("MERGED", args.actor, {"pr": pr, "work_unit": work_unit, "approved_head": approved_sha, "approved_base": approved_base, "merge_sha": payload.get("sha"), "method": args.method})
+            post_event("MERGED", args.actor, {"pr": pr, "work_unit": work_unit, "approved_head": approved_sha, "approved_base": approved_base, "merge_sha": payload.get("sha"), "method": args.method, "assurance_packet": packet_path, "assurance_attestation_sha256": assurance_digest, "assurance_policy_revision": attestation.get("policy_revision")})
         except Exception as exc: print(f"WARN: merge succeeded but ledger post-merge record failed: {exc}")
 
     now = dt.datetime.now(dt.timezone.utc).isoformat()
@@ -155,11 +214,11 @@ def main() -> int:
         if lease.get("status") == "active" and lease.get("role") == "implementation" and lease.get("pr") == pr:
             lease["status"] = "released"; lease["released_at"] = now; lease["release_reason"] = "merged"
     state["active_streams"] = [item for item in state.get("active_streams", []) if item.get("pr") != pr]
-    state["last_merge"] = {"pr": pr, "work_unit": work_unit, "approved_head": approved_sha, "approved_base": approved_base, "merge_sha": payload.get("sha"), "actor": args.actor, "method": args.method, "merged_at": now}
+    state["last_merge"] = {"pr": pr, "work_unit": work_unit, "approved_head": approved_sha, "approved_base": approved_base, "merge_sha": payload.get("sha"), "actor": args.actor, "method": args.method, "assurance_packet": packet_path, "assurance_attestation_sha256": assurance_digest, "assurance_policy_revision": attestation.get("policy_revision"), "merged_at": now}
     _sync_legacy(state)
     state["company_state"] = "ACTIVE_PARALLEL_IMPLEMENTATION" if len(state.get("active_streams", [])) > 1 else ("ACTIVE_IMPLEMENTATION" if state.get("active_streams") else "POST_MERGE_RECONCILE")
     save_json(CONTROL / "state.json", state)
-    print(f"MERGED PR #{pr}: {payload.get('sha')} (approved head {approved_sha}, base {approved_base})")
+    print(f"MERGED PR #{pr}: {payload.get('sha')} (approved head {approved_sha}, base {approved_base}, assurance {assurance_digest})")
     return 0
 
 

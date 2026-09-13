@@ -1,0 +1,5 @@
+{
+  "$schema": "./schemas/requirements-catalog.schema.json",
+  "schema_version": "1.0",
+  "requirements": []
+}

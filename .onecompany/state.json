@@ -1,6 +1,6 @@
 {
   "$schema": "./schemas/state.schema.json",
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "generated_or_reconciled_at": null,
   "repository_head": null,
   "company_state": "INITIALIZING",
@@ -9,9 +9,11 @@
   "current_pr_head": null,
   "current_material_authors": [],
   "active_leases": [],
+  "active_streams": [],
   "current_gate": null,
   "ready_work_count": 0,
+  "safe_start_candidates": [],
   "open_blockers": [],
   "human_decision_required": false,
-  "note": "This file is a cache. Reconcile with live GitHub before consequential autonomous action."
+  "note": "This file is a cache. Reconcile with live GitHub before consequential autonomous action. Legacy current_* fields are populated only when exactly one implementation stream is active."
 }

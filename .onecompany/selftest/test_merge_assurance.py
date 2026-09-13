@@ -107,6 +107,19 @@ class MergeAssuranceTests(unittest.TestCase):
         config = {
             "project": {"repository": "owner/repo"},
             "autonomy": {"level": "L2"},
+            "safety": {"emergency_stop": False},
+        }
+        governance = {
+            "control_plane": {
+                "fail_closed_if_diff_unavailable": True,
+                "human_merge_required": False,
+            }
+        }
+        base_context = {
+            "config": config,
+            "governance": governance,
+            "ledger": {"enabled": False},
+            "queue": self.queue(),
         }
 
         def fake_load(path: Path):
@@ -130,15 +143,14 @@ class MergeAssuranceTests(unittest.TestCase):
         stack.enter_context(
             patch.object(
                 merge,
-                "governance_config",
-                return_value={
-                    "control_plane": {
-                        "fail_closed_if_diff_unavailable": True,
-                        "human_merge_required": False,
-                    }
-                },
+                "_base_control_context",
+                return_value=(base_context, []),
             )
         )
+        stack.enter_context(
+            patch.object(merge, "_automation_policy_drift_errors", return_value=[])
+        )
+        stack.enter_context(patch.object(merge, "governance_config", return_value=governance))
         stack.enter_context(patch.object(merge, "changed_files", return_value=(["src/change.py"], None)))
         stack.enter_context(patch.object(merge, "protected_control_plane_paths", return_value=[]))
         stack.enter_context(patch.object(merge, "always_human_paths", return_value=[]))
@@ -232,6 +244,21 @@ class MergeAssuranceTests(unittest.TestCase):
             self.common(stack, state)
             stack.enter_context(
                 patch.object(merge, "_verify_reviewer", return_value=(None, ["stale review"]))
+            )
+            stack.enter_context(patch.object(sys, "argv", ["merge.py", "--pr", "1"]))
+            result = merge.main()
+        self.assertEqual(result, 2)
+
+    def test_candidate_policy_drift_blocks_automated_merge(self):
+        state = self.state()
+        with ExitStack() as stack:
+            self.common(stack, state)
+            stack.enter_context(
+                patch.object(
+                    merge,
+                    "_automation_policy_drift_errors",
+                    return_value=["candidate changes .onecompany/ledger.json"],
+                )
             )
             stack.enter_context(patch.object(sys, "argv", ["merge.py", "--pr", "1"]))
             result = merge.main()

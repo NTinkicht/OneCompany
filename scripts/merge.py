@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Mechanically merge only the exact live, independently approved OneCompany PR head."""
+"""Mechanically merge only an exact-head, base-aware, independently approved PR."""
 from __future__ import annotations
 
 import argparse
@@ -13,6 +13,8 @@ from onecompany_lib import (
     emergency_stop_active, github_repo_from_config, governance_config, load_json,
     protected_control_plane_paths, run, save_json,
 )
+from planning_lib import by_id
+from scope_guard import changed_files, live_pr, scope_errors
 
 
 def capability_eligible(actor_id: str, capability: str, access_key: str, excluded_authors: set[str] | None = None) -> tuple[bool, list[str]]:
@@ -35,12 +37,6 @@ def capability_eligible(actor_id: str, capability: str, access_key: str, exclude
         if not access.get("read"): reasons.append("repository_read_not_verified")
         if not access.get(access_key): reasons.append(f"repository_{access_key}_not_verified")
     return not reasons, reasons
-
-
-def changed_files(repo: str, pr: int) -> tuple[list[str] | None, str | None]:
-    result = run(["gh", "pr", "diff", str(pr), "--repo", repo, "--name-only"])
-    if result.returncode != 0: return None, result.stderr.strip() or result.stdout.strip() or "unknown diff error"
-    return [line.strip() for line in result.stdout.splitlines() if line.strip()], None
 
 
 def _stream_for_pr(state: dict, pr: int) -> dict | None:
@@ -73,7 +69,7 @@ def main() -> int:
     if emergency_stop_active(): print("REFUSED: emergency stop is active; autonomous merge is frozen"); return 2
     if not command_exists("gh") or run(["gh", "auth", "status"]).returncode != 0: print("REFUSED: authenticated gh CLI is required"); return 2
 
-    config = load_json(CONTROL / "config.json"); state = load_json(CONTROL / "state.json")
+    config = load_json(CONTROL / "config.json"); state = load_json(CONTROL / "state.json"); queue = load_json(CONTROL / "queue.json")
     repo = github_repo_from_config(config); pr = args.pr or _default_pr(state)
     if not repo or not pr: print("REFUSED: repository/explicit --pr is required when multiple streams are active"); return 2
     try: level = autonomy_number(config.get("autonomy", {}).get("level", "L0"))
@@ -103,18 +99,29 @@ def main() -> int:
     reviewer_ok, reviewer_reasons = capability_eligible(reviewer, "code_review", "review", material_authors)
     if not reviewer_ok: print(f"REFUSED: gate reviewer is no longer independently eligible: {','.join(reviewer_reasons)}"); return 2
     if not gate.get("evidence"): print("REFUSED: merge-ready gate has no durable evidence reference"); return 2
-    approved_sha = gate.get("sha")
-    if not approved_sha: print("REFUSED: gate has no approved SHA"); return 2
-    if state.get("open_blockers"): print("REFUSED: open blockers remain"); return 2
-    if state.get("human_decision_required"): print("REFUSED: human decision remains outstanding"); return 2
+    if gate.get("scope_verified") is not True: print("REFUSED: gate did not verify live PR scope"); return 2
+    approved_sha = gate.get("sha"); approved_base = gate.get("base_sha")
+    if not approved_sha or not approved_base: print("REFUSED: gate must record approved head and base SHAs"); return 2
+    if state.get("open_blockers"): print("REFUSED: company-wide open blockers remain"); return 2
+    if state.get("human_decision_required"): print("REFUSED: company-wide human decision remains outstanding"); return 2
+    if stream and stream.get("open_blockers"): print("REFUSED: stream open blockers remain"); return 2
+    if stream and stream.get("human_decision_required"): print("REFUSED: stream human decision remains outstanding"); return 2
+
+    work_map = by_id(queue.get("work_units", [])); wu_id = (stream or {}).get("work_unit") or state.get("current_work_unit")
+    work_unit_record = work_map.get(str(wu_id)) if wu_id else None
+    for problem in scope_errors(paths, work_unit_record):
+        print(f"REFUSED: {problem}"); return 2
+
     merge_ok, merge_reasons = capability_eligible(args.actor, "merge_execution", "merge")
     if not merge_ok: print(f"REFUSED: merge actor {args.actor} is not eligible: {','.join(merge_reasons)}"); return 2
 
-    result = run(["gh", "pr", "view", str(pr), "--repo", repo, "--json", "headRefOid,state,isDraft,mergeStateStatus"])
-    if result.returncode != 0: print("REFUSED: cannot read live PR state"); return 2
-    live = json.loads(result.stdout); live_head = live.get("headRefOid")
+    live, live_error = live_pr(repo, pr)
+    if live is None: print(f"REFUSED: cannot read live PR state: {live_error}"); return 2
+    live_head = live.get("headRefOid"); live_base = live.get("baseRefOid")
     if live.get("state") != "OPEN" or live.get("isDraft"): print("REFUSED: PR is not open/ready"); return 2
     if live_head != approved_sha: print(f"REFUSED: expected-head mismatch; approved={approved_sha} live={live_head}"); return 2
+    if live_base != approved_base:
+        print(f"REFUSED: base drift invalidated gate; reviewed_base={approved_base} live_base={live_base}. Rebase/update and rerun CI/review."); return 2
     checks = run(["gh", "pr", "checks", str(pr), "--repo", repo, "--required"])
     if checks.returncode != 0 or not checks.stdout.strip(): print("REFUSED: required checks are not all green/reported"); return 2
 
@@ -127,7 +134,7 @@ def main() -> int:
     if ledger_enabled():
         try:
             for lease in active: post_event("ROLE_LEASE_RELEASED", str(lease.get("actor") or args.actor), {"lease_id": lease.get("id"), "pr": pr, "reason": "merged"})
-            post_event("MERGED", args.actor, {"pr": pr, "work_unit": work_unit, "approved_head": approved_sha, "merge_sha": payload.get("sha"), "method": args.method})
+            post_event("MERGED", args.actor, {"pr": pr, "work_unit": work_unit, "approved_head": approved_sha, "approved_base": approved_base, "merge_sha": payload.get("sha"), "method": args.method})
         except Exception as exc:
             print(f"WARN: merge succeeded but ledger post-merge record failed: {exc}")
 
@@ -136,11 +143,11 @@ def main() -> int:
         if lease.get("status") == "active" and lease.get("role") == "implementation" and lease.get("pr") == pr:
             lease["status"] = "released"; lease["released_at"] = now; lease["release_reason"] = "merged"
     state["active_streams"] = [item for item in state.get("active_streams", []) if item.get("pr") != pr]
-    state["last_merge"] = {"pr": pr, "work_unit": work_unit, "approved_head": approved_sha, "merge_sha": payload.get("sha"), "actor": args.actor, "method": args.method, "merged_at": now}
+    state["last_merge"] = {"pr": pr, "work_unit": work_unit, "approved_head": approved_sha, "approved_base": approved_base, "merge_sha": payload.get("sha"), "actor": args.actor, "method": args.method, "merged_at": now}
     _sync_legacy(state)
     state["company_state"] = "ACTIVE_PARALLEL_IMPLEMENTATION" if len(state.get("active_streams", [])) > 1 else ("ACTIVE_IMPLEMENTATION" if state.get("active_streams") else "POST_MERGE_RECONCILE")
     save_json(CONTROL / "state.json", state)
-    print(f"MERGED PR #{pr}: {payload.get('sha')} (approved exact head {approved_sha})")
+    print(f"MERGED PR #{pr}: {payload.get('sha')} (approved head {approved_sha}, base {approved_base})")
     return 0
 
 

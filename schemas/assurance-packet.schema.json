@@ -2,20 +2,141 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "OneCompany Work Unit Assurance Packet",
   "type": "object",
-  "required": ["work_unit", "objective", "risk_level", "requirements", "acceptance_criteria", "risks", "traceability", "test_plan", "documentation_impact", "architecture_impact", "release", "evidence"],
+  "required": ["work_unit", "status", "objective", "risk_level", "quality_profile", "code_change", "requirements", "acceptance_criteria", "risks", "traceability", "test_plan", "documentation_impact", "architecture_impact", "release", "evidence"],
   "properties": {
-    "work_unit": {"type": "string", "pattern": "^WU[0-9]+$"},
+    "work_unit": {"type": "string", "pattern": "^WU(?:[0-9]+|-[A-Z0-9-]+)$"},
+    "status": {"enum": ["draft", "ready", "review", "in_progress", "merge_ready", "done"]},
     "objective": {"type": "string", "minLength": 10},
     "risk_level": {"enum": ["low", "medium", "high", "critical"]},
-    "requirements": {"type": "array", "minItems": 1, "items": {"$ref": "requirement.schema.json"}},
-    "acceptance_criteria": {"type": "array", "minItems": 1},
+    "quality_profile": {"enum": ["prototype", "standard", "production", "high_assurance", "regulated"]},
+    "code_change": {"type": "boolean"},
+    "candidate_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "material_authors": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "requirements": {"type": "array", "items": {"$ref": "requirement.schema.json"}},
+    "acceptance_criteria": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "statement", "verification_method"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^AC-[0-9]{3,}$"},
+          "statement": {"type": "string", "minLength": 10},
+          "verification_method": {"type": "string", "minLength": 1}
+        },
+        "additionalProperties": true
+      }
+    },
     "risks": {"type": "array", "items": {"$ref": "risk.schema.json"}},
-    "traceability": {"type": "array", "minItems": 1},
-    "test_plan": {"type": "object"},
+    "traceability": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source", "target", "relationship"],
+        "properties": {
+          "source": {"type": "string", "minLength": 1},
+          "target": {"type": "string", "minLength": 1},
+          "relationship": {"enum": ["objective_to_requirement", "requirement_to_acceptance_criterion", "requirement_to_risk", "requirement_to_design_or_architecture", "requirement_to_work_unit", "requirement_to_test", "test_to_evidence", "risk_to_mitigation", "mitigation_to_test", "change_to_requirement"]}
+        },
+        "additionalProperties": false
+      }
+    },
+    "test_plan": {
+      "type": "object",
+      "required": ["families", "tests"],
+      "properties": {
+        "families": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "tests": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "family", "covers"],
+            "properties": {
+              "id": {"type": "string", "pattern": "^TEST-[0-9]{3,}$"},
+              "family": {"type": "string", "minLength": 1},
+              "covers": {"type": "array", "minItems": 1, "items": {"type": "string"}, "uniqueItems": true},
+              "exploratory": {"type": "boolean"}
+            },
+            "additionalProperties": true
+          }
+        }
+      },
+      "additionalProperties": true
+    },
     "documentation_impact": {"type": "object"},
     "architecture_impact": {"type": "object"},
     "release": {"type": "object"},
-    "evidence": {"type": "object"}
+    "evidence": {
+      "type": "object",
+      "properties": {
+        "sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "verified_requirements": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "verified_acceptance_criteria": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "references": {
+          "type": "array",
+          "items": {"$ref": "evidence-reference.schema.json"}
+        },
+        "review_reference": {
+          "type": "object",
+          "required": ["review_id"],
+          "properties": {"review_id": {"type": "integer", "minimum": 1}},
+          "additionalProperties": false
+        },
+        "artifacts": {
+          "description": "Deprecated compatibility metadata. Merge-grade proof comes from references resolved by trusted_assurance.",
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "kind", "reference"],
+            "properties": {
+              "id": {"type": "string", "pattern": "^EVID-[0-9]{3,}$"},
+              "kind": {"type": "string", "minLength": 1},
+              "reference": {"type": "string", "minLength": 1}
+            },
+            "additionalProperties": true
+          }
+        },
+        "coverage": {"description": "Deprecated self-reported metadata; not authoritative for merge-grade assurance.", "type": "object"},
+        "test_family_results": {"description": "Deprecated self-reported metadata; not authoritative for merge-grade assurance.", "type": "object"},
+        "gates": {"description": "Deprecated self-reported metadata; not authoritative for merge-grade assurance.", "type": "object"},
+        "independent_review": {
+          "description": "Deprecated self-reported metadata; platform review_reference is authoritative.",
+          "type": "object",
+          "properties": {
+            "actor": {"type": "string", "minLength": 1},
+            "sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+            "verdict": {"type": "string"}
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    }
   },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"enum": ["ready", "review", "in_progress", "merge_ready", "done"]}}, "required": ["status"]},
+      "then": {
+        "properties": {
+          "requirements": {"minItems": 1},
+          "acceptance_criteria": {"minItems": 1},
+          "traceability": {"minItems": 1},
+          "test_plan": {"properties": {"families": {"minItems": 1}, "tests": {"minItems": 1}}}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"status": {"enum": ["merge_ready", "done"]}}, "required": ["status"]},
+      "then": {
+        "required": ["candidate_sha", "material_authors"],
+        "properties": {
+          "material_authors": {"minItems": 1},
+          "evidence": {
+            "required": ["sha", "verified_requirements", "verified_acceptance_criteria", "references", "review_reference"],
+            "properties": {"references": {"minItems": 1}}
+          }
+        }
+      }
+    }
+  ],
   "additionalProperties": true
 }

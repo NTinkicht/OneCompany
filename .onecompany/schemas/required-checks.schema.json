@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://onecompany.dev/schemas/required-checks.schema.json",
+  "title": "CompanyOS Required Check Manifest",
+  "type": "object",
+  "required": ["schema_version", "checks"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "schema_version": {"type": "string"},
+    "checks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "allowed_conclusions", "workflow_path"],
+        "properties": {
+          "name": {"type": "string", "minLength": 1},
+          "allowed_conclusions": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string", "minLength": 1},
+            "uniqueItems": true
+          },
+          "app_slug": {"type": ["string", "null"]},
+          "workflow_path": {"type": "string", "pattern": "^\\.github/workflows/.+\\.ya?ml$"}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

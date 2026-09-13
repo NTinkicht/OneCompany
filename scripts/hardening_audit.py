@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audit OneCompany-managed workflow and template supply-chain invariants."""
+"""Audit repository-wide workflow and template supply-chain invariants."""
 from __future__ import annotations
 
 import re
@@ -9,38 +9,197 @@ from pathlib import Path
 from onecompany_lib import ROOT
 
 SHA40 = re.compile(r"^[0-9a-fA-F]{40}$")
-USES = re.compile(r"(?m)^\s*-?\s*uses:\s*([^\s@]+)@([^\s#]+)")
+USES_KEY = re.compile(r"(?i)(?<![A-Za-z0-9_-])['\"]?uses['\"]?\s*:\s*([^\s,}\]]+)")
+USES_EMPTY = re.compile(r"(?im)(?<![A-Za-z0-9_-])['\"]?uses['\"]?\s*:\s*(?:$|[,}\]])")
+WRITE_ALL = re.compile(r"(?i)(?<![A-Za-z0-9_-])['\"]?permissions['\"]?\s*:\s*['\"]?write-all['\"]?(?![A-Za-z0-9_-])")
+BLOCK_PRT = re.compile(r"(?im)^\s*['\"]?pull_request_target['\"]?\s*:")
+FLOW_PRT = re.compile(
+    r"(?is)(?<![A-Za-z0-9_-])['\"]?on['\"]?\s*:\s*(?:\[[^\]]*\bpull_request_target\b|\{[^}]*\bpull_request_target\b)"
+)
+ENCODED_SCALAR = re.compile(r"\\(?:x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})")
+YAML_ANCHOR_OR_ALIAS = re.compile(r"(?m)(?:^|[\s\[{,])(?:&|\*)[A-Za-z_][A-Za-z0-9_-]*")
+# Security-relevant keys must use a visible scalar/mapping representation. GitHub
+# workflows legitimately use block scalars for `run`, so only keys that affect
+# trigger/privilege/action provenance are forbidden from using folded/literal
+# block scalar syntax or YAML tags.
+SECURITY_BLOCK_SCALAR = re.compile(
+    r"(?im)^\s*['\"]?(?:permissions|uses|on)['\"]?\s*:\s*[>|][+-]?\s*$"
+)
+# Reject both shorthand tags (`!foo`, `!!str`) and YAML's verbatim `!<...>` form.
+# Security auditing intentionally accepts only a canonical visible YAML subset.
+YAML_TAG = re.compile(
+    r"(?m)(?:^|[\s\[{,])(?:!<[^>\r\n]+>|!{1,2}[A-Za-z_][A-Za-z0-9_:/.-]*)"
+)
+ACTION_REFERENCE = re.compile(
+    r"(?<![A-Za-z0-9_.-])([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)@([^\s,}\]\"']+)"
+)
+DOCKER_REFERENCE = re.compile(r"docker://([^\s,}\]\"']+)")
+
+
+def workflow_files(root: Path) -> list[Path]:
+    if not root.exists():
+        return []
+    return sorted(
+        path
+        for path in root.rglob("*")
+        if path.is_file() and path.suffix.lower() in {".yml", ".yaml"}
+    )
+
+
+def _strip_yaml_comments(text: str) -> str:
+    """Remove YAML comments without treating # inside quoted strings as comments."""
+    output: list[str] = []
+    single = False
+    double = False
+    escaped = False
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if ch == "\n":
+            output.append(ch)
+            escaped = False
+            i += 1
+            continue
+        if double:
+            output.append(ch)
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                double = False
+            i += 1
+            continue
+        if single:
+            output.append(ch)
+            if ch == "'":
+                if i + 1 < len(text) and text[i + 1] == "'":
+                    output.append("'")
+                    i += 2
+                    continue
+                single = False
+            i += 1
+            continue
+        if ch == '"':
+            double = True
+            output.append(ch)
+        elif ch == "'":
+            single = True
+            output.append(ch)
+        elif ch == "#":
+            while i < len(text) and text[i] != "\n":
+                i += 1
+            continue
+        else:
+            output.append(ch)
+        i += 1
+    return "".join(output)
+
+
+def _unquote(value: str) -> str:
+    value = value.strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+        return value[1:-1]
+    return value
+
+
+def _audit_action_reference(relative: Path, raw: str) -> list[str]:
+    errors: list[str] = []
+    if raw.startswith("./"):
+        return errors
+    if raw.startswith("docker://"):
+        image = raw[len("docker://"):]
+        if not re.search(r"@sha256:[0-9a-fA-F]{64}$", image):
+            errors.append(
+                f"{relative}: docker action {raw} is not pinned to an immutable sha256 digest"
+            )
+        return errors
+    if "@" not in raw:
+        errors.append(f"{relative}: external action {raw} is missing an immutable revision")
+        return errors
+    action, revision = raw.rsplit("@", 1)
+    if not action or not SHA40.fullmatch(revision):
+        errors.append(
+            f"{relative}: external action {raw} is not pinned to immutable 40-hex SHA"
+        )
+    return errors
+
+
+def audit_workflow(path: Path) -> list[str]:
+    errors: list[str] = []
+    text = _strip_yaml_comments(path.read_text(encoding="utf-8"))
+    relative = path.relative_to(ROOT)
+
+    if ENCODED_SCALAR.search(text):
+        errors.append(
+            f"{relative}: YAML hex/unicode escapes are forbidden in executable workflows; "
+            "use canonical visible scalars"
+        )
+    if YAML_ANCHOR_OR_ALIAS.search(text):
+        errors.append(
+            f"{relative}: YAML anchors/aliases are forbidden in executable workflows; "
+            "keep security-relevant structure explicit"
+        )
+    if SECURITY_BLOCK_SCALAR.search(text):
+        errors.append(
+            f"{relative}: security-relevant workflow keys may not use folded/literal block scalars"
+        )
+    if YAML_TAG.search(text):
+        errors.append(f"{relative}: YAML tags are forbidden in executable workflows")
+
+    if BLOCK_PRT.search(text) or FLOW_PRT.search(text) or "pull_request_target" in text:
+        errors.append(f"{relative}: pull_request_target is forbidden")
+    if WRITE_ALL.search(text):
+        errors.append(f"{relative}: permissions: write-all is forbidden")
+
+    if USES_EMPTY.search(text):
+        errors.append(f"{relative}: uses must be an explicit scalar on the same mapping entry")
+
+    seen: set[str] = set()
+    for match in USES_KEY.finditer(text):
+        raw = _unquote(match.group(1))
+        seen.add(raw)
+        errors.extend(_audit_action_reference(relative, raw))
+
+    for match in ACTION_REFERENCE.finditer(text):
+        raw = f"{match.group(1)}@{match.group(2)}"
+        if raw in seen:
+            continue
+        errors.extend(_audit_action_reference(relative, raw))
+
+    for match in DOCKER_REFERENCE.finditer(text):
+        raw = "docker://" + match.group(1)
+        if raw in seen:
+            continue
+        errors.extend(_audit_action_reference(relative, raw))
+
+    return sorted(set(errors))
 
 
 def main() -> int:
     errors: list[str] = []
     workflows = ROOT / ".github" / "workflows"
-    for path in sorted(list(workflows.glob("onecompany-*.yml")) + list(workflows.glob("onecompany-*.yaml"))):
-        text = path.read_text(encoding="utf-8")
-        relative = path.relative_to(ROOT)
-        if re.search(r"(?m)^\s*pull_request_target\s*:", text):
-            errors.append(f"{relative}: pull_request_target is forbidden for managed workflows")
-        if re.search(r"(?mi)^\s*permissions\s*:\s*write-all\s*$", text):
-            errors.append(f"{relative}: permissions: write-all is forbidden")
-        for match in USES.finditer(text):
-            action, revision = match.groups()
-            if action.startswith("./"):
-                continue
-            if not SHA40.fullmatch(revision):
-                errors.append(f"{relative}: external action {action}@{revision} is not pinned to immutable 40-hex SHA")
+    discovered = workflow_files(workflows)
+    if not discovered:
+        errors.append(".github/workflows contains no executable workflow to audit")
+    for path in discovered:
+        errors.extend(audit_workflow(path))
 
     template_dir = ROOT / ".onecompany" / "templates" / "workflows"
     if template_dir.exists():
         for path in template_dir.rglob("*"):
-            if path.is_file() and path.suffix in {".yml", ".yaml"}:
-                errors.append(f"{path.relative_to(ROOT)}: provider/supervisor template became executable; keep templates disabled until project setup explicitly promotes them")
+            if path.is_file() and path.suffix.lower() in {".yml", ".yaml"}:
+                errors.append(
+                    f"{path.relative_to(ROOT)}: provider/supervisor template became executable; "
+                    "keep templates disabled until project setup explicitly promotes them"
+                )
 
     if errors:
         for error in errors:
             print(f"ERROR: {error}")
         print(f"Hardening audit FAILED ({len(errors)} error(s)).")
         return 1
-    print("Hardening audit PASS.")
+    print(f"Hardening audit PASS ({len(discovered)} workflow(s) audited).")
     return 0
 
 

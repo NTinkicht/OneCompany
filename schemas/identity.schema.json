@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OneCompany Platform Identity Policy",
+  "type": "object",
+  "required": ["schema_version", "trust_model", "bootstrap", "principals", "root_rotation", "emergency_stop"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "trust_model": {"const": "base-trusted-platform-principal"},
+    "bootstrap": {
+      "type": "object",
+      "required": ["when_base_policy_absent"],
+      "properties": {"when_base_policy_absent": {"const": "repository_owner_only"}},
+      "additionalProperties": false
+    },
+    "principals": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["login", "actor_id", "authorities"],
+        "properties": {
+          "login": {"type": "string", "minLength": 1},
+          "actor_id": {"type": "string", "minLength": 1},
+          "authorities": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {"type": "string", "minLength": 1}
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "root_rotation": {
+      "type": "object",
+      "required": ["requires_out_of_band_human_approval", "requires_protected_platform_review", "audit_event_type"],
+      "properties": {
+        "requires_out_of_band_human_approval": {"const": true},
+        "requires_protected_platform_review": {"const": true},
+        "audit_event_type": {"const": "ROOT_TRUST_ROTATED"}
+      },
+      "additionalProperties": false
+    },
+    "emergency_stop": {
+      "type": "object",
+      "required": ["assertion_is_permissionless", "clear_requires_authority", "external_environment_flag", "external_file_environment"],
+      "properties": {
+        "assertion_is_permissionless": {"const": true},
+        "clear_requires_authority": {"const": "emergency_control"},
+        "external_environment_flag": {"const": "ONECOMPANY_EMERGENCY_STOP"},
+        "external_file_environment": {"const": "ONECOMPANY_EMERGENCY_STOP_FILE"}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,22 +1,44 @@
 {
   "$schema": "./schemas/governance.schema.json",
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "control_plane": {
     "human_merge_required": true,
     "fail_closed_if_diff_unavailable": true,
     "protected_paths": [
-      "company/**", "agents/**", "patterns/**", "overlays/**",
-      ".onecompany/config.json", ".onecompany/budget.json", ".onecompany/actors.json", ".onecompany/readiness.json", ".onecompany/roles.json", ".onecompany/routing.json", ".onecompany/dispatch.json", ".onecompany/ledger.json", ".onecompany/supervision.json", ".onecompany/governance.json",
-      ".onecompany/planning.json", ".onecompany/portfolio.json", ".onecompany/requirements-catalog.json", ".onecompany/acceptance-criteria.json", ".onecompany/risk-register.json", ".onecompany/queue.json",
-      ".onecompany/quality.json", ".onecompany/requirements.json", ".onecompany/risk.json", ".onecompany/traceability.json", ".onecompany/architecture.json", ".onecompany/waivers.json", ".onecompany/quality-baseline.json",
-      ".onecompany/schemas/**",
+      ".onecompany/**",
+      "scripts/**",
+      "company/**",
+      "agents/**",
+      "patterns/**",
+      "overlays/**",
+      ".github/**",
       "onecompany.py",
-      "scripts/assurance.py", "scripts/assurance_gate.py", "scripts/bootstrap.py", "scripts/capacity_lib.py", "scripts/check.py", "scripts/dispatch.py", "scripts/dispatch_validate.py", "scripts/doctor.py", "scripts/flow_validate.py", "scripts/gate.py", "scripts/github_audit.py", "scripts/governance_validate.py", "scripts/hardening_audit.py", "scripts/init_project.py", "scripts/lease.py", "scripts/ledger.py", "scripts/ledger_lib.py", "scripts/ledger_validate.py", "scripts/merge.py", "scripts/next_work.py", "scripts/onboard.py", "scripts/onecompany_lib.py", "scripts/planner.py", "scripts/planning_lib.py", "scripts/planning_validate.py", "scripts/queue_validate.py", "scripts/readiness.py", "scripts/reconcile.py", "scripts/risk_register_validate.py", "scripts/router.py", "scripts/schema_validate.py", "scripts/scope_guard.py", "scripts/simulate.py", "scripts/simulate_ledger.py", "scripts/simulate_parallelism.py", "scripts/simulate_supervision.py", "scripts/smoke_bootstrap.py", "scripts/smoke_init.py", "scripts/status.py", "scripts/supervise.py", "scripts/supervision_validate.py", "scripts/validate.py", "scripts/validate_all.py",
-      ".github/workflows/**", "AGENTS.md", "CLAUDE.md", "GEMINI.md", ".github/copilot-instructions.md"
+      "Makefile",
+      "AGENTS.md",
+      "CLAUDE.md",
+      "GEMINI.md"
     ],
-    "always_human_paths": ["company/CONSTITUTION.md", ".onecompany/governance.json"]
+    "always_human_paths": [
+      "company/CONSTITUTION.md",
+      ".onecompany/governance.json",
+      ".onecompany/required-checks.json",
+      ".github/CODEOWNERS",
+      ".github/workflows/**"
+    ]
   },
-  "supply_chain": {"onecompany_managed_actions_require_sha_pin": true, "forbid_pull_request_target_in_managed_workflows": true, "forbid_write_all_in_managed_workflows": true},
-  "side_effects": {"require_idempotency_or_natural_deduplication": true, "require_rollback_or_compensation_for_destructive_actions": true, "require_bounded_retry_policy": true},
-  "policy": {"no_self_escalation": true, "control_plane_relaxation_requires_human": true, "ambiguity_fails_closed": true}
+  "supply_chain": {
+    "all_workflow_actions_require_sha_pin": true,
+    "forbid_pull_request_target_in_all_workflows": true,
+    "forbid_write_all_in_all_workflows": true
+  },
+  "side_effects": {
+    "require_idempotency_or_natural_deduplication": true,
+    "require_rollback_or_compensation_for_destructive_actions": true,
+    "require_bounded_retry_policy": true
+  },
+  "policy": {
+    "no_self_escalation": true,
+    "control_plane_relaxation_requires_human": true,
+    "ambiguity_fails_closed": true
+  }
 }

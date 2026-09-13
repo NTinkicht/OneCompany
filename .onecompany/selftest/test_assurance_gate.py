@@ -14,25 +14,52 @@ gate = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(gate)
 REFERENCE = ROOT / ".onecompany" / "reference" / "assurance" / "WU900.json"
 
+
 class AssuranceGateTests(unittest.TestCase):
     @classmethod
-    def setUpClass(cls): cls.packet = json.loads(REFERENCE.read_text())
-    def test_merge_ready_reference_passes(self):
-        errors, _ = gate.validate(copy.deepcopy(self.packet)); self.assertEqual(errors, [])
-    def test_undercoverage_fails(self):
-        packet = copy.deepcopy(self.packet); packet["evidence"]["coverage"]["branch"] = 12
-        errors, _ = gate.validate(packet); self.assertTrue(any("coverage.branch" in item for item in errors))
-    def test_missing_required_test_family_evidence_fails(self):
-        packet = copy.deepcopy(self.packet); del packet["evidence"]["test_family_results"]["security"]
-        errors, _ = gate.validate(packet); self.assertTrue(any("required test family security" in item for item in errors))
-    def test_stale_independent_review_fails(self):
-        packet = copy.deepcopy(self.packet); packet["evidence"]["independent_review"]["sha"] = "b" * 40
-        errors, _ = gate.validate(packet); self.assertTrue(any("independent review must target exact" in item for item in errors))
-    def test_author_cannot_independently_review(self):
-        packet = copy.deepcopy(self.packet); packet["evidence"]["independent_review"]["actor"] = "implementer-example"
-        errors, _ = gate.validate(packet); self.assertTrue(any("cannot be a material author" in item for item in errors))
-    def test_missing_objective_trace_fails(self):
-        packet = copy.deepcopy(self.packet); packet["traceability"] = [x for x in packet["traceability"] if x["relationship"] != "objective_to_requirement"]
-        errors, _ = gate.validate(packet); self.assertTrue(any("objective_to_requirement" in item for item in errors))
+    def setUpClass(cls):
+        cls.packet = json.loads(REFERENCE.read_text(encoding="utf-8"))
 
-if __name__ == "__main__": unittest.main()
+    def test_merge_ready_reference_structure_passes(self):
+        errors, _ = gate.validate_structure(copy.deepcopy(self.packet))
+        self.assertEqual(errors, [])
+
+    def test_undercoverage_claim_is_not_structural_authority(self):
+        packet = copy.deepcopy(self.packet)
+        packet["evidence"]["coverage"]["branch"] = 12
+        errors, _ = gate.validate_structure(packet)
+        self.assertEqual(errors, [])
+
+    def test_missing_legacy_test_family_claim_is_not_structural_authority(self):
+        packet = copy.deepcopy(self.packet)
+        del packet["evidence"]["test_family_results"]["security"]
+        errors, _ = gate.validate_structure(packet)
+        self.assertEqual(errors, [])
+
+    def test_stale_legacy_review_claim_is_not_structural_authority(self):
+        packet = copy.deepcopy(self.packet)
+        packet["evidence"]["independent_review"]["sha"] = "b" * 40
+        errors, _ = gate.validate_structure(packet)
+        self.assertEqual(errors, [])
+
+    def test_legacy_self_review_claim_is_not_structural_authority(self):
+        packet = copy.deepcopy(self.packet)
+        packet["evidence"]["independent_review"]["actor"] = "implementer-example"
+        errors, _ = gate.validate_structure(packet)
+        self.assertEqual(errors, [])
+
+    def test_missing_platform_review_reference_fails(self):
+        packet = copy.deepcopy(self.packet)
+        packet["evidence"].pop("review_reference", None)
+        errors, _ = gate.validate_structure(packet)
+        self.assertTrue(any("review_reference" in item for item in errors), errors)
+
+    def test_missing_objective_trace_fails(self):
+        packet = copy.deepcopy(self.packet)
+        packet["traceability"] = [x for x in packet["traceability"] if x["relationship"] != "objective_to_requirement"]
+        errors, _ = gate.validate_structure(packet)
+        self.assertTrue(any("objective_to_requirement" in item for item in errors), errors)
+
+
+if __name__ == "__main__":
+    unittest.main()

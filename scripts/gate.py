@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Record a binding exact-head, base-aware review gate for one PR/Work Unit stream."""
+"""Record a binding exact-head/base gate backed by an exact GitHub review."""
 from __future__ import annotations
 
 import argparse
@@ -8,50 +8,28 @@ import json
 import sys
 
 from ledger_lib import derive, ledger_enabled, list_events, post_event
-from onecompany_lib import CONTROL, budget_allows, command_exists, emergency_stop_active, github_repo_from_config, load_json, run, save_json
+from onecompany_lib import (
+    CONTROL,
+    command_exists,
+    emergency_stop_active,
+    github_repo_from_config,
+    load_json,
+    run,
+    save_json,
+)
 from planning_lib import by_id
+from platform_identity import require_authority, review_platform_identity
 from required_checks import evaluate_required_checks
 from scope_guard import changed_files, live_pr, scope_errors
 
-VERDICTS = ["PASS — MERGE_READY", "CHANGES_REQUIRED", "BLOCKED — CI_RED", "BLOCKED — HUMAN_DECISION", "BLOCKED — CAPACITY"]
-
-
-def reviewer_eligible(actor_id: str, material_authors: set[str]) -> tuple[bool, list[str]]:
-    actors = load_json(CONTROL / "actors.json")
-    readiness_doc = load_json(CONTROL / "readiness.json")
-    budget = load_json(CONTROL / "budget.json")
-    actor = next((item for item in actors.get("actors", []) if item.get("id") == actor_id), None)
-    ready = next((item for item in readiness_doc.get("actors", []) if item.get("actor_id") == actor_id), None)
-    reasons: list[str] = []
-    if actor is None:
-        return False, ["unknown_actor"]
-    if actor_id in material_authors:
-        reasons.append("material_author_conflict")
-    if not actor.get("enabled"):
-        reasons.append("disabled")
-    if not actor.get("configured"):
-        reasons.append("not_configured")
-    if "code_review" not in actor.get("capabilities", []):
-        reasons.append("code_review_not_declared")
-    if actor.get("may_independently_gate_own_material_authorship") is True:
-        reasons.append("self_gate_policy_conflict")
-    if not budget_allows(actor.get("cost_class", "UNKNOWN_COST"), budget):
-        reasons.append("forbidden_by_budget")
-    if ready is None:
-        reasons.append("missing_readiness")
-    else:
-        if ready.get("setup_state") not in {"ready", "degraded"}:
-            reasons.append(f"setup_state:{ready.get('setup_state')}")
-        if "code_review" not in ready.get("verified_capabilities", []):
-            reasons.append("code_review_not_verified")
-        if "code_review" in ready.get("temporarily_unavailable_capabilities", []):
-            reasons.append("code_review_temporarily_unavailable")
-        access = ready.get("repository_access", {})
-        if not access.get("read"):
-            reasons.append("repository_read_not_verified")
-        if not access.get("review"):
-            reasons.append("review_publish_not_verified")
-    return not reasons, reasons
+VERDICTS = [
+    "PASS — MERGE_READY",
+    "CHANGES_REQUIRED",
+    "BLOCKED — CI_RED",
+    "BLOCKED — HUMAN_DECISION",
+    "BLOCKED — CAPACITY",
+]
+NON_PASS_REVIEW_STATES = {"APPROVED", "CHANGES_REQUESTED", "COMMENTED"}
 
 
 def _stream_for_pr(state: dict, pr: int) -> dict | None:
@@ -77,13 +55,18 @@ def _default_pr(state: dict) -> int | None:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--reviewer", required=True)
+    parser.add_argument("--review-id", type=int, required=True, help="GitHub pull-request review ID")
+    parser.add_argument(
+        "--reviewer",
+        help="Optional descriptive assertion; must match the platform-derived login or actor ID",
+    )
     parser.add_argument("--sha", required=True)
     parser.add_argument("--verdict", required=True, choices=VERDICTS)
     parser.add_argument("--pr", type=int)
     parser.add_argument("--evidence", action="append", default=[])
     parser.add_argument("--summary", default="")
     args = parser.parse_args()
+
     if emergency_stop_active():
         print("REFUSED: emergency stop is active; do not publish binding gates during containment")
         return 2
@@ -99,6 +82,7 @@ def main() -> int:
     if not repo or not pr:
         print("REFUSED: repository and explicit --pr are required when multiple streams are active")
         return 2
+
     live, live_error = live_pr(repo, pr)
     if live is None:
         print(f"REFUSED: cannot read live PR state: {live_error}")
@@ -120,16 +104,44 @@ def main() -> int:
     if work_unit is None:
         print(f"REFUSED: PR #{pr} is not mapped to a versioned Work Unit")
         return 2
-    material_authors = set((stream or {}).get("material_authors", state.get("current_material_authors", [])))
+
+    material_authors = set(
+        (stream or {}).get("material_authors", state.get("current_material_authors", []))
+    )
     if ledger_enabled():
         try:
             material_authors = set(derive(list_events(), pr).get("material_authors", []))
         except Exception as exc:
             print(f"REFUSED: cannot read durable authorship ledger: {exc}")
             return 2
-    eligible, reasons = reviewer_eligible(args.reviewer, material_authors)
-    if not eligible:
-        print(f"REFUSED: reviewer {args.reviewer} is not eligible: {','.join(reasons)}")
+
+    allowed_states = {"APPROVED"} if args.verdict == "PASS — MERGE_READY" else NON_PASS_REVIEW_STATES
+    reviewer_identity, identity_errors = review_platform_identity(
+        repo,
+        pr,
+        args.review_id,
+        args.sha,
+        base_sha,
+        allowed_states=allowed_states,
+    )
+    if reviewer_identity is None:
+        print("REFUSED: platform reviewer identity is not verified: " + ",".join(identity_errors))
+        return 2
+    reviewer_ok, reviewer_reasons = require_authority(
+        reviewer_identity,
+        "code_review",
+        material_authors,
+    )
+    if not reviewer_ok:
+        print("REFUSED: platform reviewer lacks independent code-review authority: " + ",".join(reviewer_reasons))
+        return 2
+    reviewer_actor = str(reviewer_identity.get("actor_id"))
+    reviewer_login = str(reviewer_identity.get("login"))
+    if args.reviewer and args.reviewer not in {reviewer_actor, reviewer_login}:
+        print(
+            f"REFUSED: descriptive --reviewer {args.reviewer!r} does not match "
+            f"platform identity actor={reviewer_actor!r} login={reviewer_login!r}"
+        )
         return 2
 
     paths, diff_error = changed_files(repo, pr)
@@ -143,17 +155,11 @@ def main() -> int:
         if not args.evidence:
             print("REFUSED: PASS — MERGE_READY requires at least one durable evidence reference")
             return 2
-        if state.get("open_blockers"):
-            print("REFUSED: company-wide open blockers remain")
+        if state.get("open_blockers") or (stream and stream.get("open_blockers")):
+            print("REFUSED: open blockers remain")
             return 2
-        if state.get("human_decision_required"):
-            print("REFUSED: company-wide human decision remains outstanding")
-            return 2
-        if stream and stream.get("open_blockers"):
-            print("REFUSED: stream open blockers remain")
-            return 2
-        if stream and stream.get("human_decision_required"):
-            print("REFUSED: stream human decision remains outstanding")
+        if state.get("human_decision_required") or (stream and stream.get("human_decision_required")):
+            print("REFUSED: human decision remains outstanding")
             return 2
         if scope_problems:
             for problem in scope_problems:
@@ -167,12 +173,25 @@ def main() -> int:
                 print(f"REFUSED: {reason}")
             return 2
 
+    review_record = {
+        "review_id": args.review_id,
+        "reviewer_login": reviewer_login,
+        "reviewer_actor": reviewer_actor,
+        "review_state": reviewer_identity.get("review_state"),
+        "review_commit_id": reviewer_identity.get("review_commit_id"),
+        "identity_provider": reviewer_identity.get("provider"),
+        "identity_policy_provenance": reviewer_identity.get("policy_provenance"),
+        "bootstrap_review_only": reviewer_identity.get("bootstrap_review_only") is True,
+    }
     gate = {
         "pr": pr,
         "work_unit": work_unit.get("id"),
         "sha": args.sha,
         "base_sha": base_sha,
-        "reviewer_actor": args.reviewer,
+        "reviewer_actor": reviewer_actor,
+        "reviewer_login": reviewer_login,
+        "review_id": args.review_id,
+        "review_identity": review_record,
         "verdict": args.verdict,
         "reviewed_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "material_authors": sorted(material_authors),
@@ -183,25 +202,26 @@ def main() -> int:
         "changed_files": paths,
         "stale": False,
     }
+
     if ledger_enabled():
         try:
-            event = post_event(
-                "GATE",
-                args.reviewer,
-                {
-                    "pr": pr,
-                    "work_unit": work_unit.get("id"),
-                    "sha": args.sha,
-                    "base_sha": base_sha,
-                    "verdict": args.verdict,
-                    "material_authors": sorted(material_authors),
-                    "evidence": args.evidence,
-                    "required_checks": required_check_evidence,
-                    "summary": args.summary,
-                    "scope_verified": not scope_problems,
-                    "changed_files": paths,
-                },
-            )
+            payload = {
+                "pr": pr,
+                "work_unit": work_unit.get("id"),
+                "sha": args.sha,
+                "base_sha": base_sha,
+                "review_id": args.review_id,
+                "reviewer_login": reviewer_login,
+                "review_identity": review_record,
+                "verdict": args.verdict,
+                "material_authors": sorted(material_authors),
+                "evidence": args.evidence,
+                "required_checks": required_check_evidence,
+                "summary": args.summary,
+                "scope_verified": not scope_problems,
+                "changed_files": paths,
+            }
+            event = post_event("GATE", reviewer_actor, payload)
             gate["github_comment_url"] = event.get("github_comment_url")
             gate["github_publisher"] = event.get("github_publisher")
             durable = derive(list_events(), pr).get("current_gate")
@@ -209,7 +229,8 @@ def main() -> int:
                 not durable
                 or durable.get("sha") != args.sha
                 or durable.get("base_sha") != base_sha
-                or durable.get("reviewer_actor") != args.reviewer
+                or durable.get("reviewer_actor") != reviewer_actor
+                or durable.get("review_id") != args.review_id
                 or durable.get("stale")
             ):
                 print("REFUSED: newly published gate did not become a current valid durable gate")
@@ -223,12 +244,16 @@ def main() -> int:
         if item.get("pr") == pr:
             item.setdefault("open_blockers", [])
             item.setdefault("human_decision_required", False)
-            item["work_unit"] = work_unit.get("id")
-            item["head"] = live_head
-            item["base_sha"] = base_sha
-            item["material_authors"] = sorted(material_authors)
-            item["gate"] = gate
-            item["status"] = "MERGE_READY" if args.verdict == "PASS — MERGE_READY" else "REVIEW_BLOCKED"
+            item.update(
+                {
+                    "work_unit": work_unit.get("id"),
+                    "head": live_head,
+                    "base_sha": base_sha,
+                    "material_authors": sorted(material_authors),
+                    "gate": gate,
+                    "status": "MERGE_READY" if args.verdict == "PASS — MERGE_READY" else "REVIEW_BLOCKED",
+                }
+            )
             matched = True
     if not matched:
         state.setdefault("active_streams", []).append(

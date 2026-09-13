@@ -217,9 +217,6 @@ def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any
     def add_lease(lease_id: str, actor: str | None, payload: dict[str, Any], event: dict[str, Any]) -> bool:
         role = payload.get("role", "implementation")
         if role == "implementation":
-            # A published implementation lease ID is known even if it loses
-            # arbitration. Stale follow-on failover events from that rejected ID
-            # are another losing claim, not evidence of ledger corruption.
             known_implementation_leases.add(lease_id)
             candidate = snapshot_item(payload)
             actor_limit = actor_capacities.get(str(actor), 1) if actor else None
@@ -279,6 +276,8 @@ def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any
             old = active.get(old_id)
             if old is None:
                 if old_id in known_implementation_leases:
+                    if new_id:
+                        known_implementation_leases.add(new_id)
                     record_rejected_claim(
                         event,
                         new_id,
@@ -364,7 +363,6 @@ def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any
         "gates_by_pr": gates_by_pr,
         "rejected_claims": rejected_claims,
         "integrity_conflicts": unresolved_integrity_conflicts,
-        # Backward-compatible alias. Only unresolved integrity conflicts block progression.
         "conflicts": unresolved_integrity_conflicts,
         "resolved_conflict_ids": sorted(resolved_conflict_ids),
         "merged_work_units": sorted(merged_work_units),

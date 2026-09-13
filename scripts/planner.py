@@ -8,7 +8,7 @@ import sys
 
 from ledger_lib import derive, ledger_enabled, list_events
 from onecompany_lib import CONTROL, load_json
-from planning_lib import by_id, critical_path, priority_score, select_parallel_set
+from planning_lib import by_id, critical_path, priority_score, rank_work, select_parallel_set
 from planning_validate import validate_documents
 
 
@@ -63,8 +63,19 @@ def main() -> int:
         }, indent=2))
         return 0
     if args.command == "rank":
-        ranked = sorted(work, key=lambda item: (-priority_score(item, planning), str(item.get("id", ""))))
-        print(json.dumps([{"id": item.get("id"), "status": item.get("status"), "score": round(priority_score(item, planning), 4), "priority": item.get("priority")} for item in ranked], indent=2))
+        ranked = rank_work(work, planning)
+        critical_ids = set(critical_path(work).get("path", []))
+        print(json.dumps([
+            {
+                "id": item.get("id"),
+                "status": item.get("status"),
+                "score": round(priority_score(item, planning), 4),
+                "priority": item.get("priority"),
+                "critical_path": item.get("id") in critical_ids,
+                "job_size": (item.get("estimate") or {}).get("job_size"),
+            }
+            for item in ranked
+        ], indent=2))
         return 0
     if args.command == "parallel":
         leases, done = active_leases()
@@ -85,6 +96,7 @@ def main() -> int:
         payload = {"id": identifier, "entity": entity, "requirement": requirement, "work_unit": work_item, "links": links}
         if work_item:
             payload["priority_score"] = round(priority_score(work_item, planning), 4)
+            payload["critical_path"] = identifier in set(critical_path(work).get("path", []))
         if not entity and not requirement and not work_item:
             payload["error"] = "unknown id"
             print(json.dumps(payload, indent=2)); return 2

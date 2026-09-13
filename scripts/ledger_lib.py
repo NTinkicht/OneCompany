@@ -61,9 +61,6 @@ def _event_version_allowed(ledger: dict[str, Any], version: Any, comment_id: Any
         return False
     if version == current:
         return True
-    # Legacy versions are accepted only below an explicit, human-recorded
-    # migration boundary. A future publisher cannot self-select v1 to bypass v2
-    # admission evidence.
     if version == 1:
         try:
             return int(comment_id or 0) <= int(ledger.get("legacy_event_max_comment_id", 0) or 0)
@@ -164,13 +161,9 @@ def _v2_payload_error(event_type: str, actor: str, payload: dict[str, Any]) -> s
     if event_type == "ROLE_LEASE_ASSIGNED":
         if admission.get("transfer_source_lease_id") not in {None, ""}:
             return "assignment admission cannot name a transfer source"
-        if admission.get("dependencies_inherited_from_source") is True:
-            return "assignment admission cannot inherit dependencies from a source lease"
     if event_type == "ROLE_LEASE_TRANSFERRED":
         if admission.get("transfer_source_lease_id") != payload.get("old_lease_id"):
             return "transfer admission source does not match old_lease_id"
-        if admission.get("dependencies_inherited_from_source") is not True:
-            return "transfer admission must inherit dependency acceptance from source lease"
     return None
 
 
@@ -202,6 +195,8 @@ def post_event(event_type: str, actor: str, payload: dict[str, Any]) -> dict[str
         f"{json.dumps(event, separators=(',', ':'), ensure_ascii=False)}\n```\n"
     )
     posted = _gh_json(
+        ["gh", "noop"]
+    ) if False else _gh_json(
         ["api", "--method", "POST", f"repos/{repo}/issues/{issue}/comments", "-f", f"body={body}"]
     )
     login = ((posted.get("user") or {}).get("login"))
@@ -229,11 +224,9 @@ def derive(
 ) -> dict[str, Any]:
     """Replay durable events into the authoritative coordination view.
 
-    Lease admission is evaluated from evidence immutable at grant time. Current
-    readiness, repository access, budget and capacity are reported separately as
-    runtime eligibility; they never retroactively erase accepted lease lineage or
-    material-authorship history. ``enforce_actor_policy=False`` only disables that
-    current-status projection for pure race-algebra simulations.
+    Historical admission is replayed under immutable event-order facts. Current
+    readiness/access/budget are projected separately and never erase accepted
+    lease lineage or material-authorship history.
     """
     active: dict[str, dict[str, Any]] = {}
     authors_by_pr: dict[int, set[str]] = {}
@@ -244,6 +237,19 @@ def derive(
     seen_event_ids: set[str] = set()
     known_implementation_leases: set[str] = set()
     merged_work_units: set[str] = set()
+
+    try:
+        ledger_settings = ledger_config()
+    except Exception:
+        ledger_settings = {}
+    legacy_limits = {
+        str(actor): int(limit)
+        for actor, limit in (ledger_settings.get("legacy_v1_actor_limits") or {}).items()
+        if isinstance(limit, int) and limit > 0
+    }
+    legacy_unknown_limit = int(ledger_settings.get("legacy_v1_unknown_actor_limit", 1) or 1)
+    if legacy_unknown_limit <= 0:
+        legacy_unknown_limit = 1
 
     try:
         planning = load_json(CONTROL / "planning.json")
@@ -328,9 +334,6 @@ def derive(
         event: dict[str, Any], actor: str | None, payload: dict[str, Any]
     ) -> tuple[dict[str, Any] | None, list[dict[str, Any]], str | None]:
         if int(event.get("version") or 1) < 2:
-            # V1 claims below the ingestion migration cutoff were admitted by the
-            # previous kernel. Grandfather their historical admission; later
-            # runtime eligibility is projected separately below.
             return None, [], None
         actor_id = str(actor or "")
         error = _v2_payload_error(str(event.get("type") or ""), actor_id, payload)
@@ -355,21 +358,16 @@ def derive(
                     "details": list(admission.get("actor_ineligibility_reasons") or []),
                 }
             )
-        if event.get("type") == "ROLE_LEASE_ASSIGNED" and admission.get("dependencies_complete") is not True:
-            violations.append(
-                {
-                    "reason": "dependency_not_complete_at_admission",
-                    "work_unit": payload.get("work_unit"),
-                    "dependencies": recorded_dependencies,
-                }
-            )
-        if event.get("type") == "ROLE_LEASE_TRANSFERRED" and admission.get("dependencies_complete") is not True:
-            violations.append(
-                {
-                    "reason": "transfer_did_not_preserve_dependency_acceptance",
-                    "work_unit": payload.get("work_unit"),
-                }
-            )
+        if event.get("type") == "ROLE_LEASE_ASSIGNED":
+            unfinished = sorted(set(recorded_dependencies) - merged_work_units)
+            if unfinished:
+                violations.append(
+                    {
+                        "reason": "dependency_not_durably_complete_at_admission",
+                        "work_unit": payload.get("work_unit"),
+                        "dependencies": unfinished,
+                    }
+                )
         return admission, violations, None
 
     def add_lease(
@@ -392,7 +390,10 @@ def derive(
                     detail=admission_error,
                 )
                 return False
-            actor_limit = admission.get("actor_limit") if admission else None
+            if admission is not None:
+                actor_limit = int(admission.get("actor_limit"))
+            else:
+                actor_limit = legacy_limits.get(str(actor or ""), legacy_unknown_limit)
             violations = [
                 *frozen_violations,
                 *implementation_admission_violations(
@@ -486,6 +487,14 @@ def derive(
                         "invalid_lease_admission_evidence",
                         lease_id=new_id,
                         detail="transfer admission does not bind active source lease",
+                    )
+                    continue
+                if payload.get("planning_snapshot") != old.get("planning_snapshot"):
+                    record_integrity_conflict(
+                        event,
+                        "invalid_lease_admission_evidence",
+                        lease_id=new_id,
+                        detail="transfer planning snapshot differs from canonical source lease",
                     )
                     continue
             active.pop(old_id, None)

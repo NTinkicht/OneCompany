@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Policy-correct OneCompany engineering assurance validator.
 
-The historical validator is retained in ``assurance_legacy`` so this layer can
-apply lifecycle and traceability-policy semantics explicitly while preserving
-all established validation behavior. Merge authority still comes from
+The historical validator is retained in ``simulate_assurance_legacy`` so this
+layer can apply lifecycle and traceability-policy semantics explicitly while
+preserving established validation behavior. Merge authority still comes from
 ``trusted_assurance``; packet-authored quality/review claims are compatibility
 metadata only at the authoritative gate.
 """
@@ -16,7 +16,7 @@ import re
 import sys
 from pathlib import Path
 
-_LEGACY_PATH = Path(__file__).resolve().with_name("assurance_legacy.py")
+_LEGACY_PATH = Path(__file__).resolve().with_name("simulate_assurance_legacy.py")
 _LEGACY_SPEC = importlib.util.spec_from_file_location("onecompany_assurance_legacy", _LEGACY_PATH)
 if _LEGACY_SPEC is None or _LEGACY_SPEC.loader is None:
     raise RuntimeError(f"cannot load assurance compatibility validator: {_LEGACY_PATH}")

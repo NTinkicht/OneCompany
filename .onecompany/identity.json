@@ -1,0 +1,40 @@
+{
+  "$schema": "./schemas/identity.schema.json",
+  "schema_version": "1.0",
+  "trust_model": "base-trusted-platform-principal",
+  "bootstrap": {
+    "when_base_policy_absent": "repository_owner_only"
+  },
+  "principals": [
+    {
+      "login": "NTinkicht",
+      "actor_id": "human-owner",
+      "authorities": [
+        "root",
+        "merge_execution",
+        "protected_merge",
+        "governance_change",
+        "budget_change",
+        "emergency_control",
+        "root_rotation",
+        "code_review"
+      ]
+    },
+    {
+      "login": "chatgpt-codex-connector",
+      "actor_id": "codex",
+      "authorities": ["code_review"]
+    }
+  ],
+  "root_rotation": {
+    "requires_out_of_band_human_approval": true,
+    "requires_protected_platform_review": true,
+    "audit_event_type": "ROOT_TRUST_ROTATED"
+  },
+  "emergency_stop": {
+    "assertion_is_permissionless": true,
+    "clear_requires_authority": "emergency_control",
+    "external_environment_flag": "ONECOMPANY_EMERGENCY_STOP",
+    "external_file_environment": "ONECOMPANY_EMERGENCY_STOP_FILE"
+  }
+}

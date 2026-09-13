@@ -7,6 +7,7 @@ import re
 import uuid
 from typing import Any
 
+from capacity_lib import implementation_availability, implementation_capacity_limit
 from onecompany_lib import CONTROL, command_exists, github_repo_from_config, load_json, run
 from planning_lib import implementation_admission_violations
 
@@ -137,7 +138,20 @@ def _conflict_id(event: dict[str, Any], reason: str) -> str:
     return f"{event.get('event_id') or '<missing>'}:{reason}"
 
 
-def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any]:
+def derive(
+    events: list[dict[str, Any]],
+    pr: int | None = None,
+    *,
+    enforce_actor_policy: bool = True,
+) -> dict[str, Any]:
+    """Replay durable events into the current authoritative coordination view.
+
+    Runtime actor eligibility is deliberately re-evaluated while replaying.
+    Repository readiness/budget/access policy is current authority, so a disabled
+    or no-longer-eligible actor cannot retain implementation authority merely
+    because an older event once named it. Tests/simulators may explicitly disable
+    this runtime-policy layer when exercising pure ledger race algebra.
+    """
     active: dict[str, dict[str, Any]] = {}
     authors_by_pr: dict[int, set[str]] = {}
     gates_by_pr: dict[int, dict[str, Any]] = {}
@@ -159,15 +173,34 @@ def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any
                 "critical_risk_default": "serialize",
             }
         }
+
     try:
-        readiness = load_json(CONTROL / "readiness.json")
-        actor_capacities = {
-            str(item.get("actor_id")): max(int(item.get("capacity", {}).get("implementation_streams", 1)), 1)
-            for item in readiness.get("actors", [])
-            if item.get("actor_id")
-        }
+        readiness_doc = load_json(CONTROL / "readiness.json")
     except Exception:
-        actor_capacities = {}
+        readiness_doc = {"actors": []}
+    readiness_by_actor = {
+        str(item.get("actor_id")): item
+        for item in readiness_doc.get("actors", [])
+        if isinstance(item, dict) and item.get("actor_id")
+    }
+    actor_capacities = {
+        actor_id: implementation_capacity_limit(ready)
+        for actor_id, ready in readiness_by_actor.items()
+    }
+
+    try:
+        actors_doc = load_json(CONTROL / "actors.json")
+    except Exception:
+        actors_doc = {"actors": []}
+    actors_by_id = {
+        str(item.get("id")): item
+        for item in actors_doc.get("actors", [])
+        if isinstance(item, dict) and item.get("id")
+    }
+    try:
+        budget_doc = load_json(CONTROL / "budget.json")
+    except Exception:
+        budget_doc = {}
 
     def normalize_pr(value: Any) -> int | None:
         if isinstance(value, int):
@@ -213,20 +246,66 @@ def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any
             }
         )
 
+    def durable_dependency_violations(candidate: dict[str, Any]) -> list[dict[str, Any]]:
+        unfinished = sorted(
+            {
+                str(dep)
+                for dep in candidate.get("dependencies", [])
+                if dep and str(dep) not in merged_work_units
+            }
+        )
+        if not unfinished:
+            return []
+        return [
+            {
+                "reason": "dependency_not_durably_complete",
+                "work_unit": candidate.get("id"),
+                "dependencies": unfinished,
+            }
+        ]
+
+    def actor_policy_violations(actor: str | None) -> list[dict[str, Any]]:
+        if not enforce_actor_policy:
+            return []
+        actor_id = str(actor or "")
+        actor_record = actors_by_id.get(actor_id)
+        if actor_record is None:
+            return [{"reason": "actor_implementation_ineligible", "actor": actor_id, "details": ["unknown_actor"]}]
+        _slots, reasons = implementation_availability(
+            actor_record,
+            readiness_by_actor.get(actor_id),
+            budget_doc,
+            implementations(),
+        )
+        hard_reasons = sorted({reason for reason in reasons if reason != "actor_capacity"})
+        if not hard_reasons:
+            return []
+        return [
+            {
+                "reason": "actor_implementation_ineligible",
+                "actor": actor_id,
+                "details": hard_reasons,
+            }
+        ]
+
     def add_lease(lease_id: str, actor: str | None, payload: dict[str, Any], event: dict[str, Any]) -> bool:
         role = payload.get("role", "implementation")
         if role == "implementation":
             known_implementation_leases.add(lease_id)
             candidate = snapshot_item(payload)
             actor_limit = actor_capacities.get(str(actor), 1) if actor else None
-            violations = implementation_admission_violations(
-                candidate,
-                implementations(),
-                planning,
-                None,
-                actor=actor,
-                actor_limit=actor_limit,
-            )
+            violations = [
+                *durable_dependency_violations(candidate),
+                *actor_policy_violations(actor),
+                *implementation_admission_violations(
+                    candidate,
+                    implementations(),
+                    planning,
+                    None,
+                    actor=actor,
+                    actor_limit=actor_limit,
+                ),
+            ]
             if violations:
                 record_rejected_claim(event, lease_id, payload, violations)
                 return False

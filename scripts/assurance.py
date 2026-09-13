@@ -11,11 +11,17 @@ from __future__ import annotations
 
 import argparse
 import copy
+import importlib.util
 import re
 import sys
 from pathlib import Path
 
-import assurance_legacy as _legacy
+_LEGACY_PATH = Path(__file__).resolve().with_name("assurance_legacy.py")
+_LEGACY_SPEC = importlib.util.spec_from_file_location("onecompany_assurance_legacy", _LEGACY_PATH)
+if _LEGACY_SPEC is None or _LEGACY_SPEC.loader is None:
+    raise RuntimeError(f"cannot load assurance compatibility validator: {_LEGACY_PATH}")
+_legacy = importlib.util.module_from_spec(_LEGACY_SPEC)
+_LEGACY_SPEC.loader.exec_module(_legacy)
 
 ROOT = _legacy.ROOT
 CONTROL = _legacy.CONTROL
@@ -127,8 +133,6 @@ def validate_packet(packet: dict) -> tuple[list[str], list[str]]:
     errors = filtered
 
     if original_status not in {"draft", *ASSURED_STATUSES}:
-        # Legacy validation already emits a status error for every unsupported
-        # state. This branch only gives the current complete lifecycle list.
         errors = [error for error in errors if not error.startswith("status must be ")]
         errors.append("status must be draft|ready|review|in_progress|merge_ready|done")
 
@@ -137,8 +141,6 @@ def validate_packet(packet: dict) -> tuple[list[str], list[str]]:
         if not isinstance(authors, list) or not authors or any(not isinstance(author, str) or not author.strip() for author in authors):
             errors.append("merge_ready/done packet requires a complete non-empty material_authors snapshot")
 
-    # Keep deterministic diagnostics if a compatibility path produced the same
-    # message twice.
     errors = list(dict.fromkeys(errors))
     warnings = list(dict.fromkeys(warnings))
     return errors, warnings

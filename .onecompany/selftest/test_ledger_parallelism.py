@@ -11,10 +11,21 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import ledger_lib
 from ledger_lib import derive as derive_live
 
+TRUSTED_REF = "b" * 40
+POLICY_BLOBS = {
+    key: (str(index) * 40)[:40]
+    for index, key in enumerate(ledger_lib.TRUSTED_POLICY_PATHS, start=1)
+}
+
 
 def derive(events, pr=None):
-    """Exercise ledger race algebra without depending on live actor readiness fixtures."""
-    return derive_live(events, pr, enforce_actor_policy=False)
+    """Exercise ledger race algebra without depending on live actor readiness/provenance fixtures."""
+    return derive_live(
+        events,
+        pr,
+        enforce_actor_policy=False,
+        verify_admission_provenance=False,
+    )
 
 
 def event(
@@ -79,6 +90,8 @@ def admission(
         "dependencies_complete": dependencies_complete,
         "transfer_source_lease_id": source,
         "dependencies_inherited_from_source": source is not None,
+        "trusted_ref": TRUSTED_REF,
+        "policy_blobs": dict(POLICY_BLOBS),
     }
 
 
@@ -253,8 +266,17 @@ class LedgerParallelismTests(unittest.TestCase):
             version=2,
         )
         with patch.object(ledger_lib, "load_json", side_effect=fake_load):
-            before = derive_live([assignment], enforce_actor_policy=True)
-            after = derive_live([assignment, transfer], 10, enforce_actor_policy=True)
+            before = derive_live(
+                [assignment],
+                enforce_actor_policy=True,
+                verify_admission_provenance=False,
+            )
+            after = derive_live(
+                [assignment, transfer],
+                10,
+                enforce_actor_policy=True,
+                verify_admission_provenance=False,
+            )
 
         self.assertEqual([item["id"] for item in before["active_leases"]], ["L1"])
         self.assertEqual(before["material_authors"], ["worker"])

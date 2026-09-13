@@ -8,6 +8,7 @@ import hashlib
 import json
 import sys
 from pathlib import Path
+from typing import Any
 
 from assurance_gate import validate_structure
 from lease_lifecycle import append_coordination_event, coordination_view
@@ -34,7 +35,14 @@ from platform_identity import (
 )
 from required_checks import evaluate_required_checks
 from scope_guard import changed_files, live_pr, scope_errors
-from trusted_assurance import verify_trusted_packet
+from trusted_assurance import _base_json, verify_trusted_packet
+
+AUTOMATION_FROZEN_POLICY_FILES = {
+    "config": ".onecompany/config.json",
+    "governance": ".onecompany/governance.json",
+    "ledger": ".onecompany/ledger.json",
+}
+BASE_QUEUE_PATH = ".onecompany/queue.json"
 
 
 def _work_unit_for_pr(queue: dict, pr: int, active: list[dict]) -> dict | None:
@@ -45,13 +53,6 @@ def _work_unit_for_pr(queue: dict, pr: int, active: list[dict]) -> dict | None:
     lease = next((item for item in active if item.get("pr") == pr), None)
     wu_id = (lease or {}).get("work_unit")
     return by_id(work).get(str(wu_id)) if wu_id else None
-
-
-def _default_pr(active: list[dict]) -> int | None:
-    values = sorted(
-        {item.get("pr") for item in active if isinstance(item.get("pr"), int)}
-    )
-    return values[0] if len(values) == 1 else None
 
 
 def _sync_legacy(state: dict) -> None:
@@ -69,6 +70,39 @@ def _sync_legacy(state: dict) -> None:
         state["current_pr_head"] = None
         state["current_material_authors"] = []
         state["current_gate"] = None
+
+
+def _base_document(repo: str, path: str, base_sha: str) -> tuple[dict | None, str | None]:
+    value, _blob, error = _base_json(repo, path, base_sha)
+    if value is None:
+        return None, error or f"cannot load base-trusted {path}"
+    return value, None
+
+
+def _base_control_context(
+    repo: str, base_sha: str
+) -> tuple[dict[str, dict[str, Any]] | None, list[str]]:
+    documents: dict[str, dict[str, Any]] = {}
+    errors: list[str] = []
+    for key, path in {**AUTOMATION_FROZEN_POLICY_FILES, "queue": BASE_QUEUE_PATH}.items():
+        value, error = _base_document(repo, path, base_sha)
+        if value is None:
+            errors.append(error or f"cannot load {path}")
+        else:
+            documents[key] = value
+    return (documents if not errors else None), errors
+
+
+def _automation_policy_drift_errors(base: dict[str, dict[str, Any]]) -> list[str]:
+    errors: list[str] = []
+    for key, path in AUTOMATION_FROZEN_POLICY_FILES.items():
+        candidate = load_json(CONTROL / path.rsplit("/", 1)[-1])
+        if candidate != base[key]:
+            errors.append(
+                f"candidate changes {path}; automated merge must refuse control-policy "
+                "self-modification and use the protected human policy-change route"
+            )
+    return errors
 
 
 def _load_assurance_packet(
@@ -147,7 +181,12 @@ def main() -> int:
             "authenticated GitHub principal"
         ),
     )
-    parser.add_argument("--pr", type=int)
+    parser.add_argument(
+        "--pr",
+        type=int,
+        required=True,
+        help="Explicit GitHub PR number; merge authority is never inferred from candidate state",
+    )
     parser.add_argument(
         "--method",
         choices=["merge", "squash", "rebase"],
@@ -159,39 +198,54 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    if emergency_stop_active():
-        print("REFUSED: emergency stop is active; autonomous merge is frozen")
+    # Check out-of-band containment without trusting candidate configuration.
+    if emergency_stop_active({"safety": {"emergency_stop": False}}):
+        print("REFUSED: external emergency stop is active; autonomous merge is frozen")
         return 2
     if not command_exists("gh") or run(["gh", "auth", "status"]).returncode != 0:
         print("REFUSED: authenticated gh CLI is required")
         return 2
 
-    config = load_json(CONTROL / "config.json")
+    candidate_config = load_json(CONTROL / "config.json")
     state = load_json(CONTROL / "state.json")
-    queue = load_json(CONTROL / "queue.json")
-    repo = github_repo_from_config(config)
-
-    try:
-        global_view = coordination_view()
-        global_active = [
-            item
-            for item in global_view.get("active_leases", [])
-            if item.get("role") == "implementation"
-        ]
-    except Exception as exc:
-        print(f"REFUSED: cannot reconstruct lease authority: {exc}")
+    repo = github_repo_from_config(candidate_config)
+    pr = args.pr
+    if not repo:
+        print("REFUSED: config.project.repository must be owner/name")
         return 2
 
-    pr = args.pr or _default_pr(global_active)
-    if not repo or not pr:
-        print(
-            "REFUSED: repository/explicit --pr is required when zero or multiple "
-            "streams are active"
-        )
+    live, live_error = live_pr(repo, pr)
+    if live is None:
+        print(f"REFUSED: cannot read live PR state: {live_error}")
+        return 2
+    live_head = live.get("headRefOid")
+    live_base = live.get("baseRefOid")
+    if live.get("state") != "OPEN" or live.get("isDraft"):
+        print("REFUSED: PR is not open/ready")
+        return 2
+    if not isinstance(live_head, str) or not isinstance(live_base, str):
+        print("REFUSED: live PR head/base SHA is unavailable")
+        return 2
+
+    base, base_errors = _base_control_context(repo, live_base)
+    if base is None:
+        for error in base_errors:
+            print(f"REFUSED: {error}")
+        return 2
+    if github_repo_from_config(base["config"]) != repo:
+        print("REFUSED: candidate repository identity differs from base-trusted configuration")
+        return 2
+    drift = _automation_policy_drift_errors(base)
+    if drift:
+        for error in drift:
+            print(f"REFUSED: {error}")
+        return 2
+    if emergency_stop_active(base["config"]):
+        print("REFUSED: base-trusted emergency stop is active; autonomous merge is frozen")
         return 2
 
     try:
-        level = autonomy_number(config.get("autonomy", {}).get("level", "L0"))
+        level = autonomy_number(base["config"].get("autonomy", {}).get("level", "L0"))
     except ValueError as exc:
         print(f"REFUSED: {exc}")
         return 2
@@ -202,20 +256,6 @@ def main() -> int:
     ):
         print("REFUSED: L3+ autonomous merge requires durable ledger")
         return 2
-
-    paths, diff_error = changed_files(repo, pr)
-    governance = governance_config().get("control_plane", {})
-    if paths is None:
-        if governance.get("fail_closed_if_diff_unavailable", True):
-            print(
-                "REFUSED: cannot establish PR change set for governance check: "
-                f"{diff_error}"
-            )
-            return 2
-        paths = []
-
-    protected = protected_control_plane_paths(paths)
-    absolute_human = always_human_paths(paths)
 
     try:
         view = coordination_view(pr)
@@ -231,10 +271,25 @@ def main() -> int:
         print("REFUSED: PR has no canonical active unexpired implementation lease")
         return 2
 
+    queue = base["queue"]
     work_unit_record = _work_unit_for_pr(queue, pr, active)
     if work_unit_record is None:
-        print(f"REFUSED: PR #{pr} is not mapped to a versioned Work Unit")
+        print(f"REFUSED: PR #{pr} is not mapped to a base-trusted Work Unit")
         return 2
+
+    paths, diff_error = changed_files(repo, pr)
+    governance = governance_config().get("control_plane", {})
+    if paths is None:
+        if governance.get("fail_closed_if_diff_unavailable", True):
+            print(
+                "REFUSED: cannot establish PR change set for governance check: "
+                f"{diff_error}"
+            )
+            return 2
+        paths = []
+
+    protected = protected_control_plane_paths(paths)
+    absolute_human = always_human_paths(paths)
 
     gate = view.get("current_gate")
     material_authors = set(view.get("material_authors", []))
@@ -262,6 +317,19 @@ def main() -> int:
     approved_base = gate.get("base_sha")
     if not isinstance(approved_sha, str) or not isinstance(approved_base, str):
         print("REFUSED: gate must record approved head and base SHAs")
+        return 2
+    if live_head != approved_sha:
+        print(
+            "REFUSED: expected-head mismatch; "
+            f"approved={approved_sha} live={live_head}"
+        )
+        return 2
+    if live_base != approved_base:
+        print(
+            "REFUSED: base drift invalidated gate; "
+            f"reviewed_base={approved_base} live_base={live_base}. "
+            "Rebase/update and rerun CI/review."
+        )
         return 2
 
     reviewer_identity, reviewer_errors = _verify_reviewer(
@@ -344,29 +412,6 @@ def main() -> int:
     if problems:
         for problem in problems:
             print(f"REFUSED: {problem}")
-        return 2
-
-    live, live_error = live_pr(repo, pr)
-    if live is None:
-        print(f"REFUSED: cannot read live PR state: {live_error}")
-        return 2
-    live_head = live.get("headRefOid")
-    live_base = live.get("baseRefOid")
-    if live.get("state") != "OPEN" or live.get("isDraft"):
-        print("REFUSED: PR is not open/ready")
-        return 2
-    if live_head != approved_sha:
-        print(
-            "REFUSED: expected-head mismatch; "
-            f"approved={approved_sha} live={live_head}"
-        )
-        return 2
-    if live_base != approved_base:
-        print(
-            "REFUSED: base drift invalidated gate; "
-            f"reviewed_base={approved_base} live_base={live_base}. "
-            "Rebase/update and rerun CI/review."
-        )
         return 2
 
     checks_ok, check_reasons, _ = evaluate_required_checks(

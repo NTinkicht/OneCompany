@@ -10,33 +10,74 @@ import sys
 from lease_lifecycle import append_coordination_event, coordination_view
 from ledger_lib import ledger_config, ledger_enabled
 from onecompany_lib import (
-    CONTROL, always_human_paths, autonomy_number, budget_allows, command_exists,
-    emergency_stop_active, github_repo_from_config, governance_config, load_json,
-    protected_control_plane_paths, run, save_json,
+    CONTROL,
+    always_human_paths,
+    autonomy_number,
+    budget_allows,
+    command_exists,
+    emergency_stop_active,
+    github_repo_from_config,
+    governance_config,
+    load_json,
+    protected_control_plane_paths,
+    run,
+    save_json,
 )
 from planning_lib import by_id
 from scope_guard import changed_files, live_pr, scope_errors
 
 
-def capability_eligible(actor_id: str, capability: str, access_key: str, excluded_authors: set[str] | None = None) -> tuple[bool, list[str]]:
-    actors = load_json(CONTROL / "actors.json"); readiness_doc = load_json(CONTROL / "readiness.json"); budget = load_json(CONTROL / "budget.json")
-    actor = next((item for item in actors.get("actors", []) if item.get("id") == actor_id), None)
-    ready = next((item for item in readiness_doc.get("actors", []) if item.get("actor_id") == actor_id), None)
+def capability_eligible(
+    actor_id: str,
+    capability: str,
+    access_key: str,
+    excluded_authors: set[str] | None = None,
+) -> tuple[bool, list[str]]:
+    actors = load_json(CONTROL / "actors.json")
+    readiness_doc = load_json(CONTROL / "readiness.json")
+    budget = load_json(CONTROL / "budget.json")
+    actor = next(
+        (item for item in actors.get("actors", []) if item.get("id") == actor_id),
+        None,
+    )
+    ready = next(
+        (
+            item
+            for item in readiness_doc.get("actors", [])
+            if item.get("actor_id") == actor_id
+        ),
+        None,
+    )
     reasons: list[str] = []
-    if actor is None: return False, ["unknown_actor"]
-    if excluded_authors and actor_id in excluded_authors: reasons.append("material_author_conflict")
-    if not actor.get("enabled"): reasons.append("disabled")
-    if not actor.get("configured"): reasons.append("not_configured")
-    if capability not in actor.get("capabilities", []): reasons.append(f"{capability}_not_declared")
-    if not budget_allows(actor.get("cost_class", "UNKNOWN_COST"), budget): reasons.append("forbidden_by_budget")
-    if ready is None: reasons.append("missing_readiness")
+
+    if actor is None:
+        return False, ["unknown_actor"]
+    if excluded_authors and actor_id in excluded_authors:
+        reasons.append("material_author_conflict")
+    if not actor.get("enabled"):
+        reasons.append("disabled")
+    if not actor.get("configured"):
+        reasons.append("not_configured")
+    if capability not in actor.get("capabilities", []):
+        reasons.append(f"{capability}_not_declared")
+    if not budget_allows(actor.get("cost_class", "UNKNOWN_COST"), budget):
+        reasons.append("forbidden_by_budget")
+
+    if ready is None:
+        reasons.append("missing_readiness")
     else:
-        if ready.get("setup_state") not in {"ready", "degraded"}: reasons.append(f"setup_state:{ready.get('setup_state')}")
-        if capability not in ready.get("verified_capabilities", []): reasons.append(f"{capability}_not_verified")
-        if capability in ready.get("temporarily_unavailable_capabilities", []): reasons.append(f"{capability}_temporarily_unavailable")
+        if ready.get("setup_state") not in {"ready", "degraded"}:
+            reasons.append(f"setup_state:{ready.get('setup_state')}")
+        if capability not in ready.get("verified_capabilities", []):
+            reasons.append(f"{capability}_not_verified")
+        if capability in ready.get("temporarily_unavailable_capabilities", []):
+            reasons.append(f"{capability}_temporarily_unavailable")
         access = ready.get("repository_access", {})
-        if not access.get("read"): reasons.append("repository_read_not_verified")
-        if not access.get(access_key): reasons.append(f"repository_{access_key}_not_verified")
+        if not access.get("read"):
+            reasons.append("repository_read_not_verified")
+        if not access.get(access_key):
+            reasons.append(f"repository_{access_key}_not_verified")
+
     return not reasons, reasons
 
 
@@ -51,7 +92,9 @@ def _work_unit_for_pr(queue: dict, pr: int, active: list[dict]) -> dict | None:
 
 
 def _default_pr(active: list[dict]) -> int | None:
-    values = sorted({item.get("pr") for item in active if isinstance(item.get("pr"), int)})
+    values = sorted(
+        {item.get("pr") for item in active if isinstance(item.get("pr"), int)}
+    )
     return values[0] if len(values) == 1 else None
 
 
@@ -59,86 +102,244 @@ def _sync_legacy(state: dict) -> None:
     streams = state.get("active_streams", [])
     if len(streams) == 1:
         stream = streams[0]
-        state["current_work_unit"] = stream.get("work_unit"); state["current_pr"] = stream.get("pr")
-        state["current_pr_head"] = stream.get("head"); state["current_material_authors"] = stream.get("material_authors", [])
+        state["current_work_unit"] = stream.get("work_unit")
+        state["current_pr"] = stream.get("pr")
+        state["current_pr_head"] = stream.get("head")
+        state["current_material_authors"] = stream.get("material_authors", [])
         state["current_gate"] = stream.get("gate")
     else:
-        state["current_work_unit"] = None; state["current_pr"] = None; state["current_pr_head"] = None
-        state["current_material_authors"] = []; state["current_gate"] = None
+        state["current_work_unit"] = None
+        state["current_pr"] = None
+        state["current_pr_head"] = None
+        state["current_material_authors"] = []
+        state["current_gate"] = None
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--actor", required=True); parser.add_argument("--pr", type=int)
-    parser.add_argument("--method", choices=["merge", "squash", "rebase"], default="squash")
+    parser.add_argument("--actor", required=True)
+    parser.add_argument("--pr", type=int)
+    parser.add_argument(
+        "--method",
+        choices=["merge", "squash", "rebase"],
+        default="squash",
+    )
     args = parser.parse_args()
-    if emergency_stop_active(): print("REFUSED: emergency stop is active; autonomous merge is frozen"); return 2
-    if not command_exists("gh") or run(["gh", "auth", "status"]).returncode != 0: print("REFUSED: authenticated gh CLI is required"); return 2
 
-    config = load_json(CONTROL / "config.json"); state = load_json(CONTROL / "state.json"); queue = load_json(CONTROL / "queue.json")
+    if emergency_stop_active():
+        print("REFUSED: emergency stop is active; autonomous merge is frozen")
+        return 2
+    if not command_exists("gh") or run(["gh", "auth", "status"]).returncode != 0:
+        print("REFUSED: authenticated gh CLI is required")
+        return 2
+
+    config = load_json(CONTROL / "config.json")
+    state = load_json(CONTROL / "state.json")
+    queue = load_json(CONTROL / "queue.json")
     repo = github_repo_from_config(config)
+
     try:
         global_view = coordination_view()
-        global_active = [item for item in global_view.get("active_leases", []) if item.get("role") == "implementation"]
+        global_active = [
+            item
+            for item in global_view.get("active_leases", [])
+            if item.get("role") == "implementation"
+        ]
     except Exception as exc:
-        print(f"REFUSED: cannot reconstruct lease authority: {exc}"); return 2
-    pr = args.pr or _default_pr(global_active)
-    if not repo or not pr: print("REFUSED: repository/explicit --pr is required when zero or multiple streams are active"); return 2
-    try: level = autonomy_number(config.get("autonomy", {}).get("level", "L0"))
-    except ValueError as exc: print(f"REFUSED: {exc}"); return 2
-    if level >= 3 and ledger_config().get("required_for_autonomous_merge") and not ledger_enabled(): print("REFUSED: L3+ autonomous merge requires durable ledger"); return 2
+        print(f"REFUSED: cannot reconstruct lease authority: {exc}")
+        return 2
 
-    paths, diff_error = changed_files(repo, pr); governance = governance_config().get("control_plane", {})
+    pr = args.pr or _default_pr(global_active)
+    if not repo or not pr:
+        print(
+            "REFUSED: repository/explicit --pr is required when zero or multiple "
+            "streams are active"
+        )
+        return 2
+
+    try:
+        level = autonomy_number(config.get("autonomy", {}).get("level", "L0"))
+    except ValueError as exc:
+        print(f"REFUSED: {exc}")
+        return 2
+
+    if (
+        level >= 3
+        and ledger_config().get("required_for_autonomous_merge")
+        and not ledger_enabled()
+    ):
+        print("REFUSED: L3+ autonomous merge requires durable ledger")
+        return 2
+
+    paths, diff_error = changed_files(repo, pr)
+    governance = governance_config().get("control_plane", {})
     if paths is None:
-        if governance.get("fail_closed_if_diff_unavailable", True): print(f"REFUSED: cannot establish PR change set for governance check: {diff_error}"); return 2
+        if governance.get("fail_closed_if_diff_unavailable", True):
+            print(
+                "REFUSED: cannot establish PR change set for governance check: "
+                f"{diff_error}"
+            )
+            return 2
         paths = []
-    protected = protected_control_plane_paths(paths); absolute_human = always_human_paths(paths)
-    if absolute_human and args.actor != "human-owner": print(f"REFUSED: always-human governance paths changed: {', '.join(absolute_human)}"); return 2
-    if protected and governance.get("human_merge_required") is True and args.actor != "human-owner": print(f"REFUSED: protected control-plane change requires human-owner merge: {', '.join(protected)}"); return 2
+
+    protected = protected_control_plane_paths(paths)
+    absolute_human = always_human_paths(paths)
+    if absolute_human and args.actor != "human-owner":
+        print(
+            "REFUSED: always-human governance paths changed: "
+            + ", ".join(absolute_human)
+        )
+        return 2
+    if (
+        protected
+        and governance.get("human_merge_required") is True
+        and args.actor != "human-owner"
+    ):
+        print(
+            "REFUSED: protected control-plane change requires human-owner merge: "
+            + ", ".join(protected)
+        )
+        return 2
 
     view = coordination_view(pr)
-    active = [item for item in view.get("active_leases", []) if item.get("role") == "implementation" and item.get("pr") == pr]
+    active = [
+        item
+        for item in view.get("active_leases", [])
+        if item.get("role") == "implementation" and item.get("pr") == pr
+    ]
     if not active:
-        print("REFUSED: PR has no canonical active unexpired implementation lease"); return 2
+        print("REFUSED: PR has no canonical active unexpired implementation lease")
+        return 2
+
     work_unit_record = _work_unit_for_pr(queue, pr, active)
-    if work_unit_record is None: print(f"REFUSED: PR #{pr} is not mapped to a versioned Work Unit"); return 2
+    if work_unit_record is None:
+        print(f"REFUSED: PR #{pr} is not mapped to a versioned Work Unit")
+        return 2
+
     gate = view.get("current_gate")
     material_authors = set(view.get("material_authors", []))
-    if not gate or gate.get("verdict") != "PASS — MERGE_READY" or gate.get("stale"): print("REFUSED: no current durable PASS — MERGE_READY gate"); return 2
-    if gate.get("work_unit") not in {None, work_unit_record.get("id")}: print("REFUSED: gate Work Unit does not match PR mapping"); return 2
-    if set(gate.get("material_authors") or []) != material_authors: print("REFUSED: gate authorship snapshot differs from current durable authorship"); return 2
+    if (
+        not gate
+        or gate.get("verdict") != "PASS — MERGE_READY"
+        or gate.get("stale")
+    ):
+        print("REFUSED: no current durable PASS — MERGE_READY gate")
+        return 2
+    if gate.get("work_unit") not in {None, work_unit_record.get("id")}:
+        print("REFUSED: gate Work Unit does not match PR mapping")
+        return 2
+    if set(gate.get("material_authors") or []) != material_authors:
+        print("REFUSED: gate authorship snapshot differs from current durable authorship")
+        return 2
+
     reviewer = gate.get("reviewer_actor")
-    if not isinstance(reviewer, str) or not reviewer: print("REFUSED: gate has no reviewer actor"); return 2
-    reviewer_ok, reviewer_reasons = capability_eligible(reviewer, "code_review", "review", material_authors)
-    if not reviewer_ok: print(f"REFUSED: gate reviewer is no longer independently eligible: {','.join(reviewer_reasons)}"); return 2
-    if not gate.get("evidence"): print("REFUSED: merge-ready gate has no durable evidence reference"); return 2
-    if gate.get("scope_verified") is not True: print("REFUSED: gate did not verify live PR scope"); return 2
-    approved_sha = gate.get("sha"); approved_base = gate.get("base_sha")
-    if not approved_sha or not approved_base: print("REFUSED: gate must record approved head and base SHAs"); return 2
+    if not isinstance(reviewer, str) or not reviewer:
+        print("REFUSED: gate has no reviewer actor")
+        return 2
+
+    reviewer_ok, reviewer_reasons = capability_eligible(
+        reviewer,
+        "code_review",
+        "review",
+        material_authors,
+    )
+    if not reviewer_ok:
+        print(
+            "REFUSED: gate reviewer is no longer independently eligible: "
+            + ",".join(reviewer_reasons)
+        )
+        return 2
+    if not gate.get("evidence"):
+        print("REFUSED: merge-ready gate has no durable evidence reference")
+        return 2
+    if gate.get("scope_verified") is not True:
+        print("REFUSED: gate did not verify live PR scope")
+        return 2
+
+    approved_sha = gate.get("sha")
+    approved_base = gate.get("base_sha")
+    if not approved_sha or not approved_base:
+        print("REFUSED: gate must record approved head and base SHAs")
+        return 2
 
     # Cache-held blockers are allowed to fail closed, never to grant authority.
-    if state.get("open_blockers"): print("REFUSED: company-wide open blockers remain"); return 2
-    if state.get("human_decision_required"): print("REFUSED: company-wide human decision remains outstanding"); return 2
+    if state.get("open_blockers"):
+        print("REFUSED: company-wide open blockers remain")
+        return 2
+    if state.get("human_decision_required"):
+        print("REFUSED: company-wide human decision remains outstanding")
+        return 2
 
-    for problem in scope_errors(paths, work_unit_record): print(f"REFUSED: {problem}"); return 2
+    problems = scope_errors(paths, work_unit_record)
+    if problems:
+        for problem in problems:
+            print(f"REFUSED: {problem}")
+        return 2
 
-    merge_ok, merge_reasons = capability_eligible(args.actor, "merge_execution", "merge")
-    if not merge_ok: print(f"REFUSED: merge actor {args.actor} is not eligible: {','.join(merge_reasons)}"); return 2
+    merge_ok, merge_reasons = capability_eligible(
+        args.actor,
+        "merge_execution",
+        "merge",
+    )
+    if not merge_ok:
+        print(
+            f"REFUSED: merge actor {args.actor} is not eligible: "
+            + ",".join(merge_reasons)
+        )
+        return 2
 
     live, live_error = live_pr(repo, pr)
-    if live is None: print(f"REFUSED: cannot read live PR state: {live_error}"); return 2
-    live_head = live.get("headRefOid"); live_base = live.get("baseRefOid")
-    if live.get("state") != "OPEN" or live.get("isDraft"): print("REFUSED: PR is not open/ready"); return 2
-    if live_head != approved_sha: print(f"REFUSED: expected-head mismatch; approved={approved_sha} live={live_head}"); return 2
-    if live_base != approved_base:
-        print(f"REFUSED: base drift invalidated gate; reviewed_base={approved_base} live_base={live_base}. Rebase/update and rerun CI/review."); return 2
-    checks = run(["gh", "pr", "checks", str(pr), "--repo", repo, "--required"])
-    if checks.returncode != 0 or not checks.stdout.strip(): print("REFUSED: required checks are not all green/reported"); return 2
+    if live is None:
+        print(f"REFUSED: cannot read live PR state: {live_error}")
+        return 2
 
-    merge = run(["gh", "api", "--method", "PUT", f"repos/{repo}/pulls/{pr}/merge", "-f", f"sha={approved_sha}", "-f", f"merge_method={args.method}"])
-    if merge.returncode != 0: print("MERGE FAILED:", merge.stderr.strip() or merge.stdout.strip()); return 2
+    live_head = live.get("headRefOid")
+    live_base = live.get("baseRefOid")
+    if live.get("state") != "OPEN" or live.get("isDraft"):
+        print("REFUSED: PR is not open/ready")
+        return 2
+    if live_head != approved_sha:
+        print(
+            "REFUSED: expected-head mismatch; "
+            f"approved={approved_sha} live={live_head}"
+        )
+        return 2
+    if live_base != approved_base:
+        print(
+            "REFUSED: base drift invalidated gate; "
+            f"reviewed_base={approved_base} live_base={live_base}. "
+            "Rebase/update and rerun CI/review."
+        )
+        return 2
+
+    checks = run(
+        ["gh", "pr", "checks", str(pr), "--repo", repo, "--required"]
+    )
+    if checks.returncode != 0 or not checks.stdout.strip():
+        print("REFUSED: required checks are not all green/reported")
+        return 2
+
+    merge = run(
+        [
+            "gh",
+            "api",
+            "--method",
+            "PUT",
+            f"repos/{repo}/pulls/{pr}/merge",
+            "-f",
+            f"sha={approved_sha}",
+            "-f",
+            f"merge_method={args.method}",
+        ]
+    )
+    if merge.returncode != 0:
+        print("MERGE FAILED:", merge.stderr.strip() or merge.stdout.strip())
+        return 2
+
     payload = json.loads(merge.stdout)
-    if not payload.get("merged"): print("MERGE REFUSED BY GITHUB:", payload.get("message")); return 2
+    if not payload.get("merged"):
+        print("MERGE REFUSED BY GITHUB:", payload.get("message"))
+        return 2
 
     work_unit = work_unit_record.get("id")
     try:
@@ -146,25 +347,58 @@ def main() -> int:
             append_coordination_event(
                 "ROLE_LEASE_RELEASED",
                 str(lease.get("actor") or args.actor),
-                {"lease_id": lease.get("id"), "pr": pr, "reason": "merged"},
+                {
+                    "lease_id": lease.get("id"),
+                    "pr": pr,
+                    "reason": "merged",
+                },
             )
         append_coordination_event(
             "MERGED",
             args.actor,
-            {"pr": pr, "work_unit": work_unit, "approved_head": approved_sha, "approved_base": approved_base, "merge_sha": payload.get("sha"), "method": args.method},
+            {
+                "pr": pr,
+                "work_unit": work_unit,
+                "approved_head": approved_sha,
+                "approved_base": approved_base,
+                "merge_sha": payload.get("sha"),
+                "method": args.method,
+            },
         )
     except Exception as exc:
         print(f"WARN: merge succeeded but post-merge coordination record failed: {exc}")
 
     now = dt.datetime.now(dt.timezone.utc).isoformat()
     state["active_leases"] = []
-    state["active_streams"] = [item for item in state.get("active_streams", []) if item.get("pr") != pr]
-    state["last_merge"] = {"pr": pr, "work_unit": work_unit, "approved_head": approved_sha, "approved_base": approved_base, "merge_sha": payload.get("sha"), "actor": args.actor, "method": args.method, "merged_at": now}
+    state["active_streams"] = [
+        item for item in state.get("active_streams", []) if item.get("pr") != pr
+    ]
+    state["last_merge"] = {
+        "pr": pr,
+        "work_unit": work_unit,
+        "approved_head": approved_sha,
+        "approved_base": approved_base,
+        "merge_sha": payload.get("sha"),
+        "actor": args.actor,
+        "method": args.method,
+        "merged_at": now,
+    }
     state["generated_or_reconciled_at"] = now
     _sync_legacy(state)
-    state["company_state"] = "ACTIVE_PARALLEL_IMPLEMENTATION" if len(state.get("active_streams", [])) > 1 else ("ACTIVE_IMPLEMENTATION" if state.get("active_streams") else "POST_MERGE_RECONCILE")
+
+    active_streams = state.get("active_streams", [])
+    if len(active_streams) > 1:
+        state["company_state"] = "ACTIVE_PARALLEL_IMPLEMENTATION"
+    elif active_streams:
+        state["company_state"] = "ACTIVE_IMPLEMENTATION"
+    else:
+        state["company_state"] = "POST_MERGE_RECONCILE"
+
     save_json(CONTROL / "state.json", state)
-    print(f"MERGED PR #{pr}: {payload.get('sha')} (approved head {approved_sha}, base {approved_base})")
+    print(
+        f"MERGED PR #{pr}: {payload.get('sha')} "
+        f"(approved head {approved_sha}, base {approved_base})"
+    )
     return 0
 
 

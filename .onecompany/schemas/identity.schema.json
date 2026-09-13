@@ -2,8 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "OneCompany Platform Identity Policy",
   "type": "object",
-  "required": ["schema_version", "trust_model", "bootstrap", "principals", "root_rotation", "emergency_stop"],
+  "required": ["$schema", "schema_version", "trust_model", "bootstrap", "principals", "root_rotation", "emergency_stop"],
   "properties": {
+    "$schema": {"const": "./schemas/identity.schema.json"},
     "schema_version": {"const": "1.0"},
     "trust_model": {"const": "base-trusted-platform-principal"},
     "bootstrap": {

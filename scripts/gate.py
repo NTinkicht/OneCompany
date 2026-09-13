@@ -159,7 +159,9 @@ def main() -> int:
             for problem in scope_problems:
                 print(f"REFUSED: {problem}")
             return 2
-        checks_ok, check_reasons, required_check_evidence = evaluate_required_checks(repo, args.sha)
+        checks_ok, check_reasons, required_check_evidence = evaluate_required_checks(
+            repo, args.sha, trusted_ref=base_sha
+        )
         if not checks_ok:
             for reason in check_reasons:
                 print(f"REFUSED: {reason}")

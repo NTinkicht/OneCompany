@@ -142,7 +142,7 @@ def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any
     authors_by_pr: dict[int, set[str]] = {}
     gates_by_pr: dict[int, dict[str, Any]] = {}
     rejected_claims: list[dict[str, Any]] = []
-    integrity_conflicts: list[dict[str, Any]] = []
+    open_integrity_conflicts: dict[str, dict[str, Any]] = {}
     resolved_conflict_ids: set[str] = set()
     seen_event_ids: set[str] = set()
     known_implementation_leases: set[str] = set()
@@ -186,15 +186,14 @@ def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any
         return {"id": actor_payload.get("work_unit"), **snapshot}
 
     def record_integrity_conflict(event: dict[str, Any], reason: str, **details: Any) -> None:
-        integrity_conflicts.append(
-            {
-                "conflict_id": _conflict_id(event, reason),
-                "event_id": event.get("event_id"),
-                "type": event.get("type"),
-                "reason": reason,
-                **details,
-            }
-        )
+        conflict = {
+            "conflict_id": _conflict_id(event, reason),
+            "event_id": event.get("event_id"),
+            "type": event.get("type"),
+            "reason": reason,
+            **details,
+        }
+        open_integrity_conflicts[str(conflict["conflict_id"])] = conflict
 
     def record_rejected_claim(
         event: dict[str, Any],
@@ -327,6 +326,7 @@ def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any
             conflict_id = payload.get("conflict_id")
             if isinstance(conflict_id, str) and conflict_id:
                 resolved_conflict_ids.add(conflict_id)
+                open_integrity_conflicts.pop(conflict_id, None)
         elif event_type == "MERGED":
             work_unit = payload.get("work_unit")
             if isinstance(work_unit, str) and work_unit:
@@ -344,9 +344,7 @@ def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any
             gate["stale"] = True
             gate["stale_reasons"] = reasons
 
-    unresolved_integrity_conflicts = [
-        item for item in integrity_conflicts if item.get("conflict_id") not in resolved_conflict_ids
-    ]
+    unresolved_integrity_conflicts = list(open_integrity_conflicts.values())
     active_values = list(active.values())
     if pr is not None:
         active_values = [item for item in active_values if item.get("pr") == pr]

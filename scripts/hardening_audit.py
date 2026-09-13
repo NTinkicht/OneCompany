@@ -16,6 +16,19 @@ BLOCK_PRT = re.compile(r"(?im)^\s*['\"]?pull_request_target['\"]?\s*:")
 FLOW_PRT = re.compile(
     r"(?is)(?<![A-Za-z0-9_-])['\"]?on['\"]?\s*:\s*(?:\[[^\]]*\bpull_request_target\b|\{[^}]*\bpull_request_target\b)"
 )
+# CompanyOS deliberately rejects encoded YAML semantics in executable workflows.
+# This is a fail-closed canonical-subset rule: semantically significant strings
+# must be visible to a deterministic text audit rather than hidden behind YAML
+# escape decoding, anchors or aliases.
+ENCODED_SCALAR = re.compile(r"\\(?:x[0-9A-Fa-f]{2}|u[0-9A-Fa-f]{4}|U[0-9A-Fa-f]{8})")
+YAML_ANCHOR_OR_ALIAS = re.compile(r"(?m)(?:^|[\s\[{,])(?:&|\*)[A-Za-z_][A-Za-z0-9_-]*")
+# Detect action-like owner/repository references anywhere after comment stripping,
+# not only behind a literal `uses` token. This prevents aliases/encoded keys from
+# hiding mutable external action revisions.
+ACTION_REFERENCE = re.compile(
+    r"(?<![A-Za-z0-9_.-])([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)@([^\s,}\]\"']+)"
+)
+DOCKER_REFERENCE = re.compile(r"docker://([^\s,}\]\"']+)")
 
 
 def workflow_files(root: Path) -> list[Path]:
@@ -85,14 +98,39 @@ def _unquote(value: str) -> str:
     return value
 
 
+def _audit_action_reference(relative: Path, raw: str) -> list[str]:
+    errors: list[str] = []
+    if raw.startswith("./"):
+        return errors
+    if raw.startswith("docker://"):
+        image = raw[len("docker://"):]
+        if not re.search(r"@sha256:[0-9a-fA-F]{64}$", image):
+            errors.append(f"{relative}: docker action {raw} is not pinned to an immutable sha256 digest")
+        return errors
+    if "@" not in raw:
+        errors.append(f"{relative}: external action {raw} is missing an immutable revision")
+        return errors
+    action, revision = raw.rsplit("@", 1)
+    if not action or not SHA40.fullmatch(revision):
+        errors.append(f"{relative}: external action {raw} is not pinned to immutable 40-hex SHA")
+    return errors
+
+
 def audit_workflow(path: Path) -> list[str]:
     errors: list[str] = []
     text = _strip_yaml_comments(path.read_text(encoding="utf-8"))
     relative = path.relative_to(ROOT)
 
-    # Cover both block and YAML-flow event syntax. Flow syntax is a common way
-    # line-oriented audits are bypassed, so policy checks are representation-agnostic.
-    if BLOCK_PRT.search(text) or FLOW_PRT.search(text):
+    if ENCODED_SCALAR.search(text):
+        errors.append(
+            f"{relative}: YAML hex/unicode escapes are forbidden in executable workflows; use canonical visible scalars"
+        )
+    if YAML_ANCHOR_OR_ALIAS.search(text):
+        errors.append(
+            f"{relative}: YAML anchors/aliases are forbidden in executable workflows; keep security-relevant structure explicit"
+        )
+
+    if BLOCK_PRT.search(text) or FLOW_PRT.search(text) or "pull_request_target" in text:
         errors.append(f"{relative}: pull_request_target is forbidden")
     if WRITE_ALL.search(text):
         errors.append(f"{relative}: permissions: write-all is forbidden")
@@ -100,23 +138,27 @@ def audit_workflow(path: Path) -> list[str]:
     if USES_EMPTY.search(text):
         errors.append(f"{relative}: uses must be an explicit scalar on the same mapping entry")
 
+    # Audit literal uses mappings.
+    seen: set[str] = set()
     for match in USES_KEY.finditer(text):
         raw = _unquote(match.group(1))
-        if raw.startswith("./"):
+        seen.add(raw)
+        errors.extend(_audit_action_reference(relative, raw))
+
+    # Also audit every owner/repository@revision token globally. This catches
+    # equivalent YAML representations whose key spelling is not a literal `uses`.
+    for match in ACTION_REFERENCE.finditer(text):
+        raw = f"{match.group(1)}@{match.group(2)}"
+        if raw in seen:
             continue
-        if raw.startswith("docker://"):
-            image = raw[len("docker://"):]
-            if not re.search(r"@sha256:[0-9a-fA-F]{64}$", image):
-                errors.append(f"{relative}: docker action {raw} is not pinned to an immutable sha256 digest")
+        errors.extend(_audit_action_reference(relative, raw))
+
+    for match in DOCKER_REFERENCE.finditer(text):
+        raw = "docker://" + match.group(1)
+        if raw in seen:
             continue
-        if "@" not in raw:
-            errors.append(f"{relative}: external action {raw} is missing an immutable revision")
-            continue
-        action, revision = raw.rsplit("@", 1)
-        if not action or not SHA40.fullmatch(revision):
-            errors.append(
-                f"{relative}: external action {raw} is not pinned to immutable 40-hex SHA"
-            )
+        errors.extend(_audit_action_reference(relative, raw))
+
     return sorted(set(errors))
 
 

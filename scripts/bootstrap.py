@@ -76,7 +76,8 @@ def initialize_control_plane(target: Path, project_name: str, repository: str, d
     write_json(config_path, config)
     write_json(target / ".onecompany" / "queue.json", {"$schema": "./schemas/queue.schema.json", "schema_version": "1.1", "work_units": []})
     write_json(target / ".onecompany" / "portfolio.json", {"$schema": "./schemas/portfolio.schema.json", "schema_version": "1.0", "entities": [], "links": []})
-    write_json(target / ".onecompany" / "requirements-catalog.json", {"$schema": "./schemas/requirements-catalog.schema.json", "schema_version": "1.0", "requirements": []})
+    write_json(target / ".onecompany" / "requirements-catalog.json", {"$schema": "./schemas/requirements-catalog.schema.json", "schema_version": "1.0", "requirements": [], "acceptance_criteria": []})
+    write_json(target / ".onecompany" / "risk-register.json", {"$schema": "./schemas/risk-register.schema.json", "schema_version": "1.0", "risks": []})
     write_json(target / ".onecompany" / "state.json", INITIAL_STATE)
 
 def main() -> int:
@@ -101,7 +102,7 @@ def main() -> int:
     if args.initialize_contracts: initialize_contracts(target)
     print(f"OneCompany installed into {target}")
     print(f"Project: {project_name}; repository: {repository}; default branch: {default_branch}")
-    print("Portfolio/requirements/queue/state were reset; source work history was not copied. Unattended paths remain disabled.")
+    print("Portfolio/requirements/acceptance-criteria/risk-register/queue/state were reset; source work history was not copied. Unattended paths remain disabled.")
     return 0
 
 if __name__ == "__main__":

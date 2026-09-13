@@ -15,6 +15,7 @@ COMMANDS = {
     "ledger": ["ledger.py"], "lease": ["lease.py"], "gate": ["gate.py"], "merge": ["merge.py"], "reconcile": ["reconcile.py"], "supervise": ["supervise.py"],
     "bootstrap": ["bootstrap.py"], "init": ["init_project.py"],
     "assurance": ["assurance_gate.py"], "trace": ["assurance.py", "trace"], "risk": ["assurance.py", "risk"], "evidence": ["assurance.py", "evidence"],
+    "verify-evidence": ["evidence_verify.py"],
 }
 
 

@@ -74,6 +74,13 @@ class KernelReviewRegressionTests(unittest.TestCase):
             "path": ".github/workflows/onecompany-validate.yml",
             "head_sha": sha,
             "event": "pull_request",
+            "pull_requests": [
+                {
+                    "number": 14,
+                    "head": {"sha": sha},
+                    "base": {"sha": base},
+                }
+            ],
         }
         with (
             patch.object(required_checks, "_manifest_from_ref", return_value=(manifest, None)),
@@ -90,7 +97,28 @@ class KernelReviewRegressionTests(unittest.TestCase):
             )
         self.assertTrue(ok, reasons)
         self.assertEqual(evidence[0]["trusted_ref"], base)
+        self.assertEqual(evidence[0]["workflow_base_sha"], base)
+        self.assertEqual(evidence[0]["workflow_pr"], 14)
         self.assertEqual(evidence[0]["trusted_workflow_blob_sha"], "trusted-workflow-blob")
+
+    def test_same_head_check_from_old_base_is_rejected(self):
+        sha = "a" * 40
+        old_base = "b" * 40
+        reviewed_base = "c" * 40
+        workflow = {
+            "id": 70,
+            "path": ".github/workflows/onecompany-validate.yml",
+            "head_sha": sha,
+            "event": "pull_request",
+            "pull_requests": [
+                {"number": 14, "head": {"sha": sha}, "base": {"sha": old_base}}
+            ],
+        }
+        ok, _pr, reason = required_checks._workflow_pr_binding(
+            workflow, sha, reviewed_base
+        )
+        self.assertFalse(ok)
+        self.assertIn("exact head/base", reason or "")
 
     def test_hardening_audit_rejects_unicode_encoded_yaml_key(self):
         with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
@@ -103,6 +131,16 @@ class KernelReviewRegressionTests(unittest.TestCase):
         self.assertTrue(any("escapes are forbidden" in error for error in errors), errors)
         self.assertTrue(any("not pinned" in error for error in errors), errors)
 
+    def test_hardening_audit_rejects_folded_permissions_scalar(self):
+        with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
+            path = Path(tmp) / "folded.yml"
+            path.write_text(
+                "name: folded\npermissions: >-\n  write-all\njobs: {}\n",
+                encoding="utf-8",
+            )
+            errors = hardening_audit.audit_workflow(path)
+        self.assertTrue(any("block scalars" in error for error in errors), errors)
+
     def test_unsupported_ruleset_exclusion_fails_closed(self):
         ruleset = {
             "conditions": {
@@ -113,6 +151,15 @@ class KernelReviewRegressionTests(unittest.TestCase):
             }
         }
         self.assertFalse(github_controls._ruleset_applies_to_branch(ruleset, "main"))
+
+    def test_ruleset_with_any_bypass_actor_cannot_count_as_enforcement(self):
+        self.assertTrue(
+            github_controls._ruleset_has_bypass(
+                {"bypass_actors": [{"actor_type": "Integration", "actor_id": 1}]}
+            )
+        )
+        self.assertFalse(github_controls._ruleset_has_bypass({"bypass_actors": []}))
+        self.assertTrue(github_controls._ruleset_has_bypass({}))
 
     def test_later_ownerless_codeowners_rule_removes_effective_ownership(self):
         text = (ROOT / ".github" / "CODEOWNERS").read_text(encoding="utf-8")

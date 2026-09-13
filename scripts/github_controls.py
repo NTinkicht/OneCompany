@@ -95,16 +95,36 @@ def _ruleset_applies_to_branch(ruleset: dict[str, Any], branch: str) -> bool:
 
 
 def _ruleset_has_bypass(ruleset: dict[str, Any]) -> bool:
-    """Fail closed unless the applicable ruleset has no bypass principals.
-
-    CompanyOS cannot prove that an arbitrary app/team/role bypass is outside the
-    worker threat model, so such a ruleset is informative but cannot establish
-    non-bypassable enforcement.
-    """
+    """Fail closed unless the applicable ruleset has no bypass principals."""
     bypass = ruleset.get("bypass_actors")
     if not isinstance(bypass, list):
         return True
     return bool(bypass)
+
+
+def _classic_has_bypass(protection: dict[str, Any]) -> bool:
+    """Return True unless classic protection is provably non-bypassable.
+
+    Administrators must be subject to protection and PR bypass allowances must be
+    explicitly present and empty. Missing/ambiguous fields fail closed because
+    they cannot establish the non-bypassable enforcement CompanyOS claims.
+    """
+    enforce_admins = protection.get("enforce_admins")
+    if not isinstance(enforce_admins, dict) or enforce_admins.get("enabled") is not True:
+        return True
+    reviews = protection.get("required_pull_request_reviews")
+    if not isinstance(reviews, dict):
+        return True
+    allowances = reviews.get("bypass_pull_request_allowances")
+    if not isinstance(allowances, dict):
+        return True
+    for key in ("users", "teams", "apps"):
+        values = allowances.get(key)
+        if not isinstance(values, list):
+            return True
+        if values:
+            return True
+    return False
 
 
 def _decode_contents_payload(payload: Any) -> str | None:
@@ -261,6 +281,8 @@ def inspect_enforcement(
             "configured": False,
             "required_checks": [],
             "code_owner_review": False,
+            "bypassable": True,
+            "counted_as_enforcement": False,
         },
         "rulesets": [],
         "required_checks": sorted(required_checks),
@@ -314,13 +336,17 @@ def inspect_enforcement(
         )
         reviews = protection.get("required_pull_request_reviews") or {}
         code_owner = reviews.get("require_code_owner_reviews") is True
-        observed_required.update(contexts)
-        owner_review_enforced = owner_review_enforced or code_owner
+        bypassable = _classic_has_bypass(protection)
         result["classic"] = {
             "configured": True,
             "required_checks": sorted(contexts),
             "code_owner_review": code_owner,
+            "bypassable": bypassable,
+            "counted_as_enforcement": not bypassable,
         }
+        if not bypassable:
+            observed_required.update(contexts)
+            owner_review_enforced = owner_review_enforced or code_owner
 
     code, rulesets, _ = gh_api(f"repos/{repo}/rulesets")
     if code == 0 and isinstance(rulesets, list):

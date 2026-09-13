@@ -9,6 +9,16 @@
   "event_format_version": 2,
   "accepted_event_versions": [1, 2],
   "legacy_event_max_comment_id": 0,
+  "legacy_v1_actor_limits": {
+    "human-owner": 1,
+    "chatgpt": 1,
+    "codex": 1,
+    "claude": 1,
+    "github-copilot": 1,
+    "gemini-cli": 1,
+    "mistral-vibe": 1
+  },
+  "legacy_v1_unknown_actor_limit": 1,
   "accepted_event_types": [
     "ROLE_LEASE_ASSIGNED",
     "ROLE_LEASE_RELEASED",
@@ -30,6 +40,8 @@
     "continuous_supervisors_must_share_ledger": true,
     "lease_admission_is_immutable_at_grant": true,
     "current_actor_eligibility_is_runtime_status_not_replay_authority": true,
-    "legacy_v1_events_require_migration_cutoff": true
+    "legacy_v1_events_require_migration_cutoff": true,
+    "legacy_v1_capacity_is_frozen_at_migration": true,
+    "v2_dependency_completion_requires_preceding_merge_evidence": true
   }
 }

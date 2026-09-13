@@ -3,29 +3,32 @@
   "$id": "https://onecompany.dev/schemas/planning.schema.json",
   "title": "OneCompany Planning Policy",
   "type": "object",
-  "required": [
-    "schema_version",
-    "work_model",
-    "planning_horizons",
-    "prioritization",
-    "estimation",
-    "traceability",
-    "parallel_execution",
-    "flow",
-    "automation"
-  ],
+  "required": ["schema_version", "source_of_truth", "work_model", "planning_horizons", "prioritization", "estimation", "traceability", "parallel_execution", "flow", "automation"],
   "properties": {
     "$schema": {"type": "string"},
     "schema_version": {"type": "string"},
+    "source_of_truth": {
+      "type": "object",
+      "required": ["approved_baseline", "github_issues_are_collaboration_surface", "issue_edits_do_not_auto_baseline", "reconciliation_required"],
+      "properties": {
+        "approved_baseline": {"const": "versioned_control_plane"},
+        "github_issues_are_collaboration_surface": {"const": true},
+        "issue_edits_do_not_auto_baseline": {"const": true},
+        "reconciliation_required": {"const": true}
+      },
+      "additionalProperties": false
+    },
     "work_model": {
       "type": "object",
-      "required": ["entity_types", "execution_item_types", "relationship_types", "execution_contract", "requirements_are_canonical_in"],
+      "required": ["entity_types", "execution_item_types", "relationship_types", "execution_contract", "requirements_are_canonical_in", "acceptance_criteria_are_canonical_in", "risks_are_canonical_in"],
       "properties": {
         "entity_types": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
         "relationship_types": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}},
         "optional_layers": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
         "execution_contract": {"type": "string"},
         "requirements_are_canonical_in": {"type": "string"},
+        "acceptance_criteria_are_canonical_in": {"type": "string"},
+        "risks_are_canonical_in": {"type": "string"},
         "execution_item_types": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string"}}
       }
     },

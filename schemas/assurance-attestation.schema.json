@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "assurance-attestation.schema.json",
+  "title": "OneCompany Assurance Attestation",
+  "type": "object",
+  "required": ["schema", "repository", "work_unit", "pr", "head_sha", "base_sha", "quality_profile", "risk_level", "material_authors", "review", "artifacts", "extracted", "policy_revision", "verdict"],
+  "properties": {
+    "schema": {"const": "onecompany-assurance-attestation-v1"},
+    "repository": {"type": "string", "pattern": "^[^/]+/[^/]+$"},
+    "work_unit": {"type": "string", "minLength": 1},
+    "pr": {"type": "integer", "minimum": 1},
+    "head_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "base_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "quality_profile": {"type": "string", "minLength": 1},
+    "risk_level": {"enum": ["low", "medium", "high", "critical"]},
+    "material_authors": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+    "review": {
+      "type": "object",
+      "required": ["verified"],
+      "properties": {
+        "verified": {"type": "boolean"},
+        "review_id": {"type": ["integer", "null"]},
+        "state": {"type": "string"},
+        "commit_id": {"type": ["string", "null"]},
+        "reviewer_login": {"type": ["string", "null"]},
+        "submitted_at": {"type": ["string", "null"]},
+        "errors": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": true
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["evidence_id", "workflow_run_id", "artifact_id", "artifact_name", "digest_sha256", "parser"],
+        "properties": {
+          "evidence_id": {"type": ["string", "null"]},
+          "workflow_run_id": {"type": ["integer", "null"]},
+          "artifact_id": {"type": ["integer", "null"]},
+          "artifact_name": {"type": ["string", "null"]},
+          "digest_sha256": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+          "parser": {"type": ["object", "null"]}
+        },
+        "additionalProperties": false
+      }
+    },
+    "extracted": {
+      "type": "object",
+      "required": ["coverage", "test_families"],
+      "properties": {
+        "coverage": {"type": "object", "additionalProperties": {"type": "number"}},
+        "test_families": {"type": "object", "additionalProperties": {"enum": ["pass", "fail", "skipped"]}}
+      },
+      "additionalProperties": false
+    },
+    "policy_revision": {"type": "string", "minLength": 1},
+    "verdict": {"enum": ["PASS", "UNVERIFIED"]}
+  },
+  "additionalProperties": false
+}

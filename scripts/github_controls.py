@@ -34,12 +34,7 @@ def _required_contexts_from_rule(rule: dict[str, Any]) -> set[str]:
 
 
 def _ref_pattern_regex(pattern: str) -> re.Pattern[str] | None:
-    """Translate the GitHub ruleset fnmatch subset used for branch refs.
-
-    Single `*` does not cross `/`; `**` may. Character classes and other
-    extensions are deliberately not guessed: unsupported constructs return None.
-    Callers treat None as ambiguous and fail closed.
-    """
+    """Translate the GitHub ruleset fnmatch subset used for branch refs."""
     if any(ch in pattern for ch in "[]{}"):
         return None
     out: list[str] = ["^"]
@@ -64,9 +59,7 @@ def _ref_pattern_regex(pattern: str) -> re.Pattern[str] | None:
 
 def _ref_pattern_matches(pattern: str, branch: str) -> bool | None:
     pattern = str(pattern)
-    if pattern == "~ALL":
-        return True
-    if pattern == "~DEFAULT_BRANCH":
+    if pattern in {"~ALL", "~DEFAULT_BRANCH"}:
         return True
     if pattern.startswith("~"):
         return None
@@ -86,8 +79,6 @@ def _ruleset_applies_to_branch(ruleset: dict[str, Any], branch: str) -> bool:
     for pattern in excludes:
         matched = _ref_pattern_matches(pattern, branch)
         if matched is None:
-            # An exclusion we cannot model might exclude this branch. Do not count
-            # the ruleset as protection when applicability is ambiguous.
             return False
         if matched:
             return False
@@ -103,6 +94,19 @@ def _ruleset_applies_to_branch(ruleset: dict[str, Any], branch: str) -> bool:
     return include_match
 
 
+def _ruleset_has_bypass(ruleset: dict[str, Any]) -> bool:
+    """Fail closed unless the applicable ruleset has no bypass principals.
+
+    CompanyOS cannot prove that an arbitrary app/team/role bypass is outside the
+    worker threat model, so such a ruleset is informative but cannot establish
+    non-bypassable enforcement.
+    """
+    bypass = ruleset.get("bypass_actors")
+    if not isinstance(bypass, list):
+        return True
+    return bool(bypass)
+
+
 def _decode_contents_payload(payload: Any) -> str | None:
     if not isinstance(payload, dict) or payload.get("encoding") != "base64":
         return None
@@ -116,11 +120,7 @@ def _decode_contents_payload(payload: Any) -> str | None:
 
 
 def _parse_codeowners(text: str) -> list[tuple[str, list[str]]]:
-    """Parse CODEOWNERS in file order, preserving ownerless rules.
-
-    GitHub uses the *last* matching CODEOWNERS rule. Ownerless later rules are
-    therefore security-significant and must not be discarded.
-    """
+    """Parse CODEOWNERS in file order, preserving ownerless rules."""
     rules: list[tuple[str, list[str]]] = []
     for raw in text.splitlines():
         line = raw.strip()
@@ -140,7 +140,6 @@ def _parse_codeowners(text: str) -> list[tuple[str, list[str]]]:
 
 
 def _codeowners_pattern_regex(pattern: str) -> re.Pattern[str] | None:
-    """Translate the CODEOWNERS subset CompanyOS relies on for protected paths."""
     value = pattern.strip()
     if not value or value.startswith("!") or any(ch in value for ch in "[]{}"):
         return None
@@ -177,7 +176,9 @@ def _codeowners_pattern_matches(pattern: str, path: str) -> bool:
     return bool(regex.fullmatch(normalized))
 
 
-def _effective_codeowners(rules: list[tuple[str, list[str]]], path: str) -> list[str] | None:
+def _effective_codeowners(
+    rules: list[tuple[str, list[str]]], path: str
+) -> list[str] | None:
     effective: list[str] | None = None
     matched = False
     for pattern, owners in rules:
@@ -215,22 +216,17 @@ def _current_protected_files(patterns: list[str]) -> list[str]:
 
 
 def _codeowners_coverage(text: str) -> tuple[bool, list[str]]:
-    """Verify effective ownership after CODEOWNERS last-match precedence.
-
-    We check one synthetic probe for every structural protected family and every
-    current protected file. The latter catches a later ownerless/specific rule that
-    removes ownership from one control-plane file while leaving the broad family
-    rule apparently present.
-    """
     try:
         governance = load_json(CONTROL / "governance.json")
-        protected = [str(value) for value in governance.get("control_plane", {}).get("protected_paths", [])]
+        protected = [
+            str(value)
+            for value in governance.get("control_plane", {}).get("protected_paths", [])
+        ]
     except Exception:
         return False, ["cannot load governance protected_paths"]
 
     rules = _parse_codeowners(text)
     missing: list[str] = []
-
     for item in protected:
         canonical = _canonical_codeowner_pattern(item)
         probe = _family_probe(item)
@@ -250,13 +246,10 @@ def _codeowners_coverage(text: str) -> tuple[bool, list[str]]:
     return not missing, missing
 
 
-def inspect_enforcement(repo: str, branch: str, required_checks: set[str]) -> dict[str, Any]:
-    """Inspect whether the default branch has non-bypassable review/check controls.
-
-    Classic branch protection or an active ruleset may satisfy the enforcement
-    requirement. CODEOWNERS must exist, parse without live GitHub errors, and
-    effectively own every CompanyOS protected path after last-match precedence.
-    """
+def inspect_enforcement(
+    repo: str, branch: str, required_checks: set[str]
+) -> dict[str, Any]:
+    """Inspect whether default-branch review/check controls are non-bypassable."""
     result: dict[str, Any] = {
         "repo": repo,
         "branch": branch,
@@ -264,7 +257,11 @@ def inspect_enforcement(repo: str, branch: str, required_checks: set[str]) -> di
         "codeowners_valid": False,
         "codeowners_errors": [],
         "codeowners_missing_protected_paths": [],
-        "classic": {"configured": False, "required_checks": [], "code_owner_review": False},
+        "classic": {
+            "configured": False,
+            "required_checks": [],
+            "code_owner_review": False,
+        },
         "rulesets": [],
         "required_checks": sorted(required_checks),
         "missing_required_checks": sorted(required_checks),
@@ -272,22 +269,37 @@ def inspect_enforcement(repo: str, branch: str, required_checks: set[str]) -> di
     }
 
     encoded_ref = quote(branch, safe="")
-    code, codeowners, _ = gh_api(f"repos/{repo}/contents/.github/CODEOWNERS?ref={encoded_ref}")
+    code, codeowners, _ = gh_api(
+        f"repos/{repo}/contents/.github/CODEOWNERS?ref={encoded_ref}"
+    )
     result["codeowners_exists"] = code == 0 and isinstance(codeowners, dict)
-    codeowners_text = _decode_contents_payload(codeowners) if result["codeowners_exists"] else None
+    codeowners_text = (
+        _decode_contents_payload(codeowners) if result["codeowners_exists"] else None
+    )
     coverage_ok = False
     if codeowners_text is not None:
         coverage_ok, missing_coverage = _codeowners_coverage(codeowners_text)
         result["codeowners_missing_protected_paths"] = missing_coverage
 
-    errors_code, errors_payload, errors_message = gh_api(f"repos/{repo}/codeowners/errors?ref={encoded_ref}")
+    errors_code, errors_payload, errors_message = gh_api(
+        f"repos/{repo}/codeowners/errors?ref={encoded_ref}"
+    )
     errors: list[Any] = []
-    if errors_code == 0 and isinstance(errors_payload, dict) and isinstance(errors_payload.get("errors"), list):
+    if (
+        errors_code == 0
+        and isinstance(errors_payload, dict)
+        and isinstance(errors_payload.get("errors"), list)
+    ):
         errors = errors_payload.get("errors", [])
     elif result["codeowners_exists"]:
         errors = [{"message": errors_message or "CODEOWNERS validity could not be verified"}]
     result["codeowners_errors"] = errors
-    result["codeowners_valid"] = bool(result["codeowners_exists"] and codeowners_text is not None and coverage_ok and not errors)
+    result["codeowners_valid"] = bool(
+        result["codeowners_exists"]
+        and codeowners_text is not None
+        and coverage_ok
+        and not errors
+    )
 
     observed_required: set[str] = set()
     owner_review_enforced = False
@@ -313,10 +325,18 @@ def inspect_enforcement(repo: str, branch: str, required_checks: set[str]) -> di
     code, rulesets, _ = gh_api(f"repos/{repo}/rulesets")
     if code == 0 and isinstance(rulesets, list):
         for summary in rulesets:
-            if not isinstance(summary, dict) or summary.get("enforcement") != "active" or not summary.get("id"):
+            if (
+                not isinstance(summary, dict)
+                or summary.get("enforcement") != "active"
+                or not summary.get("id")
+            ):
                 continue
             detail_code, detail, _ = gh_api(f"repos/{repo}/rulesets/{summary['id']}")
-            if detail_code != 0 or not isinstance(detail, dict) or not _ruleset_applies_to_branch(detail, branch):
+            if (
+                detail_code != 0
+                or not isinstance(detail, dict)
+                or not _ruleset_applies_to_branch(detail, branch)
+            ):
                 continue
             contexts: set[str] = set()
             code_owner = False
@@ -326,21 +346,31 @@ def inspect_enforcement(repo: str, branch: str, required_checks: set[str]) -> di
                 contexts.update(_required_contexts_from_rule(rule))
                 if rule.get("type") == "pull_request":
                     params = rule.get("parameters") or {}
-                    code_owner = code_owner or params.get("require_code_owner_review") is True
-            observed_required.update(contexts)
-            owner_review_enforced = owner_review_enforced or code_owner
+                    code_owner = (
+                        code_owner or params.get("require_code_owner_review") is True
+                    )
+            bypass_actors = detail.get("bypass_actors")
+            bypassable = _ruleset_has_bypass(detail)
             result["rulesets"].append(
                 {
                     "id": detail.get("id"),
                     "name": detail.get("name"),
                     "required_checks": sorted(contexts),
                     "code_owner_review": code_owner,
+                    "bypass_actors": bypass_actors if isinstance(bypass_actors, list) else None,
+                    "counted_as_enforcement": not bypassable,
                 }
             )
+            if bypassable:
+                continue
+            observed_required.update(contexts)
+            owner_review_enforced = owner_review_enforced or code_owner
 
     missing = required_checks - observed_required
     result["observed_required_checks"] = sorted(observed_required)
     result["missing_required_checks"] = sorted(missing)
     result["code_owner_review_enforced"] = owner_review_enforced
-    result["enforcement_ok"] = bool(result["codeowners_valid"] and owner_review_enforced and not missing)
+    result["enforcement_ok"] = bool(
+        result["codeowners_valid"] and owner_review_enforced and not missing
+    )
     return result

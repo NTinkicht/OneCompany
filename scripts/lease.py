@@ -10,7 +10,7 @@ import uuid
 from capacity_lib import implementation_active_count, implementation_availability, implementation_capacity_limit
 from ledger_lib import derive, ledger_enabled, list_events, post_event
 from onecompany_lib import CONTROL, active_implementation_leases, emergency_stop_active, load_json, save_json
-from planning_lib import by_id, work_item_for_lease, work_units_conflict
+from planning_lib import by_id, dependency_ready, work_item_for_lease, work_units_conflict
 
 
 def actor_capacity_state(actor_id: str, active: list[dict], exclude_lease_id: str | None = None) -> tuple[int, list[str], int, int]:
@@ -83,16 +83,18 @@ def authoritative(state: dict) -> tuple[list[dict], list[dict]]:
 
 
 def _stream_from_lease(lease: dict) -> dict:
+    actor = lease.get("actor")
     return {
         "work_unit": lease.get("work_unit"),
         "lease_id": lease.get("id"),
-        "actor": lease.get("actor"),
+        "actor": actor,
         "branch": lease.get("branch"),
         "pr": lease.get("pr"),
         "head": lease.get("start_head"),
         "base_sha": None,
         "status": "ACTIVE_IMPLEMENTATION",
         "gate": None,
+        "material_authors": [actor] if isinstance(actor, str) and actor else [],
         "open_blockers": [],
         "human_decision_required": False,
     }
@@ -133,6 +135,7 @@ def sync_cache(state: dict, pr: int | None) -> None:
         stream.setdefault("open_blockers", [])
         stream.setdefault("human_decision_required", False)
         stream.setdefault("base_sha", None)
+        stream.setdefault("material_authors", [lease.get("actor")] if lease.get("actor") else [])
         stream.update({
             "actor": lease.get("actor"),
             "branch": lease.get("branch"),
@@ -170,6 +173,24 @@ def acquire(args: argparse.Namespace) -> int:
     if conflicts:
         print(f"REFUSED: durable coordination conflicts must be reconciled first: {conflicts}")
         return 2
+
+    durable_done: set[str] = set()
+    if ledger_enabled():
+        try:
+            durable_done = set(derive(list_events()).get("merged_work_units", []))
+        except Exception as exc:
+            print(f"REFUSED: cannot verify durable dependency state: {exc}")
+            return 2
+    ready, missing, unsatisfied = dependency_ready(candidate, work_map, durable_done)
+    if not ready:
+        detail = []
+        if missing:
+            detail.append("missing=" + ",".join(sorted(missing)))
+        if unsatisfied:
+            detail.append("unsatisfied=" + ",".join(sorted(unsatisfied)))
+        print(f"REFUSED: work unit {args.wu} dependencies are not complete: {'; '.join(detail)}")
+        return 2
+
     if any(item.get("work_unit") == args.wu for item in active):
         print(f"REFUSED: implementation lease already active for {args.wu}")
         return 2
@@ -315,10 +336,15 @@ def transfer(args: argparse.Namespace) -> int:
     old_stream = next((stream for stream in state.get("active_streams", []) if stream.get("lease_id") == old.get("id")), None)
     state["active_streams"] = [stream for stream in state.get("active_streams", []) if stream.get("lease_id") != old.get("id")]
     new_stream = _stream_from_lease(replacement)
+    authors = set(new_stream.get("material_authors", []))
+    if old.get("actor"):
+        authors.add(str(old.get("actor")))
     if old_stream:
+        authors.update(str(value) for value in old_stream.get("material_authors", []) if value)
         new_stream["open_blockers"] = old_stream.get("open_blockers", [])
         new_stream["human_decision_required"] = old_stream.get("human_decision_required", False)
         new_stream["base_sha"] = old_stream.get("base_sha")
+    new_stream["material_authors"] = sorted(authors)
     state.setdefault("active_streams", []).append(new_stream)
     sync_cache(state, old.get("pr"))
     state["company_state"] = "ACTIVE_PARALLEL_IMPLEMENTATION" if len(state.get("active_streams", [])) > 1 else "ACTIVE_IMPLEMENTATION"

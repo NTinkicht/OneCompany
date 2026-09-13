@@ -7,7 +7,8 @@ import datetime as dt
 import json
 import sys
 
-from ledger_lib import derive, ledger_config, ledger_enabled, list_events, post_event
+from lease_lifecycle import append_coordination_event, coordination_view
+from ledger_lib import ledger_config, ledger_enabled
 from onecompany_lib import (
     CONTROL, always_human_paths, autonomy_number, budget_allows, command_exists,
     emergency_stop_active, github_repo_from_config, governance_config, load_json,
@@ -39,23 +40,19 @@ def capability_eligible(actor_id: str, capability: str, access_key: str, exclude
     return not reasons, reasons
 
 
-def _stream_for_pr(state: dict, pr: int) -> dict | None:
-    return next((stream for stream in state.get("active_streams", []) if stream.get("pr") == pr), None)
-
-
-def _work_unit_for_pr(queue: dict, state: dict, pr: int) -> dict | None:
+def _work_unit_for_pr(queue: dict, pr: int, active: list[dict]) -> dict | None:
     work = queue.get("work_units", [])
     direct = next((item for item in work if item.get("pr") == pr), None)
-    if direct is not None: return direct
-    stream = _stream_for_pr(state, pr)
-    wu_id = (stream or {}).get("work_unit") or state.get("current_work_unit")
+    if direct is not None:
+        return direct
+    lease = next((item for item in active if item.get("pr") == pr), None)
+    wu_id = (lease or {}).get("work_unit")
     return by_id(work).get(str(wu_id)) if wu_id else None
 
 
-def _default_pr(state: dict) -> int | None:
-    streams = [s for s in state.get("active_streams", []) if isinstance(s.get("pr"), int)]
-    if len(streams) == 1: return streams[0].get("pr")
-    return state.get("current_pr") if len(streams) <= 1 else None
+def _default_pr(active: list[dict]) -> int | None:
+    values = sorted({item.get("pr") for item in active if isinstance(item.get("pr"), int)})
+    return values[0] if len(values) == 1 else None
 
 
 def _sync_legacy(state: dict) -> None:
@@ -79,8 +76,14 @@ def main() -> int:
     if not command_exists("gh") or run(["gh", "auth", "status"]).returncode != 0: print("REFUSED: authenticated gh CLI is required"); return 2
 
     config = load_json(CONTROL / "config.json"); state = load_json(CONTROL / "state.json"); queue = load_json(CONTROL / "queue.json")
-    repo = github_repo_from_config(config); pr = args.pr or _default_pr(state)
-    if not repo or not pr: print("REFUSED: repository/explicit --pr is required when multiple streams are active"); return 2
+    repo = github_repo_from_config(config)
+    try:
+        global_view = coordination_view()
+        global_active = [item for item in global_view.get("active_leases", []) if item.get("role") == "implementation"]
+    except Exception as exc:
+        print(f"REFUSED: cannot reconstruct lease authority: {exc}"); return 2
+    pr = args.pr or _default_pr(global_active)
+    if not repo or not pr: print("REFUSED: repository/explicit --pr is required when zero or multiple streams are active"); return 2
     try: level = autonomy_number(config.get("autonomy", {}).get("level", "L0"))
     except ValueError as exc: print(f"REFUSED: {exc}"); return 2
     if level >= 3 and ledger_config().get("required_for_autonomous_merge") and not ledger_enabled(): print("REFUSED: L3+ autonomous merge requires durable ledger"); return 2
@@ -93,15 +96,14 @@ def main() -> int:
     if absolute_human and args.actor != "human-owner": print(f"REFUSED: always-human governance paths changed: {', '.join(absolute_human)}"); return 2
     if protected and governance.get("human_merge_required") is True and args.actor != "human-owner": print(f"REFUSED: protected control-plane change requires human-owner merge: {', '.join(protected)}"); return 2
 
-    stream = _stream_for_pr(state, pr); work_unit_record = _work_unit_for_pr(queue, state, pr)
+    view = coordination_view(pr)
+    active = [item for item in view.get("active_leases", []) if item.get("role") == "implementation" and item.get("pr") == pr]
+    if not active:
+        print("REFUSED: PR has no canonical active unexpired implementation lease"); return 2
+    work_unit_record = _work_unit_for_pr(queue, pr, active)
     if work_unit_record is None: print(f"REFUSED: PR #{pr} is not mapped to a versioned Work Unit"); return 2
-    gate = (stream or {}).get("gate", state.get("current_gate"))
-    active = [lease for lease in state.get("active_leases", []) if lease.get("status") == "active" and lease.get("role") == "implementation" and lease.get("pr") == pr]
-    material_authors = set((stream or {}).get("material_authors", state.get("current_material_authors", [])))
-    if ledger_enabled():
-        try:
-            view = derive(list_events(), pr); gate = view.get("current_gate"); active = view.get("active_leases", []); material_authors = set(view.get("material_authors", []))
-        except Exception as exc: print(f"REFUSED: cannot read durable ledger: {exc}"); return 2
+    gate = view.get("current_gate")
+    material_authors = set(view.get("material_authors", []))
     if not gate or gate.get("verdict") != "PASS — MERGE_READY" or gate.get("stale"): print("REFUSED: no current durable PASS — MERGE_READY gate"); return 2
     if gate.get("work_unit") not in {None, work_unit_record.get("id")}: print("REFUSED: gate Work Unit does not match PR mapping"); return 2
     if set(gate.get("material_authors") or []) != material_authors: print("REFUSED: gate authorship snapshot differs from current durable authorship"); return 2
@@ -113,10 +115,10 @@ def main() -> int:
     if gate.get("scope_verified") is not True: print("REFUSED: gate did not verify live PR scope"); return 2
     approved_sha = gate.get("sha"); approved_base = gate.get("base_sha")
     if not approved_sha or not approved_base: print("REFUSED: gate must record approved head and base SHAs"); return 2
+
+    # Cache-held blockers are allowed to fail closed, never to grant authority.
     if state.get("open_blockers"): print("REFUSED: company-wide open blockers remain"); return 2
     if state.get("human_decision_required"): print("REFUSED: company-wide human decision remains outstanding"); return 2
-    if stream and stream.get("open_blockers"): print("REFUSED: stream open blockers remain"); return 2
-    if stream and stream.get("human_decision_required"): print("REFUSED: stream human decision remains outstanding"); return 2
 
     for problem in scope_errors(paths, work_unit_record): print(f"REFUSED: {problem}"); return 2
 
@@ -139,18 +141,26 @@ def main() -> int:
     if not payload.get("merged"): print("MERGE REFUSED BY GITHUB:", payload.get("message")); return 2
 
     work_unit = work_unit_record.get("id")
-    if ledger_enabled():
-        try:
-            for lease in active: post_event("ROLE_LEASE_RELEASED", str(lease.get("actor") or args.actor), {"lease_id": lease.get("id"), "pr": pr, "reason": "merged"})
-            post_event("MERGED", args.actor, {"pr": pr, "work_unit": work_unit, "approved_head": approved_sha, "approved_base": approved_base, "merge_sha": payload.get("sha"), "method": args.method})
-        except Exception as exc: print(f"WARN: merge succeeded but ledger post-merge record failed: {exc}")
+    try:
+        for lease in active:
+            append_coordination_event(
+                "ROLE_LEASE_RELEASED",
+                str(lease.get("actor") or args.actor),
+                {"lease_id": lease.get("id"), "pr": pr, "reason": "merged"},
+            )
+        append_coordination_event(
+            "MERGED",
+            args.actor,
+            {"pr": pr, "work_unit": work_unit, "approved_head": approved_sha, "approved_base": approved_base, "merge_sha": payload.get("sha"), "method": args.method},
+        )
+    except Exception as exc:
+        print(f"WARN: merge succeeded but post-merge coordination record failed: {exc}")
 
     now = dt.datetime.now(dt.timezone.utc).isoformat()
-    for lease in state.get("active_leases", []):
-        if lease.get("status") == "active" and lease.get("role") == "implementation" and lease.get("pr") == pr:
-            lease["status"] = "released"; lease["released_at"] = now; lease["release_reason"] = "merged"
+    state["active_leases"] = []
     state["active_streams"] = [item for item in state.get("active_streams", []) if item.get("pr") != pr]
     state["last_merge"] = {"pr": pr, "work_unit": work_unit, "approved_head": approved_sha, "approved_base": approved_base, "merge_sha": payload.get("sha"), "actor": args.actor, "method": args.method, "merged_at": now}
+    state["generated_or_reconciled_at"] = now
     _sync_legacy(state)
     state["company_state"] = "ACTIVE_PARALLEL_IMPLEMENTATION" if len(state.get("active_streams", [])) > 1 else ("ACTIVE_IMPLEMENTATION" if state.get("active_streams") else "POST_MERGE_RECONCILE")
     save_json(CONTROL / "state.json", state)

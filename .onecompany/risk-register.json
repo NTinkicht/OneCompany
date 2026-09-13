@@ -1,5 +1,70 @@
 {
   "$schema": "./schemas/risk-register.schema.json",
   "schema_version": "1.0",
-  "risks": []
+  "risks": [
+    {
+      "id": "RISK-001",
+      "title": "Conflicting parallel implementation",
+      "domain": "delivery",
+      "cause": "Multiple workers may be scheduled against overlapping code or semantic resources",
+      "event": "conflicting implementation streams run concurrently",
+      "consequence": "changes are lost, authority becomes ambiguous, or integration fails",
+      "likelihood": 4,
+      "impact": 5,
+      "inherent_score": 20,
+      "owner": "human-owner",
+      "treatment": "reduce",
+      "mitigations": [
+        {"id": "MIT-001", "description": "Enforce one writer per Work Unit, write-scope conflicts, resource locks, WIP limits, and actor capacity."},
+        {"id": "MIT-002", "description": "Verify the live PR diff remains inside the declared write scope before merge-ready gating and merge."}
+      ],
+      "residual_likelihood": 1,
+      "residual_impact": 5,
+      "residual_score": 5,
+      "status": "treated",
+      "review_trigger": "planning, lease, scope, resource-lock, or parallel scheduling semantics change"
+    },
+    {
+      "id": "RISK-002",
+      "title": "Stale integration evidence after base movement",
+      "domain": "delivery",
+      "cause": "Another parallel Work Unit may merge after a candidate has passed CI and independent review",
+      "event": "the target branch changes while the candidate head remains unchanged",
+      "consequence": "previous evidence no longer proves compatibility with the current integration base",
+      "likelihood": 4,
+      "impact": 4,
+      "inherent_score": 16,
+      "owner": "human-owner",
+      "treatment": "reduce",
+      "mitigations": [
+        {"id": "MIT-003", "description": "Bind merge-ready evidence to both exact head SHA and exact base SHA and require revalidation after base drift."}
+      ],
+      "residual_likelihood": 1,
+      "residual_impact": 4,
+      "residual_score": 4,
+      "status": "treated",
+      "review_trigger": "merge, gate, CI merge-candidate, or base-update semantics change"
+    },
+    {
+      "id": "RISK-003",
+      "title": "Non-reproducible autonomous planning",
+      "domain": "reliability",
+      "cause": "Priority or conflict decisions may depend on hidden, unstable, or non-versioned state",
+      "event": "identical planning inputs produce different execution decisions",
+      "consequence": "auditability and predictable autonomous operation are lost",
+      "likelihood": 3,
+      "impact": 4,
+      "inherent_score": 12,
+      "owner": "human-owner",
+      "treatment": "reduce",
+      "mitigations": [
+        {"id": "MIT-004", "description": "Use deterministic versioned inputs, stable tie breakers, and repeatable planner self-tests."}
+      ],
+      "residual_likelihood": 1,
+      "residual_impact": 3,
+      "residual_score": 3,
+      "status": "treated",
+      "review_trigger": "priority formula, tie breaker, dependency, or conflict semantics change"
+    }
+  ]
 }

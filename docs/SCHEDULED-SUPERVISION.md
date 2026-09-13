@@ -4,7 +4,7 @@ OneCompany can run around the clock, but a scheduler is a **liveness/reconciliat
 
 > **Events move the company; schedules make sure no transition was missed.**
 
-A supervisor reconciles the approved planning baseline, live GitHub state, durable coordination, worker readiness/capacity and budget. It may fill safe WIP slots with dependency-ready conflict-free WUs, but it never creates a duplicate writer for an existing WU.
+A supervisor reconciles the approved planning baseline, live GitHub state, durable coordination, worker readiness/capacity and budget. It may fill safe WIP slots with dependency-ready conflict-free WUs, but only when current autonomy authorizes continuous starts **and** a verified unattended implementation path has free capacity. It never creates a duplicate writer for an existing WU.
 
 ## Layered 24/7 model
 
@@ -24,6 +24,8 @@ This is stronger than “wake every agent every 15 minutes.” More workers do n
 ```text
 IDLE_NO_READY_WORK
 IDLE_READY_WORK_BLOCKED
+READY_WORK_REQUIRES_AUTHORITY
+CAPACITY_BLOCKED
 START_READY_WORK
 START_PARALLEL_READY_WORK
 ACTIVE_WORK_IN_PROGRESS
@@ -37,7 +39,9 @@ RECONCILE_UNLEASED_PR
 RECONCILE_OPEN_PRS
 ```
 
-A no-idle fault is actionable only when at least one WU is genuinely executable under dependency/conflict/WIP policy **and** an eligible budget-permitted worker has verified implementation capacity.
+`READY_WORK_REQUIRES_AUTHORITY` means the work is planning-safe but the current autonomy level does not authorize continuous autonomous starts. `CAPACITY_BLOCKED` means planning-safe work exists, but no worker currently has both verified free implementation capacity and a configured verified unattended implementation mechanism.
+
+A no-idle fault is actionable only when at least one WU is genuinely executable under dependency/conflict/WIP policy **and** an eligible budget-permitted worker has verified unattended implementation capacity. Interactive-only availability never creates a false autonomous-idle fault.
 
 ## GitHub Actions schedule
 
@@ -64,6 +68,9 @@ Important constraints:
 - scheduled runs must reconcile current PR head **and base** SHAs before consequential transitions;
 - connected-app actions may require approval; approval waits are visible blockers, not assumed success;
 - a supervisor must not infer capacity from a worker simply being configured — readiness and capacity must be verified;
+- interactive implementation readiness is distinct from unattended dispatchability;
+- an unattended start requires both verified unattended readiness and a configured unattended dispatch mechanism for implementation;
+- L1-L3 may surface planning-safe work without authorizing a continuous autonomous start; L4+ is required by the reference model for automatic next-WU progression;
 - event-triggered transitions are preferable where reliable; scheduled reconciliation remains the missed-event safety net;
 - supervisors must remain budget-compliant and may not enable paid fallback, overage, top-up or new vendors.
 
@@ -77,12 +84,12 @@ Use the trusted base AGENTS.md/company constitution and the current approved .on
 2. Never create a competing implementation branch/PR/lease for an already-owned Work Unit.
 3. Recompute dependency-ready work and the conflict-safe parallel set. Respect global WIP, declared scopes, semantic resource locks, risk policy and per-actor implementation capacity.
 4. If healthy deterministic work is progressing on a WU, do not preempt that WU.
-5. If a lease appears stale, verify branch/PR/CI/job movement before failover. Failover changes the worker, not the canonical WU stream.
+5. If a lease appears stale, verify branch/PR/CI/job movement before failover. Failover changes the worker, not the canonical WU stream and preserves the lease planning snapshot unless the work is explicitly re-planned.
 6. If CI is red, route one eligible remediation/implementation worker for that existing WU stream.
-7. If CI is green and no valid independent exact-head/base gate exists, route an eligible non-author reviewer.
+7. If CI is green and no valid independent exact-head/base gate exists, route an eligible non-author reviewer for that PR.
 8. If a gate is merge-ready, confirm live scope still matches the WU, required checks are green, head/base SHAs still match, governance permits merge, and expected-head protection is available.
-9. After a merge, release only that WU stream, recompute the portfolio graph, and start newly unlocked WUs only within safe WIP/capacity.
-10. READY work is not automatically executable. If all READY work is dependency/conflict/WIP/capacity blocked, report the real blocker rather than FAULT_IDLE.
+9. After a merge, release only that WU stream, recompute the portfolio graph, and start newly unlocked WUs only when autonomy permits and an unattended implementation route has verified free capacity.
+10. READY work is not automatically executable. If it is planning-safe but autonomy is too low, report READY_WORK_REQUIRES_AUTHORITY. If no unattended implementation route has capacity, report CAPACITY_BLOCKED rather than FAULT_IDLE.
 11. Never enable paid fallback, overage, top-up, new credentials, new vendors, risk acceptance, or another human-only action.
 12. If no useful transition is required, create no coordination noise.
 
@@ -94,8 +101,10 @@ Report durable action/evidence or a genuine blocker only.
 They converge on the same authoritative model:
 
 - existing canonical lease for WU-A → no duplicate writer for WU-A;
-- WU-B independently safe + WIP slot + worker capacity → WU-B may start;
+- WU-B independently safe + WIP slot + L4+ authority + unattended worker capacity → WU-B may start;
+- WU-B planning-safe at L1/L2/L3 → surface it, but do not call it autonomously startable;
 - WU-C conflicts with WU-A → hold WU-C;
+- worker is interactive-ready but has no unattended execution mechanism → capacity is unavailable to scheduled autonomy;
 - CI running → do not duplicate remediation;
 - current exact-head/base gate already exists → no redundant review;
 - head moved → gate stale;

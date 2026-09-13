@@ -1,0 +1,41 @@
+{
+  "$schema": "./schemas/policy-claims.schema.json",
+  "schema_version": "1.0",
+  "claims": [
+    {
+      "file": "budget.json",
+      "path": "/ai/additional_monthly_spend_cap",
+      "classification": "ENFORCED",
+      "owner": "validate.py",
+      "tests": [".onecompany/selftest/test_policy_truth.py"]
+    },
+    {
+      "file": "config.json",
+      "path": "/delivery/require_exact_head_gate",
+      "classification": "ENFORCED",
+      "owner": "validate.py",
+      "tests": [".onecompany/selftest/test_review_regressions.py"]
+    },
+    {
+      "file": "ledger.json",
+      "path": "/lease_lifecycle/ttl_seconds",
+      "classification": "ENFORCED",
+      "owner": "lease_lifecycle.py",
+      "tests": [".onecompany/selftest/test_lease_lifecycle.py"]
+    },
+    {
+      "file": "ledger.json",
+      "path": "/lease_lifecycle/renewal_progress_kinds",
+      "classification": "ENFORCED",
+      "owner": "lease_lifecycle.py",
+      "tests": [".onecompany/selftest/test_lease_lifecycle.py"]
+    },
+    {
+      "file": "planning.json",
+      "path": "/parallel_execution/max_concurrent_implementation_streams",
+      "classification": "ENFORCED",
+      "owner": "planning_lib.py",
+      "tests": [".onecompany/selftest/test_parallel_admission_consistency.py"]
+    }
+  ]
+}

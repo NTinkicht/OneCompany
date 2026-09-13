@@ -19,7 +19,7 @@ COMMANDS = {
 
 
 def usage() -> int:
-    print("OneCompany 0.3.0-planning-flow-control")
+    print("OneCompany 0.3.0")
     print("usage: python onecompany.py <command> [args]")
     print("\nStart here:")
     print("  onboard    assess a new/existing repository; read-only unless --apply")

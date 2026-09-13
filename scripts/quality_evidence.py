@@ -1,50 +1,40 @@
 #!/usr/bin/env python3
 """Produce deterministic Python quality evidence using only the standard library.
 
-This script is designed to be executed from a *trusted base revision* against a
-candidate checkout. It never reads packet-authored quality numbers. Evidence is
-measured from executed tests, bytecode branch edges, the exact base/head diff,
-and bounded deterministic mutations of changed Python production files.
+The trusted workflow copies this producer from its reviewed base revision and
+runs it against the candidate checkout. It never consumes packet-authored
+quality numbers. Evidence comes from executed tests, bytecode branch edges, the
+exact base/head diff, and bounded deterministic mutations of changed Python
+production files.
 """
 from __future__ import annotations
 
 import argparse
 import ast
-import contextlib
 import datetime as dt
 import dis
 import io
 import json
 import os
+import re
 import subprocess
 import sys
-import tempfile
 import time
 import unittest
+from collections import deque
 from pathlib import Path
 from typing import Any, Iterable
 
 SCHEMA = "onecompany-quality-evidence-v1"
 TOOL_VERSION = 1
-EXCLUDED_SOURCE_NAMES = {
-    "quality_evidence.py",
-    "smoke_bootstrap.py",
-    "smoke_init.py",
-}
+EXCLUDED_SOURCE_NAMES = {"quality_evidence.py", "smoke_bootstrap.py", "smoke_init.py"}
 EXCLUDED_PREFIXES = ("simulate",)
 
 
 def _run(command: list[str], cwd: Path, timeout: int = 180) -> dict[str, Any]:
     started = time.monotonic()
     try:
-        result = subprocess.run(
-            command,
-            cwd=str(cwd),
-            check=False,
-            text=True,
-            capture_output=True,
-            timeout=timeout,
-        )
+        result = subprocess.run(command, cwd=str(cwd), check=False, text=True, capture_output=True, timeout=timeout)
         return {
             "command": command,
             "returncode": result.returncode,
@@ -72,16 +62,13 @@ def _is_product_source(path: Path, root: Path) -> bool:
         return True
     if len(relative.parts) < 2 or relative.parts[0] != "scripts" or path.suffix != ".py":
         return False
-    if path.name in EXCLUDED_SOURCE_NAMES:
-        return False
-    if any(path.stem.startswith(prefix) for prefix in EXCLUDED_PREFIXES):
+    if path.name in EXCLUDED_SOURCE_NAMES or any(path.stem.startswith(prefix) for prefix in EXCLUDED_PREFIXES):
         return False
     return True
 
 
 def _product_sources(root: Path) -> list[Path]:
-    values = [root / "onecompany.py"]
-    values.extend(sorted((root / "scripts").rglob("*.py")))
+    values = [root / "onecompany.py", *sorted((root / "scripts").rglob("*.py"))]
     return [path for path in values if path.is_file() and _is_product_source(path, root)]
 
 
@@ -130,11 +117,10 @@ def _static_model(root: Path) -> tuple[set[tuple[str, int]], set[tuple[tuple[str
 
 
 def _discover_suite(root: Path) -> unittest.TestSuite:
-    loader = unittest.TestLoader()
     combined = unittest.TestSuite()
     for directory in (root / ".onecompany" / "selftest", root / "tests"):
         if directory.is_dir():
-            combined.addTests(loader.discover(str(directory), pattern="test_*.py", top_level_dir=str(root)))
+            combined.addTests(unittest.TestLoader().discover(str(directory), pattern="test_*.py"))
     return combined
 
 
@@ -182,11 +168,8 @@ def _coverage_measurement(root: Path) -> tuple[dict[str, float], dict[str, Any]]
     suite = _discover_suite(root)
     output = io.StringIO()
     runner = unittest.TextTestRunner(stream=output, verbosity=0)
-    old_trace = sys.gettrace()
-    old_cwd = Path.cwd()
-    old_argv = list(sys.argv)
-    inserted = [str(root), str(root / "scripts")]
-    for value in reversed(inserted):
+    old_trace, old_cwd, old_argv = sys.gettrace(), Path.cwd(), list(sys.argv)
+    for value in (str(root / "scripts"), str(root)):
         if value not in sys.path:
             sys.path.insert(0, value)
     try:
@@ -220,40 +203,37 @@ def _coverage_measurement(root: Path) -> tuple[dict[str, float], dict[str, Any]]
     )
 
 
-def _changed_lines(root: Path, base_sha: str, candidate_sha: str) -> set[tuple[str, int]]:
+def _git_diff(root: Path, base_sha: str, candidate_sha: str, *args: str) -> str:
     result = subprocess.run(
-        ["git", "diff", "--unified=0", "--no-color", base_sha, candidate_sha, "--", "scripts", "onecompany.py"],
-        cwd=str(root),
-        check=False,
-        text=True,
-        capture_output=True,
+        ["git", "diff", *args, base_sha, candidate_sha, "--", "scripts", "onecompany.py"],
+        cwd=str(root), check=False, text=True, capture_output=True,
     )
     if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or "git diff failed while deriving changed-line coverage")
+        raise RuntimeError(result.stderr.strip() or "git diff failed")
+    return result.stdout
+
+
+def _changed_lines(root: Path, base_sha: str, candidate_sha: str) -> set[tuple[str, int]]:
+    text = _git_diff(root, base_sha, candidate_sha, "--unified=0", "--no-color")
     changed: set[tuple[str, int]] = set()
     current: str | None = None
-    import re
     hunk = re.compile(r"^@@\s+-\d+(?:,\d+)?\s+\+(\d+)(?:,(\d+))?\s+@@")
-    for line in result.stdout.splitlines():
+    for line in text.splitlines():
         if line.startswith("+++ b/"):
             current = line[6:]
-            path = root / current
-            if not _is_product_source(path, root):
+            if not _is_product_source(root / current, root):
                 current = None
             continue
         match = hunk.match(line)
         if current and match:
-            start = int(match.group(1))
-            count = int(match.group(2) or "1")
-            for lineno in range(start, start + count):
-                changed.add((current, lineno))
+            start, count = int(match.group(1)), int(match.group(2) or "1")
+            changed.update((current, lineno) for lineno in range(start, start + count))
     return changed
 
 
 def _changed_line_coverage(root: Path, base_sha: str, candidate_sha: str, coverage_details: dict[str, Any]) -> tuple[float, dict[str, Any]]:
     executable, _ = _static_model(root)
-    changed = _changed_lines(root, base_sha, candidate_sha)
-    executable_changed = changed & executable
+    executable_changed = _changed_lines(root, base_sha, candidate_sha) & executable
     executed = {
         (str(item[0]), int(item[1]))
         for item in coverage_details.get("executed_lines", [])
@@ -261,41 +241,19 @@ def _changed_line_coverage(root: Path, base_sha: str, candidate_sha: str, covera
     }
     covered = executable_changed & executed
     percentage = 100.0 if not executable_changed else 100.0 * len(covered) / len(executable_changed)
-    return round(percentage, 2), {
-        "changed_executable_lines": len(executable_changed),
-        "covered_changed_lines": len(covered),
-    }
+    return round(percentage, 2), {"changed_executable_lines": len(executable_changed), "covered_changed_lines": len(covered)}
 
 
 def _changed_python_files(root: Path, base_sha: str, candidate_sha: str) -> list[Path]:
-    result = subprocess.run(
-        ["git", "diff", "--name-only", base_sha, candidate_sha, "--", "scripts", "onecompany.py"],
-        cwd=str(root),
-        check=False,
-        text=True,
-        capture_output=True,
-    )
-    if result.returncode != 0:
-        raise RuntimeError(result.stderr.strip() or "git diff failed while deriving mutation targets")
-    values: list[Path] = []
-    for raw in result.stdout.splitlines():
-        path = root / raw.strip()
-        if path.is_file() and _is_product_source(path, root):
-            values.append(path)
-    return sorted(values)
+    text = _git_diff(root, base_sha, candidate_sha, "--name-only")
+    values = [root / raw.strip() for raw in text.splitlines() if raw.strip()]
+    return sorted(path for path in values if path.is_file() and _is_product_source(path, root))
 
 
 COMPARE_MUTATIONS = {
-    ast.Eq: ast.NotEq,
-    ast.NotEq: ast.Eq,
-    ast.Lt: ast.GtE,
-    ast.LtE: ast.Gt,
-    ast.Gt: ast.LtE,
-    ast.GtE: ast.Lt,
-    ast.Is: ast.IsNot,
-    ast.IsNot: ast.Is,
-    ast.In: ast.NotIn,
-    ast.NotIn: ast.In,
+    ast.Eq: ast.NotEq, ast.NotEq: ast.Eq, ast.Lt: ast.GtE, ast.LtE: ast.Gt,
+    ast.Gt: ast.LtE, ast.GtE: ast.Lt, ast.Is: ast.IsNot, ast.IsNot: ast.Is,
+    ast.In: ast.NotIn, ast.NotIn: ast.In,
 }
 BINOP_MUTATIONS = {ast.Add: ast.Sub, ast.Sub: ast.Add, ast.Mult: ast.FloorDiv, ast.FloorDiv: ast.Mult}
 
@@ -314,9 +272,7 @@ def _mutation_kind(node: ast.AST) -> str | None:
 
 class _SingleMutator(ast.NodeTransformer):
     def __init__(self, target: int):
-        self.target = target
-        self.index = -1
-        self.applied = False
+        self.target, self.index, self.applied = target, -1, False
 
     def generic_visit(self, node):
         kind = _mutation_kind(node)
@@ -324,14 +280,10 @@ class _SingleMutator(ast.NodeTransformer):
             self.index += 1
             if self.index == self.target:
                 self.applied = True
-                if kind == "compare":
-                    node.ops[0] = COMPARE_MUTATIONS[type(node.ops[0])]()
-                elif kind == "boolop":
-                    node.op = ast.Or() if isinstance(node.op, ast.And) else ast.And()
-                elif kind == "bool":
-                    node.value = not node.value
-                elif kind == "binop":
-                    node.op = BINOP_MUTATIONS[type(node.op)]()
+                if kind == "compare": node.ops[0] = COMPARE_MUTATIONS[type(node.ops[0])]()
+                elif kind == "boolop": node.op = ast.Or() if isinstance(node.op, ast.And) else ast.And()
+                elif kind == "bool": node.value = not node.value
+                elif kind == "binop": node.op = BINOP_MUTATIONS[type(node.op)]()
                 return node
         return super().generic_visit(node)
 
@@ -341,14 +293,26 @@ def _mutation_specs(path: Path) -> list[int]:
     return list(range(sum(1 for node in ast.walk(tree) if _mutation_kind(node) is not None)))
 
 
+def _bounded_mutation_candidates(files: list[Path], max_mutants: int) -> list[tuple[Path, int]]:
+    queues = deque((path, deque(_mutation_specs(path))) for path in files)
+    result: list[tuple[Path, int]] = []
+    while queues and len(result) < max_mutants:
+        path, indexes = queues.popleft()
+        if indexes:
+            result.append((path, indexes.popleft()))
+        if indexes:
+            queues.append((path, indexes))
+    return result
+
+
 def _tests_kill_mutant(root: Path, timeout: int = 120) -> tuple[bool, list[dict[str, Any]]]:
     commands = [
-        [sys.executable, "-m", "unittest", "discover", "-s", ".onecompany/selftest", "-p", "test_*.py"],
-        [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"],
+        (root / ".onecompany" / "selftest", [sys.executable, "-m", "unittest", "discover", "-s", ".onecompany/selftest", "-p", "test_*.py"]),
+        (root / "tests", [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"]),
     ]
     results: list[dict[str, Any]] = []
-    for command in commands:
-        if not (root / command[6]).exists():
+    for directory, command in commands:
+        if not directory.is_dir():
             continue
         result = _run(command, root, timeout=timeout)
         results.append(result)
@@ -358,16 +322,11 @@ def _tests_kill_mutant(root: Path, timeout: int = 120) -> tuple[bool, list[dict[
 
 
 def _mutation_score(root: Path, base_sha: str, candidate_sha: str, max_mutants: int) -> tuple[float | None, dict[str, Any]]:
-    candidates: list[tuple[Path, int]] = []
-    for path in _changed_python_files(root, base_sha, candidate_sha):
-        for index in _mutation_specs(path):
-            candidates.append((path, index))
-    candidates = candidates[:max_mutants]
+    candidates = _bounded_mutation_candidates(_changed_python_files(root, base_sha, candidate_sha), max_mutants)
     if not candidates:
-        return None, {"generated": 0, "killed": 0, "survived": 0, "bounded_max": max_mutants}
+        return None, {"generated": 0, "killed": 0, "survived": 0, "bounded_max": max_mutants, "survivors": []}
 
-    killed = 0
-    survivors: list[dict[str, Any]] = []
+    killed, survivors = 0, []
     for path, index in candidates:
         original = path.read_text(encoding="utf-8")
         try:
@@ -378,7 +337,7 @@ def _mutation_score(root: Path, base_sha: str, candidate_sha: str, max_mutants: 
                 continue
             ast.fix_missing_locations(mutated)
             path.write_text(ast.unparse(mutated) + "\n", encoding="utf-8")
-            is_killed, results = _tests_kill_mutant(root)
+            is_killed, _results = _tests_kill_mutant(root)
             if is_killed:
                 killed += 1
             else:
@@ -388,11 +347,8 @@ def _mutation_score(root: Path, base_sha: str, candidate_sha: str, max_mutants: 
     total = len(candidates)
     score = 100.0 * killed / total if total else None
     return (round(score, 2) if score is not None else None), {
-        "generated": total,
-        "killed": killed,
-        "survived": total - killed,
-        "bounded_max": max_mutants,
-        "survivors": survivors[:50],
+        "generated": total, "killed": killed, "survived": total - killed,
+        "bounded_max": max_mutants, "survivors": survivors[:50],
     }
 
 
@@ -409,10 +365,16 @@ def _family_results(root: Path) -> tuple[dict[str, str], dict[str, Any]]:
         "security": [[python, "onecompany.py", "hardening-audit"]],
         "operations": [[python, "onecompany.py", "simulate-supervision"]],
     }
-    statuses: dict[str, str] = {}
-    details: dict[str, Any] = {}
+    statuses, details = {}, {}
     for family, commands in families.items():
-        results = [_run(command, root) for command in commands]
+        usable = []
+        for command in commands:
+            if "-s" in command:
+                directory = root / command[command.index("-s") + 1]
+                if not directory.is_dir():
+                    continue
+            usable.append(command)
+        results = [_run(command, root) for command in usable]
         statuses[family] = "pass" if results and all(item["returncode"] == 0 for item in results) else "fail"
         details[family] = results
     return statuses, details
@@ -426,6 +388,7 @@ def produce(root: Path, candidate_sha: str, base_sha: str, max_mutants: int) -> 
     if mutation is not None:
         coverage["mutation"] = mutation
     families, family_details = _family_results(root)
+    families["mutation"] = "pass" if mutation is not None else "skipped"
     return {
         "schema": SCHEMA,
         "candidate_sha": candidate_sha,
@@ -434,8 +397,7 @@ def produce(root: Path, candidate_sha: str, base_sha: str, max_mutants: int) -> 
         "coverage": coverage,
         "test_families": families,
         "tool": {
-            "name": "onecompany-quality-evidence",
-            "version": TOOL_VERSION,
+            "name": "onecompany-quality-evidence", "version": TOOL_VERSION,
             "implementation": "python-stdlib-bytecode-trace-and-bounded-mutation",
             "mutation_operators": ["compare", "boolop", "bool-constant", "binop"],
             "max_mutants": max_mutants,

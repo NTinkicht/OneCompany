@@ -82,6 +82,72 @@ class ReviewRegressionTests(unittest.TestCase):
         capacity.assert_not_called()
         save.assert_not_called()
 
+    def test_failover_preserves_all_material_authors_in_local_mode(self):
+        old = {
+            "id": "L1",
+            "work_unit": "WU-1",
+            "role": "implementation",
+            "actor": "first-worker",
+            "branch": "wu-1",
+            "pr": 10,
+            "start_head": "a" * 40,
+            "status": "active",
+            "planning_snapshot": {
+                "write_scope": ["src/**"],
+                "resource_locks": [],
+                "parallelism": "auto",
+                "risk_class": "LOW",
+                "dependencies": [],
+            },
+        }
+        state = {
+            "active_leases": [dict(old)],
+            "active_streams": [{
+                "work_unit": "WU-1",
+                "lease_id": "L1",
+                "actor": "first-worker",
+                "branch": "wu-1",
+                "pr": 10,
+                "head": "a" * 40,
+                "base_sha": None,
+                "status": "ACTIVE_IMPLEMENTATION",
+                "gate": None,
+                "material_authors": ["first-worker", "earlier-worker"],
+                "open_blockers": [],
+                "human_decision_required": False,
+            }],
+        }
+        queue = {"work_units": []}
+
+        def fake_load(path: Path):
+            name = Path(path).name
+            if name == "state.json":
+                return state
+            if name == "queue.json":
+                return queue
+            raise AssertionError(f"unexpected load: {path}")
+
+        args = argparse.Namespace(
+            lease_id="L1",
+            actor="replacement-worker",
+            current_head="b" * 40,
+            reason="failover",
+        )
+        with (
+            patch.object(lease, "emergency_stop_active", return_value=False),
+            patch.object(lease, "load_json", side_effect=fake_load),
+            patch.object(lease, "authoritative", return_value=([old], [])),
+            patch.object(lease, "actor_capacity_state", return_value=(1, [], 0, 1)),
+            patch.object(lease, "ledger_enabled", return_value=False),
+            patch.object(lease, "sync_cache"),
+            patch.object(lease, "save_json"),
+        ):
+            result = lease.transfer(args)
+
+        self.assertEqual(result, 0)
+        authors = set(state["active_streams"][0]["material_authors"])
+        self.assertEqual(authors, {"first-worker", "earlier-worker", "replacement-worker"})
+
     def test_authorization_planning_baselines_are_protected(self):
         governance = json.loads((ROOT / ".onecompany" / "governance.json").read_text(encoding="utf-8"))
         protected = set(governance["control_plane"]["protected_paths"])

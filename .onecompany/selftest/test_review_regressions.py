@@ -98,6 +98,7 @@ class ReviewRegressionTests(unittest.TestCase):
                 "parallelism": "auto",
                 "risk_class": "LOW",
                 "dependencies": [],
+                "dependency_closure": [],
             },
         }
         state = {
@@ -118,6 +119,14 @@ class ReviewRegressionTests(unittest.TestCase):
             }],
         }
         queue = {"work_units": []}
+        planning = {
+            "parallel_execution": {
+                "enabled": True,
+                "max_concurrent_implementation_streams": 3,
+                "require_write_scope_for_parallel": True,
+                "critical_risk_default": "serialize",
+            }
+        }
 
         def fake_load(path: Path):
             name = Path(path).name
@@ -125,6 +134,8 @@ class ReviewRegressionTests(unittest.TestCase):
                 return state
             if name == "queue.json":
                 return queue
+            if name == "planning.json":
+                return planning
             raise AssertionError(f"unexpected load: {path}")
 
         args = argparse.Namespace(

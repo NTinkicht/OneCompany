@@ -21,7 +21,11 @@ def required_check_manifest() -> dict[str, Any]:
 
 
 def required_check_names() -> list[str]:
-    return [str(item.get("name")) for item in required_check_manifest().get("checks", []) if item.get("name")]
+    return [
+        str(item.get("name"))
+        for item in required_check_manifest().get("checks", [])
+        if item.get("name")
+    ]
 
 
 def _gh_json(path: str) -> tuple[dict[str, Any] | None, str | None]:
@@ -100,16 +104,46 @@ def _workflow_run(repo: str, check: dict[str, Any]) -> tuple[dict[str, Any] | No
     return _gh_json(f"repos/{repo}/actions/runs/{match.group(1)}")
 
 
+def _workflow_pr_binding(
+    workflow: dict[str, Any],
+    sha: str,
+    trusted_ref: str,
+) -> tuple[bool, int | None, str | None]:
+    """Require the Actions run to name the exact PR head/base tuple.
+
+    Exact head alone is insufficient: a branch can retain the same head commit
+    while the target branch advances. GitHub's workflow-run pull_requests payload
+    is platform evidence of the base against which this check actually ran.
+    """
+    pulls = workflow.get("pull_requests")
+    if not isinstance(pulls, list) or not pulls:
+        return False, None, "trusted check workflow has no pull-request base binding"
+    for item in pulls:
+        if not isinstance(item, dict):
+            continue
+        head = (item.get("head") or {}).get("sha")
+        base = (item.get("base") or {}).get("sha")
+        number = item.get("number")
+        if head == sha and base == trusted_ref:
+            return True, number if isinstance(number, int) else None, None
+    return (
+        False,
+        None,
+        f"trusted check workflow is not bound to exact head/base {sha}/{trusted_ref}",
+    )
+
+
 def _trusted_matches(
     repo: str,
     sha: str,
     spec: dict[str, Any],
     runs: list[dict[str, Any]],
-) -> tuple[list[tuple[dict[str, Any], dict[str, Any]]], list[str]]:
+    trusted_ref: str | None,
+) -> tuple[list[tuple[dict[str, Any], dict[str, Any], int | None]], list[str]]:
     name = str(spec.get("name") or "")
     app_slug = spec.get("app_slug")
     workflow_path = str(spec.get("workflow_path") or "")
-    trusted: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    trusted: list[tuple[dict[str, Any], dict[str, Any], int | None]] = []
     rejected: list[str] = []
     for item in runs:
         if item.get("name") != name:
@@ -123,13 +157,25 @@ def _trusted_matches(
             continue
         if workflow_path and workflow.get("path") != workflow_path:
             rejected.append(
-                f"check {item.get('id')} named {name!r} came from untrusted workflow {workflow.get('path')!r}"
+                f"check {item.get('id')} named {name!r} came from untrusted workflow "
+                f"{workflow.get('path')!r}"
             )
             continue
         if workflow.get("head_sha") != sha:
-            rejected.append(f"workflow run for check {item.get('id')} is not bound to exact SHA {sha}")
+            rejected.append(
+                f"workflow run for check {item.get('id')} is not bound to exact SHA {sha}"
+            )
             continue
-        trusted.append((item, workflow))
+        pr_number: int | None = None
+        if trusted_ref:
+            bound, pr_number, binding_error = _workflow_pr_binding(workflow, sha, trusted_ref)
+            if not bound:
+                rejected.append(
+                    binding_error
+                    or f"workflow run for check {item.get('id')} is not bound to reviewed base"
+                )
+                continue
+        trusted.append((item, workflow, pr_number))
     return trusted, rejected
 
 
@@ -153,7 +199,8 @@ def _verify_trusted_workflow_unchanged(
         return (
             False,
             base_blob,
-            f"trusted workflow {workflow_path} changed relative to base {trusted_ref}; candidate CI cannot self-attest that change",
+            f"trusted workflow {workflow_path} changed relative to base {trusted_ref}; "
+            "candidate CI cannot self-attest that change",
         )
     return True, base_blob, None
 
@@ -163,14 +210,7 @@ def evaluate_required_checks(
     sha: str,
     trusted_ref: str | None = None,
 ) -> tuple[bool, list[str], list[dict[str, Any]]]:
-    """Return whether every required check passed on exactly ``sha``.
-
-    Merge/gate callers pass the reviewed base SHA as ``trusted_ref``. In that
-    mode the required-check manifest is loaded from the base revision, and every
-    trusted workflow must be byte-identical between base and candidate. Candidate
-    code therefore cannot redefine either the referee list or the referee itself
-    and then use that redefinition as merge evidence.
-    """
+    """Return whether every required check passed on exact head and reviewed base."""
     if trusted_ref:
         manifest, manifest_error = _manifest_from_ref(repo, trusted_ref)
         if manifest is None:
@@ -196,7 +236,9 @@ def evaluate_required_checks(
             if blob_sha:
                 workflow_blobs[workflow_path] = blob_sha
             if not unchanged:
-                reasons.append(workflow_error or f"trusted workflow {workflow_path} could not be verified")
+                reasons.append(
+                    workflow_error or f"trusted workflow {workflow_path} could not be verified"
+                )
         if reasons:
             return False, reasons, []
 
@@ -208,12 +250,14 @@ def evaluate_required_checks(
     for spec in required:
         name = str(spec.get("name") or "")
         allowed = {str(value) for value in spec.get("allowed_conclusions", [])}
-        trusted, rejected = _trusted_matches(repo, sha, spec, runs)
+        trusted, rejected = _trusted_matches(repo, sha, spec, runs, trusted_ref)
         if not trusted:
-            reasons.append(f"required trusted check missing on exact SHA: {name}")
+            reasons.append(f"required trusted check missing on exact head/base: {name}")
             reasons.extend(rejected)
             continue
-        observed, workflow = max(trusted, key=lambda pair: int(pair[0].get("id") or 0))
+        observed, workflow, pr_number = max(
+            trusted, key=lambda triple: int(triple[0].get("id") or 0)
+        )
         status = observed.get("status")
         conclusion = observed.get("conclusion")
         workflow_path = str(spec.get("workflow_path") or "")
@@ -228,6 +272,8 @@ def evaluate_required_checks(
             "workflow_run_id": workflow.get("id"),
             "workflow_path": workflow.get("path"),
             "workflow_event": workflow.get("event"),
+            "workflow_pr": pr_number,
+            "workflow_base_sha": trusted_ref,
             "trusted_ref": trusted_ref,
             "trusted_workflow_blob_sha": workflow_blobs.get(workflow_path),
         }
@@ -237,18 +283,38 @@ def evaluate_required_checks(
         if status != "completed":
             reasons.append(f"required check {name} is not completed (status={status})")
         if conclusion not in allowed:
-            reasons.append(f"required check {name} conclusion {conclusion!r} not in {sorted(allowed)}")
+            reasons.append(
+                f"required check {name} conclusion {conclusion!r} not in {sorted(allowed)}"
+            )
     return not reasons, reasons, evidence
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Verify CompanyOS required checks on an exact commit SHA")
+    parser = argparse.ArgumentParser(
+        description="Verify CompanyOS required checks on an exact commit SHA"
+    )
     parser.add_argument("--repo", required=True)
     parser.add_argument("--sha", required=True)
-    parser.add_argument("--trusted-ref", help="Base/trusted revision that defines the required-check manifest and workflow")
+    parser.add_argument(
+        "--trusted-ref",
+        help="Base/trusted revision that defines the required-check manifest and workflow",
+    )
     args = parser.parse_args()
-    ok, reasons, evidence = evaluate_required_checks(args.repo, args.sha, trusted_ref=args.trusted_ref)
-    print(json.dumps({"ok": ok, "sha": args.sha, "trusted_ref": args.trusted_ref, "checks": evidence, "reasons": reasons}, indent=2))
+    ok, reasons, evidence = evaluate_required_checks(
+        args.repo, args.sha, trusted_ref=args.trusted_ref
+    )
+    print(
+        json.dumps(
+            {
+                "ok": ok,
+                "sha": args.sha,
+                "trusted_ref": args.trusted_ref,
+                "checks": evidence,
+                "reasons": reasons,
+            },
+            indent=2,
+        )
+    )
     return 0 if ok else 1
 
 

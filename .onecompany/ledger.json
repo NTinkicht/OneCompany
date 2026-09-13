@@ -1,6 +1,6 @@
 {
   "$schema": "./schemas/ledger.schema.json",
-  "schema_version": "1.2",
+  "schema_version": "1.3",
   "enabled": false,
   "issue_number": null,
   "trusted_publisher_logins": [],
@@ -22,9 +22,7 @@
   "lease_lifecycle": {
     "ttl_seconds": 14400,
     "renewal_progress_kinds": ["pr_head"],
-    "implicit_expiry_revokes_authority": true,
-    "heartbeat_renews": false,
-    "local_event_store": ".git/onecompany/lease-events.jsonl"
+    "implicit_expiry_revokes_authority": true
   },
   "accepted_event_types": [
     "ROLE_LEASE_ASSIGNED",
@@ -40,21 +38,5 @@
     "HUMAN_DECISION",
     "INTEGRITY_CONFLICT_RESOLVED",
     "MERGED"
-  ],
-  "policy": {
-    "github_issue_comments_are_durable_coordination_record": true,
-    "local_state_is_cache": true,
-    "ignore_untrusted_publishers": true,
-    "binding_gate_must_be_durable": true,
-    "continuous_supervisors_must_share_ledger": true,
-    "lease_admission_is_immutable_at_grant": true,
-    "current_actor_eligibility_is_runtime_status_not_replay_authority": true,
-    "legacy_v1_events_require_migration_cutoff": true,
-    "legacy_v1_capacity_is_frozen_at_migration": true,
-    "v2_dependency_completion_requires_preceding_merge_evidence": true,
-    "lease_expiry_revokes_implementation_authority_without_erasing_history": true,
-    "lease_renewal_requires_durable_progress": true,
-    "heartbeat_is_not_progress": true,
-    "runtime_cache_never_grants_authority": true
-  }
+  ]
 }

@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""Authoritative engineering assurance gate for OneCompany Work Units.
+"""Engineering assurance structure gate with optional trusted attestation.
 
-Packet validation proves requirements/risk/traceability structure. For
-``merge_ready`` and ``done`` it is intentionally insufficient: merge-grade
-quality and review truth must come from ``trusted_assurance`` using live GitHub
-state, base-trusted policy, exact-SHA required checks, and downloaded artifacts.
-Legacy packet-authored coverage/PASS/review fields are compatibility metadata;
-they are neutralized before structural validation and can neither grant nor
-deny merge-grade assurance.
+Offline packet validation proves requirements/risk/traceability structure only.
+For ``merge_ready`` and ``done``, merge-grade quality and review truth is provided
+only when live GitHub context is supplied, or directly through ``onecompany.py
+attest``. Legacy packet-authored coverage/PASS/review fields are compatibility
+metadata; they are neutralized before structural validation and can neither grant
+nor deny trusted merge-grade assurance.
 """
 from __future__ import annotations
 
@@ -36,7 +35,6 @@ LEGACY_GATES = {
 
 
 def _platform_reference_errors(packet: dict) -> list[str]:
-    """Validate the shape of candidate-nominated evidence references only."""
     if packet.get("status") not in MERGE_STATUSES:
         return []
     errors: list[str] = []
@@ -78,14 +76,7 @@ def _platform_reference_errors(packet: dict) -> list[str]:
 
 
 def _structural_view(packet: dict) -> dict:
-    """Return a copy suitable for structural validation without trusting claims.
-
-    ``assurance.validate_packet`` predates artifact-backed evidence and checks
-    packet-authored coverage/test/review values. We preserve all of its valuable
-    requirements/risk/traceability invariants while replacing those legacy
-    merge-grade claims with neutral compatibility placeholders. The real quality
-    decision is performed afterwards by ``verify_trusted_packet``.
-    """
+    """Neutralize legacy evidence claims while preserving structural invariants."""
     view = copy.deepcopy(packet)
     if view.get("status") not in MERGE_STATUSES:
         return view
@@ -96,7 +87,6 @@ def _structural_view(packet: dict) -> dict:
     profile_name = view.get("quality_profile") or quality.get("profile")
     profile = quality.get("profiles", {}).get(profile_name, {})
 
-    # Stable evidence IDs for traceability come from the platform references.
     references = evidence.get("references") if isinstance(evidence.get("references"), list) else []
     reference_ids = [str(item.get("id")) for item in references if isinstance(item, dict) and item.get("id")]
     if reference_ids:
@@ -105,9 +95,7 @@ def _structural_view(packet: dict) -> dict:
             for evidence_id in reference_ids
         ]
 
-    # These values exist only to keep the legacy structural validator from making
-    # a second quality decision. They are never returned as evidence and never
-    # influence trusted_assurance's verdict.
+    # Compatibility placeholders only. trusted_assurance never consumes them.
     evidence["coverage"] = {
         "line": profile.get("line_coverage_min", 0),
         "branch": profile.get("branch_coverage_min", 0),
@@ -121,11 +109,7 @@ def _structural_view(packet: dict) -> dict:
     placeholder = "platform-review-placeholder"
     while placeholder in authors:
         placeholder += "-independent"
-    evidence["independent_review"] = {
-        "actor": placeholder,
-        "sha": candidate_sha,
-        "verdict": "pass",
-    }
+    evidence["independent_review"] = {"actor": placeholder, "sha": candidate_sha, "verdict": "pass"}
     if isinstance(candidate_sha, str) and SHA40.fullmatch(candidate_sha):
         evidence["sha"] = candidate_sha
     return view
@@ -134,17 +118,15 @@ def _structural_view(packet: dict) -> dict:
 def validate_structure(packet: dict) -> tuple[list[str], list[str]]:
     errors, warnings = validate_packet(_structural_view(packet))
     errors.extend(_platform_reference_errors(packet))
-    # De-duplicate while preserving deterministic order.
-    errors = list(dict.fromkeys(errors))
-    return errors, warnings
+    return list(dict.fromkeys(errors)), warnings
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="OneCompany authoritative engineering assurance gate")
+    parser = argparse.ArgumentParser(description="OneCompany assurance structure validation with optional trusted attestation")
     parser.add_argument("packet", type=Path)
-    parser.add_argument("--repo", help="owner/repo; required for merge_ready/done")
-    parser.add_argument("--pr", type=int, help="pull request number; required for merge_ready/done")
-    parser.add_argument("--base-sha", help="reviewed base SHA; required for merge_ready/done")
+    parser.add_argument("--repo", help="owner/repo for live platform attestation")
+    parser.add_argument("--pr", type=int, help="pull request number for live platform attestation")
+    parser.add_argument("--base-sha", help="reviewed base SHA for live platform attestation")
     args = parser.parse_args()
 
     p_errors = policy_errors()
@@ -160,35 +142,34 @@ def main() -> int:
     if errors:
         for error in errors:
             print(f"ERROR: {error}")
-        print(f"Assurance gate FAILED ({len(errors)} structural/reference error(s), {len(warnings)} warning(s)).")
+        print(f"Assurance structure FAILED ({len(errors)} error(s), {len(warnings)} warning(s)).")
         return 1
 
-    if packet.get("status") not in MERGE_STATUSES:
-        print(f"Assurance structure PASS ({len(warnings)} warning(s)); platform attestation is not required before merge-ready.")
+    merge_grade = packet.get("status") in MERGE_STATUSES
+    supplied = [args.repo is not None, args.pr is not None, args.base_sha is not None]
+    if any(supplied) and not all(supplied):
+        print("ERROR: live attestation requires --repo, --pr and --base-sha together")
+        return 1
+
+    if not all(supplied):
+        suffix = " This is NOT merge evidence; run `python onecompany.py attest ...` with exact PR/base context." if merge_grade else ""
+        print(f"Assurance structure PASS ({len(warnings)} warning(s)).{suffix}")
         return 0
 
-    if not args.repo or not args.pr or not args.base_sha:
-        print("ERROR: merge_ready/done assurance requires --repo, --pr and --base-sha for platform verification")
-        return 1
-    if not SHA40.fullmatch(args.base_sha):
+    if not isinstance(args.base_sha, str) or not SHA40.fullmatch(args.base_sha):
         print("ERROR: --base-sha must be a lowercase 40-hex commit SHA")
         return 1
 
-    attestation, evidence_errors = verify_trusted_packet(
-        packet,
-        repo=args.repo,
-        pr=args.pr,
-        base_sha=args.base_sha,
-    )
+    attestation, evidence_errors = verify_trusted_packet(packet, repo=args.repo, pr=args.pr, base_sha=args.base_sha)
     if evidence_errors or not attestation or attestation.get("verdict") != "PASS":
         for error in evidence_errors:
             print(f"ERROR: {error}")
         print(json.dumps({"attestation": attestation}, indent=2))
-        print("Assurance gate UNVERIFIED: packet claims cannot substitute for platform-backed evidence.")
+        print("Assurance UNVERIFIED: packet claims cannot substitute for platform-backed evidence.")
         return 1
 
     print(json.dumps({"attestation": attestation}, indent=2))
-    print("Assurance gate PASS: structure and base-trusted platform evidence verified.")
+    print("Assurance PASS: structure and base-trusted platform evidence verified.")
     return 0
 
 

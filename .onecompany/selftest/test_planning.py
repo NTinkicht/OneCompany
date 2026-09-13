@@ -110,11 +110,13 @@ class PlanningTests(unittest.TestCase):
         ranked = rank_work([b, downstream, a], self.planning)
         self.assertEqual(ranked[0]["id"], "WU-A")
 
-    def test_equal_score_and_priority_prefers_smaller_job(self):
+    def test_equal_score_and_priority_prefers_smaller_job_off_critical_path(self):
         large = self.wu("WU-LARGE", ["large"], priority=5, size=8)
         small = self.wu("WU-SMALL", ["small"], priority=5, size=2)
-        ranked = rank_work([large, small], self.planning)
-        self.assertEqual(ranked[0]["id"], "WU-SMALL")
+        critical = self.wu("WU-CRITICAL", ["critical"], priority=1, size=20)
+        ranked = rank_work([large, small, critical], self.planning)
+        ids = [item["id"] for item in ranked]
+        self.assertLess(ids.index("WU-SMALL"), ids.index("WU-LARGE"))
 
 
 if __name__ == "__main__":

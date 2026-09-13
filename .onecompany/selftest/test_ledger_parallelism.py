@@ -3,11 +3,18 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from ledger_lib import derive
+import ledger_lib
+from ledger_lib import derive as derive_live
+
+
+def derive(events, pr=None):
+    """Exercise ledger race algebra without depending on live actor readiness fixtures."""
+    return derive_live(events, pr, enforce_actor_policy=False)
 
 
 def event(i: int, kind: str, actor: str, payload: dict, event_id: str | None = None) -> dict:
@@ -92,6 +99,49 @@ class LedgerParallelismTests(unittest.TestCase):
         self.assertEqual([x["id"] for x in result["active_leases"]], ["L3"])
         self.assertEqual(result["integrity_conflicts"], [])
         self.assertTrue(result["rejected_claims"])
+
+    def test_unfinished_dependency_is_rejected_by_durable_arbitration(self):
+        claim = event(
+            2,
+            "ROLE_LEASE_ASSIGNED",
+            "codex",
+            {
+                "lease_id": "LA",
+                "role": "implementation",
+                "work_unit": "WU-A",
+                "pr": 2,
+                "planning_snapshot": snapshot("src/a/**", dependencies=["WU-B"], dependency_closure=["WU-B"]),
+            },
+        )
+        blocked = derive([claim])
+        self.assertEqual(blocked["active_leases"], [])
+        rejection = blocked["rejected_claims"][0]
+        self.assertIn("dependency_not_durably_complete", {item["reason"] for item in rejection["violations"]})
+
+        unlocked = derive([
+            event(1, "MERGED", "human-owner", {"pr": 1, "work_unit": "WU-B", "merge_sha": "m"}),
+            claim,
+        ])
+        self.assertEqual([item["id"] for item in unlocked["active_leases"]], ["LA"])
+
+    def test_live_durable_arbitration_reapplies_actor_eligibility(self):
+        real_load = ledger_lib.load_json
+
+        def fake_load(path):
+            name = Path(path).name
+            if name == "actors.json":
+                return {"actors": [{"id": "rogue", "enabled": False, "configured": True, "capabilities": ["implementation"], "cost_class": "FREE"}]}
+            if name == "readiness.json":
+                return {"actors": [{"actor_id": "rogue", "setup_state": "ready", "verified_capabilities": ["implementation"], "temporarily_unavailable_capabilities": [], "repository_access": {"read": True, "write": True}, "capacity": {"implementation_streams": 1}}]}
+            return real_load(path)
+
+        claim = event(1, "ROLE_LEASE_ASSIGNED", "rogue", {"lease_id": "LR", "role": "implementation", "work_unit": "WU-R", "pr": 9, "planning_snapshot": snapshot("src/r/**")})
+        with patch.object(ledger_lib, "load_json", side_effect=fake_load):
+            result = derive_live([claim], enforce_actor_policy=True)
+        self.assertEqual(result["active_leases"], [])
+        rejection = result["rejected_claims"][0]
+        eligibility = next(item for item in rejection["violations"] if item["reason"] == "actor_implementation_ineligible")
+        self.assertIn("disabled", eligibility["details"])
 
     def test_transitive_dependency_closure_is_enforced_from_snapshot(self):
         events = [

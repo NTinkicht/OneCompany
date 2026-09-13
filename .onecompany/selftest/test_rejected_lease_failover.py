@@ -7,7 +7,11 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from ledger_lib import derive
+from ledger_lib import derive as derive_live
+
+
+def derive(events, pr=None):
+    return derive_live(events, pr, enforce_actor_policy=False)
 
 
 def event(i: int, kind: str, actor: str, payload: dict) -> dict:

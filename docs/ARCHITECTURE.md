@@ -1,44 +1,89 @@
 # Architecture
 
-OneCompany is a **control plane**, not a single AI agent. It coordinates heterogeneous workers around GitHub and enforces contracts that survive provider/model changes.
+OneCompany is a **company control plane**, not a single AI agent. It coordinates heterogeneous workers around GitHub and enforces contracts that survive provider/model changes.
 
 ## Layers
 
 ```text
 ┌────────────────────────────────────────────────────────────┐
-│ Human governance                                           │
-│ budget, autonomy, credentials, irreversible decisions     │
+│ Human sovereignty                                          │
+│ mission boundaries, budget, credentials, legal/governance │
+├────────────────────────────────────────────────────────────┤
+│ Strategy / planning baseline                               │
+│ objectives, epics, requirements, ACs, risks, WUs          │
 ├────────────────────────────────────────────────────────────┤
 │ Company policy                                             │
-│ constitution, roles, security, review/merge contracts     │
+│ constitution, roles, security, assurance, review/merge    │
 ├────────────────────────────────────────────────────────────┤
-│ Orchestration                                              │
-│ observe → reconcile → select → route → lease → continue    │
+│ Flow control                                               │
+│ observe → reconcile → plan → route → lease → supervise    │
 ├────────────────────────────────────────────────────────────┤
 │ Worker plane                                               │
 │ ChatGPT / Codex / Claude / Copilot / Gemini / Mistral /…  │
 ├────────────────────────────────────────────────────────────┤
 │ Verification plane                                         │
-│ formatting, lint, types, tests, build, audit, review       │
+│ formatting, lint, types, tests, assurance, review          │
 ├────────────────────────────────────────────────────────────┤
-│ GitHub source of truth                                      │
-│ issues, branches, PRs, SHAs, Actions, comments, merges     │
+│ GitHub execution evidence                                  │
+│ issues, branches, PRs, SHAs, Actions, reviews, merges      │
 └────────────────────────────────────────────────────────────┘
 ```
 
-## Control-plane documents
+## Split source-of-truth model
 
-`.onecompany/config.json` — project-level configuration and autonomy policy.
+OneCompany distinguishes **approved intent** from **live execution evidence**.
 
-`.onecompany/actors.json` — current worker roster, capability scores/preferences, permissions, and cost/capacity classes.
+### Approved planning baseline
 
-`.onecompany/roles.json` — reusable role contracts. Roles are responsibilities, not identities.
+Versioned control-plane files are authoritative for approved machine-executable intent:
 
-`.onecompany/budget.json` — explicit financial and capacity policy.
+- `.onecompany/portfolio.json` — Objectives, Epics, Features/Capabilities, optional User Stories, milestones/releases and their links;
+- `.onecompany/requirements-catalog.json` — formal requirements and acceptance-criterion definitions;
+- `.onecompany/risk-register.json` — planning risks and treatments;
+- `.onecompany/queue.json` — bounded Work Units, dependencies, priority inputs, scope/locks, issue/PR mapping;
+- `.onecompany/planning.json` — planning/parallelism policy.
 
-`.onecompany/queue.json` — planned Work Units/dependencies. Live issues/PRs remain source of truth once work begins.
+GitHub Issues and Projects are the preferred collaboration and visualization surface. They may propose or discuss changes, but an edited issue does not silently re-baseline approved requirements, risk or scope.
 
-`.onecompany/state.json` — reconciled snapshot for fast coordination. It must never overrule live GitHub reality.
+### Live execution evidence
+
+GitHub is authoritative for live reality:
+
+- open/closed/merged PR state;
+- exact head and base SHAs;
+- branch content;
+- changed files;
+- Actions/check conclusions;
+- reviews/comments;
+- merge result.
+
+`.onecompany/state.json` is a reconciled cache and never overrules live GitHub.
+
+## Planning hierarchy
+
+The model is flexible rather than Scrum-specific:
+
+```text
+Objective
+  ↓
+Epic
+  ↓
+Feature / Capability       optional
+  ↓
+User Story                 optional
+  ↓
+Formal Requirements
+  ↓
+Acceptance Criteria
+  ↓
+Work Units
+  ↓
+Tasks / Enablers / Spikes / Defects / Chores
+  ↓
+Tests / Evidence / Release / Outcome
+```
+
+A backend/infrastructure project can omit User Stories. A Task is not a Requirement, and an Epic is not merely a large Work Unit.
 
 ## Work Unit state machine
 
@@ -56,57 +101,80 @@ CI_PENDING
   ↓ green
 REVIEW_PENDING
   ├─ findings → REMEDIATION → CI_PENDING
-  ↓ exact-head pass
+  ↓ exact-head + exact-base pass
 MERGE_READY
   ├─ head moved → CI_PENDING/REVIEW_PENDING
-  ↓ expected-head merge
+  ├─ base moved → REBASE/UPDATE → CI_PENDING/REVIEW_PENDING
+  ↓ expected-head/base merge
 MERGED
   ↓
 RECONCILED / DONE
 ```
 
-## Why one canonical stream
+## One canonical stream **per Work Unit**
 
-Parallel exploration is useful; parallel implementation of the same bounded objective is usually wasteful and dangerous. OneCompany permits analysis by many actors but grants one write lease for the canonical branch/PR. This avoids:
+OneCompany preserves single-writer authority inside a bounded WU:
 
-- conflicting fixes;
-- duplicated token/subscription capacity;
-- ambiguous authorship;
-- review races;
-- stale gates;
-- “which branch is real?” failures.
+- one canonical issue/contract;
+- one canonical branch/PR;
+- at most one active implementation lease;
+- one current head;
+- failover changes the worker, not the stream.
 
-Experimental forks are allowed only when the Work Unit explicitly authorizes a comparative experiment.
+That invariant does **not** require the whole company to serialize.
+
+## Conflict-safe company parallelism
+
+Multiple WUs may run concurrently only when the planner can prove they are independent under configured policy.
+
+Admission considers:
+
+- hard dependency relationships;
+- declared write scopes;
+- semantic resource locks;
+- risk class;
+- global WIP limit;
+- per-actor verified implementation capacity.
+
+Unknown scope fails closed to serialization. Critical-risk work serializes by default. Live PR diffs are checked against declared scope before a merge-ready gate and again before merge.
+
+Example:
+
+```text
+WU-A: src/auth/**       lock auth:policy
+WU-B: web/marketing/**  no lock
+WU-C: migrations/**     lock auth:policy + db:schema
+
+WU-A + WU-B  → may run concurrently
+WU-A + WU-C  → conflict; serialize
+```
+
+## Parallel merge train / base drift
+
+Exact head identity alone is insufficient when branches are developed concurrently.
+
+A merge-ready gate records both:
+
+```text
+candidate head SHA
+candidate base SHA
+```
+
+If another WU merges and the base moves, the previous integration evidence becomes stale even when the candidate head is unchanged. The merge executor refuses the stale gate and requires update/rebase plus required CI/review again.
+
+This preserves fast parallel implementation without allowing stale integration evidence onto `main`.
 
 ## Router architecture
 
 Routing is a constrained decision, not a popularity contest.
 
-Input:
+Input includes required capability, risk, repository permission, current verified readiness, worker capacity, budget, material-authorship conflicts and provider availability. Hard constraints are evaluated before preferences.
 
-```text
-required capabilities
-risk class
-write/read requirement
-context size
-latency preference
-current capacity/quota
-budget policy
-authorship conflicts
-provider availability
-```
-
-Output:
-
-```text
-eligible actor + reason + fallback chain
-```
-
-Hard constraints are evaluated before preferences. For example, a model may be the best reviewer but ineligible because it materially authored the head.
+A routing preference is never authority. A route is not a lease, and a lease is not evidence of progress.
 
 ## Lease architecture
 
-A lease is a concurrency primitive. A minimal implementation lease contains:
+A lease is a concurrency/authority primitive. A minimal implementation lease contains:
 
 ```json
 {
@@ -116,61 +184,52 @@ A lease is a concurrency primitive. A minimal implementation lease contains:
   "branch": "wu29-example",
   "pr": 174,
   "start_head": "abc123",
-  "scope_hash": "optional",
-  "status": "active",
-  "granted_at": "ISO-8601",
-  "expires_or_failover_when": ["quota_exhausted", "no_progress", "human_override"]
+  "planning_snapshot": {
+    "write_scope": ["src/module/**"],
+    "resource_locks": ["module:api"],
+    "risk_class": "MEDIUM"
+  },
+  "status": "active"
 }
 ```
 
-Leases should be reconciled against actual branch/PR state before being trusted.
+Durable claim races enforce one writer per WU, company WIP and actor capacity.
 
 ## Review architecture
 
 Review contains two classes:
 
-- **deterministic gate:** CI commands with reproducible pass/fail;
-- **independent judgment gate:** code/security/product reasoning anchored to exact SHA.
+- **deterministic gate:** reproducible CI/assurance commands;
+- **independent judgment gate:** non-author code/security/product reasoning.
 
-The default final verdict vocabulary is deliberately small:
+Binding merge-ready evidence is anchored to exact head **and base**, verified scope, current material authors and durable evidence references.
 
-```text
-PASS — MERGE_READY
-CHANGES_REQUIRED
-BLOCKED — CI_RED
-BLOCKED — HUMAN_DECISION
-BLOCKED — CAPACITY
-```
+## Reconciliation
 
-Projects may extend it but should keep machine-readable equivalents.
+Before consequential mutation, reconcile:
 
-## State reconciliation
-
-Never assume `.onecompany/state.json` is current just because it is committed. A reconciler should compare at least:
-
-- current open WU issues;
-- open PRs and exact heads;
+- versioned WU/PR mapping;
+- live open PRs and exact heads/bases;
 - merge/closed state;
-- active CI runs and conclusions;
-- recorded lease owner vs branch activity;
-- current review verdict SHA;
-- unresolved configured-severity findings;
+- CI state;
+- active leases and worker capacity;
+- gate SHA/base/authorship;
+- blockers/human decisions;
 - budget/capacity state when observable.
 
-Reconciliation should be idempotent.
+Reconciliation is idempotent. Ambiguous authority fails closed.
 
 ## Communication architecture
 
-GitHub owns durable coordination. Optional Slack/Discord/Teams/email layers are for attention and culture:
-
 ```text
-GitHub = authoritative state
-Slack = “look here”
-Chat = interactive reasoning
-Local tools = execution environment
+Versioned .onecompany graph = approved intent / planning baseline
+GitHub Issues/Projects       = collaborative UI / discussion surface
+GitHub PRs/Actions/reviews   = live execution evidence
+Chat                         = interactive reasoning
+Local tools                  = execution environment
 ```
 
-Never require reconstructing project truth from chat history.
+Never require reconstruction of project truth from chat history.
 
 ## Deployment models
 
@@ -178,12 +237,12 @@ Never require reconstructing project truth from chat history.
 Human + one implementer AI + one independent reviewer AI + GitHub Actions.
 
 ### Subscription-only
-Several interactive/GitHub-native workers using already-paid subscriptions; no API billing.
+Several workers using already-paid subscriptions/free allowances with zero additional API spend.
 
 ### Local-first
-Local models/tools perform repository intelligence/tests; stronger remote models handle high-value reasoning.
+Local models/tools perform repository intelligence/tests; remote models handle high-value reasoning.
 
-### Enterprise
-Organization-owned runners, secrets, policy enforcement, audit storage, mandatory human gates for defined risk classes.
+### Governed autonomous company
+Multiple conflict-safe WUs, event-driven supervision, durable coordination, exact-head/base gates, outcome measurement and human sovereignty over restricted decisions.
 
-OneCompany is intentionally neutral across all four.
+OneCompany is intentionally provider-neutral across all modes.

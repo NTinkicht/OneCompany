@@ -6,6 +6,7 @@ import argparse
 import datetime as dt
 import json
 import sys
+from typing import Any
 
 from lease_lifecycle import append_coordination_event, coordination_view
 from onecompany_lib import (
@@ -21,6 +22,7 @@ from planning_lib import by_id
 from platform_identity import require_authority, review_platform_identity
 from required_checks import evaluate_required_checks
 from scope_guard import changed_files, live_pr, scope_errors
+from trusted_assurance import _base_json
 
 VERDICTS = [
     "PASS — MERGE_READY",
@@ -30,6 +32,12 @@ VERDICTS = [
     "BLOCKED — CAPACITY",
 ]
 NON_PASS_REVIEW_STATES = {"APPROVED", "CHANGES_REQUESTED", "COMMENTED"}
+AUTOMATION_FROZEN_POLICY_FILES = {
+    "config": ".onecompany/config.json",
+    "governance": ".onecompany/governance.json",
+    "ledger": ".onecompany/ledger.json",
+}
+BASE_QUEUE_PATH = ".onecompany/queue.json"
 
 
 def _active_implementation(view: dict, pr: int) -> list[dict]:
@@ -38,18 +46,6 @@ def _active_implementation(view: dict, pr: int) -> list[dict]:
         for lease in view.get("active_leases", [])
         if lease.get("role") == "implementation" and lease.get("pr") == pr
     ]
-
-
-def _default_pr(global_view: dict) -> int | None:
-    values = sorted(
-        {
-            lease.get("pr")
-            for lease in global_view.get("active_leases", [])
-            if lease.get("role") == "implementation"
-            and isinstance(lease.get("pr"), int)
-        }
-    )
-    return values[0] if len(values) == 1 else None
 
 
 def _work_unit_for_pr(queue: dict, pr: int, active: list[dict]) -> dict | None:
@@ -75,6 +71,39 @@ def _live_context(repo: str, pr: int, reviewed_sha: str) -> tuple[dict | None, s
     if not isinstance(base_sha, str) or not base_sha:
         return None, "live PR base SHA is unavailable"
     return live, None
+
+
+def _base_document(repo: str, path: str, base_sha: str) -> tuple[dict | None, str | None]:
+    value, _blob, error = _base_json(repo, path, base_sha)
+    if value is None:
+        return None, error or f"cannot load base-trusted {path}"
+    return value, None
+
+
+def _base_control_context(
+    repo: str, base_sha: str
+) -> tuple[dict[str, dict[str, Any]] | None, list[str]]:
+    documents: dict[str, dict[str, Any]] = {}
+    errors: list[str] = []
+    for key, path in {**AUTOMATION_FROZEN_POLICY_FILES, "queue": BASE_QUEUE_PATH}.items():
+        value, error = _base_document(repo, path, base_sha)
+        if value is None:
+            errors.append(error or f"cannot load {path}")
+        else:
+            documents[key] = value
+    return (documents if not errors else None), errors
+
+
+def _automation_policy_drift_errors(base: dict[str, dict[str, Any]]) -> list[str]:
+    errors: list[str] = []
+    for key, path in AUTOMATION_FROZEN_POLICY_FILES.items():
+        candidate = load_json(CONTROL / path.rsplit("/", 1)[-1])
+        if candidate != base[key]:
+            errors.append(
+                f"candidate changes {path}; binding automation must use the protected "
+                "human policy-change route before a later PR can consume the new policy"
+            )
+    return errors
 
 
 def _pass_preconditions(
@@ -204,38 +233,30 @@ def main() -> int:
     )
     parser.add_argument("--sha", required=True)
     parser.add_argument("--verdict", required=True, choices=VERDICTS)
-    parser.add_argument("--pr", type=int)
+    parser.add_argument(
+        "--pr",
+        type=int,
+        required=True,
+        help="Explicit GitHub PR number; consequential authorization never infers it from candidate state",
+    )
     parser.add_argument("--evidence", action="append", default=[])
     parser.add_argument("--summary", default="")
     args = parser.parse_args()
 
-    if emergency_stop_active():
-        print(
-            "REFUSED: emergency stop is active; do not publish binding gates "
-            "during containment"
-        )
+    # External containment is checked before any repository-controlled document.
+    if emergency_stop_active({"safety": {"emergency_stop": False}}):
+        print("REFUSED: external emergency stop is active; binding gates are frozen")
         return 2
     if not command_exists("gh") or run(["gh", "auth", "status"]).returncode != 0:
         print("REFUSED: authenticated gh CLI is required")
         return 2
 
-    config = load_json(CONTROL / "config.json")
+    candidate_config = load_json(CONTROL / "config.json")
     state = load_json(CONTROL / "state.json")
-    queue = load_json(CONTROL / "queue.json")
-    repo = github_repo_from_config(config)
-
-    try:
-        global_view = coordination_view()
-    except Exception as exc:
-        print(f"REFUSED: cannot reconstruct coordination authority: {exc}")
-        return 2
-
-    pr = args.pr or _default_pr(global_view)
-    if not repo or not pr:
-        print(
-            "REFUSED: repository and explicit --pr are required when zero or "
-            "multiple implementation streams are active"
-        )
+    repo = github_repo_from_config(candidate_config)
+    pr = args.pr
+    if not repo:
+        print("REFUSED: config.project.repository must be owner/name")
         return 2
 
     live, live_error = _live_context(repo, pr, args.sha)
@@ -245,6 +266,24 @@ def main() -> int:
     live_head = str(live.get("headRefOid"))
     base_sha = str(live.get("baseRefOid"))
 
+    base, base_errors = _base_control_context(repo, base_sha)
+    if base is None:
+        for error in base_errors:
+            print(f"REFUSED: {error}")
+        return 2
+    if github_repo_from_config(base["config"]) != repo:
+        print("REFUSED: candidate repository identity differs from base-trusted configuration")
+        return 2
+    drift = _automation_policy_drift_errors(base)
+    if drift:
+        for error in drift:
+            print(f"REFUSED: {error}")
+        return 2
+    if emergency_stop_active(base["config"]):
+        print("REFUSED: base-trusted emergency stop is active; binding gates are frozen")
+        return 2
+
+    queue = base["queue"]
     try:
         view = coordination_view(pr)
     except Exception as exc:
@@ -258,7 +297,7 @@ def main() -> int:
 
     work_unit = _work_unit_for_pr(queue, pr, active)
     if work_unit is None:
-        print(f"REFUSED: PR #{pr} is not mapped to a versioned Work Unit")
+        print(f"REFUSED: PR #{pr} is not mapped to a base-trusted Work Unit")
         return 2
 
     material_authors = set(view.get("material_authors", []))

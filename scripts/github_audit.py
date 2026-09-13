@@ -1,21 +1,12 @@
 #!/usr/bin/env python3
-"""Read-only audit of GitHub repository controls relevant to OneCompany."""
+"""Read-only audit of live GitHub controls required by CompanyOS."""
 from __future__ import annotations
 
-import json
 import sys
 
+from github_controls import gh_api, inspect_enforcement
 from onecompany_lib import CONTROL, command_exists, load_json, run
-
-
-def gh_api(path: str) -> tuple[int, object | None, str]:
-    result = run(["gh", "api", path, "-H", "Accept: application/vnd.github+json"])
-    if result.returncode != 0:
-        return result.returncode, None, (result.stderr or result.stdout).strip()
-    try:
-        return 0, json.loads(result.stdout), ""
-    except json.JSONDecodeError:
-        return 1, None, "GitHub CLI returned non-JSON output"
+from required_checks import required_check_names
 
 
 def main() -> int:
@@ -34,8 +25,9 @@ def main() -> int:
         print("ERROR: set config.project.repository to owner/name first")
         return 2
 
+    errors: list[str] = []
     warnings: list[str] = []
-    print(f"OneCompany GitHub audit: {repo} default={branch}")
+    print(f"CompanyOS GitHub audit: {repo} default={branch}")
 
     code, metadata, error = gh_api(f"repos/{repo}")
     if code:
@@ -44,28 +36,42 @@ def main() -> int:
     assert isinstance(metadata, dict)
     print(f"OK repository visible; private={metadata.get('private')} archived={metadata.get('archived')}")
     if metadata.get("archived"):
-        warnings.append("repository is archived")
+        errors.append("repository is archived")
 
-    code, protection, error = gh_api(f"repos/{repo}/branches/{branch}/protection")
-    if code == 0 and isinstance(protection, dict):
-        print("OK classic branch protection is readable and configured")
-        checks = protection.get("required_status_checks")
-        reviews = protection.get("required_pull_request_reviews")
-        if not checks:
-            warnings.append("branch protection does not expose required status checks")
-        if not reviews:
-            warnings.append("branch protection does not expose required PR review settings")
+    required = set(required_check_names())
+    enforcement = inspect_enforcement(repo, branch, required)
+    if enforcement.get("codeowners_exists"):
+        print("OK CODEOWNERS exists on the default branch")
     else:
-        warnings.append("classic branch protection absent or unreadable; inspect repository rulesets manually")
+        errors.append(".github/CODEOWNERS is missing on the default branch")
 
-    code, rulesets, error = gh_api(f"repos/{repo}/rulesets")
-    if code == 0 and isinstance(rulesets, list):
-        active = [r for r in rulesets if r.get("enforcement") == "active"]
-        print(f"OK rulesets readable; active={len(active)} total={len(rulesets)}")
-        if not active and not protection:
-            warnings.append("no active ruleset detected and classic protection was not confirmed")
+    classic = enforcement.get("classic", {})
+    if classic.get("configured"):
+        print(
+            "OK classic branch protection configured; "
+            f"checks={classic.get('required_checks', [])} code_owner_review={classic.get('code_owner_review')}"
+        )
     else:
-        warnings.append("rulesets could not be read with current credential; verify protections in GitHub Settings")
+        print("INFO classic branch protection not confirmed; checking active rulesets")
+
+    rulesets = enforcement.get("rulesets", [])
+    if rulesets:
+        print(f"OK active applicable rulesets={len(rulesets)}")
+        for item in rulesets:
+            print(
+                f"  ruleset {item.get('name') or item.get('id')}: "
+                f"checks={item.get('required_checks', [])} code_owner_review={item.get('code_owner_review')}"
+            )
+
+    missing = enforcement.get("missing_required_checks", [])
+    if missing:
+        errors.append(f"manifest-required checks are not enforced on {branch}: {', '.join(missing)}")
+    if not enforcement.get("code_owner_review_enforced"):
+        errors.append("Code Owner review is not enforced by classic protection or an active applicable ruleset")
+    if not classic.get("configured") and not rulesets:
+        errors.append("no enforceable default-branch protection/ruleset was confirmed")
+    if not enforcement.get("enforcement_ok"):
+        errors.append("GitHub merge controls do not currently enforce the CompanyOS trusted boundary")
 
     code, actions, error = gh_api(f"repos/{repo}/actions/permissions/workflow")
     if code == 0 and isinstance(actions, dict):
@@ -74,7 +80,7 @@ def main() -> int:
         if default_perm == "write":
             warnings.append("Actions GITHUB_TOKEN defaults to write; prefer read unless workflows explicitly need write")
     else:
-        warnings.append("Actions default permissions could not be read; verify Settings > Actions > General")
+        warnings.append("Actions default permissions could not be read with current credential")
 
     print("\nWarnings:")
     if warnings:
@@ -82,7 +88,14 @@ def main() -> int:
             print(f"WARN: {warning}")
     else:
         print("none")
-    print("\nThis audit is advisory and read-only. A warning may reflect missing API permission rather than a missing control.")
+
+    if errors:
+        print("\nBlocking enforcement problems:")
+        for item in errors:
+            print(f"ERROR: {item}")
+        print(f"\nGitHub enforcement audit FAILED ({len(errors)} blocking problem(s)).")
+        return 1
+    print("\nGitHub enforcement audit PASS.")
     return 0
 
 

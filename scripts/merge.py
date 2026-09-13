@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
-"""Mechanically merge only an exact-head, base-aware, independently approved PR."""
+"""Merge only an exact-head/base PR with live authority and trusted assurance."""
 from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import sys
+from pathlib import Path
 
+from assurance_gate import validate_structure
 from lease_lifecycle import append_coordination_event, coordination_view
 from ledger_lib import ledger_config, ledger_enabled
 from onecompany_lib import (
     CONTROL,
+    ROOT,
     always_human_paths,
     autonomy_number,
-    budget_allows,
     command_exists,
     emergency_stop_active,
     github_repo_from_config,
@@ -24,61 +27,14 @@ from onecompany_lib import (
     save_json,
 )
 from planning_lib import by_id
+from platform_identity import (
+    authorize_current_principal,
+    require_authority,
+    review_platform_identity,
+)
+from required_checks import evaluate_required_checks
 from scope_guard import changed_files, live_pr, scope_errors
-
-
-def capability_eligible(
-    actor_id: str,
-    capability: str,
-    access_key: str,
-    excluded_authors: set[str] | None = None,
-) -> tuple[bool, list[str]]:
-    actors = load_json(CONTROL / "actors.json")
-    readiness_doc = load_json(CONTROL / "readiness.json")
-    budget = load_json(CONTROL / "budget.json")
-    actor = next(
-        (item for item in actors.get("actors", []) if item.get("id") == actor_id),
-        None,
-    )
-    ready = next(
-        (
-            item
-            for item in readiness_doc.get("actors", [])
-            if item.get("actor_id") == actor_id
-        ),
-        None,
-    )
-    reasons: list[str] = []
-
-    if actor is None:
-        return False, ["unknown_actor"]
-    if excluded_authors and actor_id in excluded_authors:
-        reasons.append("material_author_conflict")
-    if not actor.get("enabled"):
-        reasons.append("disabled")
-    if not actor.get("configured"):
-        reasons.append("not_configured")
-    if capability not in actor.get("capabilities", []):
-        reasons.append(f"{capability}_not_declared")
-    if not budget_allows(actor.get("cost_class", "UNKNOWN_COST"), budget):
-        reasons.append("forbidden_by_budget")
-
-    if ready is None:
-        reasons.append("missing_readiness")
-    else:
-        if ready.get("setup_state") not in {"ready", "degraded"}:
-            reasons.append(f"setup_state:{ready.get('setup_state')}")
-        if capability not in ready.get("verified_capabilities", []):
-            reasons.append(f"{capability}_not_verified")
-        if capability in ready.get("temporarily_unavailable_capabilities", []):
-            reasons.append(f"{capability}_temporarily_unavailable")
-        access = ready.get("repository_access", {})
-        if not access.get("read"):
-            reasons.append("repository_read_not_verified")
-        if not access.get(access_key):
-            reasons.append(f"repository_{access_key}_not_verified")
-
-    return not reasons, reasons
+from trusted_assurance import verify_trusted_packet
 
 
 def _work_unit_for_pr(queue: dict, pr: int, active: list[dict]) -> dict | None:
@@ -115,14 +71,91 @@ def _sync_legacy(state: dict) -> None:
         state["current_gate"] = None
 
 
+def _load_assurance_packet(
+    value: str | None,
+) -> tuple[dict | None, str | None, str | None]:
+    if not value:
+        return (
+            None,
+            None,
+            "merge requires --assurance-packet; structural/review gates cannot "
+            "substitute for artifact-backed assurance",
+        )
+    path = Path(value)
+    if not path.is_absolute():
+        path = ROOT / path
+    try:
+        resolved = path.resolve()
+        resolved.relative_to(ROOT.resolve())
+    except (OSError, ValueError):
+        return None, None, "assurance packet must be a file inside the repository checkout"
+    if not resolved.is_file():
+        return (
+            None,
+            None,
+            f"assurance packet does not exist: {resolved.relative_to(ROOT)}",
+        )
+    try:
+        packet = json.loads(resolved.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return None, None, f"cannot read assurance packet: {exc}"
+    if not isinstance(packet, dict):
+        return None, None, "assurance packet must be a JSON object"
+    return packet, resolved.relative_to(ROOT).as_posix(), None
+
+
+def _attestation_digest(attestation: dict) -> str:
+    canonical = json.dumps(
+        attestation,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _verify_reviewer(
+    repo: str,
+    pr: int,
+    candidate_sha: str,
+    base_sha: str,
+    review_id: object,
+    material_authors: set[str],
+) -> tuple[dict | None, list[str]]:
+    if not isinstance(review_id, int) or isinstance(review_id, bool) or review_id <= 0:
+        return None, ["binding gate/attestation has no positive platform review_id"]
+    identity, errors = review_platform_identity(
+        repo,
+        pr,
+        review_id,
+        candidate_sha,
+        base_sha,
+        allowed_states={"APPROVED"},
+    )
+    if identity is None:
+        return None, errors
+    ok, reasons = require_authority(identity, "code_review", material_authors)
+    return (identity if ok else None), reasons
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--actor", required=True)
+    parser.add_argument(
+        "--actor",
+        help=(
+            "Optional descriptive assertion only; authority is derived from the "
+            "authenticated GitHub principal"
+        ),
+    )
     parser.add_argument("--pr", type=int)
     parser.add_argument(
         "--method",
         choices=["merge", "squash", "rebase"],
         default="squash",
+    )
+    parser.add_argument(
+        "--assurance-packet",
+        help="repository-relative merge-ready assurance packet",
     )
     args = parser.parse_args()
 
@@ -162,7 +195,6 @@ def main() -> int:
     except ValueError as exc:
         print(f"REFUSED: {exc}")
         return 2
-
     if (
         level >= 3
         and ledger_config().get("required_for_autonomous_merge")
@@ -184,24 +216,12 @@ def main() -> int:
 
     protected = protected_control_plane_paths(paths)
     absolute_human = always_human_paths(paths)
-    if absolute_human and args.actor != "human-owner":
-        print(
-            "REFUSED: always-human governance paths changed: "
-            + ", ".join(absolute_human)
-        )
-        return 2
-    if (
-        protected
-        and governance.get("human_merge_required") is True
-        and args.actor != "human-owner"
-    ):
-        print(
-            "REFUSED: protected control-plane change requires human-owner merge: "
-            + ", ".join(protected)
-        )
-        return 2
 
-    view = coordination_view(pr)
+    try:
+        view = coordination_view(pr)
+    except Exception as exc:
+        print(f"REFUSED: cannot reconstruct PR coordination authority: {exc}")
+        return 2
     active = [
         item
         for item in view.get("active_leases", [])
@@ -223,31 +243,13 @@ def main() -> int:
         or gate.get("verdict") != "PASS — MERGE_READY"
         or gate.get("stale")
     ):
-        print("REFUSED: no current durable PASS — MERGE_READY gate")
+        print("REFUSED: no current PASS — MERGE_READY coordination gate")
         return 2
     if gate.get("work_unit") not in {None, work_unit_record.get("id")}:
         print("REFUSED: gate Work Unit does not match PR mapping")
         return 2
     if set(gate.get("material_authors") or []) != material_authors:
-        print("REFUSED: gate authorship snapshot differs from current durable authorship")
-        return 2
-
-    reviewer = gate.get("reviewer_actor")
-    if not isinstance(reviewer, str) or not reviewer:
-        print("REFUSED: gate has no reviewer actor")
-        return 2
-
-    reviewer_ok, reviewer_reasons = capability_eligible(
-        reviewer,
-        "code_review",
-        "review",
-        material_authors,
-    )
-    if not reviewer_ok:
-        print(
-            "REFUSED: gate reviewer is no longer independently eligible: "
-            + ",".join(reviewer_reasons)
-        )
+        print("REFUSED: gate authorship snapshot differs from current authorship")
         return 2
     if not gate.get("evidence"):
         print("REFUSED: merge-ready gate has no durable evidence reference")
@@ -258,16 +260,84 @@ def main() -> int:
 
     approved_sha = gate.get("sha")
     approved_base = gate.get("base_sha")
-    if not approved_sha or not approved_base:
+    if not isinstance(approved_sha, str) or not isinstance(approved_base, str):
         print("REFUSED: gate must record approved head and base SHAs")
         return 2
 
-    # Cache-held blockers are allowed to fail closed, never to grant authority.
-    if state.get("open_blockers"):
-        print("REFUSED: company-wide open blockers remain")
+    reviewer_identity, reviewer_errors = _verify_reviewer(
+        repo,
+        pr,
+        approved_sha,
+        approved_base,
+        gate.get("review_id"),
+        material_authors,
+    )
+    if reviewer_identity is None:
+        print(
+            "REFUSED: gate reviewer is not currently platform-authorized: "
+            + ",".join(reviewer_errors)
+        )
         return 2
-    if state.get("human_decision_required"):
-        print("REFUSED: company-wide human decision remains outstanding")
+    if gate.get("reviewer_actor") not in {None, reviewer_identity.get("actor_id")}:
+        print("REFUSED: gate actor does not match platform-derived reviewer identity")
+        return 2
+    if gate.get("reviewer_login") not in {None, reviewer_identity.get("login")}:
+        print("REFUSED: gate login does not match platform-derived reviewer identity")
+        return 2
+
+    merge_identity, merge_errors = authorize_current_principal(
+        repo,
+        approved_base,
+        "merge_execution",
+    )
+    if merge_identity is None:
+        print(
+            "REFUSED: authenticated GitHub principal lacks merge authority: "
+            + ",".join(merge_errors)
+        )
+        return 2
+    merge_actor = str(merge_identity.get("actor_id"))
+    merge_login = str(merge_identity.get("login"))
+    if args.actor and args.actor not in {merge_actor, merge_login}:
+        print(
+            f"REFUSED: descriptive --actor {args.actor!r} does not match "
+            f"authenticated principal actor={merge_actor!r} login={merge_login!r}"
+        )
+        return 2
+
+    if absolute_human:
+        ok, reasons = require_authority(merge_identity, "root")
+        if not ok:
+            print(
+                "REFUSED: always-human governance change requires platform root "
+                "authority: "
+                + ",".join(reasons)
+            )
+            return 2
+    if protected and governance.get("human_merge_required") is True:
+        ok, reasons = require_authority(merge_identity, "protected_merge")
+        if not ok:
+            print(
+                "REFUSED: protected control-plane change requires protected_merge "
+                "authority: "
+                + ",".join(reasons)
+            )
+            return 2
+
+    # State is cache-only; cache blockers may fail closed but never grant authority.
+    cached_stream = next(
+        (item for item in state.get("active_streams", []) if item.get("pr") == pr),
+        None,
+    )
+    if state.get("open_blockers") or (
+        cached_stream and cached_stream.get("open_blockers")
+    ):
+        print("REFUSED: cached blockers remain")
+        return 2
+    if state.get("human_decision_required") or (
+        cached_stream and cached_stream.get("human_decision_required")
+    ):
+        print("REFUSED: cached human decision remains outstanding")
         return 2
 
     problems = scope_errors(paths, work_unit_record)
@@ -276,23 +346,10 @@ def main() -> int:
             print(f"REFUSED: {problem}")
         return 2
 
-    merge_ok, merge_reasons = capability_eligible(
-        args.actor,
-        "merge_execution",
-        "merge",
-    )
-    if not merge_ok:
-        print(
-            f"REFUSED: merge actor {args.actor} is not eligible: "
-            + ",".join(merge_reasons)
-        )
-        return 2
-
     live, live_error = live_pr(repo, pr)
     if live is None:
         print(f"REFUSED: cannot read live PR state: {live_error}")
         return 2
-
     live_head = live.get("headRefOid")
     live_base = live.get("baseRefOid")
     if live.get("state") != "OPEN" or live.get("isDraft"):
@@ -312,12 +369,83 @@ def main() -> int:
         )
         return 2
 
-    checks = run(
-        ["gh", "pr", "checks", str(pr), "--repo", repo, "--required"]
+    checks_ok, check_reasons, _ = evaluate_required_checks(
+        repo,
+        approved_sha,
+        trusted_ref=approved_base,
     )
-    if checks.returncode != 0 or not checks.stdout.strip():
-        print("REFUSED: required checks are not all green/reported")
+    if not checks_ok:
+        for reason in check_reasons:
+            print(f"REFUSED: {reason}")
         return 2
+
+    packet, packet_path, packet_error = _load_assurance_packet(args.assurance_packet)
+    if packet is None:
+        print(f"REFUSED: {packet_error}")
+        return 2
+
+    structural_errors, structural_warnings = validate_structure(packet)
+    if structural_errors:
+        for error in structural_errors:
+            print(f"REFUSED: assurance structure: {error}")
+        return 2
+    for warning in structural_warnings:
+        print(f"WARN: assurance structure: {warning}")
+
+    if packet.get("status") not in {"merge_ready", "done"}:
+        print(
+            "REFUSED: assurance packet status must be merge_ready/done, got "
+            f"{packet.get('status')}"
+        )
+        return 2
+    if packet.get("work_unit") != work_unit_record.get("id"):
+        print("REFUSED: assurance packet Work Unit does not match PR mapping")
+        return 2
+    if packet.get("candidate_sha") != approved_sha:
+        print("REFUSED: assurance packet candidate_sha does not equal approved exact head")
+        return 2
+
+    packet_authors = {
+        str(value) for value in packet.get("material_authors", []) if value
+    }
+    if packet_authors != material_authors:
+        print(
+            "REFUSED: assurance packet material-authorship snapshot differs from "
+            "coordination authorship"
+        )
+        return 2
+
+    attestation, assurance_errors = verify_trusted_packet(
+        packet,
+        repo=repo,
+        pr=pr,
+        base_sha=approved_base,
+    )
+    if assurance_errors or not attestation or attestation.get("verdict") != "PASS":
+        for error in assurance_errors:
+            print(f"REFUSED: assurance evidence: {error}")
+        print("REFUSED: no current base-trusted PASS assurance attestation")
+        return 2
+
+    att_review = attestation.get("review") or {}
+    att_reviewer, att_review_errors = _verify_reviewer(
+        repo,
+        pr,
+        approved_sha,
+        approved_base,
+        att_review.get("review_id"),
+        material_authors,
+    )
+    if att_reviewer is None:
+        print(
+            "REFUSED: assurance reviewer is not platform-authorized: "
+            + ",".join(att_review_errors)
+        )
+        return 2
+    if att_review.get("reviewer_login") != att_reviewer.get("login"):
+        print("REFUSED: assurance reviewer login does not match platform identity")
+        return 2
+    assurance_digest = _attestation_digest(attestation)
 
     merge = run(
         [
@@ -346,7 +474,7 @@ def main() -> int:
         for lease in active:
             append_coordination_event(
                 "ROLE_LEASE_RELEASED",
-                str(lease.get("actor") or args.actor),
+                str(lease.get("actor") or "system"),
                 {
                     "lease_id": lease.get("id"),
                     "pr": pr,
@@ -355,7 +483,7 @@ def main() -> int:
             )
         append_coordination_event(
             "MERGED",
-            args.actor,
+            merge_actor,
             {
                 "pr": pr,
                 "work_unit": work_unit,
@@ -363,13 +491,22 @@ def main() -> int:
                 "approved_base": approved_base,
                 "merge_sha": payload.get("sha"),
                 "method": args.method,
+                "platform_login": merge_login,
+                "identity_policy_provenance": merge_identity.get("policy_provenance"),
+                "assurance_packet": packet_path,
+                "assurance_attestation_sha256": assurance_digest,
+                "assurance_policy_revision": attestation.get("policy_revision"),
             },
         )
     except Exception as exc:
         print(f"WARN: merge succeeded but post-merge coordination record failed: {exc}")
 
     now = dt.datetime.now(dt.timezone.utc).isoformat()
-    state["active_leases"] = []
+    state["active_leases"] = [
+        lease
+        for lease in state.get("active_leases", [])
+        if lease.get("pr") != pr
+    ]
     state["active_streams"] = [
         item for item in state.get("active_streams", []) if item.get("pr") != pr
     ]
@@ -379,8 +516,13 @@ def main() -> int:
         "approved_head": approved_sha,
         "approved_base": approved_base,
         "merge_sha": payload.get("sha"),
-        "actor": args.actor,
+        "actor": merge_actor,
+        "platform_login": merge_login,
+        "identity_policy_provenance": merge_identity.get("policy_provenance"),
         "method": args.method,
+        "assurance_packet": packet_path,
+        "assurance_attestation_sha256": assurance_digest,
+        "assurance_policy_revision": attestation.get("policy_revision"),
         "merged_at": now,
     }
     state["generated_or_reconciled_at"] = now
@@ -396,8 +538,9 @@ def main() -> int:
 
     save_json(CONTROL / "state.json", state)
     print(
-        f"MERGED PR #{pr}: {payload.get('sha')} "
-        f"(approved head {approved_sha}, base {approved_base})"
+        f"MERGED PR #{pr}: {payload.get('sha')} (approved head {approved_sha}, "
+        f"base {approved_base}, principal {merge_login}/{merge_actor}, "
+        f"assurance {assurance_digest})"
     )
     return 0
 

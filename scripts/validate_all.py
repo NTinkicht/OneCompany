@@ -12,8 +12,8 @@ ROOT = Path(__file__).resolve().parent
 def main() -> int:
     validators = [
         "schema_validate.py", "validate.py", "governance_validate.py", "queue_validate.py",
-        "planning_validate.py", "flow_validate.py", "dispatch_validate.py", "ledger_validate.py",
-        "supervision_validate.py", "hardening_audit.py",
+        "planning_validate.py", "risk_register_validate.py", "flow_validate.py",
+        "dispatch_validate.py", "ledger_validate.py", "supervision_validate.py", "hardening_audit.py",
     ]
     failed = False
     for name in validators:

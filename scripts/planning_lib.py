@@ -5,6 +5,8 @@ from __future__ import annotations
 import fnmatch
 from typing import Any
 
+from scope_guard import scope_covers_path
+
 DONE = {"MERGED", "DONE"}
 ACTIVEISH = {"LEASED", "IN_PROGRESS", "CI_PENDING", "REVIEW_PENDING", "REMEDIATION", "MERGE_READY"}
 
@@ -78,21 +80,23 @@ def _has_wildcards(pattern: str) -> bool:
 
 
 def scopes_overlap(left: str, right: str) -> bool:
-    a = left.replace("\\", "/").strip().lstrip("./")
-    b = right.replace("\\", "/").strip().lstrip("./")
+    a = left.replace("\\", "/").strip().lstrip("./").rstrip("/")
+    b = right.replace("\\", "/").strip().lstrip("./").rstrip("/")
     if not a or not b:
         return True
     if a in {"*", "**", "**/*"} or b in {"*", "**", "**/*"}:
         return True
+    # Exact files, directory prefixes, and glob-to-concrete matches.
+    if scope_covers_path(a, b) or scope_covers_path(b, a):
+        return True
     aw, bw = _has_wildcards(a), _has_wildcards(b)
-    if not aw and not bw:
-        if a == b:
-            return True
-        return False
     if aw and fnmatch.fnmatchcase(b, a):
         return True
     if bw and fnmatch.fnmatchcase(a, b):
         return True
+    # For glob-to-glob comparisons, common deterministic prefixes are treated as
+    # overlapping. False positives serialize work; false negatives could create
+    # competing writers, so fail closed.
     ap, bp = _scope_prefix(a), _scope_prefix(b)
     if not ap or not bp:
         return True

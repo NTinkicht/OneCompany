@@ -12,12 +12,24 @@ from onecompany_lib import CONTROL, active_implementation_leases, budget_allows,
 from planning_lib import by_id, work_units_conflict
 
 
+def readiness_record(actor_id: str) -> dict | None:
+    readiness_doc = load_json(CONTROL / "readiness.json")
+    return next((item for item in readiness_doc.get("actors", []) if item.get("actor_id") == actor_id), None)
+
+
+def actor_capacity(actor_id: str, key: str) -> int:
+    ready = readiness_record(actor_id)
+    try:
+        return max(int((ready or {}).get("capacity", {}).get(key, 1)), 1)
+    except (TypeError, ValueError):
+        return 1
+
+
 def actor_eligible_for_implementation(actor_id: str) -> tuple[bool, list[str]]:
     actors = load_json(CONTROL / "actors.json")
-    readiness_doc = load_json(CONTROL / "readiness.json")
     budget = load_json(CONTROL / "budget.json")
     actor = next((item for item in actors.get("actors", []) if item.get("id") == actor_id), None)
-    ready = next((item for item in readiness_doc.get("actors", []) if item.get("actor_id") == actor_id), None)
+    ready = readiness_record(actor_id)
     reasons: list[str] = []
     if actor is None:
         return False, ["unknown_actor"]
@@ -84,7 +96,8 @@ def _stream_from_lease(lease: dict) -> dict:
     return {
         "work_unit": lease.get("work_unit"), "lease_id": lease.get("id"), "actor": lease.get("actor"),
         "branch": lease.get("branch"), "pr": lease.get("pr"), "head": lease.get("start_head"),
-        "status": "ACTIVE_IMPLEMENTATION", "gate": None,
+        "base_sha": None, "status": "ACTIVE_IMPLEMENTATION", "gate": None,
+        "open_blockers": [], "human_decision_required": False,
     }
 
 
@@ -120,6 +133,9 @@ def sync_cache(state: dict, pr: int | None) -> None:
         if lease.get("status") != "active" or lease.get("role") != "implementation":
             continue
         stream = existing.get(lease.get("id"), _stream_from_lease(lease))
+        stream.setdefault("open_blockers", [])
+        stream.setdefault("human_decision_required", False)
+        stream.setdefault("base_sha", None)
         stream.update({"actor": lease.get("actor"), "branch": lease.get("branch"), "pr": lease.get("pr"), "work_unit": lease.get("work_unit")})
         streams.append(stream)
     state["active_streams"] = streams
@@ -127,6 +143,15 @@ def sync_cache(state: dict, pr: int | None) -> None:
     if len(streams) == 1:
         state["current_material_authors"] = streams[0].get("material_authors", state.get("current_material_authors", []))
         state["current_gate"] = streams[0].get("gate", state.get("current_gate"))
+
+
+def capacity_available(actor_id: str, active: list[dict], exclude_lease_id: str | None = None) -> tuple[bool, int, int]:
+    limit = actor_capacity(actor_id, "implementation_streams")
+    current = sum(
+        1 for item in active
+        if item.get("actor") == actor_id and item.get("id") != exclude_lease_id and item.get("role") == "implementation"
+    )
+    return current < limit, current, limit
 
 
 def acquire(args: argparse.Namespace) -> int:
@@ -172,6 +197,10 @@ def acquire(args: argparse.Namespace) -> int:
     if not eligible:
         print(f"REFUSED: actor {args.actor} is not implementation-ready: {','.join(reasons)}")
         return 2
+    capacity_ok, actor_active, actor_limit = capacity_available(args.actor, active)
+    if not capacity_ok:
+        print(f"REFUSED: actor {args.actor} implementation capacity reached ({actor_active}/{actor_limit})")
+        return 2
 
     lease = new_lease(args.actor, args.wu, args.branch, args.pr, args.start_head, candidate)
     if ledger_enabled():
@@ -179,7 +208,7 @@ def acquire(args: argparse.Namespace) -> int:
             post_event("ROLE_LEASE_ASSIGNED", args.actor, lease_payload(lease))
             winner = next((item for item in derive(list_events()).get("active_leases", []) if item.get("id") == lease.get("id")), None)
             if not winner:
-                print("REFUSED: lease lost concurrent claim/conflict race")
+                print("REFUSED: lease lost concurrent claim/conflict/capacity race")
                 return 2
         except Exception as exc:
             print(f"REFUSED: durable lease record failed: {exc}")
@@ -189,7 +218,7 @@ def acquire(args: argparse.Namespace) -> int:
     sync_cache(state, args.pr)
     state["company_state"] = "ACTIVE_PARALLEL_IMPLEMENTATION" if len(active) + 1 > 1 else "ACTIVE_IMPLEMENTATION"
     save_json(CONTROL / "state.json", state)
-    print(f"LEASED {args.wu} to {args.actor} on {args.branch} ({lease['id']}); active_streams={len(active)+1}/{limit}")
+    print(f"LEASED {args.wu} to {args.actor} on {args.branch} ({lease['id']}); active_streams={len(active)+1}/{limit}; actor_capacity={actor_active+1}/{actor_limit}")
     return 0
 
 
@@ -243,6 +272,10 @@ def transfer(args: argparse.Namespace) -> int:
     if old.get("actor") == args.actor:
         print("REFUSED: replacement actor already holds lease")
         return 2
+    capacity_ok, actor_active, actor_limit = capacity_available(args.actor, active, str(old.get("id")))
+    if not capacity_ok:
+        print(f"REFUSED: replacement actor {args.actor} implementation capacity reached ({actor_active}/{actor_limit})")
+        return 2
     item = work_map.get(str(old.get("work_unit"))) or {"id": old.get("work_unit"), **old.get("planning_snapshot", {})}
     replacement = new_lease(args.actor, str(old.get("work_unit")), str(old.get("branch")), old.get("pr"), args.current_head, item, str(old.get("id")))
     payload = lease_payload(replacement) | {"old_lease_id": old.get("id"), "new_lease_id": replacement.get("id"), "old_actor": old.get("actor"), "reason": args.reason}
@@ -261,8 +294,14 @@ def transfer(args: argparse.Namespace) -> int:
         if lease.get("id") == old.get("id") and lease.get("status") == "active":
             lease["status"] = "released"; lease["released_at"] = now; lease["release_reason"] = args.reason
     state.setdefault("active_leases", []).append(replacement)
+    old_stream = next((stream for stream in state.get("active_streams", []) if stream.get("lease_id") == old.get("id")), None)
     state["active_streams"] = [stream for stream in state.get("active_streams", []) if stream.get("lease_id") != old.get("id")]
-    state.setdefault("active_streams", []).append(_stream_from_lease(replacement))
+    new_stream = _stream_from_lease(replacement)
+    if old_stream:
+        new_stream["open_blockers"] = old_stream.get("open_blockers", [])
+        new_stream["human_decision_required"] = old_stream.get("human_decision_required", False)
+        new_stream["base_sha"] = old_stream.get("base_sha")
+    state.setdefault("active_streams", []).append(new_stream)
     sync_cache(state, old.get("pr"))
     state["company_state"] = "ACTIVE_PARALLEL_IMPLEMENTATION" if len(state.get("active_streams", [])) > 1 else "ACTIVE_IMPLEMENTATION"
     save_json(CONTROL / "state.json", state)

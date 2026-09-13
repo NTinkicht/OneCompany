@@ -152,7 +152,7 @@ class LedgerParallelismTests(unittest.TestCase):
         self.assertEqual(blocked["active_leases"], [])
         rejection = blocked["rejected_claims"][0]
         self.assertIn(
-            "dependency_not_complete_at_admission",
+            "dependency_not_durably_complete_at_admission",
             {item["reason"] for item in rejection["violations"]},
         )
 

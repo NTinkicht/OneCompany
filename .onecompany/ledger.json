@@ -1,6 +1,6 @@
 {
   "$schema": "./schemas/ledger.schema.json",
-  "schema_version": "1.1",
+  "schema_version": "1.2",
   "enabled": false,
   "issue_number": null,
   "trusted_publisher_logins": [],
@@ -19,10 +19,19 @@
     "mistral-vibe": 1
   },
   "legacy_v1_unknown_actor_limit": 1,
+  "lease_lifecycle": {
+    "ttl_seconds": 14400,
+    "renewal_progress_kinds": ["pr_head"],
+    "implicit_expiry_revokes_authority": true,
+    "heartbeat_renews": false,
+    "local_event_store": ".git/onecompany/lease-events.jsonl"
+  },
   "accepted_event_types": [
     "ROLE_LEASE_ASSIGNED",
     "ROLE_LEASE_RELEASED",
     "ROLE_LEASE_TRANSFERRED",
+    "ROLE_LEASE_RENEWED",
+    "ROLE_LEASE_REAPED",
     "MATERIAL_AUTHOR",
     "GATE",
     "CAPACITY_DEGRADED",
@@ -42,6 +51,10 @@
     "current_actor_eligibility_is_runtime_status_not_replay_authority": true,
     "legacy_v1_events_require_migration_cutoff": true,
     "legacy_v1_capacity_is_frozen_at_migration": true,
-    "v2_dependency_completion_requires_preceding_merge_evidence": true
+    "v2_dependency_completion_requires_preceding_merge_evidence": true,
+    "lease_expiry_revokes_implementation_authority_without_erasing_history": true,
+    "lease_renewal_requires_durable_progress": true,
+    "heartbeat_is_not_progress": true,
+    "runtime_cache_never_grants_authority": true
   }
 }

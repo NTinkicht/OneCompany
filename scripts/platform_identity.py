@@ -2,7 +2,7 @@
 """Base-trusted platform identity and privilege mapping for CompanyOS.
 
 Authorization facts come from GitHub platform principals plus a policy loaded
-from the reviewed base revision.  Candidate-local actor/readiness files and CLI
+from the reviewed base revision. Candidate-local actor/readiness files and CLI
 actor labels are deliberately not authorization inputs.
 """
 from __future__ import annotations
@@ -99,7 +99,7 @@ def _validate_policy(policy: dict[str, Any]) -> list[str]:
 
 
 def load_identity_policy(repo: str, trusted_ref: str) -> tuple[dict[str, Any] | None, dict[str, Any], list[str]]:
-    """Load authority mapping from reviewed base; bootstrap only to repository owner.
+    """Load authority mapping from reviewed base; bootstrap only repository owner.
 
     The bootstrap path exists solely for the first KERNEL-004 promotion, when the
     reviewed base predates identity.json. Once the file exists in base, any error
@@ -189,10 +189,22 @@ def review_platform_identity(
         errors.append("platform review has no reviewer login")
     if errors:
         return None, errors
+
     policy, provenance, policy_errors = load_identity_policy(repo, trusted_ref)
     if policy is None:
         return None, policy_errors
     identity, mapping_error = map_platform_login(policy, login)
+    if identity is None and provenance.get("source") == "repository-owner-bootstrap":
+        # First identity-policy promotion only: an exact platform reviewer that is
+        # not yet in a base policy may receive *review-only* authority. This avoids
+        # circular bootstrap while granting no merge/root/governance privilege.
+        identity = {
+            "login": login,
+            "actor_id": f"github-reviewer:{login}",
+            "authorities": ["code_review"],
+            "bootstrap_review_only": True,
+        }
+        mapping_error = None
     if identity is None:
         return None, [mapping_error or "review principal mapping failed"]
     identity.update(

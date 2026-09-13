@@ -1,12 +1,14 @@
 {
   "$schema": "./schemas/ledger.schema.json",
-  "schema_version": "1.0",
+  "schema_version": "1.1",
   "enabled": false,
   "issue_number": null,
   "trusted_publisher_logins": [],
   "required_for_autonomous_merge": true,
   "required_for_continuous_autonomy": true,
-  "event_format_version": 1,
+  "event_format_version": 2,
+  "accepted_event_versions": [1, 2],
+  "legacy_event_max_comment_id": 0,
   "accepted_event_types": [
     "ROLE_LEASE_ASSIGNED",
     "ROLE_LEASE_RELEASED",
@@ -25,6 +27,9 @@
     "local_state_is_cache": true,
     "ignore_untrusted_publishers": true,
     "binding_gate_must_be_durable": true,
-    "continuous_supervisors_must_share_ledger": true
+    "continuous_supervisors_must_share_ledger": true,
+    "lease_admission_is_immutable_at_grant": true,
+    "current_actor_eligibility_is_runtime_status_not_replay_authority": true,
+    "legacy_v1_events_require_migration_cutoff": true
   }
 }

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import sys
 import unittest
 from pathlib import Path
-import sys
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -10,15 +10,28 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from ledger_lib import derive
 
 
-def event(i: int, kind: str, actor: str, payload: dict) -> dict:
+def event(i: int, kind: str, actor: str, payload: dict, event_id: str | None = None) -> dict:
     return {
-        "version": 1, "event_id": f"e{i}", "type": kind, "actor": actor, "payload": payload,
-        "github_created_at": f"2026-01-01T00:00:{i:02d}Z", "github_comment_id": i,
+        "version": 1,
+        "event_id": event_id or f"e{i}",
+        "type": kind,
+        "actor": actor,
+        "payload": payload,
+        "github_created_at": f"2026-01-01T00:00:{i:02d}Z",
+        "github_comment_id": i,
     }
 
 
-def snapshot(scope: str, locks=None) -> dict:
-    return {"write_scope": [scope], "resource_locks": locks or [], "parallelism": "auto", "risk_class": "LOW", "dependencies": []}
+def snapshot(scope: str, locks=None, dependencies=None, dependency_closure=None) -> dict:
+    dependencies = dependencies or []
+    return {
+        "write_scope": [scope],
+        "resource_locks": locks or [],
+        "parallelism": "auto",
+        "risk_class": "LOW",
+        "dependencies": dependencies,
+        "dependency_closure": dependency_closure if dependency_closure is not None else list(dependencies),
+    }
 
 
 class LedgerParallelismTests(unittest.TestCase):
@@ -27,25 +40,71 @@ class LedgerParallelismTests(unittest.TestCase):
             event(1, "ROLE_LEASE_ASSIGNED", "codex", {"lease_id": "L1", "role": "implementation", "work_unit": "WU-A", "pr": 1, "planning_snapshot": snapshot("src/a/**")}),
             event(2, "ROLE_LEASE_ASSIGNED", "chatgpt", {"lease_id": "L2", "role": "implementation", "work_unit": "WU-B", "pr": 2, "planning_snapshot": snapshot("src/b/**")}),
         ]
-        self.assertEqual({x["id"] for x in derive(events)["active_leases"]}, {"L1", "L2"})
+        result = derive(events)
+        self.assertEqual({x["id"] for x in result["active_leases"]}, {"L1", "L2"})
+        self.assertEqual(result["integrity_conflicts"], [])
 
-    def test_same_work_unit_second_lease_is_rejected(self):
+    def test_same_work_unit_second_lease_is_informational_rejection(self):
         events = [
             event(1, "ROLE_LEASE_ASSIGNED", "codex", {"lease_id": "L1", "role": "implementation", "work_unit": "WU-A", "pr": 1, "planning_snapshot": snapshot("src/a/**")}),
             event(2, "ROLE_LEASE_ASSIGNED", "chatgpt", {"lease_id": "L2", "role": "implementation", "work_unit": "WU-A", "pr": 2, "planning_snapshot": snapshot("src/a/**")}),
         ]
         result = derive(events)
         self.assertEqual([x["id"] for x in result["active_leases"]], ["L1"])
-        self.assertEqual(result["conflicts"][0]["reason"], "implementation_lease_already_active_for_wu")
+        self.assertEqual(result["integrity_conflicts"], [])
+        self.assertEqual(result["conflicts"], [])
+        rejected = result["rejected_claims"][0]
+        self.assertEqual(rejected["rejected_lease_id"], "L2")
+        self.assertIn("implementation_lease_already_active_for_wu", {item["reason"] for item in rejected["violations"]})
 
-    def test_overlapping_scope_is_rejected(self):
+    def test_overlapping_scope_is_informational_rejection(self):
         events = [
             event(1, "ROLE_LEASE_ASSIGNED", "codex", {"lease_id": "L1", "role": "implementation", "work_unit": "WU-A", "pr": 1, "planning_snapshot": snapshot("src/a/**")}),
             event(2, "ROLE_LEASE_ASSIGNED", "chatgpt", {"lease_id": "L2", "role": "implementation", "work_unit": "WU-B", "pr": 2, "planning_snapshot": snapshot("src/a/file.py")}),
         ]
         result = derive(events)
         self.assertEqual([x["id"] for x in result["active_leases"]], ["L1"])
-        self.assertEqual(result["conflicts"][0]["reason"], "implementation_scope_conflict")
+        self.assertEqual(result["integrity_conflicts"], [])
+        rejected = result["rejected_claims"][0]
+        details = {detail for item in rejected["violations"] for detail in item.get("details", [])}
+        self.assertIn("write_scope_overlap", details)
+
+    def test_historical_rejection_does_not_deadlock_future_lease(self):
+        events = [
+            event(1, "ROLE_LEASE_ASSIGNED", "codex", {"lease_id": "L1", "role": "implementation", "work_unit": "WU-A", "pr": 1, "planning_snapshot": snapshot("src/a/**")}),
+            event(2, "ROLE_LEASE_ASSIGNED", "chatgpt", {"lease_id": "L2", "role": "implementation", "work_unit": "WU-A", "pr": 2, "planning_snapshot": snapshot("src/a/**")}),
+            event(3, "ROLE_LEASE_RELEASED", "codex", {"lease_id": "L1", "pr": 1, "reason": "merged"}),
+            event(4, "MERGED", "human-owner", {"pr": 1, "work_unit": "WU-A", "merge_sha": "m"}),
+            event(5, "ROLE_LEASE_ASSIGNED", "claude", {"lease_id": "L3", "role": "implementation", "work_unit": "WU-C", "pr": 3, "planning_snapshot": snapshot("src/c/**")}),
+        ]
+        result = derive(events)
+        self.assertEqual([x["id"] for x in result["active_leases"]], ["L3"])
+        self.assertEqual(result["integrity_conflicts"], [])
+        self.assertTrue(result["rejected_claims"])
+
+    def test_transitive_dependency_closure_is_enforced_from_snapshot(self):
+        events = [
+            event(1, "ROLE_LEASE_ASSIGNED", "codex", {"lease_id": "LC", "role": "implementation", "work_unit": "WU-C", "pr": 1, "planning_snapshot": snapshot("src/c/**")}),
+            event(2, "ROLE_LEASE_ASSIGNED", "claude", {"lease_id": "LA", "role": "implementation", "work_unit": "WU-A", "pr": 2, "planning_snapshot": snapshot("src/a/**", dependencies=["WU-B"], dependency_closure=["WU-B", "WU-C"])}),
+        ]
+        result = derive(events)
+        self.assertEqual([x["id"] for x in result["active_leases"]], ["LC"])
+        rejected = result["rejected_claims"][0]
+        details = {detail for item in rejected["violations"] for detail in item.get("details", [])}
+        self.assertIn("dependency_relationship", details)
+
+    def test_integrity_conflict_requires_explicit_resolution_event(self):
+        events = [
+            event(1, "SUPERVISION_CHECK", "chatgpt", {"state": "first"}, event_id="dup"),
+            event(2, "SUPERVISION_CHECK", "chatgpt", {"state": "replay"}, event_id="dup"),
+        ]
+        result = derive(events)
+        self.assertEqual(len(result["integrity_conflicts"]), 1)
+        conflict_id = result["integrity_conflicts"][0]["conflict_id"]
+        events.append(event(3, "INTEGRITY_CONFLICT_RESOLVED", "human-owner", {"conflict_id": conflict_id, "reason": "investigated"}))
+        resolved = derive(events)
+        self.assertEqual(resolved["integrity_conflicts"], [])
+        self.assertIn(conflict_id, resolved["resolved_conflict_ids"])
 
     def test_merge_release_does_not_release_other_stream(self):
         events = [

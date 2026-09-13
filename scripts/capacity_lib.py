@@ -7,14 +7,35 @@ from typing import Any
 from onecompany_lib import budget_allows
 
 
+def capacity_measurement_errors(ready: dict[str, Any] | None) -> list[str]:
+    capacity = (ready or {}).get("capacity", {})
+    reasons: list[str] = []
+    if capacity.get("measured") is not True:
+        reasons.append("capacity_unmeasured")
+    observed_at = capacity.get("observed_at")
+    if not isinstance(observed_at, str) or not observed_at.strip():
+        reasons.append("capacity_observed_at_missing")
+    evidence = capacity.get("evidence")
+    if not isinstance(evidence, list) or not any(isinstance(item, str) and item.strip() for item in evidence):
+        reasons.append("capacity_evidence_missing")
+    streams = capacity.get("implementation_streams")
+    if not isinstance(streams, int) or isinstance(streams, bool) or streams < 0:
+        reasons.append("capacity_stream_count_invalid")
+    return reasons
+
+
 def implementation_capacity_limit(ready: dict[str, Any] | None) -> int:
-    try:
-        return max(int((ready or {}).get("capacity", {}).get("implementation_streams", 1)), 1)
-    except (TypeError, ValueError):
-        return 1
+    """Return measured capacity only; an unmeasured default grants zero slots."""
+    if capacity_measurement_errors(ready):
+        return 0
+    return int((ready or {}).get("capacity", {}).get("implementation_streams", 0))
 
 
-def implementation_active_count(actor_id: str, active: list[dict[str, Any]], exclude_lease_id: str | None = None) -> int:
+def implementation_active_count(
+    actor_id: str,
+    active: list[dict[str, Any]],
+    exclude_lease_id: str | None = None,
+) -> int:
     return sum(
         1
         for lease in active
@@ -24,8 +45,20 @@ def implementation_active_count(actor_id: str, active: list[dict[str, Any]], exc
     )
 
 
-def configured_dispatch_exists(dispatch_doc: dict[str, Any], actor_id: str, capability: str, unattended: bool) -> bool:
-    actor_entry = next((item for item in dispatch_doc.get("actors", []) if item.get("actor_id") == actor_id), None)
+def configured_dispatch_exists(
+    dispatch_doc: dict[str, Any],
+    actor_id: str,
+    capability: str,
+    unattended: bool,
+) -> bool:
+    actor_entry = next(
+        (
+            item
+            for item in dispatch_doc.get("actors", [])
+            if item.get("actor_id") == actor_id
+        ),
+        None,
+    )
     if not actor_entry:
         return False
     return any(
@@ -46,11 +79,10 @@ def implementation_availability(
     require_unattended: bool = False,
     exclude_lease_id: str | None = None,
 ) -> tuple[int, list[str]]:
-    """Return free implementation slots and hard ineligibility reasons.
+    """Return measured free implementation slots and hard ineligibility reasons.
 
-    `require_unattended=True` is for continuous/scheduled autonomy. Interactive
-    implementation may be ready while still being unavailable to an unattended
-    supervisor; those states must not be conflated.
+    Capacity is a circuit breaker only. It never creates spending permission,
+    readiness, repository access, a lease, or a dispatch path.
     """
     reasons: list[str] = []
     actor_id = str(actor.get("id") or "")
@@ -81,11 +113,21 @@ def implementation_availability(
     if not access.get("write"):
         reasons.append("repository_write_not_verified")
 
+    reasons.extend(capacity_measurement_errors(ready))
+
     if require_unattended:
         unattended = ready.get("unattended", {})
         if unattended.get("configured") is not True or unattended.get("verified") is not True:
             reasons.append("unattended_not_verified")
-        if dispatch_doc is None or not configured_dispatch_exists(dispatch_doc, actor_id, "implementation", True):
+        if (
+            dispatch_doc is None
+            or not configured_dispatch_exists(
+                dispatch_doc,
+                actor_id,
+                "implementation",
+                True,
+            )
+        ):
             reasons.append("unattended_implementation_dispatch_missing")
 
     limit = implementation_capacity_limit(ready)
@@ -95,7 +137,7 @@ def implementation_availability(
         reasons.append("actor_capacity")
 
     hard_reasons = [reason for reason in reasons if reason != "actor_capacity"]
-    return (free if not hard_reasons else 0), reasons
+    return (free if not hard_reasons else 0), sorted(set(reasons))
 
 
 def implementation_pool(
@@ -108,7 +150,11 @@ def implementation_pool(
     require_unattended: bool = False,
 ) -> dict[str, Any]:
     """Return aggregate executable implementation capacity using one policy path."""
-    readiness = {item.get("actor_id"): item for item in readiness_doc.get("actors", []) if item.get("actor_id")}
+    readiness = {
+        item.get("actor_id"): item
+        for item in readiness_doc.get("actors", [])
+        if item.get("actor_id")
+    }
     available: list[dict[str, Any]] = []
     rejected: list[dict[str, Any]] = []
     total_slots = 0

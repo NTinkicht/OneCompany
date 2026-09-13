@@ -80,7 +80,7 @@ def _scope_prefix(pattern: str) -> str:
     value = pattern.replace("\\", "/").strip().lstrip("./")
     wildcard_positions = [value.find(ch) for ch in ("*", "?", "[") if value.find(ch) >= 0]
     if wildcard_positions:
-        value = value[:min(wildcard_positions)]
+        value = value[: min(wildcard_positions)]
     return value.rstrip("/")
 
 
@@ -136,7 +136,22 @@ def work_item_for_lease(lease: dict[str, Any], work_map: dict[str, dict[str, Any
         return {"id": wu, **snapshot}
     if wu and wu in work_map:
         return work_map[wu]
-    return {"id": wu, "parallelism": "serial", "write_scope": [], "resource_locks": ["*"], "risk_class": "CRITICAL", "dependencies": []}
+    return {
+        "id": wu,
+        "parallelism": "serial",
+        "write_scope": [],
+        "resource_locks": ["*"],
+        "risk_class": "CRITICAL",
+        "dependencies": [],
+        "dependency_closure": [],
+    }
+
+
+def _declared_dependency_closure(item: dict[str, Any]) -> set[str]:
+    closure = item.get("dependency_closure")
+    if isinstance(closure, list):
+        return {str(value) for value in closure if value}
+    return {str(value) for value in item.get("dependencies", []) if value}
 
 
 def work_units_conflict(
@@ -157,14 +172,17 @@ def work_units_conflict(
     if left.get("risk_class") == "CRITICAL" or right.get("risk_class") == "CRITICAL":
         if parallel.get("critical_risk_default") == "serialize":
             reasons.append("critical_risk_serialized")
-    # Always honor the records being compared (including an active lease snapshot).
-    if right_id and right_id in {str(v) for v in left.get("dependencies", [])}:
+
+    left_closure = _declared_dependency_closure(left)
+    right_closure = _declared_dependency_closure(right)
+    if right_id and right_id in left_closure:
         reasons.append("dependency_relationship")
-    if left_id and left_id in {str(v) for v in right.get("dependencies", [])}:
+    if left_id and left_id in right_closure:
         reasons.append("dependency_relationship")
     if work_map and left_id and right_id:
         if right_id in dependency_closure(work_map, left_id) or left_id in dependency_closure(work_map, right_id):
             reasons.append("dependency_relationship")
+
     left_locks = [str(v) for v in left.get("resource_locks", [])]
     right_locks = [str(v) for v in right.get("resource_locks", [])]
     if any(locks_overlap(a, b) for a in left_locks for b in right_locks):
@@ -177,6 +195,69 @@ def work_units_conflict(
     elif any(scopes_overlap(a, b) for a in left_scope for b in right_scope):
         reasons.append("write_scope_overlap")
     return bool(reasons), sorted(set(reasons))
+
+
+def implementation_admission_violations(
+    candidate: dict[str, Any],
+    active_leases: list[dict[str, Any]],
+    planning: dict[str, Any],
+    work_map: dict[str, dict[str, Any]] | None = None,
+    *,
+    actor: str | None = None,
+    actor_limit: int | None = None,
+) -> list[dict[str, Any]]:
+    """Return deterministic implementation-admission violations.
+
+    This is the shared admission decision used by both local lease acquisition and
+    durable-ledger arbitration. Durable callers rely on immutable lease snapshots;
+    local callers may additionally provide the complete work graph.
+    """
+    work_map = work_map or {}
+    active = [item for item in active_leases if item.get("role", "implementation") == "implementation"]
+    violations: list[dict[str, Any]] = []
+    candidate_id = str(candidate.get("id") or "")
+
+    same_wu = next((item for item in active if str(item.get("work_unit") or item.get("id") or "") == candidate_id), None)
+    if same_wu is not None:
+        violations.append(
+            {
+                "reason": "implementation_lease_already_active_for_wu",
+                "work_unit": candidate_id,
+                "with_lease_id": same_wu.get("id"),
+            }
+        )
+
+    limit = int(planning.get("parallel_execution", {}).get("max_concurrent_implementation_streams", 1) or 1)
+    if len(active) >= limit:
+        violations.append({"reason": "implementation_wip_limit_reached", "limit": limit, "active": len(active)})
+
+    if actor and actor_limit is not None:
+        actor_active = sum(1 for item in active if item.get("actor") == actor)
+        if actor_active >= actor_limit:
+            violations.append(
+                {
+                    "reason": "actor_implementation_capacity_reached",
+                    "actor": actor,
+                    "limit": actor_limit,
+                    "active": actor_active,
+                }
+            )
+
+    for lease in active:
+        other = work_item_for_lease(lease, work_map)
+        if str(other.get("id") or "") == candidate_id:
+            continue
+        conflict, reasons = work_units_conflict(candidate, other, planning, work_map or None)
+        if conflict:
+            violations.append(
+                {
+                    "reason": "implementation_work_unit_conflict",
+                    "with_work_unit": other.get("id"),
+                    "with_lease_id": lease.get("id"),
+                    "details": reasons,
+                }
+            )
+    return violations
 
 
 def dependency_ready(item: dict[str, Any], work_map: dict[str, dict[str, Any]], durable_done: set[str] | None = None) -> tuple[bool, list[str], list[str]]:

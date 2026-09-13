@@ -12,6 +12,7 @@
     "scope_guard",
     "onecompany_lib",
     "ledger_lib",
+    "lease_lifecycle",
     "planning_lib",
     "capacity_lib",
     "assurance",

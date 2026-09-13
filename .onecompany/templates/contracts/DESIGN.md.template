@@ -1,0 +1,92 @@
+# Design and Experience Contract
+
+This contract defines product-level experience invariants. It is framework-neutral: use the project's existing deterministic tools rather than adopting a tool solely because OneCompany mentions it.
+
+## Experience principles
+- Primary user promise:
+- Clarity hierarchy:
+- Interaction principles:
+- Brand/personality constraints:
+- Explicit anti-patterns:
+
+## Design system
+Document or link the canonical source for:
+- typography;
+- spacing/layout grid;
+- color and semantic tokens;
+- elevation/borders/radii;
+- iconography/imagery;
+- motion;
+- component states and variants.
+
+Prefer reusable tokens/components over one-off styling. A design-system change should update the canonical primitive before duplicating local exceptions.
+
+## Required UI states
+For every meaningful user journey, define the applicable states:
+- initial/loading/skeleton;
+- empty/no-results;
+- success;
+- validation/help;
+- partial/degraded;
+- offline/retry;
+- permission/authentication denied;
+- error/recovery;
+- destructive confirmation/undo where applicable.
+
+## Accessibility
+For web products, WCAG 2.2 Level AA is the default target unless the product contract sets a stricter or legally required standard.
+
+Verify as applicable:
+- semantic structure and accessible names;
+- keyboard operation and visible, unobscured focus;
+- contrast and non-color cues;
+- target size and pointer alternatives;
+- labels, validation, errors and accessible authentication;
+- reduced motion and animation safety;
+- screen-reader announcements for dynamic state.
+
+Automated accessibility checks are useful but do not replace keyboard/screen-reader or task-level review for important journeys.
+
+## Responsive / device behavior
+- Supported viewport/device classes:
+- Touch/pointer assumptions:
+- Orientation behavior:
+- Dense/compact layouts:
+- Overflow/long-content strategy:
+
+## Localization and directionality
+When applicable, test:
+- long translated strings;
+- plural/date/number/currency formats;
+- RTL mirroring and logical CSS/layout;
+- mixed-direction text;
+- user-generated content;
+- locale-independent identifiers.
+
+## Themes and display modes
+- Light/dark/system behavior:
+- High contrast or platform modes:
+- Theme token invariants:
+
+## Performance experience
+Define project-specific budgets for meaningful user journeys. For web products, include relevant Core Web Vitals or equivalent field/lab metrics when the project can measure them reliably.
+
+Performance regression checks must be stable enough to gate; noisy synthetic metrics should be treated as evidence, not blindly retried until green.
+
+## Deterministic design verification
+Select only tools appropriate to the project:
+- component/unit interaction tests;
+- browser/end-to-end journey tests;
+- accessibility automation;
+- deterministic screenshot/visual regression;
+- responsive viewport matrix;
+- localization/RTL fixtures;
+- performance budgets.
+
+Visual baselines are reviewed artifacts. A changed screenshot is neither automatically correct nor automatically wrong.
+
+## Human judgment evidence
+For material user-facing changes, record the smallest useful evidence: screenshots/video, keyboard walkthrough, responsive matrix, accessibility findings, or design-review notes. Do not require heavyweight ceremony for invisible/non-UI changes.
+
+## Exceptions
+Any intentional deviation from this contract must be explicit in the Work Unit/PR with rationale, impact and follow-up or owner acceptance.

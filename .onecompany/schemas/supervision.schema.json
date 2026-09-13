@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://onecompany.dev/schemas/supervision.schema.json",
+  "title": "OneCompany Continuous Supervision",
+  "type": "object",
+  "required": ["schema_version", "enabled", "mode", "continuous_operation", "github_actions", "chatgpt_tasks", "coordination", "safety"],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "enabled": {"type": "boolean"},
+    "mode": {"enum": ["observe_only", "notify", "orchestrate"]},
+    "continuous_operation": {
+      "type": "object",
+      "required": ["event_driven_first", "scheduled_reconciliation", "quiet_when_no_action", "stale_candidate_minutes", "target_effective_cadence_minutes"],
+      "properties": {
+        "event_driven_first": {"type": "boolean"},
+        "scheduled_reconciliation": {"type": "boolean"},
+        "quiet_when_no_action": {"type": "boolean"},
+        "stale_candidate_minutes": {"type": "integer", "minimum": 5},
+        "target_effective_cadence_minutes": {"type": "integer", "minimum": 5}
+      }
+    },
+    "github_actions": {"type": "object"},
+    "chatgpt_tasks": {"type": "object"},
+    "coordination": {"type": "object"},
+    "safety": {"type": "object"}
+  },
+  "additionalProperties": true
+}

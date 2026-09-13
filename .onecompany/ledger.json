@@ -1,0 +1,29 @@
+{
+  "$schema": "./schemas/ledger.schema.json",
+  "schema_version": "1.0",
+  "enabled": false,
+  "issue_number": null,
+  "trusted_publisher_logins": [],
+  "required_for_autonomous_merge": true,
+  "required_for_continuous_autonomy": true,
+  "event_format_version": 1,
+  "accepted_event_types": [
+    "ROLE_LEASE_ASSIGNED",
+    "ROLE_LEASE_RELEASED",
+    "ROLE_LEASE_TRANSFERRED",
+    "MATERIAL_AUTHOR",
+    "GATE",
+    "CAPACITY_DEGRADED",
+    "CAPACITY_RECOVERED",
+    "SUPERVISION_CHECK",
+    "HUMAN_DECISION",
+    "MERGED"
+  ],
+  "policy": {
+    "github_issue_comments_are_durable_coordination_record": true,
+    "local_state_is_cache": true,
+    "ignore_untrusted_publishers": true,
+    "binding_gate_must_be_durable": true,
+    "continuous_supervisors_must_share_ledger": true
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://onecompany.dev/schemas/budget.schema.json",
+  "title": "OneCompany Budget",
+  "type": "object",
+  "required": ["schema_version", "currency", "ai", "cost_classes"],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "currency": {"type": "string", "minLength": 3},
+    "ai": {
+      "type": "object",
+      "required": ["additional_monthly_spend_cap", "allow_paid_fallback", "allow_overage", "allow_auto_topup", "unknown_cost_behavior"],
+      "properties": {
+        "additional_monthly_spend_cap": {"type": "number", "minimum": 0},
+        "allow_paid_fallback": {"type": "boolean"},
+        "allow_overage": {"type": "boolean"},
+        "allow_auto_topup": {"type": "boolean"},
+        "allow_new_paid_vendor": {"type": "boolean"},
+        "unknown_cost_behavior": {"enum": ["forbid", "human_approval", "allow_within_cap"]}
+      }
+    },
+    "ci": {"type": "object"},
+    "cost_classes": {"type": "object"}
+  },
+  "additionalProperties": true
+}

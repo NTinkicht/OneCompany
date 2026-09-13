@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OneCompany Role Overlay Registry",
+  "type": "object",
+  "required": ["version", "provenance", "rules", "profiles"],
+  "properties": {
+    "version": {"type": "integer", "minimum": 1},
+    "provenance": {"type": "object"},
+    "rules": {
+      "type": "object",
+      "required": ["creates_actor", "creates_capacity", "creates_implementation_lease", "grants_repository_permission", "overrides_material_authorship", "overrides_self_gate_rule", "grants_merge_authority"],
+      "properties": {
+        "creates_actor": {"const": false},
+        "creates_capacity": {"const": false},
+        "creates_implementation_lease": {"const": false},
+        "grants_repository_permission": {"const": false},
+        "overrides_material_authorship": {"const": false},
+        "overrides_self_gate_rule": {"const": false},
+        "grants_merge_authority": {"const": false},
+        "max_primary_overlays_per_work_unit": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": true
+    },
+    "profiles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "path", "recommended_for"],
+        "properties": {
+          "id": {"type": "string", "minLength": 1},
+          "path": {"type": "string", "minLength": 1},
+          "recommended_for": {"type": "array", "items": {"type": "string"}}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

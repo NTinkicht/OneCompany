@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://onecompany.dev/schemas/governance.schema.json",
+  "title": "OneCompany Governance Guardrails",
+  "type": "object",
+  "required": ["schema_version", "control_plane", "supply_chain", "side_effects", "policy"],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "control_plane": {
+      "type": "object",
+      "required": ["human_merge_required", "fail_closed_if_diff_unavailable", "protected_paths", "always_human_paths"],
+      "properties": {
+        "human_merge_required": {"const": true},
+        "fail_closed_if_diff_unavailable": {"const": true},
+        "protected_paths": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+        "always_human_paths": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true}
+      },
+      "additionalProperties": true
+    },
+    "supply_chain": {
+      "type": "object",
+      "required": ["onecompany_managed_actions_require_sha_pin", "forbid_pull_request_target_in_managed_workflows", "forbid_write_all_in_managed_workflows"],
+      "properties": {
+        "onecompany_managed_actions_require_sha_pin": {"const": true},
+        "forbid_pull_request_target_in_managed_workflows": {"const": true},
+        "forbid_write_all_in_managed_workflows": {"const": true}
+      }
+    },
+    "side_effects": {
+      "type": "object",
+      "required": ["require_idempotency_or_natural_deduplication", "require_rollback_or_compensation_for_destructive_actions", "require_bounded_retry_policy"],
+      "properties": {
+        "require_idempotency_or_natural_deduplication": {"const": true},
+        "require_rollback_or_compensation_for_destructive_actions": {"const": true},
+        "require_bounded_retry_policy": {"const": true}
+      }
+    },
+    "policy": {
+      "type": "object",
+      "required": ["no_self_escalation", "control_plane_relaxation_requires_human", "ambiguity_fails_closed"],
+      "properties": {
+        "no_self_escalation": {"const": true},
+        "control_plane_relaxation_requires_human": {"const": true},
+        "ambiguity_fails_closed": {"const": true}
+      }
+    }
+  },
+  "additionalProperties": true
+}

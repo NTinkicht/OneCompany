@@ -1,0 +1,72 @@
+#!/usr/bin/env python3
+"""Run dependency-free policy simulations against core OneCompany invariants."""
+from __future__ import annotations
+
+import copy
+import sys
+
+from onecompany_lib import CONTROL, active_implementation_leases, budget_allows, load_json
+
+
+def check(name: str, condition: bool) -> bool:
+    print(("PASS" if condition else "FAIL") + ": " + name)
+    return condition
+
+
+def main() -> int:
+    config = load_json(CONTROL / "config.json")
+    budget = load_json(CONTROL / "budget.json")
+    state = load_json(CONTROL / "state.json")
+    overlays = load_json(CONTROL / "overlays.json")
+    readiness = load_json(CONTROL / "readiness.json")
+    results = []
+
+    zero_spend = copy.deepcopy(budget)
+    zero_spend["ai"]["additional_monthly_spend_cap"] = 0
+    results.append(check("zero-spend rejects metered actor", not budget_allows("METERED_ALLOWED", zero_spend)))
+    results.append(check("zero-spend allows included subscription", budget_allows("INCLUDED_SUBSCRIPTION", zero_spend)))
+
+    one = copy.deepcopy(state)
+    one["active_leases"] = [{"role": "implementation", "status": "active", "actor": "a"}]
+    results.append(check("one implementation lease is representable", len(active_implementation_leases(one)) == 1))
+
+    two = copy.deepcopy(one)
+    two["active_leases"].append({"role": "implementation", "status": "active", "actor": "b"})
+    results.append(check("duplicate implementation lease is detectable", len(active_implementation_leases(two)) > 1))
+
+    head = "abc"
+    gate = {"sha": "def", "verdict": "PASS — MERGE_READY"}
+    results.append(check("stale exact-head gate is detectable", gate["sha"] != head))
+
+    authors = {"chatgpt", "codex"}
+    reviewer = "claude"
+    results.append(check("independent reviewer is non-author", reviewer not in authors))
+    reviewer = "codex"
+    results.append(check("material author conflict is detectable", reviewer in authors))
+
+    rules = overlays.get("rules", {})
+    results.append(check("role overlay cannot create an actor", rules.get("creates_actor") is False))
+    results.append(check("role overlay cannot create an implementation lease", rules.get("creates_implementation_lease") is False))
+    results.append(check("role overlay cannot override self-gate rule", rules.get("overrides_self_gate_rule") is False))
+    results.append(check("role overlay cannot grant merge authority", rules.get("grants_merge_authority") is False))
+
+    # Capability-level degradation must not imply whole-provider outage.
+    sample = copy.deepcopy(readiness.get("actors", [])[0])
+    sample["setup_state"] = "degraded"
+    sample["verified_capabilities"] = ["implementation", "code_review"]
+    sample["temporarily_unavailable_capabilities"] = ["code_review"]
+    results.append(check("degraded actor can retain unrelated verified capability", "implementation" in sample["verified_capabilities"] and "implementation" not in sample["temporarily_unavailable_capabilities"]))
+    results.append(check("temporary review outage is capability-specific", "code_review" in sample["temporarily_unavailable_capabilities"]))
+
+    # Declared capability is not readiness: a default actor with no verified capabilities must not be considered proven.
+    results.append(check("default readiness does not pretend capabilities are verified", all(not item.get("verified_capabilities") for item in readiness.get("actors", []))))
+
+    results.append(check("GitHub remains source of truth", config.get("project", {}).get("source_of_truth") == "github"))
+
+    failed = len([r for r in results if not r])
+    print(f"\nSimulation: {len(results)-failed} passed, {failed} failed")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

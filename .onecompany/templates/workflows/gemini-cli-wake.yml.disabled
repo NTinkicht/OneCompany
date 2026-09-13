@@ -1,0 +1,117 @@
+# DISABLED TEMPLATE. Review current Gemini CLI flags/policy syntax and pin a tested version before enabling.
+name: OneCompany Gemini CLI Read-Only Wake
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+  actions: read
+
+jobs:
+  gemini-cli:
+    if: >-
+      github.actor == vars.ONECOMPANY_OWNER_LOGIN &&
+      format('{0}', github.event.issue.number) == vars.ONECOMPANY_WAKE_ISSUE &&
+      contains(github.event.comment.body, '@gemini-cli')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 20
+          persist-credentials: false
+
+      - name: Preflight guards
+        id: preflight
+        env:
+          ZERO_BILLING_CONFIRMED: ${{ vars.ONECOMPANY_GEMINI_ZERO_BILLING_CONFIRMED }}
+          CLI_VERSION: ${{ vars.ONECOMPANY_GEMINI_CLI_VERSION }}
+          PROVIDER_KEY: ${{ secrets.GEMINI_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${ZERO_BILLING_CONFIRMED:-}" != "true" || -z "${CLI_VERSION:-}" || -z "${PROVIDER_KEY:-}" ]]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "reason=missing zero-billing guard, pinned version, or credential" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/setup-node@v4
+        if: steps.preflight.outputs.ready == 'true'
+        with:
+          node-version: '20'
+
+      - name: Run bounded read-only Gemini
+        if: steps.preflight.outputs.ready == 'true'
+        id: actor
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          CLI_VERSION: ${{ vars.ONECOMPANY_GEMINI_CLI_VERSION }}
+          DISPATCH_BODY: ${{ github.event.comment.body }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --global "@google/gemini-cli@${CLI_VERSION}"
+          cat > /tmp/onecompany-gemini-policy.toml <<'EOF'
+          [[rule]]
+          toolName = "*"
+          decision = "deny"
+          priority = 998
+          [[rule]]
+          toolName = ["glob", "grep_search", "list_directory", "read_file", "read_many_files"]
+          decision = "allow"
+          priority = 999
+          EOF
+          cat > /tmp/prompt.txt <<'EOF'
+          You are the gemini-cli actor in a OneCompany repository. This is a READ-ONLY unattended scout wake.
+          Read AGENTS.md and the minimum task-relevant repository evidence. Do not edit, commit, create PRs,
+          submit binding reviews, change GitHub state, or expose credentials. Return concise evidence/findings.
+          EOF
+          printf '\nDispatch:\n%s\n' "$DISPATCH_BODY" >> /tmp/prompt.txt
+          set +e
+          timeout --signal=TERM --kill-after=15s 600s gemini \
+            --skip-trust \
+            --approval-mode=default \
+            --policy /tmp/onecompany-gemini-policy.toml \
+            --output-format text \
+            --prompt "$(cat /tmp/prompt.txt)" \
+            > /tmp/output.txt 2> /tmp/error.txt
+          code=$?
+          set -e
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+
+      - name: Publish safe result
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          READY: ${{ steps.preflight.outputs.ready }}
+          ACTOR_EXIT: ${{ steps.actor.outputs.exit_code }}
+          ONECOMPANY_WAKE_ISSUE: ${{ vars.ONECOMPANY_WAKE_ISSUE }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${READY:-false}" == "true" && "${ACTOR_EXIT:-1}" == "0" ]]; then
+            python - <<'PY'
+          import os, re
+          from pathlib import Path
+          text = Path('/tmp/output.txt').read_text(encoding='utf-8', errors='replace') if Path('/tmp/output.txt').exists() else ''
+          secret = os.environ.get('GEMINI_API_KEY', '')
+          if secret:
+              text = text.replace(secret, '[REDACTED]')
+          text = re.sub(r'(?i)(authorization\s*:\s*bearer\s+)\S+', r'\1[REDACTED]', text)
+          text = re.sub(r'(?i)(GEMINI_API_KEY\s*[=:]\s*)\S+', r'\1[REDACTED]', text)
+          Path('/tmp/public.txt').write_text(text[:50000], encoding='utf-8')
+          PY
+            { echo '**gemini-cli read-only wake**'; echo; cat /tmp/public.txt; } > /tmp/comment.md
+          else
+            echo '**gemini-cli read-only wake**' > /tmp/comment.md
+            echo >> /tmp/comment.md
+            echo 'CAPACITY_DEGRADED - preflight/runtime failed. No paid fallback attempted.' >> /tmp/comment.md
+          fi
+          gh issue comment "$ONECOMPANY_WAKE_ISSUE" --repo "$GITHUB_REPOSITORY" --body-file /tmp/comment.md

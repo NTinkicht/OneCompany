@@ -1,0 +1,69 @@
+{
+  "$schema": "./schemas/roles.schema.json",
+  "schema_version": "1.0",
+  "roles": [
+    {
+      "id": "orchestrator",
+      "purpose": "Observe, reconcile, prioritize, route, lease, and keep the company moving without becoming the sole technical gate.",
+      "required_capabilities": ["planning", "state_reconciliation"],
+      "write_scope": "coordination",
+      "conflicts": []
+    },
+    {
+      "id": "implementer",
+      "purpose": "Own the single canonical implementation stream for one bounded Work Unit.",
+      "required_capabilities": ["implementation"],
+      "write_scope": "canonical_work_unit_branch",
+      "conflicts": ["sole_independent_final_reviewer_of_same_material_authorship"]
+    },
+    {
+      "id": "repository_scout",
+      "purpose": "Map code, dependencies, regressions, and likely impact using read-mostly access.",
+      "required_capabilities": ["repository_intelligence"],
+      "write_scope": "none_by_default",
+      "conflicts": []
+    },
+    {
+      "id": "test_designer",
+      "purpose": "Design adversarial, regression, and acceptance tests independent of implementation convenience.",
+      "required_capabilities": ["test_design"],
+      "write_scope": "none_or_test_branch_by_policy",
+      "conflicts": []
+    },
+    {
+      "id": "failure_analyst",
+      "purpose": "Diagnose CI/runtime failures from evidence before remediation is attempted.",
+      "required_capabilities": ["failure_analysis"],
+      "write_scope": "none_by_default",
+      "conflicts": []
+    },
+    {
+      "id": "independent_reviewer",
+      "purpose": "Review the full exact-head candidate against acceptance, correctness, security, and compatibility requirements.",
+      "required_capabilities": ["code_review"],
+      "write_scope": "review_only",
+      "conflicts": ["material_author_of_target_head"]
+    },
+    {
+      "id": "security_reviewer",
+      "purpose": "Evaluate privilege, secrets, trust boundaries, injection, privacy, and abuse paths.",
+      "required_capabilities": ["security_review"],
+      "write_scope": "review_only",
+      "conflicts": ["material_author_of_security_sensitive_target_when_independence_required"]
+    },
+    {
+      "id": "ci_remediator",
+      "purpose": "Reproduce and fix deterministic CI failures on the existing canonical branch without scope expansion.",
+      "required_capabilities": ["ci_remediation"],
+      "write_scope": "canonical_work_unit_branch",
+      "conflicts": ["sole_independent_final_reviewer_of_same_material_authorship"]
+    },
+    {
+      "id": "merge_executor",
+      "purpose": "Merge only after verifying expected head, required green CI, and current exact-head gate.",
+      "required_capabilities": ["merge_execution"],
+      "write_scope": "merge_only",
+      "conflicts": []
+    }
+  ]
+}

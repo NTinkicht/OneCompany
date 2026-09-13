@@ -1,0 +1,63 @@
+{
+  "$schema": "./schemas/dispatch.schema.json",
+  "schema_version": "1.0",
+  "policy": {
+    "routing_does_not_equal_execution": true,
+    "no_dispatch_without_verified_capability": true,
+    "unattended_supervisor_requires_unattended_dispatch": true,
+    "dispatch_never_creates_authority": true,
+    "missing_execution_path_behavior": "CAPACITY_BLOCKED"
+  },
+  "actors": [
+    {
+      "actor_id": "human-owner",
+      "mechanisms": [
+        {"id": "manual-github", "kind": "manual", "configured": false, "unattended": false, "capabilities": ["architecture", "planning", "implementation", "code_review", "security_review", "merge_execution"], "invocation_hint": "Human performs the bounded GitHub action directly.", "evidence": []}
+      ]
+    },
+    {
+      "actor_id": "chatgpt",
+      "mechanisms": [
+        {"id": "interactive-connected-chat", "kind": "interactive", "configured": false, "unattended": false, "capabilities": ["architecture", "planning", "implementation", "code_review", "security_review", "state_reconciliation", "merge_execution"], "invocation_hint": "Use an active ChatGPT conversation with the authorized GitHub connection/tools.", "evidence": []},
+        {"id": "scheduled-supervisor", "kind": "scheduled_task", "configured": false, "unattended": true, "capabilities": ["planning", "state_reconciliation"], "invocation_hint": "ChatGPT Scheduled task using live GitHub; see docs/SCHEDULED-SUPERVISION.md.", "evidence": []},
+        {"id": "github-event-work", "kind": "event_trigger", "configured": false, "unattended": true, "capabilities": ["planning", "state_reconciliation"], "invocation_hint": "ChatGPT Work event-triggered task for supported GitHub PR activity.", "evidence": []}
+      ]
+    },
+    {
+      "actor_id": "codex",
+      "mechanisms": [
+        {"id": "codex-github-assignment", "kind": "github_native", "configured": false, "unattended": true, "capabilities": ["implementation", "ci_remediation", "code_review", "test_design", "state_reconciliation", "merge_execution"], "invocation_hint": "Use the configured Codex GitHub/native assignment or executable workspace path on the canonical stream.", "evidence": []},
+        {"id": "codex-workspace", "kind": "workspace", "configured": false, "unattended": false, "capabilities": ["implementation", "repository_intelligence", "ci_remediation", "test_design", "failure_analysis", "documentation"], "invocation_hint": "Use the authenticated Codex workspace/CLI with the canonical repository checkout.", "evidence": []}
+      ]
+    },
+    {
+      "actor_id": "claude",
+      "mechanisms": [
+        {"id": "claude-interactive", "kind": "interactive", "configured": false, "unattended": false, "capabilities": ["architecture", "planning", "implementation", "code_review", "security_review", "failure_analysis", "state_reconciliation", "merge_execution"], "invocation_hint": "Use the configured Claude/Claude Code session.", "evidence": []},
+        {"id": "claude-github-action", "kind": "github_action", "configured": false, "unattended": true, "capabilities": ["implementation", "ci_remediation", "code_review", "security_review", "failure_analysis"], "invocation_hint": "Use a reviewed Claude Code GitHub Action template with the approved auth/cost path.", "evidence": []}
+      ]
+    },
+    {
+      "actor_id": "github-copilot",
+      "mechanisms": [
+        {"id": "copilot-coding-agent", "kind": "github_native", "configured": false, "unattended": true, "capabilities": ["implementation", "ci_remediation", "test_design", "documentation"], "invocation_hint": "Assign the canonical issue/PR to the configured Copilot coding agent.", "evidence": []},
+        {"id": "copilot-code-review", "kind": "github_review", "configured": false, "unattended": true, "capabilities": ["code_review", "test_design"], "invocation_hint": "Request Copilot Code Review only when the actor is independent of the exact target head.", "evidence": []},
+        {"id": "copilot-ide", "kind": "interactive", "configured": false, "unattended": false, "capabilities": ["implementation", "repository_intelligence", "ci_remediation", "test_design", "failure_analysis", "documentation"], "invocation_hint": "Use the authenticated IDE/CLI surface.", "evidence": []}
+      ]
+    },
+    {
+      "actor_id": "gemini-cli",
+      "mechanisms": [
+        {"id": "gemini-local-cli", "kind": "local_cli", "configured": false, "unattended": false, "capabilities": ["repository_intelligence", "regression_scouting", "implementation", "code_review", "test_design", "failure_analysis", "documentation", "research"], "invocation_hint": "Run the authenticated Gemini CLI in the repository with the permissions appropriate to the lease.", "evidence": []},
+        {"id": "gemini-readonly-wake", "kind": "github_action", "configured": false, "unattended": true, "capabilities": ["repository_intelligence", "regression_scouting", "test_design", "failure_analysis", "documentation", "research"], "invocation_hint": "Use the reviewed read-only wake template; this generic path does not create implementation/review/merge authority.", "evidence": []}
+      ]
+    },
+    {
+      "actor_id": "mistral-vibe",
+      "mechanisms": [
+        {"id": "vibe-local-cli", "kind": "local_cli", "configured": false, "unattended": false, "capabilities": ["implementation", "repository_intelligence", "ci_remediation", "code_review", "test_design", "failure_analysis", "documentation", "research"], "invocation_hint": "Run Vibe in the authenticated repository workspace with the approved included-cost path.", "evidence": []},
+        {"id": "vibe-readonly-wake", "kind": "github_action", "configured": false, "unattended": true, "capabilities": ["repository_intelligence", "test_design", "failure_analysis", "documentation", "research"], "invocation_hint": "Use the reviewed read-only wake template; PAYG remains disabled unless budget policy explicitly changes.", "evidence": []}
+      ]
+    }
+  ]
+}

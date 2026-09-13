@@ -1,0 +1,46 @@
+# Product Contract
+
+## Product
+- Name:
+- Owner:
+- Stage:
+
+## Problem
+What problem exists, for whom, and why does it matter?
+
+## Target users
+- Primary:
+- Secondary:
+- Explicitly not targeted:
+
+## Product outcomes
+Define observable outcomes rather than implementation ideas.
+
+## Core user journeys
+1.
+2.
+3.
+
+## Scope
+### In scope
+-
+
+### Non-goals
+-
+
+## Functional invariants
+Rules that must remain true regardless of implementation.
+
+## UX / accessibility / localization requirements
+-
+
+## Success metrics
+-
+
+## Release boundaries
+What qualifies as MVP/beta/production-ready?
+
+## Open human decisions
+-
+
+> This file is an authoritative product contract. Work Units may refine it only through reviewed product/governance changes.

@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://onecompany.dev/schemas/config.schema.json",
+  "title": "OneCompany Config",
+  "type": "object",
+  "required": ["schema_version", "project", "autonomy", "delivery", "coordination", "safety", "human_only_decisions"],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "project": {
+      "type": "object",
+      "required": ["name", "source_of_truth", "default_branch"],
+      "properties": {
+        "name": {"type": "string", "minLength": 1},
+        "repository": {"type": "string"},
+        "source_of_truth": {"const": "github"},
+        "default_branch": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": true
+    },
+    "autonomy": {
+      "type": "object",
+      "required": ["level", "human_must_approve_autonomy_increase"],
+      "properties": {
+        "level": {"enum": ["L0", "L1", "L2", "L3", "L4", "L5"]},
+        "human_must_approve_autonomy_increase": {"const": true}
+      },
+      "additionalProperties": true
+    },
+    "delivery": {"type": "object"},
+    "coordination": {"type": "object"},
+    "no_idle": {"type": "object"},
+    "safety": {
+      "type": "object",
+      "required": ["emergency_stop", "fail_closed_on_ambiguous_authority", "external_side_effects_require_idempotency", "destructive_change_requires_recovery_plan"],
+      "properties": {
+        "emergency_stop": {"type": "boolean"},
+        "fail_closed_on_ambiguous_authority": {"const": true},
+        "external_side_effects_require_idempotency": {"const": true},
+        "destructive_change_requires_recovery_plan": {"const": true}
+      },
+      "additionalProperties": true
+    },
+    "human_only_decisions": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+  },
+  "additionalProperties": true
+}

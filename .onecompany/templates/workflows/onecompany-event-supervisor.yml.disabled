@@ -1,0 +1,40 @@
+# DISABLED TEMPLATE. Event-driven supervision should complement, not replace, scheduled reconciliation.
+name: OneCompany Event Supervisor
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed, ready_for_review]
+  pull_request_review:
+    types: [submitted, dismissed]
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+  actions: read
+
+concurrency:
+  group: onecompany-event-supervisor-${{ github.event.pull_request.number || github.event.issue.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  supervise:
+    if: vars.ONECOMPANY_SUPERVISION_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 20
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Supervise from authoritative default-branch policy
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python onecompany.py supervise --post-team-room

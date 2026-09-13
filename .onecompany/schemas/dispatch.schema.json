@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://onecompany.dev/schemas/dispatch.schema.json",
+  "title": "OneCompany Dispatch Registry",
+  "type": "object",
+  "required": ["schema_version", "policy", "actors"],
+  "properties": {
+    "schema_version": {"type": "string"},
+    "policy": {"type": "object"},
+    "actors": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["actor_id", "mechanisms"],
+        "properties": {
+          "actor_id": {"type": "string", "minLength": 1},
+          "mechanisms": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "kind", "configured", "unattended", "capabilities", "invocation_hint", "evidence"],
+              "properties": {
+                "id": {"type": "string", "minLength": 1},
+                "kind": {"type": "string", "minLength": 1},
+                "configured": {"type": "boolean"},
+                "unattended": {"type": "boolean"},
+                "capabilities": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+                "invocation_hint": {"type": "string", "minLength": 1},
+                "evidence": {"type": "array", "items": {"type": "string"}}
+              },
+              "additionalProperties": true
+            }
+          }
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": true
+}

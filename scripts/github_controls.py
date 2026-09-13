@@ -5,10 +5,11 @@ from __future__ import annotations
 import base64
 import json
 import re
+from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
-from onecompany_lib import CONTROL, load_json, run
+from onecompany_lib import CONTROL, ROOT, load_json, path_matches_any, run
 
 
 def gh_api(path: str) -> tuple[int, Any | None, str]:
@@ -36,8 +37,8 @@ def _ref_pattern_regex(pattern: str) -> re.Pattern[str] | None:
     """Translate the GitHub ruleset fnmatch subset used for branch refs.
 
     Single `*` does not cross `/`; `**` may. Character classes and other
-    extensions are deliberately not guessed: unsupported constructs return None
-    so an ambiguous ruleset is not counted as protection.
+    extensions are deliberately not guessed: unsupported constructs return None.
+    Callers treat None as ambiguous and fail closed.
     """
     if any(ch in pattern for ch in "[]{}"):
         return None
@@ -61,17 +62,17 @@ def _ref_pattern_regex(pattern: str) -> re.Pattern[str] | None:
     return re.compile("".join(out))
 
 
-def _ref_pattern_matches(pattern: str, branch: str) -> bool:
+def _ref_pattern_matches(pattern: str, branch: str) -> bool | None:
     pattern = str(pattern)
     if pattern == "~ALL":
         return True
     if pattern == "~DEFAULT_BRANCH":
         return True
     if pattern.startswith("~"):
-        return False
+        return None
     regex = _ref_pattern_regex(pattern)
     if regex is None:
-        return False
+        return None
     full_ref = f"refs/heads/{branch}"
     return bool(regex.fullmatch(full_ref) or regex.fullmatch(branch))
 
@@ -81,11 +82,25 @@ def _ruleset_applies_to_branch(ruleset: dict[str, Any], branch: str) -> bool:
     ref_name = conditions.get("ref_name") or {}
     includes = [str(value) for value in ref_name.get("include") or []]
     excludes = [str(value) for value in ref_name.get("exclude") or []]
-    if any(_ref_pattern_matches(pattern, branch) for pattern in excludes):
-        return False
+
+    for pattern in excludes:
+        matched = _ref_pattern_matches(pattern, branch)
+        if matched is None:
+            # An exclusion we cannot model might exclude this branch. Do not count
+            # the ruleset as protection when applicability is ambiguous.
+            return False
+        if matched:
+            return False
+
     if not includes:
         return True
-    return any(_ref_pattern_matches(pattern, branch) for pattern in includes)
+    include_match = False
+    for pattern in includes:
+        matched = _ref_pattern_matches(pattern, branch)
+        if matched is None:
+            return False
+        include_match = include_match or matched
+    return include_match
 
 
 def _decode_contents_payload(payload: Any) -> str | None:
@@ -101,19 +116,75 @@ def _decode_contents_payload(payload: Any) -> str | None:
 
 
 def _parse_codeowners(text: str) -> list[tuple[str, list[str]]]:
+    """Parse CODEOWNERS in file order, preserving ownerless rules.
+
+    GitHub uses the *last* matching CODEOWNERS rule. Ownerless later rules are
+    therefore security-significant and must not be discarded.
+    """
     rules: list[tuple[str, list[str]]] = []
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
+        if "#" in line:
+            line = line.split("#", 1)[0].rstrip()
+        if not line:
+            continue
         parts = line.split()
-        if len(parts) < 2:
+        if not parts:
             continue
         pattern = parts[0]
         owners = [value for value in parts[1:] if value.startswith("@")]
-        if owners:
-            rules.append((pattern, owners))
+        rules.append((pattern, owners))
     return rules
+
+
+def _codeowners_pattern_regex(pattern: str) -> re.Pattern[str] | None:
+    """Translate the CODEOWNERS subset CompanyOS relies on for protected paths."""
+    value = pattern.strip()
+    if not value or value.startswith("!") or any(ch in value for ch in "[]{}"):
+        return None
+    anchored = value.startswith("/")
+    value = value.lstrip("/")
+    if value.endswith("/"):
+        value += "**"
+
+    out: list[str] = ["^" if anchored else r"^(?:.*/)?"]
+    i = 0
+    while i < len(value):
+        ch = value[i]
+        if ch == "*":
+            if i + 1 < len(value) and value[i + 1] == "*":
+                while i + 1 < len(value) and value[i + 1] == "*":
+                    i += 1
+                out.append(".*")
+            else:
+                out.append("[^/]*")
+        elif ch == "?":
+            out.append("[^/]")
+        else:
+            out.append(re.escape(ch))
+        i += 1
+    out.append("$")
+    return re.compile("".join(out))
+
+
+def _codeowners_pattern_matches(pattern: str, path: str) -> bool:
+    regex = _codeowners_pattern_regex(pattern)
+    if regex is None:
+        return False
+    normalized = path.replace("\\", "/").lstrip("/")
+    return bool(regex.fullmatch(normalized))
+
+
+def _effective_codeowners(rules: list[tuple[str, list[str]]], path: str) -> list[str] | None:
+    effective: list[str] | None = None
+    matched = False
+    for pattern, owners in rules:
+        if _codeowners_pattern_matches(pattern, path):
+            matched = True
+            effective = owners
+    return effective if matched else None
 
 
 def _canonical_codeowner_pattern(protected_path: str) -> str:
@@ -123,27 +194,59 @@ def _canonical_codeowner_pattern(protected_path: str) -> str:
     return "/" + value
 
 
-def _codeowners_coverage(text: str) -> tuple[bool, list[str]]:
-    """Require explicit ownership for every CompanyOS protected path family.
+def _family_probe(protected_path: str) -> str | None:
+    normalized = protected_path.replace("\\", "/").lstrip("/")
+    if normalized.endswith("/**"):
+        return normalized[:-3].rstrip("/") + "/__onecompany_codeowner_probe__"
+    if not any(ch in normalized for ch in "*?["):
+        return normalized
+    return None
 
-    CompanyOS intentionally uses a canonical CODEOWNERS form instead of trying
-    to reinterpret all gitignore-style equivalences. This makes coverage
-    machine-auditable and avoids broad rules silently losing precedence later.
+
+def _current_protected_files(patterns: list[str]) -> list[str]:
+    files: list[str] = []
+    for path in ROOT.rglob("*"):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(ROOT).as_posix()
+        if path_matches_any(relative, patterns):
+            files.append(relative)
+    return sorted(set(files))
+
+
+def _codeowners_coverage(text: str) -> tuple[bool, list[str]]:
+    """Verify effective ownership after CODEOWNERS last-match precedence.
+
+    We check one synthetic probe for every structural protected family and every
+    current protected file. The latter catches a later ownerless/specific rule that
+    removes ownership from one control-plane file while leaving the broad family
+    rule apparently present.
     """
     try:
         governance = load_json(CONTROL / "governance.json")
-        protected = governance.get("control_plane", {}).get("protected_paths", [])
+        protected = [str(value) for value in governance.get("control_plane", {}).get("protected_paths", [])]
     except Exception:
         return False, ["cannot load governance protected_paths"]
-    rules = {pattern: owners for pattern, owners in _parse_codeowners(text)}
+
+    rules = _parse_codeowners(text)
     missing: list[str] = []
+
     for item in protected:
-        canonical = _canonical_codeowner_pattern(str(item))
-        alternatives = {canonical}
-        if canonical.endswith("/"):
-            alternatives.add(canonical + "**")
-        if not any(pattern in rules and rules[pattern] for pattern in alternatives):
+        canonical = _canonical_codeowner_pattern(item)
+        probe = _family_probe(item)
+        if probe is None:
             missing.append(canonical)
+            continue
+        owners = _effective_codeowners(rules, probe)
+        if not owners:
+            missing.append(canonical)
+
+    for relative in _current_protected_files(protected):
+        owners = _effective_codeowners(rules, relative)
+        if not owners:
+            missing.append("/" + relative)
+
+    missing = sorted(set(missing))
     return not missing, missing
 
 
@@ -152,7 +255,7 @@ def inspect_enforcement(repo: str, branch: str, required_checks: set[str]) -> di
 
     Classic branch protection or an active ruleset may satisfy the enforcement
     requirement. CODEOWNERS must exist, parse without live GitHub errors, and
-    explicitly cover every CompanyOS protected path family.
+    effectively own every CompanyOS protected path after last-match precedence.
     """
     result: dict[str, Any] = {
         "repo": repo,

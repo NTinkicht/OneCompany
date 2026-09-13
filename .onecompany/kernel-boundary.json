@@ -1,0 +1,28 @@
+{
+  "schema_version": "1.0",
+  "trusted_modules": [
+    "platform_identity",
+    "trusted_assurance",
+    "evidence_verify",
+    "required_checks",
+    "github_controls",
+    "hardening_audit",
+    "scope_guard",
+    "onecompany_lib",
+    "ledger_lib",
+    "planning_lib",
+    "capacity_lib",
+    "assurance",
+    "assurance_gate",
+    "gate",
+    "merge"
+  ],
+  "trusted_data": [
+    ".onecompany/identity.json",
+    ".onecompany/required-checks.json",
+    ".onecompany/quality.json",
+    ".onecompany/governance.json",
+    ".onecompany/ledger.json"
+  ],
+  "forbidden_repo_import_roots": ["company", "app", "src", "project", "product"]
+}

@@ -3,7 +3,7 @@
   "$id": "https://onecompany.dev/schemas/requirements-catalog.schema.json",
   "title": "OneCompany Requirements Catalog",
   "type": "object",
-  "required": ["schema_version", "requirements"],
+  "required": ["schema_version", "requirements", "acceptance_criteria"],
   "properties": {
     "$schema": {"type": "string"},
     "schema_version": {"type": "string"},
@@ -21,11 +21,28 @@
           "priority": {"enum": ["must", "should", "could", "wont_now"]},
           "status": {"enum": ["proposed", "approved", "implemented", "verified", "retired"]},
           "verification_method": {"enum": ["test", "analysis", "inspection", "demonstration"]},
-          "acceptance_criteria": {"type": "array", "items": {"type": "string", "pattern": "^AC-[0-9]{3,}$"}},
-          "risk_ids": {"type": "array", "items": {"type": "string", "pattern": "^RISK-[0-9]{3,}$"}},
+          "acceptance_criteria": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^AC-[0-9]{3,}$"}},
+          "risk_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^RISK-[0-9]{3,}$"}},
           "nfr_measure": {"type": ["object", "null"]},
-          "depends_on": {"type": "array", "items": {"type": "string"}},
-          "revision": {"type": ["integer", "null"]},
+          "depends_on": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+          "revision": {"type": ["integer", "null"], "minimum": 1},
+          "owner": {"type": ["string", "null"]},
+          "tags": {"type": "array", "items": {"type": "string"}}
+        },
+        "additionalProperties": true
+      }
+    },
+    "acceptance_criteria": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "statement", "verification_method", "status"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^AC-[0-9]{3,}$"},
+          "statement": {"type": "string", "minLength": 10},
+          "verification_method": {"enum": ["automated-test", "manual-test", "analysis", "inspection", "demonstration"]},
+          "status": {"enum": ["proposed", "approved", "verified", "retired"]},
+          "negative_or_failure_case": {"type": "boolean"},
           "owner": {"type": ["string", "null"]},
           "tags": {"type": "array", "items": {"type": "string"}}
         },

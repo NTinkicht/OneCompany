@@ -70,7 +70,18 @@
         "sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
         "verified_requirements": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
         "verified_acceptance_criteria": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+        "references": {
+          "type": "array",
+          "items": {"$ref": "evidence-reference.schema.json"}
+        },
+        "review_reference": {
+          "type": "object",
+          "required": ["review_id"],
+          "properties": {"review_id": {"type": "integer", "minimum": 1}},
+          "additionalProperties": false
+        },
         "artifacts": {
+          "description": "Deprecated compatibility metadata. Merge-grade proof comes from references resolved by trusted_assurance.",
           "type": "array",
           "items": {
             "type": "object",
@@ -83,29 +94,16 @@
             "additionalProperties": true
           }
         },
-        "references": {
-          "type": "array",
-          "minItems": 1,
-          "items": {"$ref": "evidence-reference.schema.json"}
-        },
-        "review_reference": {
-          "type": "object",
-          "required": ["review_id"],
-          "properties": {
-            "review_id": {"type": "integer", "minimum": 1}
-          },
-          "additionalProperties": false
-        },
-        "coverage": {"type": "object"},
-        "test_family_results": {"type": "object"},
-        "gates": {"type": "object"},
+        "coverage": {"description": "Deprecated self-reported metadata; not authoritative for merge-grade assurance.", "type": "object"},
+        "test_family_results": {"description": "Deprecated self-reported metadata; not authoritative for merge-grade assurance.", "type": "object"},
+        "gates": {"description": "Deprecated self-reported metadata; not authoritative for merge-grade assurance.", "type": "object"},
         "independent_review": {
+          "description": "Deprecated self-reported metadata; platform review_reference is authoritative.",
           "type": "object",
-          "required": ["actor", "sha", "verdict"],
           "properties": {
             "actor": {"type": "string", "minLength": 1},
             "sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
-            "verdict": {"const": "pass"}
+            "verdict": {"type": "string"}
           },
           "additionalProperties": true
         }
@@ -121,12 +119,7 @@
           "requirements": {"minItems": 1},
           "acceptance_criteria": {"minItems": 1},
           "traceability": {"minItems": 1},
-          "test_plan": {
-            "properties": {
-              "families": {"minItems": 1},
-              "tests": {"minItems": 1}
-            }
-          }
+          "test_plan": {"properties": {"families": {"minItems": 1}, "tests": {"minItems": 1}}}
         }
       }
     },
@@ -135,7 +128,10 @@
       "then": {
         "required": ["candidate_sha"],
         "properties": {
-          "evidence": {"required": ["sha", "verified_requirements", "verified_acceptance_criteria", "artifacts", "references", "review_reference", "coverage", "test_family_results", "gates", "independent_review"]}
+          "evidence": {
+            "required": ["sha", "verified_requirements", "verified_acceptance_criteria", "references", "review_reference"],
+            "properties": {"references": {"minItems": 1}}
+          }
         }
       }
     }

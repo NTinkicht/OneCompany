@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
 import subprocess
 import sys
@@ -118,7 +117,8 @@ def contracts(target: Path) -> dict[str, bool]:
 
 
 def analyze(target: Path, repository: str | None = None, project_name: str | None = None, default_branch: str | None = None) -> dict[str, Any]:
-    target.mkdir(parents=True, exist_ok=True)
+    # Assessment is intentionally non-mutating. A missing target path represents
+    # a NEW_PROJECT plan; the directory is created only during --apply/bootstrap.
     mode, installed_repo = detect_mode(target)
     inferred_repo = repository or infer_repo(target) or installed_repo
     result: dict[str, Any] = {

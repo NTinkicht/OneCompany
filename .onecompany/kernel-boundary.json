@@ -1,6 +1,7 @@
 {
   "schema_version": "1.0",
   "trusted_modules": [
+    "kernel_boundary",
     "platform_identity",
     "trusted_assurance",
     "evidence_verify",
@@ -13,12 +14,14 @@
     "planning_lib",
     "capacity_lib",
     "assurance",
+    "simulate_assurance_legacy",
     "assurance_gate",
     "gate",
     "merge"
   ],
   "trusted_data": [
     ".onecompany/identity.json",
+    ".onecompany/kernel-boundary.json",
     ".onecompany/required-checks.json",
     ".onecompany/quality.json",
     ".onecompany/governance.json",

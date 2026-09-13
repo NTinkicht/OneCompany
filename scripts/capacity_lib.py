@@ -1,0 +1,89 @@
+#!/usr/bin/env python3
+"""Shared actor execution-capacity and dispatch-availability helpers."""
+from __future__ import annotations
+
+from typing import Any
+
+from onecompany_lib import budget_allows
+
+
+def implementation_capacity_limit(ready: dict[str, Any] | None) -> int:
+    try:
+        return max(int((ready or {}).get("capacity", {}).get("implementation_streams", 1)), 1)
+    except (TypeError, ValueError):
+        return 1
+
+
+def implementation_active_count(actor_id: str, active: list[dict[str, Any]], exclude_lease_id: str | None = None) -> int:
+    return sum(
+        1
+        for lease in active
+        if lease.get("role") == "implementation"
+        and lease.get("actor") == actor_id
+        and lease.get("id") != exclude_lease_id
+    )
+
+
+def configured_dispatch_exists(dispatch_doc: dict[str, Any], actor_id: str, capability: str, unattended: bool) -> bool:
+    actor_entry = next((item for item in dispatch_doc.get("actors", []) if item.get("actor_id") == actor_id), None)
+    if not actor_entry:
+        return False
+    return any(
+        mechanism.get("configured") is True
+        and capability in mechanism.get("capabilities", [])
+        and (not unattended or mechanism.get("unattended") is True)
+        for mechanism in actor_entry.get("mechanisms", [])
+    )
+
+
+def implementation_availability(
+    actor: dict[str, Any],
+    ready: dict[str, Any] | None,
+    budget: dict[str, Any],
+    active: list[dict[str, Any]],
+    *,
+    dispatch_doc: dict[str, Any] | None = None,
+    require_unattended: bool = False,
+    exclude_lease_id: str | None = None,
+) -> tuple[int, list[str]]:
+    """Return free implementation slots and hard ineligibility reasons.
+
+    `require_unattended=True` is for continuous/scheduled autonomy. Interactive
+    implementation may be ready while still being unavailable to an unattended
+    supervisor; those states must not be conflated.
+    """
+    reasons: list[str] = []
+    actor_id = str(actor.get("id") or "")
+    if not actor_id:
+        return 0, ["missing_actor_id"]
+    if not actor.get("enabled"): reasons.append("disabled")
+    if not actor.get("configured"): reasons.append("not_configured")
+    if "implementation" not in actor.get("capabilities", []): reasons.append("implementation_not_declared")
+    if not budget_allows(actor.get("cost_class", "UNKNOWN_COST"), budget): reasons.append("forbidden_by_budget")
+
+    if ready is None:
+        reasons.append("missing_readiness")
+        return 0, reasons
+
+    if ready.get("setup_state") not in {"ready", "degraded"}: reasons.append(f"setup_state:{ready.get('setup_state')}")
+    if "implementation" not in ready.get("verified_capabilities", []): reasons.append("implementation_not_verified")
+    if "implementation" in ready.get("temporarily_unavailable_capabilities", []): reasons.append("implementation_temporarily_unavailable")
+    access = ready.get("repository_access", {})
+    if not access.get("read"): reasons.append("repository_read_not_verified")
+    if not access.get("write"): reasons.append("repository_write_not_verified")
+
+    if require_unattended:
+        unattended = ready.get("unattended", {})
+        if unattended.get("configured") is not True or unattended.get("verified") is not True:
+            reasons.append("unattended_not_verified")
+        if dispatch_doc is None or not configured_dispatch_exists(dispatch_doc, actor_id, "implementation", True):
+            reasons.append("unattended_implementation_dispatch_missing")
+
+    limit = implementation_capacity_limit(ready)
+    current = implementation_active_count(actor_id, active, exclude_lease_id)
+    free = max(limit - current, 0)
+    if free <= 0:
+        reasons.append("actor_capacity")
+
+    hard_reasons = [reason for reason in reasons if reason != "actor_capacity"]
+    return (free if not hard_reasons else 0), reasons

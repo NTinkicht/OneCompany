@@ -1,1 +1,64 @@
-{"$schema":"https://json-schema.org/draft/2020-12/schema","$id":"https://onecompany.dev/schemas/queue.schema.json","title":"OneCompany Queue","type":"object","required":["schema_version","work_units"],"properties":{"$schema":{"type":"string"},"schema_version":{"type":"string"},"work_units":{"type":"array","items":{"type":"object","required":["id","title","work_kind","status","priority","dependencies","risk_class"],"properties":{"id":{"type":"string","pattern":"^WU[0-9A-Za-z._-]+$"},"title":{"type":"string","minLength":3},"status":{"enum":["PROPOSED","READY","LEASED","IN_PROGRESS","CI_PENDING","REVIEW_PENDING","REMEDIATION","MERGE_READY","BLOCKED","MERGED","DONE","CANCELLED"]},"priority":{"type":"integer"},"dependencies":{"type":"array","uniqueItems":true,"items":{"type":"string"}},"issue":{"type":["integer","null"]},"risk_class":{"enum":["LOW","MEDIUM","HIGH","CRITICAL"]},"planning_refs":{"type":"array","uniqueItems":true,"items":{"type":"string"}},"requirement_ids":{"type":"array","uniqueItems":true,"items":{"type":"string","pattern":"^(BR|UR|FR|NFR|SEC|DATA|OPS|UX|CON)-[0-9]{3,}$"}},"milestone":{"type":["string","null"]},"release":{"type":["string","null"]},"write_scope":{"type":"array","uniqueItems":true,"items":{"type":"string","minLength":1}},"resource_locks":{"type":"array","uniqueItems":true,"items":{"type":"string","minLength":1}},"parallelism":{"enum":["auto","serial","disjoint_only"]},"priority_inputs":{"type":["object","null"],"properties":{"business_value":{"type":"number","minimum":0,"maximum":100},"time_criticality":{"type":"number","minimum":0,"maximum":100},"risk_reduction":{"type":"number","minimum":0,"maximum":100},"dependency_unlock":{"type":"number","minimum":0,"maximum":100},"job_size":{"type":"number","minimum":0.1},"confidence":{"type":"number","minimum":0,"maximum":1}},"additionalProperties":false},"estimate":{"type":["object","null"],"properties":{"job_size":{"type":"number","minimum":0.1},"confidence":{"type":"number","minimum":0,"maximum":1},"lower":{"type":["number","null"],"minimum":0},"upper":{"type":["number","null"],"minimum":0},"unit":{"type":"string"}},"additionalProperties":false},"blocked_reason":{"type":["string","null"]},"blocked_owner":{"type":["string","null"]},"work_kind":{"enum":["DELIVERY","TASK","ENABLER","SPIKE","DEFECT","CHORE"]}},"additionalProperties":true}}},"additionalProperties":false}
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://onecompany.dev/schemas/queue.schema.json",
+  "title": "OneCompany Queue",
+  "type": "object",
+  "required": ["schema_version", "work_units"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "schema_version": {"type": "string"},
+    "work_units": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "work_kind", "status", "priority", "dependencies", "risk_class"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^WU[0-9A-Za-z._-]+$"},
+          "title": {"type": "string", "minLength": 3},
+          "status": {"enum": ["PROPOSED", "READY", "LEASED", "IN_PROGRESS", "CI_PENDING", "REVIEW_PENDING", "REMEDIATION", "MERGE_READY", "BLOCKED", "MERGED", "DONE", "CANCELLED"]},
+          "priority": {"type": "integer"},
+          "dependencies": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+          "issue": {"type": ["integer", "null"]},
+          "pr": {"type": ["integer", "null"]},
+          "branch": {"type": ["string", "null"]},
+          "risk_class": {"enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"]},
+          "planning_refs": {"type": "array", "uniqueItems": true, "items": {"type": "string"}},
+          "requirement_ids": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^(BR|UR|FR|NFR|SEC|DATA|OPS|UX|CON)-[0-9]{3,}$"}},
+          "milestone": {"type": ["string", "null"]},
+          "release": {"type": ["string", "null"]},
+          "write_scope": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+          "resource_locks": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+          "parallelism": {"enum": ["auto", "serial", "disjoint_only"]},
+          "priority_inputs": {
+            "type": ["object", "null"],
+            "properties": {
+              "business_value": {"type": "number", "minimum": 0, "maximum": 100},
+              "time_criticality": {"type": "number", "minimum": 0, "maximum": 100},
+              "risk_reduction": {"type": "number", "minimum": 0, "maximum": 100},
+              "dependency_unlock": {"type": "number", "minimum": 0, "maximum": 100},
+              "job_size": {"type": "number", "minimum": 0.1},
+              "confidence": {"type": "number", "minimum": 0, "maximum": 1}
+            },
+            "additionalProperties": false
+          },
+          "estimate": {
+            "type": ["object", "null"],
+            "properties": {
+              "job_size": {"type": "number", "minimum": 0.1},
+              "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+              "lower": {"type": ["number", "null"], "minimum": 0},
+              "upper": {"type": ["number", "null"], "minimum": 0},
+              "unit": {"type": "string"}
+            },
+            "additionalProperties": false
+          },
+          "blocked_reason": {"type": ["string", "null"]},
+          "blocked_owner": {"type": ["string", "null"]},
+          "work_kind": {"enum": ["DELIVERY", "TASK", "ENABLER", "SPIKE", "DEFECT", "CHORE"]}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": false
+}

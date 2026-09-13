@@ -1,0 +1,11 @@
+{
+  "$schema": "./schemas/required-checks.schema.json",
+  "schema_version": "1.0",
+  "checks": [
+    {
+      "name": "validate",
+      "allowed_conclusions": ["success"],
+      "app_slug": "github-actions"
+    }
+  ]
+}

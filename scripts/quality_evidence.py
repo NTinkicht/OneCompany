@@ -2,15 +2,15 @@
 """Produce deterministic Python quality evidence using only the standard library.
 
 The trusted workflow copies this producer from its reviewed base revision and
-runs it against the candidate checkout. It never consumes packet-authored
-quality numbers. Evidence comes from executed tests, bytecode branch edges, the
-exact base/head diff, and bounded deterministic mutations of changed Python
-production files.
+runs it against the candidate checkout. Candidate tests execute only in isolated
+child processes; metric aggregation and final evidence construction stay in the
+trusted parent process.
 """
 from __future__ import annotations
 
 import argparse
 import ast
+import contextlib
 import datetime as dt
 import dis
 import io
@@ -26,7 +26,8 @@ from pathlib import Path
 from typing import Any, Iterable
 
 SCHEMA = "onecompany-quality-evidence-v1"
-TOOL_VERSION = 1
+TOOL_VERSION = 2
+WORKER_MARKER = "ONECOMPANY_COVERAGE_WORKER_JSON="
 EXCLUDED_SOURCE_NAMES = {"quality_evidence.py", "smoke_bootstrap.py", "smoke_init.py"}
 EXCLUDED_PREFIXES = ("simulate",)
 
@@ -34,7 +35,14 @@ EXCLUDED_PREFIXES = ("simulate",)
 def _run(command: list[str], cwd: Path, timeout: int = 180) -> dict[str, Any]:
     started = time.monotonic()
     try:
-        result = subprocess.run(command, cwd=str(cwd), check=False, text=True, capture_output=True, timeout=timeout)
+        result = subprocess.run(
+            command,
+            cwd=str(cwd),
+            check=False,
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+        )
         return {
             "command": command,
             "returncode": result.returncode,
@@ -62,7 +70,9 @@ def _is_product_source(path: Path, root: Path) -> bool:
         return True
     if len(relative.parts) < 2 or relative.parts[0] != "scripts" or path.suffix != ".py":
         return False
-    if path.name in EXCLUDED_SOURCE_NAMES or any(path.stem.startswith(prefix) for prefix in EXCLUDED_PREFIXES):
+    if path.name in EXCLUDED_SOURCE_NAMES or any(
+        path.stem.startswith(prefix) for prefix in EXCLUDED_PREFIXES
+    ):
         return False
     return True
 
@@ -92,7 +102,9 @@ def _conditional_jump(instruction: dis.Instruction) -> bool:
     return name == "FOR_ITER" or "JUMP_IF" in name or "POP_JUMP" in name
 
 
-def _static_model(root: Path) -> tuple[set[tuple[str, int]], set[tuple[tuple[str, int, str], int, int]]]:
+def _static_model(
+    root: Path,
+) -> tuple[set[tuple[str, int]], set[tuple[tuple[str, int, str], int, int]]]:
     executable: set[tuple[str, int]] = set()
     branches: set[tuple[tuple[str, int, str], int, int]] = set()
     for path in _product_sources(root):
@@ -120,12 +132,14 @@ def _discover_suite(root: Path) -> unittest.TestSuite:
     combined = unittest.TestSuite()
     for directory in (root / ".onecompany" / "selftest", root / "tests"):
         if directory.is_dir():
-            combined.addTests(unittest.TestLoader().discover(str(directory), pattern="test_*.py"))
+            combined.addTests(
+                unittest.TestLoader().discover(str(directory), pattern="test_*.py")
+            )
     return combined
 
 
-def _coverage_measurement(root: Path) -> tuple[dict[str, float], dict[str, Any]]:
-    executable, branch_edges = _static_model(root)
+def _coverage_worker(root: Path) -> dict[str, Any]:
+    """Execute candidate tests in the child and emit only raw trace observations."""
     executed: set[tuple[str, int]] = set()
     observed_edges: set[tuple[tuple[str, int, str], int, int]] = set()
     last_opcode: dict[int, tuple[tuple[str, int, str], int]] = {}
@@ -169,51 +183,145 @@ def _coverage_measurement(root: Path) -> tuple[dict[str, float], dict[str, Any]]
     output = io.StringIO()
     runner = unittest.TextTestRunner(stream=output, verbosity=0)
     old_trace, old_cwd, old_argv = sys.gettrace(), Path.cwd(), list(sys.argv)
+    inserted: list[str] = []
     for value in (str(root / "scripts"), str(root)):
         if value not in sys.path:
             sys.path.insert(0, value)
+            inserted.append(value)
     try:
         os.chdir(root)
-        sys.argv = ["quality-evidence-tests"]
+        sys.argv = ["quality-evidence-coverage-worker"]
         sys.settrace(tracer)
-        result = runner.run(suite)
+        # Candidate prints cannot corrupt the worker protocol on stdout.
+        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+            result = runner.run(suite)
     finally:
         sys.settrace(old_trace)
         sys.argv = old_argv
         os.chdir(old_cwd)
+        for value in inserted:
+            if value in sys.path:
+                sys.path.remove(value)
+
+    return {
+        "tests_successful": result.wasSuccessful(),
+        "tests_run": result.testsRun,
+        "failures": len(result.failures),
+        "errors": len(result.errors),
+        "executed_lines": sorted([list(value) for value in executed]),
+        "observed_edges": sorted(
+            [
+                [[key[0], key[1], key[2]], source, target]
+                for key, source, target in observed_edges
+            ]
+        ),
+        "test_output_tail": output.getvalue()[-4000:],
+    }
+
+
+def _coverage_measurement(root: Path) -> tuple[dict[str, float], dict[str, Any]]:
+    """Measure coverage with candidate execution isolated from trusted aggregation."""
+    executable, branch_edges = _static_model(root)
+    command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--coverage-worker",
+        "--repo-root",
+        str(root),
+    ]
+    started = time.monotonic()
+    try:
+        child = subprocess.run(
+            command,
+            cwd=str(root),
+            check=False,
+            text=True,
+            capture_output=True,
+            timeout=180,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"coverage worker timed out: {exc}") from exc
+
+    protocol_line = next(
+        (line for line in reversed(child.stdout.splitlines()) if line.startswith(WORKER_MARKER)),
+        None,
+    )
+    if protocol_line is None:
+        raise RuntimeError(
+            "coverage worker returned no trusted protocol payload; "
+            f"stderr={child.stderr[-1000:]}"
+        )
+    try:
+        raw = json.loads(protocol_line[len(WORKER_MARKER):])
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"coverage worker protocol was invalid JSON: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise RuntimeError("coverage worker protocol must be an object")
+
+    executed: set[tuple[str, int]] = set()
+    for item in raw.get("executed_lines", []):
+        if (
+            isinstance(item, list)
+            and len(item) == 2
+            and isinstance(item[0], str)
+            and isinstance(item[1], int)
+        ):
+            executed.add((item[0], item[1]))
+
+    observed_edges: set[tuple[tuple[str, int, str], int, int]] = set()
+    for item in raw.get("observed_edges", []):
+        if not isinstance(item, list) or len(item) != 3:
+            continue
+        key, source, target = item
+        if (
+            isinstance(key, list)
+            and len(key) == 3
+            and isinstance(key[0], str)
+            and isinstance(key[1], int)
+            and isinstance(key[2], str)
+            and isinstance(source, int)
+            and isinstance(target, int)
+        ):
+            observed_edges.add(((key[0], key[1], key[2]), source, target))
 
     covered_lines = executable & executed
     observed = branch_edges & observed_edges
     line_pct = 100.0 * len(covered_lines) / len(executable) if executable else 0.0
     branch_pct = 100.0 * len(observed) / len(branch_edges) if branch_edges else 100.0
-    return (
-        {"line": round(line_pct, 2), "branch": round(branch_pct, 2)},
-        {
-            "tests_successful": result.wasSuccessful(),
-            "tests_run": result.testsRun,
-            "failures": len(result.failures),
-            "errors": len(result.errors),
-            "executable_lines": len(executable),
-            "covered_lines": len(covered_lines),
-            "branch_edges": len(branch_edges),
-            "covered_branch_edges": len(observed),
-            "executed_lines": sorted([list(value) for value in executed]),
-            "test_output_tail": output.getvalue()[-4000:],
-        },
-    )
+    details = {
+        "worker_process_isolated": True,
+        "worker_returncode": child.returncode,
+        "worker_duration_seconds": round(time.monotonic() - started, 3),
+        "tests_successful": raw.get("tests_successful") is True,
+        "tests_run": int(raw.get("tests_run") or 0),
+        "failures": int(raw.get("failures") or 0),
+        "errors": int(raw.get("errors") or 0),
+        "executable_lines": len(executable),
+        "covered_lines": len(covered_lines),
+        "branch_edges": len(branch_edges),
+        "covered_branch_edges": len(observed),
+        "executed_lines": sorted([list(value) for value in executed]),
+        "test_output_tail": str(raw.get("test_output_tail") or "")[-4000:],
+    }
+    return {"line": round(line_pct, 2), "branch": round(branch_pct, 2)}, details
 
 
 def _git_diff(root: Path, base_sha: str, candidate_sha: str, *args: str) -> str:
     result = subprocess.run(
         ["git", "diff", *args, base_sha, candidate_sha, "--", "scripts", "onecompany.py"],
-        cwd=str(root), check=False, text=True, capture_output=True,
+        cwd=str(root),
+        check=False,
+        text=True,
+        capture_output=True,
     )
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or "git diff failed")
     return result.stdout
 
 
-def _changed_lines(root: Path, base_sha: str, candidate_sha: str) -> set[tuple[str, int]]:
+def _changed_lines(
+    root: Path, base_sha: str, candidate_sha: str
+) -> set[tuple[str, int]]:
     text = _git_diff(root, base_sha, candidate_sha, "--unified=0", "--no-color")
     changed: set[tuple[str, int]] = set()
     current: str | None = None
@@ -231,7 +339,12 @@ def _changed_lines(root: Path, base_sha: str, candidate_sha: str) -> set[tuple[s
     return changed
 
 
-def _changed_line_coverage(root: Path, base_sha: str, candidate_sha: str, coverage_details: dict[str, Any]) -> tuple[float, dict[str, Any]]:
+def _changed_line_coverage(
+    root: Path,
+    base_sha: str,
+    candidate_sha: str,
+    coverage_details: dict[str, Any],
+) -> tuple[float, dict[str, Any]]:
     executable, _ = _static_model(root)
     executable_changed = _changed_lines(root, base_sha, candidate_sha) & executable
     executed = {
@@ -240,26 +353,49 @@ def _changed_line_coverage(root: Path, base_sha: str, candidate_sha: str, covera
         if isinstance(item, list) and len(item) == 2
     }
     covered = executable_changed & executed
-    percentage = 100.0 if not executable_changed else 100.0 * len(covered) / len(executable_changed)
-    return round(percentage, 2), {"changed_executable_lines": len(executable_changed), "covered_changed_lines": len(covered)}
+    percentage = (
+        100.0 if not executable_changed else 100.0 * len(covered) / len(executable_changed)
+    )
+    return round(percentage, 2), {
+        "changed_executable_lines": len(executable_changed),
+        "covered_changed_lines": len(covered),
+    }
 
 
 def _changed_python_files(root: Path, base_sha: str, candidate_sha: str) -> list[Path]:
     text = _git_diff(root, base_sha, candidate_sha, "--name-only")
     values = [root / raw.strip() for raw in text.splitlines() if raw.strip()]
-    return sorted(path for path in values if path.is_file() and _is_product_source(path, root))
+    return sorted(
+        path for path in values if path.is_file() and _is_product_source(path, root)
+    )
 
 
 COMPARE_MUTATIONS = {
-    ast.Eq: ast.NotEq, ast.NotEq: ast.Eq, ast.Lt: ast.GtE, ast.LtE: ast.Gt,
-    ast.Gt: ast.LtE, ast.GtE: ast.Lt, ast.Is: ast.IsNot, ast.IsNot: ast.Is,
-    ast.In: ast.NotIn, ast.NotIn: ast.In,
+    ast.Eq: ast.NotEq,
+    ast.NotEq: ast.Eq,
+    ast.Lt: ast.GtE,
+    ast.LtE: ast.Gt,
+    ast.Gt: ast.LtE,
+    ast.GtE: ast.Lt,
+    ast.Is: ast.IsNot,
+    ast.IsNot: ast.Is,
+    ast.In: ast.NotIn,
+    ast.NotIn: ast.In,
 }
-BINOP_MUTATIONS = {ast.Add: ast.Sub, ast.Sub: ast.Add, ast.Mult: ast.FloorDiv, ast.FloorDiv: ast.Mult}
+BINOP_MUTATIONS = {
+    ast.Add: ast.Sub,
+    ast.Sub: ast.Add,
+    ast.Mult: ast.FloorDiv,
+    ast.FloorDiv: ast.Mult,
+}
 
 
 def _mutation_kind(node: ast.AST) -> str | None:
-    if isinstance(node, ast.Compare) and len(node.ops) == 1 and type(node.ops[0]) in COMPARE_MUTATIONS:
+    if (
+        isinstance(node, ast.Compare)
+        and len(node.ops) == 1
+        and type(node.ops[0]) in COMPARE_MUTATIONS
+    ):
         return "compare"
     if isinstance(node, ast.BoolOp) and isinstance(node.op, (ast.And, ast.Or)):
         return "boolop"
@@ -280,20 +416,28 @@ class _SingleMutator(ast.NodeTransformer):
             self.index += 1
             if self.index == self.target:
                 self.applied = True
-                if kind == "compare": node.ops[0] = COMPARE_MUTATIONS[type(node.ops[0])]()
-                elif kind == "boolop": node.op = ast.Or() if isinstance(node.op, ast.And) else ast.And()
-                elif kind == "bool": node.value = not node.value
-                elif kind == "binop": node.op = BINOP_MUTATIONS[type(node.op)]()
+                if kind == "compare":
+                    node.ops[0] = COMPARE_MUTATIONS[type(node.ops[0])]()
+                elif kind == "boolop":
+                    node.op = ast.Or() if isinstance(node.op, ast.And) else ast.And()
+                elif kind == "bool":
+                    node.value = not node.value
+                elif kind == "binop":
+                    node.op = BINOP_MUTATIONS[type(node.op)]()
                 return node
         return super().generic_visit(node)
 
 
 def _mutation_specs(path: Path) -> list[int]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    return list(range(sum(1 for node in ast.walk(tree) if _mutation_kind(node) is not None)))
+    return list(
+        range(sum(1 for node in ast.walk(tree) if _mutation_kind(node) is not None))
+    )
 
 
-def _bounded_mutation_candidates(files: list[Path], max_mutants: int) -> list[tuple[Path, int]]:
+def _bounded_mutation_candidates(
+    files: list[Path], max_mutants: int
+) -> list[tuple[Path, int]]:
     queues = deque((path, deque(_mutation_specs(path))) for path in files)
     result: list[tuple[Path, int]] = []
     while queues and len(result) < max_mutants:
@@ -305,10 +449,36 @@ def _bounded_mutation_candidates(files: list[Path], max_mutants: int) -> list[tu
     return result
 
 
-def _tests_kill_mutant(root: Path, timeout: int = 120) -> tuple[bool, list[dict[str, Any]]]:
+def _tests_kill_mutant(
+    root: Path, timeout: int = 120
+) -> tuple[bool, list[dict[str, Any]]]:
     commands = [
-        (root / ".onecompany" / "selftest", [sys.executable, "-m", "unittest", "discover", "-s", ".onecompany/selftest", "-p", "test_*.py"]),
-        (root / "tests", [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"]),
+        (
+            root / ".onecompany" / "selftest",
+            [
+                sys.executable,
+                "-m",
+                "unittest",
+                "discover",
+                "-s",
+                ".onecompany/selftest",
+                "-p",
+                "test_*.py",
+            ],
+        ),
+        (
+            root / "tests",
+            [
+                sys.executable,
+                "-m",
+                "unittest",
+                "discover",
+                "-s",
+                "tests",
+                "-p",
+                "test_*.py",
+            ],
+        ),
     ]
     results: list[dict[str, Any]] = []
     for directory, command in commands:
@@ -321,10 +491,20 @@ def _tests_kill_mutant(root: Path, timeout: int = 120) -> tuple[bool, list[dict[
     return False, results
 
 
-def _mutation_score(root: Path, base_sha: str, candidate_sha: str, max_mutants: int) -> tuple[float | None, dict[str, Any]]:
-    candidates = _bounded_mutation_candidates(_changed_python_files(root, base_sha, candidate_sha), max_mutants)
+def _mutation_score(
+    root: Path, base_sha: str, candidate_sha: str, max_mutants: int
+) -> tuple[float | None, dict[str, Any]]:
+    candidates = _bounded_mutation_candidates(
+        _changed_python_files(root, base_sha, candidate_sha), max_mutants
+    )
     if not candidates:
-        return None, {"generated": 0, "killed": 0, "survived": 0, "bounded_max": max_mutants, "survivors": []}
+        return None, {
+            "generated": 0,
+            "killed": 0,
+            "survived": 0,
+            "bounded_max": max_mutants,
+            "survivors": [],
+        }
 
     killed, survivors = 0, []
     for path, index in candidates:
@@ -341,27 +521,91 @@ def _mutation_score(root: Path, base_sha: str, candidate_sha: str, max_mutants: 
             if is_killed:
                 killed += 1
             else:
-                survivors.append({"path": path.relative_to(root).as_posix(), "mutation_index": index})
+                survivors.append(
+                    {
+                        "path": path.relative_to(root).as_posix(),
+                        "mutation_index": index,
+                    }
+                )
         finally:
             path.write_text(original, encoding="utf-8")
     total = len(candidates)
     score = 100.0 * killed / total if total else None
     return (round(score, 2) if score is not None else None), {
-        "generated": total, "killed": killed, "survived": total - killed,
-        "bounded_max": max_mutants, "survivors": survivors[:50],
+        "generated": total,
+        "killed": killed,
+        "survived": total - killed,
+        "bounded_max": max_mutants,
+        "survivors": survivors[:50],
     }
 
 
 def _family_results(root: Path) -> tuple[dict[str, str], dict[str, Any]]:
     python = sys.executable
     families: dict[str, list[list[str]]] = {
-        "static": [[python, "onecompany.py", "validate"], [python, "-m", "compileall", "-q", "scripts", ".onecompany/selftest", "onecompany.py"]],
-        "unit": [[python, "-m", "unittest", "discover", "-s", ".onecompany/selftest", "-p", "test_*.py"], [python, "-m", "unittest", "discover", "-s", "tests", "-p", "test_*.py"]],
-        "integration": [[python, "onecompany.py", "simulate-ledger"], [python, "onecompany.py", "simulate-parallel"]],
+        "static": [
+            [python, "onecompany.py", "validate"],
+            [
+                python,
+                "-m",
+                "compileall",
+                "-q",
+                "scripts",
+                ".onecompany/selftest",
+                "onecompany.py",
+            ],
+        ],
+        "unit": [
+            [
+                python,
+                "-m",
+                "unittest",
+                "discover",
+                "-s",
+                ".onecompany/selftest",
+                "-p",
+                "test_*.py",
+            ],
+            [
+                python,
+                "-m",
+                "unittest",
+                "discover",
+                "-s",
+                "tests",
+                "-p",
+                "test_*.py",
+            ],
+        ],
+        "integration": [
+            [python, "onecompany.py", "simulate-ledger"],
+            [python, "onecompany.py", "simulate-parallel"],
+        ],
         "contract": [[python, "scripts/schema_validate.py"]],
-        "e2e": [[python, "scripts/smoke_bootstrap.py"], [python, "scripts/smoke_init.py"]],
-        "acceptance": [[python, "onecompany.py", "assurance", ".onecompany/reference/assurance/WU900.json"]],
-        "regression": [[python, "-m", "unittest", "discover", "-s", ".onecompany/selftest", "-p", "test_*.py"]],
+        "e2e": [
+            [python, "scripts/smoke_bootstrap.py"],
+            [python, "scripts/smoke_init.py"],
+        ],
+        "acceptance": [
+            [
+                python,
+                "onecompany.py",
+                "assurance",
+                ".onecompany/reference/assurance/WU900.json",
+            ]
+        ],
+        "regression": [
+            [
+                python,
+                "-m",
+                "unittest",
+                "discover",
+                "-s",
+                ".onecompany/selftest",
+                "-p",
+                "test_*.py",
+            ]
+        ],
         "security": [[python, "onecompany.py", "hardening-audit"]],
         "operations": [[python, "onecompany.py", "simulate-supervision"]],
     }
@@ -375,16 +619,22 @@ def _family_results(root: Path) -> tuple[dict[str, str], dict[str, Any]]:
                     continue
             usable.append(command)
         results = [_run(command, root) for command in usable]
-        statuses[family] = "pass" if results and all(item["returncode"] == 0 for item in results) else "fail"
+        statuses[family] = (
+            "pass" if results and all(item["returncode"] == 0 for item in results) else "fail"
+        )
         details[family] = results
     return statuses, details
 
 
 def produce(root: Path, candidate_sha: str, base_sha: str, max_mutants: int) -> dict[str, Any]:
     coverage, coverage_details = _coverage_measurement(root)
-    changed_line, changed_details = _changed_line_coverage(root, base_sha, candidate_sha, coverage_details)
+    changed_line, changed_details = _changed_line_coverage(
+        root, base_sha, candidate_sha, coverage_details
+    )
     coverage["changed_line"] = changed_line
-    mutation, mutation_details = _mutation_score(root, base_sha, candidate_sha, max_mutants)
+    mutation, mutation_details = _mutation_score(
+        root, base_sha, candidate_sha, max_mutants
+    )
     if mutation is not None:
         coverage["mutation"] = mutation
     families, family_details = _family_results(root)
@@ -397,8 +647,9 @@ def produce(root: Path, candidate_sha: str, base_sha: str, max_mutants: int) -> 
         "coverage": coverage,
         "test_families": families,
         "tool": {
-            "name": "onecompany-quality-evidence", "version": TOOL_VERSION,
-            "implementation": "python-stdlib-bytecode-trace-and-bounded-mutation",
+            "name": "onecompany-quality-evidence",
+            "version": TOOL_VERSION,
+            "implementation": "trusted-parent-isolated-test-trace-and-bounded-mutation",
             "mutation_operators": ["compare", "boolop", "bool-constant", "binop"],
             "max_mutants": max_mutants,
         },
@@ -414,21 +665,51 @@ def produce(root: Path, candidate_sha: str, base_sha: str, max_mutants: int) -> 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Produce exact-head OneCompany quality evidence")
     parser.add_argument("--repo-root", type=Path, required=True)
-    parser.add_argument("--candidate-sha", required=True)
-    parser.add_argument("--base-sha", required=True)
-    parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--candidate-sha")
+    parser.add_argument("--base-sha")
+    parser.add_argument("--output", type=Path)
     parser.add_argument("--max-mutants", type=int, default=30)
+    parser.add_argument("--coverage-worker", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     root = args.repo_root.resolve()
+
+    if args.coverage_worker:
+        try:
+            raw = _coverage_worker(root)
+        except Exception as exc:
+            print(f"coverage worker failed: {exc}", file=sys.stderr)
+            return 2
+        print(WORKER_MARKER + json.dumps(raw, separators=(",", ":"), ensure_ascii=False))
+        return 0 if raw.get("tests_successful") is True else 1
+
+    if not args.candidate_sha or not args.base_sha or args.output is None:
+        parser.error("--candidate-sha, --base-sha and --output are required")
     output = args.output if args.output.is_absolute() else root / args.output
     try:
-        evidence = produce(root, args.candidate_sha, args.base_sha, max(1, args.max_mutants))
+        evidence = produce(
+            root,
+            args.candidate_sha,
+            args.base_sha,
+            max(1, args.max_mutants),
+        )
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps(evidence, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        output.write_text(
+            json.dumps(evidence, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
     except Exception as exc:
         print(f"quality evidence generation failed: {exc}", file=sys.stderr)
         return 2
-    print(json.dumps({"output": str(output), "coverage": evidence["coverage"], "test_families": evidence["test_families"]}, indent=2))
+    print(
+        json.dumps(
+            {
+                "output": str(output),
+                "coverage": evidence["coverage"],
+                "test_families": evidence["test_families"],
+            },
+            indent=2,
+        )
+    )
     return 0
 
 

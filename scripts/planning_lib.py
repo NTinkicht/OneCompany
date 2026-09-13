@@ -67,6 +67,15 @@ def priority_score(item: dict[str, Any], planning: dict[str, Any]) -> float:
     return confidence * numerator / job_size
 
 
+def estimated_job_size(item: dict[str, Any]) -> float:
+    estimate = item.get("estimate") if isinstance(item.get("estimate"), dict) else {}
+    inputs = item.get("priority_inputs") if isinstance(item.get("priority_inputs"), dict) else {}
+    try:
+        return max(float(estimate.get("job_size", inputs.get("job_size", 1))), 0.1)
+    except (TypeError, ValueError):
+        return 1.0
+
+
 def _scope_prefix(pattern: str) -> str:
     value = pattern.replace("\\", "/").strip().lstrip("./")
     wildcard_positions = [value.find(ch) for ch in ("*", "?", "[") if value.find(ch) >= 0]
@@ -86,7 +95,6 @@ def scopes_overlap(left: str, right: str) -> bool:
         return True
     if a in {"*", "**", "**/*"} or b in {"*", "**", "**/*"}:
         return True
-    # Exact files, directory prefixes, and glob-to-concrete matches.
     if scope_covers_path(a, b) or scope_covers_path(b, a):
         return True
     aw, bw = _has_wildcards(a), _has_wildcards(b)
@@ -94,9 +102,6 @@ def scopes_overlap(left: str, right: str) -> bool:
         return True
     if bw and fnmatch.fnmatchcase(a, b):
         return True
-    # For glob-to-glob comparisons, common deterministic prefixes are treated as
-    # overlapping. False positives serialize work; false negatives could create
-    # competing writers, so fail closed.
     ap, bp = _scope_prefix(a), _scope_prefix(b)
     if not ap or not bp:
         return True
@@ -179,6 +184,61 @@ def active_work_items(active_leases: list[dict[str, Any]], work_map: dict[str, d
     return items
 
 
+def critical_path(work: list[dict[str, Any]]) -> dict[str, Any]:
+    work_map = by_id(work)
+    visiting: set[str] = set()
+    memo: dict[str, tuple[float, list[str]]] = {}
+
+    def duration(item: dict[str, Any]) -> float:
+        return estimated_job_size(item)
+
+    def solve(node: str) -> tuple[float, list[str]]:
+        if node in memo:
+            return memo[node]
+        if node in visiting:
+            raise ValueError(f"dependency cycle involving {node}")
+        visiting.add(node)
+        item = work_map[node]
+        best_len, best_path = 0.0, []
+        for dep in item.get("dependencies", []):
+            if dep not in work_map:
+                continue
+            length, path = solve(str(dep))
+            if length > best_len:
+                best_len, best_path = length, path
+        visiting.remove(node)
+        result = (best_len + duration(item), [*best_path, node])
+        memo[node] = result
+        return result
+
+    best = (0.0, [])
+    for node in sorted(work_map):
+        candidate = solve(node)
+        if candidate[0] > best[0]:
+            best = candidate
+    return {"job_size": best[0], "path": best[1]}
+
+
+def rank_work(work: list[dict[str, Any]], planning: dict[str, Any]) -> list[dict[str, Any]]:
+    """Rank deterministically according to the declared reference tie-breaker policy.
+
+    Primary score is confidence-weighted cost-of-delay / job size. Ties prefer
+    work on the current critical path, then higher static priority, then smaller
+    job size, then stable ID.
+    """
+    critical_ids = set(critical_path(work).get("path", [])) if work else set()
+    return sorted(
+        work,
+        key=lambda item: (
+            -priority_score(item, planning),
+            0 if item.get("id") in critical_ids else 1,
+            -int(item.get("priority", 0) or 0),
+            estimated_job_size(item),
+            str(item.get("id", "")),
+        ),
+    )
+
+
 def select_parallel_set(
     work: list[dict[str, Any]],
     planning: dict[str, Any],
@@ -194,10 +254,11 @@ def select_parallel_set(
     limit = int(parallel.get("max_concurrent_implementation_streams", 1) or 1)
     available = max(limit - len(active_items), 0)
     statuses = {"READY"} | ({"PROPOSED"} if include_proposed else set())
-    ranked = sorted(
-        [item for item in work if item.get("status") in statuses and item.get("id") not in durable_done],
-        key=lambda item: (-priority_score(item, planning), -int(item.get("priority", 0) or 0), str(item.get("id", ""))),
-    )
+    candidates = [item for item in work if item.get("status") in statuses and item.get("id") not in durable_done]
+    # Rank using the complete graph so critical-path membership reflects downstream work,
+    # then retain only candidate statuses in that deterministic order.
+    candidate_ids = {item.get("id") for item in candidates}
+    ranked = [item for item in rank_work(work, planning) if item.get("id") in candidate_ids]
     selected: list[dict[str, Any]] = []
     blocked: list[dict[str, Any]] = []
     for item in ranked:
@@ -225,42 +286,3 @@ def select_parallel_set(
         "blocked": blocked,
         "ranked": ranked,
     }
-
-
-def critical_path(work: list[dict[str, Any]]) -> dict[str, Any]:
-    work_map = by_id(work)
-    visiting: set[str] = set()
-    memo: dict[str, tuple[float, list[str]]] = {}
-
-    def duration(item: dict[str, Any]) -> float:
-        estimate = item.get("estimate") if isinstance(item.get("estimate"), dict) else {}
-        try:
-            return max(float(estimate.get("job_size", 1)), 0.0)
-        except (TypeError, ValueError):
-            return 1.0
-
-    def solve(node: str) -> tuple[float, list[str]]:
-        if node in memo:
-            return memo[node]
-        if node in visiting:
-            raise ValueError(f"dependency cycle involving {node}")
-        visiting.add(node)
-        item = work_map[node]
-        best_len, best_path = 0.0, []
-        for dep in item.get("dependencies", []):
-            if dep not in work_map:
-                continue
-            length, path = solve(str(dep))
-            if length > best_len:
-                best_len, best_path = length, path
-        visiting.remove(node)
-        result = (best_len + duration(item), [*best_path, node])
-        memo[node] = result
-        return result
-
-    best = (0.0, [])
-    for node in sorted(work_map):
-        candidate = solve(node)
-        if candidate[0] > best[0]:
-            best = candidate
-    return {"job_size": best[0], "path": best[1]}

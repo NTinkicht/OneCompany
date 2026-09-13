@@ -1,4 +1,5 @@
 {
+  "$schema": "./schemas/kernel-boundary.schema.json",
   "schema_version": "1.0",
   "trusted_modules": [
     "kernel_boundary",

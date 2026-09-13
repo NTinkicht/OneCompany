@@ -43,6 +43,15 @@ def _stream_for_pr(state: dict, pr: int) -> dict | None:
     return next((stream for stream in state.get("active_streams", []) if stream.get("pr") == pr), None)
 
 
+def _work_unit_for_pr(queue: dict, state: dict, pr: int) -> dict | None:
+    work = queue.get("work_units", [])
+    direct = next((item for item in work if item.get("pr") == pr), None)
+    if direct is not None: return direct
+    stream = _stream_for_pr(state, pr)
+    wu_id = (stream or {}).get("work_unit") or state.get("current_work_unit")
+    return by_id(work).get(str(wu_id)) if wu_id else None
+
+
 def _default_pr(state: dict) -> int | None:
     streams = [s for s in state.get("active_streams", []) if isinstance(s.get("pr"), int)]
     if len(streams) == 1: return streams[0].get("pr")
@@ -84,7 +93,8 @@ def main() -> int:
     if absolute_human and args.actor != "human-owner": print(f"REFUSED: always-human governance paths changed: {', '.join(absolute_human)}"); return 2
     if protected and governance.get("human_merge_required") is True and args.actor != "human-owner": print(f"REFUSED: protected control-plane change requires human-owner merge: {', '.join(protected)}"); return 2
 
-    stream = _stream_for_pr(state, pr)
+    stream = _stream_for_pr(state, pr); work_unit_record = _work_unit_for_pr(queue, state, pr)
+    if work_unit_record is None: print(f"REFUSED: PR #{pr} is not mapped to a versioned Work Unit"); return 2
     gate = (stream or {}).get("gate", state.get("current_gate"))
     active = [lease for lease in state.get("active_leases", []) if lease.get("status") == "active" and lease.get("role") == "implementation" and lease.get("pr") == pr]
     material_authors = set((stream or {}).get("material_authors", state.get("current_material_authors", [])))
@@ -93,6 +103,7 @@ def main() -> int:
             view = derive(list_events(), pr); gate = view.get("current_gate"); active = view.get("active_leases", []); material_authors = set(view.get("material_authors", []))
         except Exception as exc: print(f"REFUSED: cannot read durable ledger: {exc}"); return 2
     if not gate or gate.get("verdict") != "PASS — MERGE_READY" or gate.get("stale"): print("REFUSED: no current durable PASS — MERGE_READY gate"); return 2
+    if gate.get("work_unit") not in {None, work_unit_record.get("id")}: print("REFUSED: gate Work Unit does not match PR mapping"); return 2
     if set(gate.get("material_authors") or []) != material_authors: print("REFUSED: gate authorship snapshot differs from current durable authorship"); return 2
     reviewer = gate.get("reviewer_actor")
     if not isinstance(reviewer, str) or not reviewer: print("REFUSED: gate has no reviewer actor"); return 2
@@ -107,10 +118,7 @@ def main() -> int:
     if stream and stream.get("open_blockers"): print("REFUSED: stream open blockers remain"); return 2
     if stream and stream.get("human_decision_required"): print("REFUSED: stream human decision remains outstanding"); return 2
 
-    work_map = by_id(queue.get("work_units", [])); wu_id = (stream or {}).get("work_unit") or state.get("current_work_unit")
-    work_unit_record = work_map.get(str(wu_id)) if wu_id else None
-    for problem in scope_errors(paths, work_unit_record):
-        print(f"REFUSED: {problem}"); return 2
+    for problem in scope_errors(paths, work_unit_record): print(f"REFUSED: {problem}"); return 2
 
     merge_ok, merge_reasons = capability_eligible(args.actor, "merge_execution", "merge")
     if not merge_ok: print(f"REFUSED: merge actor {args.actor} is not eligible: {','.join(merge_reasons)}"); return 2
@@ -130,13 +138,12 @@ def main() -> int:
     payload = json.loads(merge.stdout)
     if not payload.get("merged"): print("MERGE REFUSED BY GITHUB:", payload.get("message")); return 2
 
-    work_unit = (stream or {}).get("work_unit") or next((item.get("work_unit") for item in active if item.get("work_unit")), None)
+    work_unit = work_unit_record.get("id")
     if ledger_enabled():
         try:
             for lease in active: post_event("ROLE_LEASE_RELEASED", str(lease.get("actor") or args.actor), {"lease_id": lease.get("id"), "pr": pr, "reason": "merged"})
             post_event("MERGED", args.actor, {"pr": pr, "work_unit": work_unit, "approved_head": approved_sha, "approved_base": approved_base, "merge_sha": payload.get("sha"), "method": args.method})
-        except Exception as exc:
-            print(f"WARN: merge succeeded but ledger post-merge record failed: {exc}")
+        except Exception as exc: print(f"WARN: merge succeeded but ledger post-merge record failed: {exc}")
 
     now = dt.datetime.now(dt.timezone.utc).isoformat()
     for lease in state.get("active_leases", []):

@@ -153,19 +153,17 @@ def _dependency_view(
 ) -> tuple[set[str], bool]:
     """Return dependency closure and whether it is provably complete.
 
-    New lease snapshots persist ``dependency_closure``. A legacy snapshot that lacks
-    it is deliberately *not* upgraded from only its direct dependency list: doing so
-    would silently treat an incomplete graph as authoritative. If the exact item is
-    the current canonical work-map record, however, the full graph is available and
-    can be traversed safely.
+    The authoritative queue graph wins over any embedded cache. Immutable lease
+    snapshots may carry a persisted closure; a legacy snapshot without one remains
+    unknown and therefore serializes fail-closed.
     """
-    closure = item.get("dependency_closure")
-    if isinstance(closure, list):
-        return {str(value) for value in closure if value}, True
-
     item_id = str(item.get("id") or "")
     if work_map and item_id and item_id in work_map and item is work_map[item_id]:
         return dependency_closure(work_map, item_id), True
+
+    closure = item.get("dependency_closure")
+    if isinstance(closure, list):
+        return {str(value) for value in closure if value}, True
     return set(), False
 
 

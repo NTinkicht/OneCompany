@@ -2,8 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "OneCompany Trusted Kernel Boundary Policy",
   "type": "object",
-  "required": ["schema_version", "trusted_modules", "trusted_data", "forbidden_repo_import_roots"],
+  "required": ["$schema", "schema_version", "trusted_modules", "trusted_data", "forbidden_repo_import_roots"],
   "properties": {
+    "$schema": {"const": "./schemas/kernel-boundary.schema.json"},
     "schema_version": {"const": "1.0"},
     "trusted_modules": {
       "type": "array",

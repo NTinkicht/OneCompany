@@ -14,8 +14,5 @@
   "documentation_impact": {"declared": false, "types": []},
   "architecture_impact": {"significant": false, "adr_ids": []},
   "release": {"rollback_strategy": "", "observability_plan": ""},
-  "evidence": {
-    "references": [],
-    "review_reference": null
-  }
+  "evidence": {"references": []}
 }

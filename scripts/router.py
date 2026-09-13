@@ -15,31 +15,6 @@ REVIEW_CAPS = {"code_review", "security_review"}
 MERGE_CAPS = {"merge_execution"}
 
 
-def active_implementation(state: dict) -> list[dict]:
-    if ledger_enabled():
-        try:
-            return [item for item in derive(list_events()).get("active_leases", []) if item.get("role") == "implementation"]
-        except Exception:
-            # Routing must fail actors closed through downstream capacity/readiness
-            # rather than invent durable state. The caller gets no capacity benefit
-            # from a ledger it could not read.
-            return active_implementation_leases(state)
-    return active_implementation_leases(state)
-
-
-def material_authors_for_pr(state: dict, pr: int | None) -> set[str]:
-    if pr is not None and ledger_enabled():
-        try:
-            return set(derive(list_events(), pr).get("material_authors", []))
-        except Exception:
-            return set()
-    if pr is not None:
-        stream = next((item for item in state.get("active_streams", []) if item.get("pr") == pr), None)
-        if stream:
-            return set(stream.get("material_authors", []))
-    return set(state.get("current_material_authors", []))
-
-
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--capability", action="append", required=True, help="Required capability; repeatable")
@@ -57,10 +32,50 @@ def main() -> int:
     state = load_json(CONTROL / "state.json")
     readiness = {item.get("actor_id"): item for item in readiness_doc.get("actors", [])}
     required = set(args.capability)
-    active = active_implementation(state)
+
+    active = active_implementation_leases(state)
+    durable_events: list[dict] | None = None
+    if ledger_enabled():
+        try:
+            durable_events = list_events()
+            active = [
+                item
+                for item in derive(durable_events).get("active_leases", [])
+                if item.get("role") == "implementation"
+            ]
+        except Exception as exc:
+            print(json.dumps({
+                "status": "BLOCKED_LEDGER_UNAVAILABLE",
+                "error": str(exc),
+                "eligible": [],
+                "note": "Routing fails closed when durable coordination truth cannot be read.",
+            }, indent=2))
+            return 2
+
     excluded = set(args.exclude_author)
     if args.for_independent_gate:
-        excluded.update(material_authors_for_pr(state, args.pr))
+        if args.pr is None and len(state.get("active_streams", [])) > 1:
+            print(json.dumps({
+                "status": "BLOCKED_AMBIGUOUS_REVIEW_STREAM",
+                "eligible": [],
+                "note": "Pass --pr when more than one implementation stream exists so authorship exclusion is stream-specific.",
+            }, indent=2))
+            return 2
+        if args.pr is not None and durable_events is not None:
+            excluded.update(derive(durable_events, args.pr).get("material_authors", []))
+        elif args.pr is not None:
+            stream = next((item for item in state.get("active_streams", []) if item.get("pr") == args.pr), None)
+            if stream is None:
+                print(json.dumps({
+                    "status": "BLOCKED_UNKNOWN_REVIEW_STREAM",
+                    "pr": args.pr,
+                    "eligible": [],
+                    "note": "PR-specific independent routing requires a reconciled stream when the durable ledger is disabled.",
+                }, indent=2))
+                return 2
+            excluded.update(stream.get("material_authors", []))
+        else:
+            excluded.update(state.get("current_material_authors", []))
 
     preferences = routing_doc.get("preference_by_capability", {})
     actor_order = {actor.get("id"): index for index, actor in enumerate(actors_doc.get("actors", []))}
@@ -72,8 +87,10 @@ def main() -> int:
         actor_id = actor["id"]
         status = readiness.get(actor_id)
 
-        if not actor.get("enabled"): reasons.append("disabled")
-        if not actor.get("configured"): reasons.append("not_configured")
+        if not actor.get("enabled"):
+            reasons.append("disabled")
+        if not actor.get("configured"):
+            reasons.append("not_configured")
 
         declared = set(actor.get("capabilities", []))
         missing_declared = sorted(required - declared)
@@ -109,7 +126,8 @@ def main() -> int:
                 if unattended.get("configured") is not True or unattended.get("verified") is not True:
                     reasons.append("unattended_not_verified")
                 missing_dispatch = sorted(
-                    capability for capability in required
+                    capability
+                    for capability in required
                     if not configured_dispatch_exists(dispatch_doc, actor_id, capability, True)
                 )
                 if missing_dispatch:
@@ -121,7 +139,10 @@ def main() -> int:
         free_implementation_slots: int | None = None
         if "implementation" in required:
             slots, availability_reasons = implementation_availability(
-                actor, status, budget, active,
+                actor,
+                status,
+                budget,
+                active,
                 dispatch_doc=dispatch_doc if args.unattended else None,
                 require_unattended=args.unattended,
             )
@@ -168,7 +189,7 @@ def main() -> int:
         "material_authors_excluded": sorted(excluded) if args.for_independent_gate else [],
         "eligible": eligible,
         "rejected": rejected,
-        "note": "Routing preference is advisory ordering after hard eligibility/capacity/dispatch filters; the first eligible actor is a proposal, not a lease."
+        "note": "Routing preference is advisory ordering after hard eligibility/capacity/dispatch filters; the first eligible actor is a proposal, not a lease.",
     }, indent=2))
     return 0 if eligible else 2
 

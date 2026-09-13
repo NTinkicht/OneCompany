@@ -18,15 +18,24 @@ from planning_lib import (
     work_item_for_lease,
 )
 
+ADMISSION_SCHEMA = "onecompany-lease-admission-v1"
 
-def actor_capacity_state(actor_id: str, active: list[dict], exclude_lease_id: str | None = None) -> tuple[int, list[str], int, int]:
+
+def actor_capacity_state(
+    actor_id: str,
+    active: list[dict],
+    exclude_lease_id: str | None = None,
+) -> tuple[int, list[str], int, int]:
     actors = load_json(CONTROL / "actors.json")
     readiness_doc = load_json(CONTROL / "readiness.json")
     budget = load_json(CONTROL / "budget.json")
     actor = next((item for item in actors.get("actors", []) if item.get("id") == actor_id), None)
     if actor is None:
         return 0, ["unknown_actor"], 0, 0
-    ready = next((item for item in readiness_doc.get("actors", []) if item.get("actor_id") == actor_id), None)
+    ready = next(
+        (item for item in readiness_doc.get("actors", []) if item.get("actor_id") == actor_id),
+        None,
+    )
     slots, reasons = implementation_availability(
         actor,
         ready,
@@ -48,21 +57,43 @@ def planning_snapshot(item: dict, work_map: dict[str, dict] | None = None) -> di
         "risk_class": item.get("risk_class", "MEDIUM"),
         "dependencies": direct_dependencies,
     }
-    # When the complete authoritative queue graph is available (new acquisition),
-    # recompute the transitive closure instead of trusting a caller-supplied cache.
-    # Immutable failover snapshots deliberately call this without work_map, so an
-    # existing closure is preserved there and an absent closure remains unknown.
+    # New acquisition has the complete queue graph and therefore recomputes the
+    # authoritative closure. Failover deliberately preserves the immutable source
+    # snapshot instead of silently adopting later queue edits.
     if work_map and item.get("id"):
-        snapshot["dependency_closure"] = sorted(dependency_closure(work_map, str(item.get("id"))))
+        snapshot["dependency_closure"] = sorted(
+            dependency_closure(work_map, str(item.get("id")))
+        )
     else:
         existing_closure = item.get("dependency_closure")
         if isinstance(existing_closure, list):
-            snapshot["dependency_closure"] = sorted({str(value) for value in existing_closure if value})
-    # If neither an immutable closure nor a complete work graph is available,
-    # preserve that uncertainty. Omitting dependency_closure is intentional:
-    # planning_lib treats it as unknown and serializes fail-closed. Never stamp
-    # direct dependencies as if they were a complete transitive closure.
+            snapshot["dependency_closure"] = sorted(
+                {str(value) for value in existing_closure if value}
+            )
     return snapshot
+
+
+def admission_snapshot(
+    *,
+    actor: str,
+    actor_limit: int,
+    item: dict,
+    dependencies_complete: bool,
+    transfer_source_lease_id: str | None = None,
+) -> dict:
+    """Freeze the admission facts that made this lease valid at grant time."""
+    return {
+        "schema": ADMISSION_SCHEMA,
+        "actor": actor,
+        "actor_eligible": True,
+        "actor_ineligibility_reasons": [],
+        "actor_limit": int(actor_limit),
+        "dependencies": sorted({str(value) for value in item.get("dependencies", []) if value}),
+        "dependencies_complete": bool(dependencies_complete),
+        "transfer_source_lease_id": transfer_source_lease_id,
+        "dependencies_inherited_from_source": transfer_source_lease_id is not None,
+        "recorded_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+    }
 
 
 def new_lease(
@@ -74,6 +105,7 @@ def new_lease(
     item: dict,
     parent_lease_id: str | None = None,
     work_map: dict[str, dict] | None = None,
+    admission: dict | None = None,
 ) -> dict:
     value = {
         "id": str(uuid.uuid4()),
@@ -86,15 +118,22 @@ def new_lease(
         "status": "active",
         "granted_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "planning_snapshot": planning_snapshot(item, work_map),
-        "failover_conditions": ["quota_exhausted", "unavailable", "no_durable_progress_after_reconciliation", "human_override"],
+        "failover_conditions": [
+            "quota_exhausted",
+            "unavailable",
+            "no_durable_progress_after_reconciliation",
+            "human_override",
+        ],
     }
     if parent_lease_id:
         value["parent_lease_id"] = parent_lease_id
+    if admission:
+        value["admission_snapshot"] = admission
     return value
 
 
 def lease_payload(lease: dict) -> dict:
-    return {
+    payload = {
         "lease_id": lease.get("id"),
         "role": lease.get("role"),
         "work_unit": lease.get("work_unit"),
@@ -104,13 +143,20 @@ def lease_payload(lease: dict) -> dict:
         "parent_lease_id": lease.get("parent_lease_id"),
         "planning_snapshot": lease.get("planning_snapshot", {}),
     }
+    if isinstance(lease.get("admission_snapshot"), dict):
+        payload["admission_snapshot"] = lease["admission_snapshot"]
+    return payload
 
 
 def authoritative(state: dict) -> tuple[list[dict], list[dict]]:
     if ledger_enabled():
         view = derive(list_events())
         return (
-            [item for item in view.get("active_leases", []) if item.get("role") == "implementation"],
+            [
+                item
+                for item in view.get("active_leases", [])
+                if item.get("role") == "implementation"
+            ],
             view.get("integrity_conflicts", view.get("conflicts", [])),
         )
     return active_implementation_leases(state), []
@@ -135,7 +181,11 @@ def _stream_from_lease(lease: dict) -> dict:
 
 
 def sync_legacy_aliases(state: dict) -> None:
-    active = [item for item in state.get("active_leases", []) if item.get("status") == "active" and item.get("role") == "implementation"]
+    active = [
+        item
+        for item in state.get("active_leases", [])
+        if item.get("status") == "active" and item.get("role") == "implementation"
+    ]
     if len(active) == 1:
         lease = active[0]
         state["current_work_unit"] = lease.get("work_unit")
@@ -154,13 +204,16 @@ def sync_cache(state: dict, pr: int | None) -> None:
         events = list_events()
         global_view = derive(events)
         state["active_leases"] = global_view.get("active_leases", [])
+        state["current_actor_eligibility"] = global_view.get("current_actor_eligibility", {})
         if pr is not None:
             pr_view = derive(events, pr)
             for stream in state.setdefault("active_streams", []):
                 if stream.get("pr") == pr:
                     stream["material_authors"] = pr_view.get("material_authors", [])
                     stream["gate"] = pr_view.get("current_gate")
-    existing = {stream.get("lease_id"): stream for stream in state.setdefault("active_streams", [])}
+    existing = {
+        stream.get("lease_id"): stream for stream in state.setdefault("active_streams", [])
+    }
     streams: list[dict] = []
     for lease in state.get("active_leases", []):
         if lease.get("status") != "active" or lease.get("role") != "implementation":
@@ -169,7 +222,9 @@ def sync_cache(state: dict, pr: int | None) -> None:
         stream.setdefault("open_blockers", [])
         stream.setdefault("human_decision_required", False)
         stream.setdefault("base_sha", None)
-        stream.setdefault("material_authors", [lease.get("actor")] if lease.get("actor") else [])
+        stream.setdefault(
+            "material_authors", [lease.get("actor")] if lease.get("actor") else []
+        )
         stream.update(
             {
                 "actor": lease.get("actor"),
@@ -182,7 +237,9 @@ def sync_cache(state: dict, pr: int | None) -> None:
     state["active_streams"] = streams
     sync_legacy_aliases(state)
     if len(streams) == 1:
-        state["current_material_authors"] = streams[0].get("material_authors", state.get("current_material_authors", []))
+        state["current_material_authors"] = streams[0].get(
+            "material_authors", state.get("current_material_authors", [])
+        )
         state["current_gate"] = streams[0].get("gate", state.get("current_gate"))
 
 
@@ -213,7 +270,10 @@ def acquire(args: argparse.Namespace) -> int:
         print(f"REFUSED: work unit {args.wu} does not exist in queue")
         return 2
     if candidate.get("status") != "READY":
-        print(f"REFUSED: work unit {args.wu} is not READY (status={candidate.get('status')})")
+        print(
+            f"REFUSED: work unit {args.wu} is not READY "
+            f"(status={candidate.get('status')})"
+        )
         return 2
     if ledger_enabled() and args.pr is None:
         print("REFUSED: durable autonomous implementation lease requires a PR number")
@@ -221,7 +281,10 @@ def acquire(args: argparse.Namespace) -> int:
 
     active, integrity_conflicts = authoritative(state)
     if integrity_conflicts:
-        print(f"REFUSED: durable coordination integrity conflicts must be reconciled first: {integrity_conflicts}")
+        print(
+            "REFUSED: durable coordination integrity conflicts must be reconciled first: "
+            f"{integrity_conflicts}"
+        )
         return 2
 
     durable_done: set[str] = set()
@@ -238,12 +301,18 @@ def acquire(args: argparse.Namespace) -> int:
             detail.append("missing=" + ",".join(sorted(missing)))
         if unsatisfied:
             detail.append("unsatisfied=" + ",".join(sorted(unsatisfied)))
-        print(f"REFUSED: work unit {args.wu} dependencies are not complete: {'; '.join(detail)}")
+        print(
+            f"REFUSED: work unit {args.wu} dependencies are not complete: "
+            f"{'; '.join(detail)}"
+        )
         return 2
 
     slots, reasons, actor_active, actor_limit = actor_capacity_state(args.actor, active)
     if slots <= 0:
-        print(f"REFUSED: actor {args.actor} is not implementation-available: {','.join(reasons)}")
+        print(
+            f"REFUSED: actor {args.actor} is not implementation-available: "
+            f"{','.join(reasons)}"
+        )
         return 2
 
     violations = implementation_admission_violations(
@@ -255,14 +324,39 @@ def acquire(args: argparse.Namespace) -> int:
         actor_limit=actor_limit,
     )
     if violations:
-        print(f"REFUSED: implementation admission denied: {_format_admission_violations(violations)}")
+        print(
+            "REFUSED: implementation admission denied: "
+            f"{_format_admission_violations(violations)}"
+        )
         return 2
 
-    lease = new_lease(args.actor, args.wu, args.branch, args.pr, args.start_head, candidate, work_map=work_map)
+    frozen = admission_snapshot(
+        actor=args.actor,
+        actor_limit=actor_limit,
+        item=candidate,
+        dependencies_complete=True,
+    )
+    lease = new_lease(
+        args.actor,
+        args.wu,
+        args.branch,
+        args.pr,
+        args.start_head,
+        candidate,
+        work_map=work_map,
+        admission=frozen,
+    )
     if ledger_enabled():
         try:
             post_event("ROLE_LEASE_ASSIGNED", args.actor, lease_payload(lease))
-            winner = next((item for item in derive(list_events()).get("active_leases", []) if item.get("id") == lease.get("id")), None)
+            winner = next(
+                (
+                    item
+                    for item in derive(list_events()).get("active_leases", [])
+                    if item.get("id") == lease.get("id")
+                ),
+                None,
+            )
             if not winner:
                 print("REFUSED: lease lost concurrent claim/conflict/capacity race")
                 return 2
@@ -273,9 +367,14 @@ def acquire(args: argparse.Namespace) -> int:
     state.setdefault("active_leases", []).append(lease)
     state.setdefault("active_streams", []).append(_stream_from_lease(lease))
     sync_cache(state, args.pr)
-    state["company_state"] = "ACTIVE_PARALLEL_IMPLEMENTATION" if len(active) + 1 > 1 else "ACTIVE_IMPLEMENTATION"
+    state["company_state"] = (
+        "ACTIVE_PARALLEL_IMPLEMENTATION" if len(active) + 1 > 1 else "ACTIVE_IMPLEMENTATION"
+    )
     save_json(CONTROL / "state.json", state)
-    limit = int(planning.get("parallel_execution", {}).get("max_concurrent_implementation_streams", 1) or 1)
+    limit = int(
+        planning.get("parallel_execution", {}).get("max_concurrent_implementation_streams", 1)
+        or 1
+    )
     print(
         f"LEASED {args.wu} to {args.actor} on {args.branch} ({lease['id']}); "
         f"active_streams={len(active)+1}/{limit}; actor_capacity={actor_active+1}/{actor_limit}"
@@ -292,7 +391,11 @@ def release(args: argparse.Namespace) -> int:
         return 2
     if ledger_enabled():
         try:
-            post_event("ROLE_LEASE_RELEASED", str(old.get("actor") or "system"), {"lease_id": args.lease_id, "pr": old.get("pr"), "reason": args.reason})
+            post_event(
+                "ROLE_LEASE_RELEASED",
+                str(old.get("actor") or "system"),
+                {"lease_id": args.lease_id, "pr": old.get("pr"), "reason": args.reason},
+            )
         except Exception as exc:
             print(f"REFUSED: durable lease release failed: {exc}")
             return 2
@@ -302,12 +405,20 @@ def release(args: argparse.Namespace) -> int:
             lease["status"] = "released"
             lease["released_at"] = now
             lease["release_reason"] = args.reason
-    state["active_streams"] = [stream for stream in state.get("active_streams", []) if stream.get("lease_id") != args.lease_id]
+    state["active_streams"] = [
+        stream
+        for stream in state.get("active_streams", [])
+        if stream.get("lease_id") != args.lease_id
+    ]
     sync_cache(state, old.get("pr"))
     state["company_state"] = (
         "ACTIVE_PARALLEL_IMPLEMENTATION"
         if len(state.get("active_streams", [])) > 1
-        else ("ACTIVE_IMPLEMENTATION" if state.get("active_streams") else "POST_LEASE_RECONCILE")
+        else (
+            "ACTIVE_IMPLEMENTATION"
+            if state.get("active_streams")
+            else "POST_LEASE_RECONCILE"
+        )
     )
     save_json(CONTROL / "state.json", state)
     print("LEASE RELEASED")
@@ -316,7 +427,10 @@ def release(args: argparse.Namespace) -> int:
 
 def transfer(args: argparse.Namespace) -> int:
     if emergency_stop_active():
-        print("REFUSED: emergency stop is active; release/contain work instead of transferring implementation")
+        print(
+            "REFUSED: emergency stop is active; release/contain work instead of "
+            "transferring implementation"
+        )
         return 2
     state = load_json(CONTROL / "state.json")
     queue = load_json(CONTROL / "queue.json")
@@ -324,7 +438,10 @@ def transfer(args: argparse.Namespace) -> int:
     work_map = by_id(queue.get("work_units", []))
     active, integrity_conflicts = authoritative(state)
     if integrity_conflicts:
-        print(f"REFUSED: durable coordination integrity conflicts must be reconciled first: {integrity_conflicts}")
+        print(
+            "REFUSED: durable coordination integrity conflicts must be reconciled first: "
+            f"{integrity_conflicts}"
+        )
         return 2
     if args.lease_id:
         old = next((item for item in active if item.get("id") == args.lease_id), None)
@@ -334,19 +451,27 @@ def transfer(args: argparse.Namespace) -> int:
     elif len(active) == 1:
         old = active[0]
     else:
-        print(f"REFUSED: transfer is ambiguous with {len(active)} active implementation leases; pass --lease-id")
+        print(
+            f"REFUSED: transfer is ambiguous with {len(active)} active implementation "
+            "leases; pass --lease-id"
+        )
         return 2
     if old.get("actor") == args.actor:
         print("REFUSED: replacement actor already holds lease")
         return 2
 
-    slots, reasons, actor_active, actor_limit = actor_capacity_state(args.actor, active, str(old.get("id")))
+    slots, reasons, actor_active, actor_limit = actor_capacity_state(
+        args.actor, active, str(old.get("id"))
+    )
     if slots <= 0:
-        print(f"REFUSED: replacement actor {args.actor} is not implementation-available: {','.join(reasons)}")
+        print(
+            f"REFUSED: replacement actor {args.actor} is not implementation-available: "
+            f"{','.join(reasons)}"
+        )
         return 2
 
-    # Failover inherits the original lease planning snapshot. Queue edits require
-    # an explicit release/re-plan/re-acquire rather than silently changing scope.
+    # Failover inherits the source planning snapshot. Queue edits require an
+    # explicit release/re-plan/re-acquire rather than silently changing authority.
     item = work_item_for_lease(old, work_map)
     other_active = [entry for entry in active if entry.get("id") != old.get("id")]
     violations = implementation_admission_violations(
@@ -358,9 +483,18 @@ def transfer(args: argparse.Namespace) -> int:
         actor_limit=actor_limit,
     )
     if violations:
-        print(f"REFUSED: failover admission denied: {_format_admission_violations(violations)}")
+        print(
+            f"REFUSED: failover admission denied: {_format_admission_violations(violations)}"
+        )
         return 2
 
+    frozen = admission_snapshot(
+        actor=args.actor,
+        actor_limit=actor_limit,
+        item=item,
+        dependencies_complete=True,
+        transfer_source_lease_id=str(old.get("id")),
+    )
     replacement = new_lease(
         args.actor,
         str(old.get("work_unit")),
@@ -369,6 +503,7 @@ def transfer(args: argparse.Namespace) -> int:
         args.current_head,
         item,
         str(old.get("id")),
+        admission=frozen,
     )
     payload = lease_payload(replacement) | {
         "old_lease_id": old.get("id"),
@@ -379,7 +514,14 @@ def transfer(args: argparse.Namespace) -> int:
     if ledger_enabled():
         try:
             post_event("ROLE_LEASE_TRANSFERRED", args.actor, payload)
-            winner = next((item for item in derive(list_events()).get("active_leases", []) if item.get("id") == replacement.get("id")), None)
+            winner = next(
+                (
+                    item
+                    for item in derive(list_events()).get("active_leases", [])
+                    if item.get("id") == replacement.get("id")
+                ),
+                None,
+            )
             if not winner:
                 print("REFUSED: durable transfer did not become canonical")
                 return 2
@@ -394,25 +536,45 @@ def transfer(args: argparse.Namespace) -> int:
             lease["released_at"] = now
             lease["release_reason"] = args.reason
     state.setdefault("active_leases", []).append(replacement)
-    old_stream = next((stream for stream in state.get("active_streams", []) if stream.get("lease_id") == old.get("id")), None)
-    state["active_streams"] = [stream for stream in state.get("active_streams", []) if stream.get("lease_id") != old.get("id")]
+    old_stream = next(
+        (
+            stream
+            for stream in state.get("active_streams", [])
+            if stream.get("lease_id") == old.get("id")
+        ),
+        None,
+    )
+    state["active_streams"] = [
+        stream
+        for stream in state.get("active_streams", [])
+        if stream.get("lease_id") != old.get("id")
+    ]
     new_stream = _stream_from_lease(replacement)
     authors = set(new_stream.get("material_authors", []))
     if old.get("actor"):
         authors.add(str(old.get("actor")))
     if old_stream:
-        authors.update(str(value) for value in old_stream.get("material_authors", []) if value)
+        authors.update(
+            str(value) for value in old_stream.get("material_authors", []) if value
+        )
         new_stream["open_blockers"] = old_stream.get("open_blockers", [])
-        new_stream["human_decision_required"] = old_stream.get("human_decision_required", False)
+        new_stream["human_decision_required"] = old_stream.get(
+            "human_decision_required", False
+        )
         new_stream["base_sha"] = old_stream.get("base_sha")
     new_stream["material_authors"] = sorted(authors)
     state.setdefault("active_streams", []).append(new_stream)
     sync_cache(state, old.get("pr"))
-    state["company_state"] = "ACTIVE_PARALLEL_IMPLEMENTATION" if len(state.get("active_streams", [])) > 1 else "ACTIVE_IMPLEMENTATION"
+    state["company_state"] = (
+        "ACTIVE_PARALLEL_IMPLEMENTATION"
+        if len(state.get("active_streams", [])) > 1
+        else "ACTIVE_IMPLEMENTATION"
+    )
     save_json(CONTROL / "state.json", state)
     print(
         f"LEASE FAILOVER {old.get('actor')} -> {args.actor}; WU={old.get('work_unit')} "
-        f"branch={old.get('branch')} pr={old.get('pr')}; actor_capacity={actor_active+1}/{actor_limit}"
+        f"branch={old.get('branch')} pr={old.get('pr')}; "
+        f"actor_capacity={actor_active+1}/{actor_limit}"
     )
     return 0
 

@@ -41,21 +41,23 @@ def actor_capacity_state(actor_id: str, active: list[dict], exclude_lease_id: st
 
 def planning_snapshot(item: dict, work_map: dict[str, dict] | None = None) -> dict:
     direct_dependencies = [str(value) for value in item.get("dependencies", [])]
-    existing_closure = item.get("dependency_closure")
-    if isinstance(existing_closure, list):
-        closure = sorted({str(value) for value in existing_closure if value})
-    elif work_map and item.get("id"):
-        closure = sorted(dependency_closure(work_map, str(item.get("id"))))
-    else:
-        closure = sorted(set(direct_dependencies))
-    return {
+    snapshot = {
         "write_scope": list(item.get("write_scope", [])),
         "resource_locks": list(item.get("resource_locks", [])),
         "parallelism": item.get("parallelism", "auto"),
         "risk_class": item.get("risk_class", "MEDIUM"),
         "dependencies": direct_dependencies,
-        "dependency_closure": closure,
     }
+    existing_closure = item.get("dependency_closure")
+    if isinstance(existing_closure, list):
+        snapshot["dependency_closure"] = sorted({str(value) for value in existing_closure if value})
+    elif work_map and item.get("id"):
+        snapshot["dependency_closure"] = sorted(dependency_closure(work_map, str(item.get("id"))))
+    # If neither an immutable closure nor a complete work graph is available,
+    # preserve that uncertainty. Omitting dependency_closure is intentional:
+    # planning_lib treats it as unknown and serializes fail-closed. Never stamp
+    # direct dependencies as if they were a complete transitive closure.
+    return snapshot
 
 
 def new_lease(

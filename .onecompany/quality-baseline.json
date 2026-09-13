@@ -1,0 +1,7 @@
+{
+  "$schema": "./schemas/quality-baseline.schema.json",
+  "version": 1,
+  "captured_at": null,
+  "metrics": {},
+  "rule": "Existing debt may be baselined during adoption; new or touched code may not worsen the baseline without a valid waiver."
+}

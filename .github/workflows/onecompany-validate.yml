@@ -10,6 +10,8 @@ on:
       - 'overlays/**'
       - 'docs/**'
       - 'scripts/**'
+      - 'schemas/**'
+      - 'tests/**'
       - 'examples/**'
       - 'AGENTS.md'
       - 'CLAUDE.md'
@@ -35,6 +37,8 @@ on:
       - 'overlays/**'
       - 'docs/**'
       - 'scripts/**'
+      - 'schemas/**'
+      - 'tests/**'
       - 'examples/**'
       - 'AGENTS.md'
       - 'CLAUDE.md'
@@ -65,8 +69,12 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
         with:
           python-version: '3.12'
-      - name: Validate complete control plane
+      - name: Validate complete control plane and assurance policy
         run: python onecompany.py validate
+      - name: Validate reference high-risk assurance packet
+        run: python onecompany.py assurance examples/assurance/WU900.json
+      - name: Test assurance invariants
+        run: python -m unittest discover -s tests -p 'test_*.py'
       - name: Simulate core policy invariants
         run: python onecompany.py simulate
       - name: Simulate durable-ledger races
@@ -78,4 +86,4 @@ jobs:
       - name: Smoke-test GitHub-template initialization
         run: python scripts/smoke_init.py
       - name: Compile Python helpers
-        run: python -m compileall -q scripts
+        run: python -m compileall -q scripts tests onecompany.py

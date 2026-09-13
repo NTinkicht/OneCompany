@@ -1,0 +1,1 @@
+{"type":"object","required":["$schema","version","bidirectional","required_links","orphan_policy","exact_head"],"properties":{"$schema":{"type":"string"},"version":{"type":"integer"},"bidirectional":{"const":true},"required_links":{"type":"array","minItems":1,"uniqueItems":true,"items":{"type":"string"}},"orphan_policy":{"type":"object"},"exact_head":{"type":"object"}}}

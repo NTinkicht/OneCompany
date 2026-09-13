@@ -1,0 +1,1 @@
+{"type":"object","required":["$schema","version","architecture_style","principles","fitness_functions","boundaries"],"properties":{"$schema":{"type":"string"},"version":{"type":"integer"},"architecture_style":{"type":"string","minLength":1},"principles":{"type":"object"},"fitness_functions":{"type":"array"},"boundaries":{"type":"array"}}}

@@ -7,7 +7,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from planning_lib import by_id, critical_path, priority_score, scopes_overlap, select_parallel_set, work_units_conflict
+from planning_lib import by_id, critical_path, priority_score, rank_work, scopes_overlap, select_parallel_set, work_units_conflict
 
 
 class PlanningTests(unittest.TestCase):
@@ -88,6 +88,19 @@ class PlanningTests(unittest.TestCase):
         result = critical_path([a, b, c])
         self.assertEqual(result["path"], ["WU-A", "WU-B", "WU-C"])
         self.assertEqual(result["job_size"], 10)
+
+    def test_equal_score_prefers_critical_path(self):
+        a = self.wu("WU-A", ["a"], priority=5, size=1)
+        b = self.wu("WU-B", ["b"], priority=5, size=1)
+        downstream = self.wu("WU-X", ["x"], dependencies=["WU-A"], priority=1, size=10)
+        ranked = rank_work([b, downstream, a], self.planning)
+        self.assertEqual(ranked[0]["id"], "WU-A")
+
+    def test_equal_score_and_priority_prefers_smaller_job(self):
+        large = self.wu("WU-LARGE", ["large"], priority=5, size=8)
+        small = self.wu("WU-SMALL", ["small"], priority=5, size=2)
+        ranked = rank_work([large, small], self.planning)
+        self.assertEqual(ranked[0]["id"], "WU-SMALL")
 
 
 if __name__ == "__main__":

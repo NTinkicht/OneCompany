@@ -25,7 +25,11 @@ YAML_ANCHOR_OR_ALIAS = re.compile(r"(?m)(?:^|[\s\[{,])(?:&|\*)[A-Za-z_][A-Za-z0-
 SECURITY_BLOCK_SCALAR = re.compile(
     r"(?im)^\s*['\"]?(?:permissions|uses|on)['\"]?\s*:\s*[>|][+-]?\s*$"
 )
-YAML_TAG = re.compile(r"(?m)(?:^|[\s\[{,])!{1,2}[A-Za-z_][A-Za-z0-9_:/.-]*")
+# Reject both shorthand tags (`!foo`, `!!str`) and YAML's verbatim `!<...>` form.
+# Security auditing intentionally accepts only a canonical visible YAML subset.
+YAML_TAG = re.compile(
+    r"(?m)(?:^|[\s\[{,])(?:!<[^>\r\n]+>|!{1,2}[A-Za-z_][A-Za-z0-9_:/.-]*)"
+)
 ACTION_REFERENCE = re.compile(
     r"(?<![A-Za-z0-9_.-])([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)@([^\s,}\]\"']+)"
 )

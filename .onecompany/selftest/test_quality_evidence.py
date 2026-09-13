@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -76,7 +77,9 @@ class QualityEvidenceTests(unittest.TestCase):
             a.write_text("def f(x):\n    return x == 1 or x == 2\n", encoding="utf-8")
             b.write_text("def g(x):\n    return x != 3 and x != 4\n", encoding="utf-8")
             values = quality_evidence._bounded_mutation_candidates([a, b], 4)
-            self.assertEqual([path.name for path, _ in values], ["a.py", "b.py", "a.py", "b.py"])
+            self.assertEqual(
+                [path.name for path, _ in values], ["a.py", "b.py", "a.py", "b.py"]
+            )
 
     def test_changed_line_parser_uses_added_hunks_only(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -95,7 +98,43 @@ class QualityEvidenceTests(unittest.TestCase):
             )
             with patch.object(quality_evidence, "_git_diff", return_value=diff):
                 changed = quality_evidence._changed_lines(root, "a" * 40, "b" * 40)
-            self.assertEqual(changed, {("scripts/worker.py", 2), ("scripts/worker.py", 3)})
+            self.assertEqual(
+                changed, {("scripts/worker.py", 2), ("scripts/worker.py", 3)}
+            )
+
+    def test_coverage_parent_only_aggregates_isolated_worker_observations(self):
+        worker_payload = {
+            "tests_successful": True,
+            "tests_run": 1,
+            "failures": 0,
+            "errors": 0,
+            "executed_lines": [["scripts/sample.py", 1]],
+            "observed_edges": [],
+            "test_output_tail": "ok",
+        }
+        completed = subprocess.CompletedProcess(
+            args=["python"],
+            returncode=0,
+            stdout=quality_evidence.WORKER_MARKER + json.dumps(worker_payload) + "\n",
+            stderr="",
+        )
+        with (
+            patch.object(
+                quality_evidence,
+                "_static_model",
+                return_value=({("scripts/sample.py", 1)}, set()),
+            ),
+            patch.object(quality_evidence.subprocess, "run", return_value=completed) as run,
+            patch.object(
+                quality_evidence,
+                "_discover_suite",
+                side_effect=AssertionError("candidate tests imported in trusted parent"),
+            ),
+        ):
+            coverage, details = quality_evidence._coverage_measurement(ROOT)
+        self.assertEqual(coverage["line"], 100.0)
+        self.assertTrue(details["worker_process_isolated"])
+        run.assert_called_once()
 
     def test_family_statuses_come_from_real_command_exit_codes(self):
         def fake_run(command, cwd, timeout=180):
@@ -117,10 +156,38 @@ class QualityEvidenceTests(unittest.TestCase):
 
     def test_output_schema_contains_exact_head_and_base(self):
         with (
-            patch.object(quality_evidence, "_coverage_measurement", return_value=({"line": 90.0, "branch": 85.0}, {"executed_lines": []})),
-            patch.object(quality_evidence, "_changed_line_coverage", return_value=(100.0, {"changed_executable_lines": 0, "covered_changed_lines": 0})),
-            patch.object(quality_evidence, "_mutation_score", return_value=(75.0, {"generated": 4, "killed": 3, "survived": 1, "bounded_max": 30, "survivors": []})),
-            patch.object(quality_evidence, "_family_results", return_value=({"static": "pass", "unit": "pass"}, {})),
+            patch.object(
+                quality_evidence,
+                "_coverage_measurement",
+                return_value=({"line": 90.0, "branch": 85.0}, {"executed_lines": []}),
+            ),
+            patch.object(
+                quality_evidence,
+                "_changed_line_coverage",
+                return_value=(
+                    100.0,
+                    {"changed_executable_lines": 0, "covered_changed_lines": 0},
+                ),
+            ),
+            patch.object(
+                quality_evidence,
+                "_mutation_score",
+                return_value=(
+                    75.0,
+                    {
+                        "generated": 4,
+                        "killed": 3,
+                        "survived": 1,
+                        "bounded_max": 30,
+                        "survivors": [],
+                    },
+                ),
+            ),
+            patch.object(
+                quality_evidence,
+                "_family_results",
+                return_value=({"static": "pass", "unit": "pass"}, {}),
+            ),
         ):
             value = quality_evidence.produce(ROOT, "a" * 40, "b" * 40, 30)
         self.assertEqual(value["schema"], "onecompany-quality-evidence-v1")

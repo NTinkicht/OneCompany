@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import lease
+from onecompany_lib import path_matches_any
 
 
 def base_view(*_args, **_kwargs) -> dict:
@@ -178,7 +179,7 @@ class ReviewRegressionTests(unittest.TestCase):
 
     def test_authorization_planning_baselines_are_protected(self):
         governance = json.loads((ROOT / ".onecompany" / "governance.json").read_text(encoding="utf-8"))
-        protected = set(governance["control_plane"]["protected_paths"])
+        patterns = governance["control_plane"]["protected_paths"]
         expected = {
             ".onecompany/queue.json",
             ".onecompany/portfolio.json",
@@ -186,7 +187,10 @@ class ReviewRegressionTests(unittest.TestCase):
             ".onecompany/acceptance-criteria.json",
             ".onecompany/risk-register.json",
         }
-        self.assertTrue(expected <= protected, sorted(expected - protected))
+        unprotected = sorted(
+            path for path in expected if not path_matches_any(path, patterns)
+        )
+        self.assertEqual(unprotected, [])
 
 
 if __name__ == "__main__":

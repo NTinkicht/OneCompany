@@ -14,6 +14,7 @@ from onecompany_lib import (
     protected_control_plane_paths, run, save_json,
 )
 from planning_lib import by_id
+from required_checks import evaluate_required_checks
 from scope_guard import changed_files, live_pr, scope_errors
 
 
@@ -130,8 +131,10 @@ def main() -> int:
     if live_head != approved_sha: print(f"REFUSED: expected-head mismatch; approved={approved_sha} live={live_head}"); return 2
     if live_base != approved_base:
         print(f"REFUSED: base drift invalidated gate; reviewed_base={approved_base} live_base={live_base}. Rebase/update and rerun CI/review."); return 2
-    checks = run(["gh", "pr", "checks", str(pr), "--repo", repo, "--required"])
-    if checks.returncode != 0 or not checks.stdout.strip(): print("REFUSED: required checks are not all green/reported"); return 2
+    checks_ok, check_reasons, _ = evaluate_required_checks(repo, approved_sha)
+    if not checks_ok:
+        for reason in check_reasons: print(f"REFUSED: {reason}")
+        return 2
 
     merge = run(["gh", "api", "--method", "PUT", f"repos/{repo}/pulls/{pr}/merge", "-f", f"sha={approved_sha}", "-f", f"merge_method={args.method}"])
     if merge.returncode != 0: print("MERGE FAILED:", merge.stderr.strip() or merge.stdout.strip()); return 2

@@ -93,6 +93,14 @@ def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any
         planning = load_json(CONTROL / "planning.json")
     except Exception:
         planning = {"parallel_execution": {"enabled": False, "max_concurrent_implementation_streams": 1, "require_write_scope_for_parallel": True, "critical_risk_default": "serialize"}}
+    try:
+        readiness = load_json(CONTROL / "readiness.json")
+        actor_capacities = {
+            str(item.get("actor_id")): max(int(item.get("capacity", {}).get("implementation_streams", 1)), 1)
+            for item in readiness.get("actors", []) if item.get("actor_id")
+        }
+    except Exception:
+        actor_capacities = {}
 
     def normalize_pr(value: Any) -> int | None:
         if isinstance(value, int): return value
@@ -104,44 +112,38 @@ def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any
 
     def snapshot_item(actor_payload: dict[str, Any]) -> dict[str, Any]:
         snapshot = actor_payload.get("planning_snapshot")
-        if not isinstance(snapshot, dict):
-            snapshot = {}
+        if not isinstance(snapshot, dict): snapshot = {}
         return {"id": actor_payload.get("work_unit"), **snapshot}
 
     def add_lease(lease_id: str, actor: str | None, payload: dict[str, Any], event: dict[str, Any]) -> bool:
         role = payload.get("role", "implementation")
         if role == "implementation":
-            work_unit = payload.get("work_unit")
-            existing = implementations()
+            work_unit = payload.get("work_unit"); existing = implementations()
             same_wu = next((item for item in existing if item.get("work_unit") == work_unit), None)
             if same_wu is not None:
-                conflicts.append({"event_id": event.get("event_id"), "type": event.get("type"), "reason": "implementation_lease_already_active_for_wu", "work_unit": work_unit, "winner_lease_id": same_wu.get("id"), "rejected_lease_id": lease_id})
-                return False
+                conflicts.append({"event_id": event.get("event_id"), "type": event.get("type"), "reason": "implementation_lease_already_active_for_wu", "work_unit": work_unit, "winner_lease_id": same_wu.get("id"), "rejected_lease_id": lease_id}); return False
             limit = int(planning.get("parallel_execution", {}).get("max_concurrent_implementation_streams", 1) or 1)
             if len(existing) >= limit:
-                conflicts.append({"event_id": event.get("event_id"), "type": event.get("type"), "reason": "implementation_wip_limit_reached", "limit": limit, "rejected_lease_id": lease_id})
-                return False
+                conflicts.append({"event_id": event.get("event_id"), "type": event.get("type"), "reason": "implementation_wip_limit_reached", "limit": limit, "rejected_lease_id": lease_id}); return False
+            if actor:
+                actor_limit = actor_capacities.get(str(actor), 1)
+                actor_active = sum(1 for item in existing if item.get("actor") == actor)
+                if actor_active >= actor_limit:
+                    conflicts.append({"event_id": event.get("event_id"), "type": event.get("type"), "reason": "actor_implementation_capacity_reached", "actor": actor, "limit": actor_limit, "rejected_lease_id": lease_id}); return False
             candidate = snapshot_item(payload)
             for item in existing:
                 other = {"id": item.get("work_unit"), **(item.get("planning_snapshot") or {})}
                 conflict, reasons = work_units_conflict(candidate, other, planning, {str(candidate.get("id")): candidate, str(other.get("id")): other})
                 if conflict:
-                    conflicts.append({"event_id": event.get("event_id"), "type": event.get("type"), "reason": "implementation_scope_conflict", "with_lease_id": item.get("id"), "rejected_lease_id": lease_id, "details": reasons})
-                    return False
+                    conflicts.append({"event_id": event.get("event_id"), "type": event.get("type"), "reason": "implementation_scope_conflict", "with_lease_id": item.get("id"), "rejected_lease_id": lease_id, "details": reasons}); return False
         event_pr = normalize_pr(payload.get("pr"))
-        active[lease_id] = {
-            "id": lease_id, "role": role, "actor": actor, "work_unit": payload.get("work_unit"),
-            "branch": payload.get("branch"), "pr": event_pr, "start_head": payload.get("start_head"),
-            "planning_snapshot": payload.get("planning_snapshot", {}), "status": "active", "event": event,
-        }
-        if role == "implementation" and event_pr is not None and actor:
-            authors_by_pr.setdefault(event_pr, set()).add(str(actor))
+        active[lease_id] = {"id": lease_id, "role": role, "actor": actor, "work_unit": payload.get("work_unit"), "branch": payload.get("branch"), "pr": event_pr, "start_head": payload.get("start_head"), "planning_snapshot": payload.get("planning_snapshot", {}), "status": "active", "event": event}
+        if role == "implementation" and event_pr is not None and actor: authors_by_pr.setdefault(event_pr, set()).add(str(actor))
         return True
 
     for event in events:
         event_id = str(event.get("event_id") or "")
-        if event_id in seen_event_ids:
-            conflicts.append({"event_id": event_id, "type": event.get("type"), "reason": "duplicate_event_id_ignored"}); continue
+        if event_id in seen_event_ids: conflicts.append({"event_id": event_id, "type": event.get("type"), "reason": "duplicate_event_id_ignored"}); continue
         if event_id: seen_event_ids.add(event_id)
         event_type = event.get("type"); actor = event.get("actor"); payload = event.get("payload") or {}; event_pr = normalize_pr(payload.get("pr"))
         if event_pr is not None: authors_by_pr.setdefault(event_pr, set())
@@ -151,15 +153,28 @@ def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any
             if payload.get("lease_id"): active.pop(str(payload.get("lease_id")), None)
         elif event_type == "ROLE_LEASE_TRANSFERRED":
             old_id = str(payload.get("old_lease_id") or ""); new_id = str(payload.get("new_lease_id") or ""); old = active.get(old_id)
-            if not old or old.get("role") != "implementation":
-                conflicts.append({"event_id": event.get("event_id"), "type": event_type, "reason": "transfer_source_not_active", "old_lease_id": old_id, "new_lease_id": new_id}); continue
+            if not old or old.get("role") != "implementation": conflicts.append({"event_id": event.get("event_id"), "type": event_type, "reason": "transfer_source_not_active", "old_lease_id": old_id, "new_lease_id": new_id}); continue
             active.pop(old_id, None)
-            if new_id and not add_lease(new_id, actor, payload, event):
-                active[old_id] = old
+            if new_id and not add_lease(new_id, actor, payload, event): active[old_id] = old
         elif event_type == "MATERIAL_AUTHOR" and event_pr is not None and actor:
             authors_by_pr[event_pr].add(str(actor))
         elif event_type == "GATE" and event_pr is not None:
-            gates_by_pr[event_pr] = {"pr": event_pr, "sha": payload.get("sha"), "reviewer_actor": actor, "verdict": payload.get("verdict"), "material_authors": payload.get("material_authors", []), "evidence": payload.get("evidence", []), "summary": payload.get("summary", ""), "stale": False, "github_comment_url": event.get("github_comment_url"), "github_publisher": event.get("github_publisher"), "timestamp": event.get("github_created_at") or event.get("timestamp")}
+            gates_by_pr[event_pr] = {
+                "pr": event_pr,
+                "sha": payload.get("sha"),
+                "base_sha": payload.get("base_sha"),
+                "reviewer_actor": actor,
+                "verdict": payload.get("verdict"),
+                "material_authors": payload.get("material_authors", []),
+                "evidence": payload.get("evidence", []),
+                "scope_verified": payload.get("scope_verified") is True,
+                "changed_files": payload.get("changed_files", []),
+                "summary": payload.get("summary", ""),
+                "stale": False,
+                "github_comment_url": event.get("github_comment_url"),
+                "github_publisher": event.get("github_publisher"),
+                "timestamp": event.get("github_created_at") or event.get("timestamp"),
+            }
         elif event_type == "MERGED":
             work_unit = payload.get("work_unit")
             if isinstance(work_unit, str) and work_unit: merged_work_units.add(work_unit)

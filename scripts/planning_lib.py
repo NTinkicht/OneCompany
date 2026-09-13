@@ -123,6 +123,22 @@ def locks_overlap(left: str, right: str) -> bool:
     return False
 
 
+def work_item_for_lease(lease: dict[str, Any], work_map: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Resolve an active WU using the immutable lease snapshot before current queue data.
+
+    Once implementation authority is granted, a later queue edit must not silently
+    shrink the scope/locks/risk/dependencies that protect concurrent scheduling.
+    An explicit re-plan should release/re-acquire the lease with a new snapshot.
+    """
+    wu = str(lease.get("work_unit") or "")
+    snapshot = lease.get("planning_snapshot")
+    if isinstance(snapshot, dict) and snapshot:
+        return {"id": wu, **snapshot}
+    if wu and wu in work_map:
+        return work_map[wu]
+    return {"id": wu, "parallelism": "serial", "write_scope": [], "resource_locks": ["*"], "risk_class": "CRITICAL", "dependencies": []}
+
+
 def work_units_conflict(
     left: dict[str, Any],
     right: dict[str, Any],
@@ -141,6 +157,11 @@ def work_units_conflict(
     if left.get("risk_class") == "CRITICAL" or right.get("risk_class") == "CRITICAL":
         if parallel.get("critical_risk_default") == "serialize":
             reasons.append("critical_risk_serialized")
+    # Always honor the records being compared (including an active lease snapshot).
+    if right_id and right_id in {str(v) for v in left.get("dependencies", [])}:
+        reasons.append("dependency_relationship")
+    if left_id and left_id in {str(v) for v in right.get("dependencies", [])}:
+        reasons.append("dependency_relationship")
     if work_map and left_id and right_id:
         if right_id in dependency_closure(work_map, left_id) or left_id in dependency_closure(work_map, right_id):
             reasons.append("dependency_relationship")
@@ -174,14 +195,7 @@ def dependency_ready(item: dict[str, Any], work_map: dict[str, dict[str, Any]], 
 
 
 def active_work_items(active_leases: list[dict[str, Any]], work_map: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-    items: list[dict[str, Any]] = []
-    for lease in active_leases:
-        wu = lease.get("work_unit")
-        if isinstance(wu, str) and wu in work_map:
-            items.append(work_map[wu])
-        elif isinstance(wu, str):
-            items.append({"id": wu, "parallelism": "serial", "write_scope": [], "resource_locks": ["*"], "risk_class": "CRITICAL"})
-    return items
+    return [work_item_for_lease(lease, work_map) for lease in active_leases if isinstance(lease.get("work_unit"), str)]
 
 
 def critical_path(work: list[dict[str, Any]]) -> dict[str, Any]:
@@ -220,12 +234,7 @@ def critical_path(work: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def rank_work(work: list[dict[str, Any]], planning: dict[str, Any]) -> list[dict[str, Any]]:
-    """Rank deterministically according to the declared reference tie-breaker policy.
-
-    Primary score is confidence-weighted cost-of-delay / job size. Ties prefer
-    work on the current critical path, then higher static priority, then smaller
-    job size, then stable ID.
-    """
+    """Rank deterministically according to the declared reference tie-breaker policy."""
     critical_ids = set(critical_path(work).get("path", [])) if work else set()
     return sorted(
         work,
@@ -255,8 +264,6 @@ def select_parallel_set(
     available = max(limit - len(active_items), 0)
     statuses = {"READY"} | ({"PROPOSED"} if include_proposed else set())
     candidates = [item for item in work if item.get("status") in statuses and item.get("id") not in durable_done]
-    # Rank using the complete graph so critical-path membership reflects downstream work,
-    # then retain only candidate statuses in that deterministic order.
     candidate_ids = {item.get("id") for item in candidates}
     ranked = [item for item in rank_work(work, planning) if item.get("id") in candidate_ids]
     selected: list[dict[str, Any]] = []

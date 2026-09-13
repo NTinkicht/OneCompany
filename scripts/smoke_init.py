@@ -17,14 +17,19 @@ def run(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
 
 
 def require(condition: bool, message: str) -> None:
-    if not condition: raise AssertionError(message)
+    if not condition:
+        raise AssertionError(message)
 
 
 def main() -> int:
     try:
         with tempfile.TemporaryDirectory(prefix="onecompany-init-") as temp:
-            target = Path(temp) / "template-copy"; target.mkdir()
-            for name in (".onecompany", "scripts"):
+            target = Path(temp) / "template-copy"
+            target.mkdir()
+            # A GitHub template copy contains the governance content referenced by
+            # the control plane. Preserve those referenced trees in this smoke
+            # fixture so validation proves the actual template-init contract.
+            for name in (".onecompany", "scripts", "patterns", "overlays"):
                 shutil.copytree(ROOT / name, target / name)
             shutil.copy2(ROOT / "onecompany.py", target / "onecompany.py")
             run(["git", "init", "-b", "main"], target)

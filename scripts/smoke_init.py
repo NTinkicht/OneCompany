@@ -24,7 +24,7 @@ def main() -> int:
     try:
         with tempfile.TemporaryDirectory(prefix="onecompany-init-") as temp:
             target = Path(temp) / "template-copy"; target.mkdir()
-            for name in (".onecompany", "scripts", "patterns", "overlays"):
+            for name in (".onecompany", ".github", "scripts", "patterns", "overlays"):
                 shutil.copytree(ROOT / name, target / name)
             shutil.copy2(ROOT / "onecompany.py", target / "onecompany.py")
             run(["git", "init", "-b", "main"], target); run(["git", "remote", "add", "origin", "https://github.com/example/template-copy.git"], target)
@@ -42,6 +42,8 @@ def main() -> int:
             require(state["active_streams"] == [] and state["safe_start_candidates"] == [], "init must clear parallel flow state")
             require(json.loads((target / ".onecompany" / "ledger.json").read_text())["enabled"] is False, "init must disable ledger")
             require(json.loads((target / ".onecompany" / "supervision.json").read_text())["enabled"] is False, "init must disable supervision")
+            require((target / ".github" / "CODEOWNERS").exists(), "template init must retain CODEOWNERS")
+            require((target / ".github" / "workflows" / "onecompany-validate.yml").exists(), "template init must retain validation workflow")
             for command in (["validate"], ["plan", "validate"], ["simulate-parallel"]):
                 result = run([sys.executable, "onecompany.py", *command], target)
                 require(result.returncode == 0, f"initialized target {' '.join(command)} failed:\n{result.stdout}\n{result.stderr}")

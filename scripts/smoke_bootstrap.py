@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prove a fresh OneCompany bootstrap creates a clean target company."""
+"""Prove a fresh OneCompany bootstrap creates a clean, self-contained target company."""
 from __future__ import annotations
 
 import json
@@ -16,30 +16,41 @@ def run(command: list[str], cwd: Path | None = None) -> subprocess.CompletedProc
 
 
 def require(condition: bool, message: str) -> None:
-    if not condition: raise AssertionError(message)
+    if not condition:
+        raise AssertionError(message)
 
 
 def main() -> int:
     try:
         with tempfile.TemporaryDirectory(prefix="onecompany-bootstrap-") as temp:
             target = Path(temp) / "acme-product"; target.mkdir()
+            (target / "tests").mkdir(); (target / "tests" / "product_test.py").write_text("# product-owned\n")
+            (target / "examples").mkdir(); (target / "examples" / "product.txt").write_text("product-owned\n")
             require(run(["git", "init", "-b", "main"], target).returncode == 0, "git init failed")
             require(run(["git", "remote", "add", "origin", "https://github.com/example/acme-product.git"], target).returncode == 0, "git remote add failed")
             install = run([sys.executable, str(ROOT / "onecompany.py"), "bootstrap", "--target", str(target), "--repository", "example/acme-product", "--project-name", "Acme Product", "--default-branch", "main", "--initialize-contracts"])
             require(install.returncode == 0, f"bootstrap failed:\n{install.stdout}\n{install.stderr}")
-            config = json.loads((target / ".onecompany" / "config.json").read_text(encoding="utf-8")); queue = json.loads((target / ".onecompany" / "queue.json").read_text(encoding="utf-8")); state = json.loads((target / ".onecompany" / "state.json").read_text(encoding="utf-8"))
+            config = json.loads((target / ".onecompany" / "config.json").read_text()); queue = json.loads((target / ".onecompany" / "queue.json").read_text()); state = json.loads((target / ".onecompany" / "state.json").read_text())
+            portfolio = json.loads((target / ".onecompany" / "portfolio.json").read_text()); catalog = json.loads((target / ".onecompany" / "requirements-catalog.json").read_text())
             require(config["project"]["name"] == "Acme Product", "bootstrap leaked source project name")
             require(config["project"]["repository"] == "example/acme-product", "bootstrap leaked source repository identity")
             require(config["project"]["default_branch"] == "main", "bootstrap default branch mismatch")
             require(config.get("safety", {}).get("emergency_stop") is False, "fresh company must not start in emergency stop")
             require(queue.get("work_units") == [], "fresh target queue must start empty")
-            require(state.get("current_work_unit") is None and state.get("current_pr") is None, "fresh target inherited source work")
-            require(state.get("current_material_authors") == [] and state.get("active_leases") == [], "fresh target inherited authorship/leases")
+            require(portfolio.get("entities") == [] and portfolio.get("links") == [], "fresh target portfolio must start empty")
+            require(catalog.get("requirements") == [], "fresh target requirements catalog must start empty")
+            require(state.get("active_streams") == [] and state.get("safe_start_candidates") == [], "fresh target inherited flow state")
+            require((target / "tests" / "product_test.py").read_text() == "# product-owned\n", "bootstrap overwrote product tests")
+            require((target / "examples" / "product.txt").read_text() == "product-owned\n", "bootstrap overwrote product examples")
+            require((target / ".onecompany" / "selftest" / "test_planning.py").exists(), "framework self-tests not installed")
+            require((target / ".onecompany" / "reference" / "assurance" / "WU900.json").exists(), "framework assurance fixture not installed")
             for contract in ("PRODUCT.md", "ARCHITECTURE.md", "SECURITY.md", "QUALITY.md", "DESIGN.md", "OPERATIONS.md"):
                 require((target / contract).exists(), f"missing initialized contract {contract}")
-            for command in (["validate"], ["simulate"], ["simulate-supervision"], ["next-work"]):
+            for command in (["validate"], ["plan", "validate"], ["simulate"], ["simulate-ledger"], ["simulate-parallel"], ["simulate-supervision"], ["next-work"]):
                 result = run([sys.executable, str(target / "onecompany.py"), *command], target)
                 require(result.returncode == 0, f"target {' '.join(command)} failed:\n{result.stdout}\n{result.stderr}")
+            selftest = run([sys.executable, "-m", "unittest", "discover", "-s", ".onecompany/selftest", "-p", "test_*.py"], target)
+            require(selftest.returncode == 0, f"target framework self-tests failed:\n{selftest.stdout}\n{selftest.stderr}")
             second = run([sys.executable, str(ROOT / "onecompany.py"), "bootstrap", "--target", str(target), "--repository", "example/acme-product"])
             require(second.returncode != 0, "bootstrap must refuse an existing .onecompany installation")
         print("OneCompany bootstrap smoke PASS"); return 0
@@ -47,5 +58,4 @@ def main() -> int:
         print(f"ERROR: {exc}"); return 1
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+if __name__ == "__main__": sys.exit(main())

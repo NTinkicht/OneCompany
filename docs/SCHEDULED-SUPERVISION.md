@@ -1,19 +1,21 @@
 # Scheduled Supervision and 24/7 Company Operation
 
-OneCompany can run around the clock, but the scheduler must not become a second implementation stream.
+OneCompany can run around the clock, but a scheduler is a **liveness/reconciliation function**, not an extra implementer.
 
 > **Events move the company; schedules make sure no transition was missed.**
 
-A scheduled task is a liveness supervisor. It reconciles live GitHub state, detects a missing handoff, stale lease, green CI waiting for review, merge-ready head, or ready work with no lease. It should not blindly start coding while another canonical stream is healthy.
+A supervisor reconciles the approved planning baseline, live GitHub state, durable coordination, worker readiness/capacity and budget. It may fill safe WIP slots with dependency-ready conflict-free WUs, but only when current autonomy authorizes continuous starts **and** a verified unattended implementation path has free capacity. It never creates a duplicate writer for an existing WU.
 
 ## Layered 24/7 model
 
 1. **Event-driven handoff** - PR updates, CI completion, reviews and merges should trigger the next bounded transition as quickly as practical.
-2. **Scheduled reconciliation** - periodically inspect live GitHub in case an event path failed or an actor went silent.
-3. **Scheduler-health check** - verify that the supervisors themselves are still active and able to access GitHub.
-4. **Human escalation** - only for explicit human-only decisions, not routine relaying/scheduling.
+2. **Scheduled reconciliation** - periodically inspect live GitHub in case an event path failed or a worker went silent.
+3. **Portfolio flow check** - recompute dependency readiness, conflict-safe candidates, WIP availability and actor capacity after relevant events.
+4. **Scheduler-health check** - verify supervisors remain active and authorized.
+5. **Nightly maintenance** - low-priority dependency/security/documentation/control-plane hygiene.
+6. **Human escalation** - only for explicit human-only decisions, not routine relaying/scheduling.
 
-This is stronger than “wake every agent every 15 minutes.” Multiple writers create races; OneCompany routes only the capability needed for the next state transition.
+This is stronger than “wake every agent every 15 minutes.” More workers do not create more authority. Parallelism is admitted only when the planner proves it safe.
 
 ## Supervisor states
 
@@ -21,122 +23,136 @@ This is stronger than “wake every agent every 15 minutes.” Multiple writers 
 
 ```text
 IDLE_NO_READY_WORK
+IDLE_READY_WORK_BLOCKED
+READY_WORK_REQUIRES_AUTHORITY
+CAPACITY_BLOCKED
 START_READY_WORK
+START_PARALLEL_READY_WORK
 ACTIVE_WORK_IN_PROGRESS
 RECONCILE_POSSIBLY_STALE_LEASE
 CI_REMEDIATION_NEEDED
 INDEPENDENT_REVIEW_NEEDED
 MERGE_READY
+MULTI_ACTION
 RECONCILE_CLOSED_PR_AND_SELECT_NEXT
 RECONCILE_UNLEASED_PR
 RECONCILE_OPEN_PRS
 ```
 
+`READY_WORK_REQUIRES_AUTHORITY` means the work is planning-safe but the current autonomy level does not authorize continuous autonomous starts. `CAPACITY_BLOCKED` means planning-safe work exists, but no worker currently has both verified free implementation capacity and a configured verified unattended implementation mechanism.
+
+A no-idle fault is actionable only when at least one WU is genuinely executable under dependency/conflict/WIP policy **and** an eligible budget-permitted worker has verified unattended implementation capacity. Interactive-only availability never creates a false autonomous-idle fault.
+
 ## GitHub Actions schedule
 
 A disabled template lives at `.onecompany/templates/workflows/onecompany-supervisor.yml.disabled`.
 
-The conservative profile runs hourly at minute 17. GitHub documents that scheduled runs can be delayed during high load, especially around the top of the hour, so exact cron timing must never be a correctness dependency. GitHub scheduled workflows also run from the default branch; the enabled workflow must therefore exist there.
+The conservative profile can run hourly away from the top of the hour. Exact cron timing is never a correctness dependency.
 
-A responsive profile can use:
+A responsive profile may use:
 
 ```yaml
 schedule:
   - cron: '2,17,32,47 * * * *'
 ```
 
-That gives an effective ~15-minute check. GitHub supports schedules as frequent as every five minutes, but OneCompany discourages aggressive polling because Actions minutes and provider invocations are budget resources.
+That gives an effective ~15-minute reconciliation cadence while avoiding one monolithic poll at `:00`. Runner minutes and provider invocations are budget resources; faster polling is not inherently better.
 
-## Four staggered ChatGPT scheduled supervisors
+## Multiple scheduled supervisors
 
-Eligible paid ChatGPT plans currently support recurring scheduled tasks up to once per hour. A 15-minute **effective** supervisory cadence can therefore use four hourly tasks staggered across the hour:
+When platform limits require staggered scheduled tasks, treat them as replicas of **one** supervisory function. Every run starts by re-reading authoritative state; none owns implementation merely because it woke up first.
 
-| Supervisor | Run minute |
-| --- | ---: |
-| A | :02 |
-| B | :17 |
-| C | :32 |
-| D | :47 |
+Important constraints:
 
-For ChatGPT Plus, the current active-task limit is five, so this leaves one active-task slot. Product limits can change; re-check current OpenAI documentation before deploying the pattern elsewhere.
+- authoritative OneCompany contracts live in GitHub, not in chat memory;
+- scheduled runs must reconcile current PR head **and base** SHAs before consequential transitions;
+- connected-app actions may require approval; approval waits are visible blockers, not assumed success;
+- a supervisor must not infer capacity from a worker simply being configured — readiness and capacity must be verified;
+- interactive implementation readiness is distinct from unattended dispatchability;
+- an unattended start requires both verified unattended readiness and a configured unattended dispatch mechanism for implementation;
+- L1-L3 may surface planning-safe work without authorizing a continuous autonomous start; L4+ is required by the reference model for automatic next-WU progression;
+- event-triggered transitions are preferable where reliable; scheduled reconciliation remains the missed-event safety net;
+- supervisors must remain budget-compliant and may not enable paid fallback, overage, top-up or new vendors.
 
-### Important ChatGPT task constraints
-
-- The supervisor must read live GitHub through a connected/authorized GitHub app; it must not rely on old conversation state.
-- A scheduled task created in a ChatGPT Project must **not** assume it can access files uploaded/stored in that Project. Keep authoritative OneCompany contracts in GitHub.
-- Connected-app actions may require approval; if an action pauses for approval, the company must treat that as a visible blocker rather than assume mutation happened.
-- Scheduled tasks can pause or become inactive. Check supervisor health daily and keep an event/schedule fallback.
-- Event-triggered Work tasks can react to supported GitHub pull-request activity and are preferable to polling where available; scheduled reconciliation remains the missed-event safety net.
-
-### Recommended supervisor prompt
+## Recommended supervisor prompt
 
 ```text
-Inspect the authorized GitHub repository and act as a OneCompany liveness supervisor.
-Read AGENTS.md and the .onecompany control-plane files from GitHub before taking action.
+Inspect the authorized GitHub repository as a OneCompany liveness supervisor.
+Use the trusted base AGENTS.md/company constitution and the current approved .onecompany baseline.
 
-1. Reconcile live PR, exact head, CI/checks, review state, active lease, material authorship, actor readiness/capacity, budget policy, and dependency-ready work.
-2. Never create a duplicate implementation branch or PR.
-3. If healthy deterministic work is progressing, do not preempt it.
-4. If a lease appears stale, verify branch/PR/CI/job movement before failover.
-5. If CI is red, route exactly one eligible CI-remediation/implementation actor on the existing canonical stream.
-6. If CI is green and no valid exact-head independent gate exists, route an eligible non-author reviewer.
-7. If the exact head is merge-ready, merge only when autonomy/policy permits and expected-head protection can be verified.
-8. After merge, select the next dependency-ready Work Unit only when continuous-operation autonomy permits.
-9. If ready work exists with no valid lease, route exactly one eligible implementer.
-10. Never enable paid fallback, overage, top-up, a new vendor, broader credentials, or another human-only action.
-11. If no useful transition is required, create no coordination noise.
+1. Reconcile approved WU/requirement/risk state with live PRs, exact head/base SHAs, changed files, CI/checks, review/gate state, active leases, material authorship, worker readiness/capacity and budget policy.
+2. Never create a competing implementation branch/PR/lease for an already-owned Work Unit.
+3. Recompute dependency-ready work and the conflict-safe parallel set. Respect global WIP, declared scopes, semantic resource locks, risk policy and per-actor implementation capacity.
+4. If healthy deterministic work is progressing on a WU, do not preempt that WU.
+5. If a lease appears stale, verify branch/PR/CI/job movement before failover. Failover changes the worker, not the canonical WU stream and preserves the lease planning snapshot unless the work is explicitly re-planned.
+6. If CI is red, route one eligible remediation/implementation worker for that existing WU stream.
+7. If CI is green and no valid independent exact-head/base gate exists, route an eligible non-author reviewer for that PR.
+8. If a gate is merge-ready, confirm live scope still matches the WU, required checks are green, head/base SHAs still match, governance permits merge, and expected-head protection is available.
+9. After a merge, release only that WU stream, recompute the portfolio graph, and start newly unlocked WUs only when autonomy permits and an unattended implementation route has verified free capacity.
+10. READY work is not automatically executable. If it is planning-safe but autonomy is too low, report READY_WORK_REQUIRES_AUTHORITY. If no unattended implementation route has capacity, report CAPACITY_BLOCKED rather than FAULT_IDLE.
+11. Never enable paid fallback, overage, top-up, new credentials, new vendors, risk acceptance, or another human-only action.
+12. If no useful transition is required, create no coordination noise.
 
-Report only durable action/evidence or a genuine blocker.
+Report durable action/evidence or a genuine blocker only.
 ```
 
-## Why four supervisors are not four orchestrators
+## Why multiple supervisors are not multiple orchestrators
 
-They are replicas of one liveness function. Every run begins from live GitHub state:
+They converge on the same authoritative model:
 
-- existing lease → no duplicate implementation;
-- CI running → do not create another writer;
-- current exact-head review already requested → no redundant generic review;
-- new head after approval → gate is stale and must be refreshed;
-- no READY work → legitimate idle.
+- existing canonical lease for WU-A → no duplicate writer for WU-A;
+- WU-B independently safe + WIP slot + L4+ authority + unattended worker capacity → WU-B may start;
+- WU-B planning-safe at L1/L2/L3 → surface it, but do not call it autonomously startable;
+- WU-C conflicts with WU-A → hold WU-C;
+- worker is interactive-ready but has no unattended execution mechanism → capacity is unavailable to scheduled autonomy;
+- CI running → do not duplicate remediation;
+- current exact-head/base gate already exists → no redundant review;
+- head moved → gate stale;
+- base moved after another merge → integration evidence stale;
+- no dependency-ready executable work → legitimate idle/blocking state.
 
 ## Monitor the monitors
 
 At least daily, verify:
 
 - external scheduled tasks still exist and are enabled;
-- GitHub scheduled workflows are enabled and have recent runs;
-- GitHub connected-app authorization still works;
-- unattended provider credentials/entitlements remain valid without printing secrets;
-- scheduler failures are visible in Team Room/notifications;
-- no scheduler has silently acquired broader permissions or a different billing path.
+- GitHub scheduled workflows have recent runs;
+- connected-app authorization still works;
+- unattended provider entitlements remain valid without printing secrets;
+- scheduler failures are visible in the Team Room/notifications;
+- no scheduler silently acquired broader permissions or a different billing path;
+- liveness decisions remain consistent with actual WIP/worker capacity.
 
-Supervisor failure should become a visible operational state; otherwise a company can look “autonomous” while its liveness layer has silently died.
+Supervisor failure should become a visible operational state; otherwise a company can appear autonomous while its liveness layer has silently died.
 
 ## Capacity recovery
 
-Do not hammer quota-limited providers on every 15-minute pass. Record capability-specific degradation and re-probe only when a reasonable reset window/new evidence exists. A recovered preferred actor does not preempt a healthy replacement mid-attempt.
+Do not hammer quota-limited workers/providers on every pass. Record capability-specific degradation and re-probe only when a reasonable reset window or new evidence exists. A recovered preferred worker does not preempt a healthy replacement mid-attempt.
 
 ## Nightly / daily maintenance lane
 
-Keep low-priority maintenance separate from delivery supervision. A daily task may inspect dependency/security advisories, documentation/control-plane drift, failed schedules, queue dependency drift, provider version pins, unresolved retrospectives and credential-expiry warnings. Maintenance must not interrupt healthy critical work without a real safety reason.
+Keep low-priority maintenance separate from delivery supervision. It may inspect dependency/security advisories, documentation/control-plane drift, failed schedules, queue/traceability drift, provider version pins, unresolved retrospectives, technical debt and credential-expiry warnings. Maintenance does not interrupt healthy critical work without a safety reason.
 
 ## Cost model
 
 Prefer:
 
 ```text
-event trigger -> immediate bounded transition
-scheduled reconciliation -> stale/missed-event safety net
-nightly maintenance -> low-priority hygiene
+event trigger             -> immediate bounded transition
+portfolio reconciliation  -> fill safe WIP / catch stale state
+scheduled reconciliation  -> missed-event safety net
+nightly maintenance       -> low-priority hygiene
 ```
 
-If a schedule causes billable runner/provider usage, lower the cadence or use included alternatives. “24/7” means continuous recoverability, not infinite polling.
+“24/7” means continuous recoverability and flow, not infinite polling.
 
 ## Stop switch
 
-1. pause/delete external scheduled tasks;
-2. disable event-triggered tasks;
-3. disable the OneCompany supervisor workflow;
-4. set `supervision.enabled=false`;
-5. set continuous queue false and/or lower autonomy;
-6. revoke unattended write credentials if containment is required.
+1. set emergency stop when containment is required;
+2. pause/delete external scheduled tasks;
+3. disable event-triggered tasks;
+4. disable the OneCompany supervisor workflow;
+5. set `supervision.enabled=false`;
+6. lower autonomy/continuous-operation settings;
+7. revoke unattended write credentials if required;
+8. reconcile all active WU streams before resuming autonomy.

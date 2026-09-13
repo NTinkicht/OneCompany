@@ -21,8 +21,10 @@ on:
       - 'CHANGELOG.md'
       - 'CONTRIBUTING.md'
       - 'SECURITY.md'
+      - 'CODE_OF_CONDUCT.md'
       - 'onecompany.py'
       - 'Makefile'
+      - '.github/CODEOWNERS'
       - '.github/copilot-instructions.md'
       - '.github/ISSUE_TEMPLATE/**'
       - '.github/PULL_REQUEST_TEMPLATE.md'
@@ -48,8 +50,10 @@ on:
       - 'CHANGELOG.md'
       - 'CONTRIBUTING.md'
       - 'SECURITY.md'
+      - 'CODE_OF_CONDUCT.md'
       - 'onecompany.py'
       - 'Makefile'
+      - '.github/CODEOWNERS'
       - '.github/copilot-instructions.md'
       - '.github/ISSUE_TEMPLATE/**'
       - '.github/PULL_REQUEST_TEMPLATE.md'
@@ -69,16 +73,18 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.12'
-      - name: Validate complete control plane and assurance policy
+      - name: Validate complete control plane, planning and assurance policy
         run: python onecompany.py validate
       - name: Validate reference high-risk assurance packet
-        run: python onecompany.py assurance examples/assurance/WU900.json
-      - name: Test assurance invariants
-        run: python -m unittest discover -s tests -p 'test_*.py'
+        run: python onecompany.py assurance .onecompany/reference/assurance/WU900.json
+      - name: Test unit and assurance invariants
+        run: python -m unittest discover -s .onecompany/selftest -p 'test_*.py'
       - name: Simulate core policy invariants
         run: python onecompany.py simulate
       - name: Simulate durable-ledger races
         run: python onecompany.py simulate-ledger
+      - name: Simulate conflict-aware parallel planning
+        run: python onecompany.py simulate-parallel
       - name: Simulate 24/7 supervision invariants
         run: python onecompany.py simulate-supervision
       - name: Smoke-test fresh bootstrap
@@ -86,4 +92,4 @@ jobs:
       - name: Smoke-test GitHub-template initialization
         run: python scripts/smoke_init.py
       - name: Compile Python helpers
-        run: python -m compileall -q scripts tests onecompany.py
+        run: python -m compileall -q scripts .onecompany/selftest onecompany.py

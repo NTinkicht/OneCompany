@@ -8,6 +8,7 @@ import uuid
 from typing import Any
 
 from onecompany_lib import CONTROL, command_exists, github_repo_from_config, load_json, run
+from planning_lib import work_units_conflict
 
 MARKER = "<!-- onecompany-ledger-v1 -->"
 EVENT_RE = re.compile(r"<!-- onecompany-ledger-v1 -->\s*```json\s*(\{.*?\})\s*```", re.DOTALL)
@@ -82,21 +83,64 @@ def post_event(event_type: str, actor: str, payload: dict[str, Any]) -> dict[str
 
 
 def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any]:
-    active: dict[str, dict[str, Any]] = {}; authors_by_pr: dict[int, set[str]] = {}; gates_by_pr: dict[int, dict[str, Any]] = {}; conflicts: list[dict[str, Any]] = []; seen_event_ids: set[str] = set(); merged_work_units: set[str] = set()
+    active: dict[str, dict[str, Any]] = {}
+    authors_by_pr: dict[int, set[str]] = {}
+    gates_by_pr: dict[int, dict[str, Any]] = {}
+    conflicts: list[dict[str, Any]] = []
+    seen_event_ids: set[str] = set()
+    merged_work_units: set[str] = set()
+    try:
+        planning = load_json(CONTROL / "planning.json")
+    except Exception:
+        planning = {"parallel_execution": {"enabled": False, "max_concurrent_implementation_streams": 1, "require_write_scope_for_parallel": True, "critical_risk_default": "serialize"}}
+    try:
+        readiness = load_json(CONTROL / "readiness.json")
+        actor_capacities = {
+            str(item.get("actor_id")): max(int(item.get("capacity", {}).get("implementation_streams", 1)), 1)
+            for item in readiness.get("actors", []) if item.get("actor_id")
+        }
+    except Exception:
+        actor_capacities = {}
+
     def normalize_pr(value: Any) -> int | None:
         if isinstance(value, int): return value
         if isinstance(value, str) and value.isdigit(): return int(value)
         return None
-    def current_implementation() -> dict[str, Any] | None: return next((item for item in active.values() if item.get("role") == "implementation"), None)
+
+    def implementations() -> list[dict[str, Any]]:
+        return [item for item in active.values() if item.get("role") == "implementation"]
+
+    def snapshot_item(actor_payload: dict[str, Any]) -> dict[str, Any]:
+        snapshot = actor_payload.get("planning_snapshot")
+        if not isinstance(snapshot, dict): snapshot = {}
+        return {"id": actor_payload.get("work_unit"), **snapshot}
+
     def add_lease(lease_id: str, actor: str | None, payload: dict[str, Any], event: dict[str, Any]) -> bool:
         role = payload.get("role", "implementation")
         if role == "implementation":
-            winner = current_implementation()
-            if winner is not None:
-                conflicts.append({"event_id": event.get("event_id"), "type": event.get("type"), "reason": "implementation_lease_already_active", "winner_lease_id": winner.get("id"), "rejected_lease_id": lease_id}); return False
-        event_pr = normalize_pr(payload.get("pr")); active[lease_id] = {"id": lease_id, "role": role, "actor": actor, "work_unit": payload.get("work_unit"), "branch": payload.get("branch"), "pr": event_pr, "start_head": payload.get("start_head"), "status": "active", "event": event}
+            work_unit = payload.get("work_unit"); existing = implementations()
+            same_wu = next((item for item in existing if item.get("work_unit") == work_unit), None)
+            if same_wu is not None:
+                conflicts.append({"event_id": event.get("event_id"), "type": event.get("type"), "reason": "implementation_lease_already_active_for_wu", "work_unit": work_unit, "winner_lease_id": same_wu.get("id"), "rejected_lease_id": lease_id}); return False
+            limit = int(planning.get("parallel_execution", {}).get("max_concurrent_implementation_streams", 1) or 1)
+            if len(existing) >= limit:
+                conflicts.append({"event_id": event.get("event_id"), "type": event.get("type"), "reason": "implementation_wip_limit_reached", "limit": limit, "rejected_lease_id": lease_id}); return False
+            if actor:
+                actor_limit = actor_capacities.get(str(actor), 1)
+                actor_active = sum(1 for item in existing if item.get("actor") == actor)
+                if actor_active >= actor_limit:
+                    conflicts.append({"event_id": event.get("event_id"), "type": event.get("type"), "reason": "actor_implementation_capacity_reached", "actor": actor, "limit": actor_limit, "rejected_lease_id": lease_id}); return False
+            candidate = snapshot_item(payload)
+            for item in existing:
+                other = {"id": item.get("work_unit"), **(item.get("planning_snapshot") or {})}
+                conflict, reasons = work_units_conflict(candidate, other, planning, {str(candidate.get("id")): candidate, str(other.get("id")): other})
+                if conflict:
+                    conflicts.append({"event_id": event.get("event_id"), "type": event.get("type"), "reason": "implementation_scope_conflict", "with_lease_id": item.get("id"), "rejected_lease_id": lease_id, "details": reasons}); return False
+        event_pr = normalize_pr(payload.get("pr"))
+        active[lease_id] = {"id": lease_id, "role": role, "actor": actor, "work_unit": payload.get("work_unit"), "branch": payload.get("branch"), "pr": event_pr, "start_head": payload.get("start_head"), "planning_snapshot": payload.get("planning_snapshot", {}), "status": "active", "event": event}
         if role == "implementation" and event_pr is not None and actor: authors_by_pr.setdefault(event_pr, set()).add(str(actor))
         return True
+
     for event in events:
         event_id = str(event.get("event_id") or "")
         if event_id in seen_event_ids: conflicts.append({"event_id": event_id, "type": event.get("type"), "reason": "duplicate_event_id_ignored"}); continue
@@ -111,19 +155,39 @@ def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any
             old_id = str(payload.get("old_lease_id") or ""); new_id = str(payload.get("new_lease_id") or ""); old = active.get(old_id)
             if not old or old.get("role") != "implementation": conflicts.append({"event_id": event.get("event_id"), "type": event_type, "reason": "transfer_source_not_active", "old_lease_id": old_id, "new_lease_id": new_id}); continue
             active.pop(old_id, None)
-            if new_id: add_lease(new_id, actor, payload, event)
-        elif event_type == "MATERIAL_AUTHOR" and event_pr is not None and actor: authors_by_pr[event_pr].add(str(actor))
+            if new_id and not add_lease(new_id, actor, payload, event): active[old_id] = old
+        elif event_type == "MATERIAL_AUTHOR" and event_pr is not None and actor:
+            authors_by_pr[event_pr].add(str(actor))
         elif event_type == "GATE" and event_pr is not None:
-            gates_by_pr[event_pr] = {"pr": event_pr, "sha": payload.get("sha"), "reviewer_actor": actor, "verdict": payload.get("verdict"), "material_authors": payload.get("material_authors", []), "evidence": payload.get("evidence", []), "summary": payload.get("summary", ""), "stale": False, "github_comment_url": event.get("github_comment_url"), "github_publisher": event.get("github_publisher"), "timestamp": event.get("github_created_at") or event.get("timestamp")}
+            gates_by_pr[event_pr] = {
+                "pr": event_pr,
+                "sha": payload.get("sha"),
+                "base_sha": payload.get("base_sha"),
+                "reviewer_actor": actor,
+                "verdict": payload.get("verdict"),
+                "material_authors": payload.get("material_authors", []),
+                "evidence": payload.get("evidence", []),
+                "scope_verified": payload.get("scope_verified") is True,
+                "changed_files": payload.get("changed_files", []),
+                "summary": payload.get("summary", ""),
+                "stale": False,
+                "github_comment_url": event.get("github_comment_url"),
+                "github_publisher": event.get("github_publisher"),
+                "timestamp": event.get("github_created_at") or event.get("timestamp"),
+            }
         elif event_type == "MERGED":
             work_unit = payload.get("work_unit")
             if isinstance(work_unit, str) and work_unit: merged_work_units.add(work_unit)
+
     for gate_pr, gate in gates_by_pr.items():
         current_authors = set(authors_by_pr.get(gate_pr, set())); gated_authors = set(gate.get("material_authors") or []); reasons: list[str] = []
         if gated_authors != current_authors: reasons.append("material_authorship_changed")
         if gate.get("reviewer_actor") in current_authors: reasons.append("reviewer_is_now_material_author")
         if reasons: gate["stale"] = True; gate["stale_reasons"] = reasons
+
     active_values = list(active.values())
-    if pr is not None: active_values = [item for item in active_values if item.get("pr") == pr]; authors = sorted(authors_by_pr.get(pr, set())); gate = gates_by_pr.get(pr)
-    else: authors = sorted({author for values in authors_by_pr.values() for author in values}); gate = None
+    if pr is not None:
+        active_values = [item for item in active_values if item.get("pr") == pr]; authors = sorted(authors_by_pr.get(pr, set())); gate = gates_by_pr.get(pr)
+    else:
+        authors = sorted({author for values in authors_by_pr.values() for author in values}); gate = None
     return {"active_leases": active_values, "material_authors": authors, "current_gate": gate, "gates_by_pr": gates_by_pr, "conflicts": conflicts, "merged_work_units": sorted(merged_work_units)}

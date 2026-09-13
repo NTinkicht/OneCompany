@@ -9,16 +9,7 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": [
-          "actor_id",
-          "setup_state",
-          "verified_surfaces",
-          "verified_capabilities",
-          "temporarily_unavailable_capabilities",
-          "repository_access",
-          "unattended",
-          "evidence"
-        ],
+        "required": ["actor_id", "setup_state", "verified_surfaces", "verified_capabilities", "temporarily_unavailable_capabilities", "repository_access", "unattended", "capacity", "evidence"],
         "properties": {
           "actor_id": {"type": "string", "minLength": 1},
           "setup_state": {"enum": ["not_started", "partially_ready", "ready", "degraded", "unavailable"]},
@@ -26,24 +17,19 @@
           "verified_capabilities": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
           "temporarily_unavailable_capabilities": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
           "repository_access": {
-            "type": "object",
-            "required": ["read", "write", "review", "merge"],
-            "properties": {
-              "read": {"type": "boolean"},
-              "write": {"type": "boolean"},
-              "review": {"type": "boolean"},
-              "merge": {"type": "boolean"}
-            },
+            "type": "object", "required": ["read", "write", "review", "merge"],
+            "properties": {"read": {"type": "boolean"}, "write": {"type": "boolean"}, "review": {"type": "boolean"}, "merge": {"type": "boolean"}},
             "additionalProperties": false
           },
           "unattended": {
-            "type": "object",
-            "required": ["configured", "verified"],
-            "properties": {
-              "configured": {"type": "boolean"},
-              "verified": {"type": "boolean"}
-            },
+            "type": "object", "required": ["configured", "verified"],
+            "properties": {"configured": {"type": "boolean"}, "verified": {"type": "boolean"}},
             "additionalProperties": true
+          },
+          "capacity": {
+            "type": "object", "required": ["implementation_streams"],
+            "properties": {"implementation_streams": {"type": "integer", "minimum": 1}},
+            "additionalProperties": false
           },
           "last_verified_at": {"type": ["string", "null"]},
           "evidence": {"type": "array", "items": {"type": "string"}}

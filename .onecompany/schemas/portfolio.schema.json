@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://onecompany.dev/schemas/portfolio.schema.json",
+  "title": "OneCompany Portfolio Graph",
+  "type": "object",
+  "required": ["schema_version", "entities", "links"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "schema_version": {"type": "string"},
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "type", "title", "status"],
+        "properties": {
+          "id": {"type": "string", "minLength": 4},
+          "type": {"type": "string"},
+          "title": {"type": "string", "minLength": 3},
+          "status": {"enum": ["PROPOSED", "DISCOVERY", "PLANNED", "READY", "ACTIVE", "BLOCKED", "DONE", "CANCELLED"]},
+          "outcome": {"type": ["string", "null"]},
+          "owner": {"type": ["string", "null"]},
+          "priority": {"type": ["integer", "null"]},
+          "target_metric": {"type": ["string", "null"]},
+          "due": {"type": ["string", "null"]},
+          "labels": {"type": "array", "items": {"type": "string"}}
+        },
+        "additionalProperties": true
+      }
+    },
+    "links": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["source", "target", "relationship"],
+        "properties": {
+          "source": {"type": "string", "minLength": 1},
+          "target": {"type": "string", "minLength": 1},
+          "relationship": {"type": "string", "minLength": 1},
+          "rationale": {"type": ["string", "null"]}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

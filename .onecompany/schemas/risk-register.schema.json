@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://onecompany.dev/schemas/risk-register.schema.json",
+  "title": "OneCompany Planning Risk Register",
+  "type": "object",
+  "required": ["schema_version", "risks"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "schema_version": {"type": "string"},
+    "risks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "domain", "cause", "event", "consequence", "likelihood", "impact", "inherent_score", "owner", "treatment", "residual_likelihood", "residual_impact", "residual_score", "status", "mitigations", "review_trigger"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^RISK-[0-9]{3,}$"},
+          "title": {"type": "string", "minLength": 3},
+          "domain": {"type": "string", "minLength": 2},
+          "cause": {"type": "string", "minLength": 5},
+          "event": {"type": "string", "minLength": 5},
+          "consequence": {"type": "string", "minLength": 5},
+          "likelihood": {"type": "integer", "minimum": 1, "maximum": 5},
+          "impact": {"type": "integer", "minimum": 1, "maximum": 5},
+          "inherent_score": {"type": "integer", "minimum": 1, "maximum": 25},
+          "owner": {"type": "string", "minLength": 1},
+          "treatment": {"enum": ["avoid", "reduce", "transfer", "accept"]},
+          "residual_likelihood": {"type": "integer", "minimum": 1, "maximum": 5},
+          "residual_impact": {"type": "integer", "minimum": 1, "maximum": 5},
+          "residual_score": {"type": "integer", "minimum": 1, "maximum": 25},
+          "status": {"enum": ["open", "treated", "accepted", "closed"]},
+          "mitigations": {"type": "array", "items": {"type": "object"}},
+          "review_trigger": {"type": "string", "minLength": 3},
+          "acceptance": {"type": ["object", "null"]}
+        },
+        "additionalProperties": true
+      }
+    }
+  },
+  "additionalProperties": false
+}

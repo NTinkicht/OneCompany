@@ -1,0 +1,50 @@
+{
+  "$schema": "./schemas/portfolio.schema.json",
+  "schema_version": "1.0",
+  "entities": [
+    {
+      "id": "OBJ-001",
+      "type": "OBJECTIVE",
+      "title": "Operate OneCompany as a governed autonomous software-company runtime",
+      "status": "ACTIVE",
+      "outcome": "OneCompany can plan and execute multiple independent delivery streams without weakening governance or evidence integrity.",
+      "owner": "human-owner",
+      "priority": 100,
+      "target_metric": "All active delivery work is traceable; conflicting streams are mechanically rejected; parallel merge evidence is base-aware."
+    },
+    {
+      "id": "EPIC-001",
+      "type": "EPIC",
+      "title": "Planning and Flow Control",
+      "status": "ACTIVE",
+      "outcome": "Strategy, requirements and Work Units form one governed dependency graph with conflict-safe parallel execution.",
+      "owner": "human-owner",
+      "priority": 100
+    },
+    {
+      "id": "CAP-001",
+      "type": "CAPABILITY",
+      "title": "Conflict-safe parallel delivery",
+      "status": "ACTIVE",
+      "outcome": "Independent Work Units may progress concurrently while scope, resource, actor-capacity and integration conflicts fail closed.",
+      "owner": "human-owner",
+      "priority": 100
+    }
+  ],
+  "links": [
+    {"source": "OBJ-001", "target": "EPIC-001", "relationship": "contains", "rationale": "Planning and flow control realizes the autonomous-company objective."},
+    {"source": "EPIC-001", "target": "CAP-001", "relationship": "contains", "rationale": "Safe parallel delivery is the central capability of this epic."},
+    {"source": "CAP-001", "target": "FR-001", "relationship": "traces_to", "rationale": "Scheduler admission is part of conflict-safe parallel delivery."},
+    {"source": "CAP-001", "target": "FR-002", "relationship": "traces_to", "rationale": "Live scope enforcement protects declared independence."},
+    {"source": "CAP-001", "target": "FR-003", "relationship": "traces_to", "rationale": "Base-aware promotion protects integration evidence."},
+    {"source": "CAP-001", "target": "NFR-001", "relationship": "traces_to", "rationale": "Planning decisions must be reproducible."},
+    {"source": "CAP-001", "target": "SEC-001", "relationship": "traces_to", "rationale": "Lease uniqueness is an authority boundary."},
+    {"source": "EPIC-001", "target": "WU-PFC-001", "relationship": "decomposes_to", "rationale": "WU-PFC-001 implements the first complete planning and flow-control increment."},
+    {"source": "CAP-001", "target": "WU-PFC-001", "relationship": "realizes", "rationale": "The Work Unit delivers the capability."},
+    {"source": "FR-001", "target": "WU-PFC-001", "relationship": "implements", "rationale": "WU-PFC-001 implements scheduler admission semantics."},
+    {"source": "FR-002", "target": "WU-PFC-001", "relationship": "implements", "rationale": "WU-PFC-001 implements live scope verification."},
+    {"source": "FR-003", "target": "WU-PFC-001", "relationship": "implements", "rationale": "WU-PFC-001 implements base-drift protection."},
+    {"source": "NFR-001", "target": "WU-PFC-001", "relationship": "implements", "rationale": "WU-PFC-001 includes deterministic planner tests."},
+    {"source": "SEC-001", "target": "WU-PFC-001", "relationship": "implements", "rationale": "WU-PFC-001 preserves one-writer authority per Work Unit."}
+  ]
+}

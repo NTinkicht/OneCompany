@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministically exercise distributed lease/gate race semantics without GitHub."""
+"""Deterministically exercise distributed lease/gate and parallel-safety race semantics without GitHub."""
 from __future__ import annotations
 
 import sys
@@ -13,28 +13,47 @@ def event(index: int, event_type: str, actor: str, payload: dict, event_id: str 
 def require(condition: bool, message: str) -> None:
     if not condition: raise AssertionError(message)
 
+def snap(scope: str, lock: str | None = None) -> dict:
+    return {"write_scope": [scope], "resource_locks": [lock] if lock else [], "parallelism": "auto", "risk_class": "LOW", "dependencies": []}
+
 def main() -> int:
     try:
         events = [
-            event(1, "ROLE_LEASE_ASSIGNED", "codex", {"lease_id": "L1", "role": "implementation", "work_unit": "WU1", "branch": "wu1", "pr": 10, "start_head": "aaa"}),
-            event(2, "ROLE_LEASE_ASSIGNED", "chatgpt", {"lease_id": "L2", "role": "implementation", "work_unit": "WU1", "branch": "wu1-alt", "pr": 11, "start_head": "bbb"}),
+            event(1, "ROLE_LEASE_ASSIGNED", "codex", {"lease_id": "L1", "role": "implementation", "work_unit": "WU1", "branch": "wu1", "pr": 10, "start_head": "aaa", "planning_snapshot": snap("src/a/**")}),
+            event(2, "ROLE_LEASE_ASSIGNED", "chatgpt", {"lease_id": "L2", "role": "implementation", "work_unit": "WU1", "branch": "wu1-alt", "pr": 11, "start_head": "bbb", "planning_snapshot": snap("src/a/**")}),
         ]
         first = derive(events); active = first.get("active_leases", [])
-        require(len(active) == 1 and active[0].get("id") == "L1", "first valid implementation lease must win concurrent claim")
-        require(any(item.get("rejected_lease_id") == "L2" for item in first.get("conflicts", [])), "losing lease must be classified")
-        events.append(event(3, "ROLE_LEASE_TRANSFERRED", "claude", {"old_lease_id": "L1", "new_lease_id": "L3", "lease_id": "L3", "role": "implementation", "work_unit": "WU1", "branch": "wu1", "pr": 10, "start_head": "ccc", "parent_lease_id": "L1"}))
+        require(len(active) == 1 and active[0].get("id") == "L1", "first valid implementation lease must win same-WU concurrent claim")
+        require(any(item.get("rejected_lease_id") == "L2" for item in first.get("conflicts", [])), "losing same-WU lease must be classified")
+
+        events.append(event(3, "ROLE_LEASE_TRANSFERRED", "claude", {"old_lease_id": "L1", "new_lease_id": "L3", "lease_id": "L3", "role": "implementation", "work_unit": "WU1", "branch": "wu1", "pr": 10, "start_head": "ccc", "parent_lease_id": "L1", "planning_snapshot": snap("src/a/**")}))
         transferred = derive(events, 10); active = transferred.get("active_leases", [])
-        require(len(active) == 1 and active[0].get("id") == "L3" and active[0].get("actor") == "claude", "failover must leave exactly one writer")
+        require(len(active) == 1 and active[0].get("id") == "L3" and active[0].get("actor") == "claude", "failover must leave exactly one writer for WU1")
         require(set(transferred.get("material_authors", [])) == {"codex", "claude"}, "failover must preserve authorship")
-        events.append(event(4, "GATE", "chatgpt", {"pr": 10, "sha": "ddd", "verdict": "PASS — MERGE_READY", "material_authors": ["codex", "claude"], "evidence": ["ci:green"]}))
+
+        events.append(event(4, "ROLE_LEASE_ASSIGNED", "codex", {"lease_id": "L4", "role": "implementation", "work_unit": "WU2", "branch": "wu2", "pr": 12, "start_head": "eee", "planning_snapshot": snap("src/b/**")}))
+        parallel = derive(events)
+        require({item.get("id") for item in parallel.get("active_leases", [])} == {"L3", "L4"}, "disjoint WUs must be able to hold concurrent leases")
+
+        events.append(event(5, "ROLE_LEASE_ASSIGNED", "chatgpt", {"lease_id": "L5", "role": "implementation", "work_unit": "WU3", "branch": "wu3", "pr": 13, "start_head": "fff", "planning_snapshot": snap("src/a/file.py")}))
+        overlap = derive(events)
+        require("L5" not in {item.get("id") for item in overlap.get("active_leases", [])}, "overlapping WU must lose lease race")
+        require(any(item.get("rejected_lease_id") == "L5" and item.get("reason") == "implementation_scope_conflict" for item in overlap.get("conflicts", [])), "overlap conflict must be explicit")
+
+        events.append(event(6, "GATE", "chatgpt", {"pr": 10, "sha": "ddd", "verdict": "PASS — MERGE_READY", "material_authors": ["codex", "claude"], "evidence": ["ci:green"]}))
         gated = derive(events, 10); require(gated.get("current_gate", {}).get("stale") is False, "matching non-author gate should be current")
-        events.append(event(5, "MATERIAL_AUTHOR", "chatgpt", {"pr": 10}))
+        events.append(event(7, "MATERIAL_AUTHOR", "chatgpt", {"pr": 10}))
         stale = derive(events, 10); require(stale.get("current_gate", {}).get("stale") is True, "gate must stale when reviewer later becomes material author")
         require("reviewer_is_now_material_author" in stale.get("current_gate", {}).get("stale_reasons", []), "stale reason should expose reviewer conflict")
-        events.append(event(6, "ROLE_LEASE_RELEASED", "claude", {"lease_id": "L3", "pr": 10, "reason": "merged"}))
-        events.append(event(7, "MERGED", "human-owner", {"pr": 10, "work_unit": "WU1", "approved_head": "ddd", "merge_sha": "mmm"}))
-        released = derive(events); require(released.get("active_leases") == [], "release must leave zero active writers"); require("WU1" in released.get("merged_work_units", []), "merge must durably unlock dependent work")
-        events.append(event(8, "SUPERVISION_CHECK", "chatgpt", {"state": "noop"}, event_id="e7"))
+
+        events.append(event(8, "ROLE_LEASE_RELEASED", "claude", {"lease_id": "L3", "pr": 10, "reason": "merged"}))
+        events.append(event(9, "MERGED", "human-owner", {"pr": 10, "work_unit": "WU1", "approved_head": "ddd", "merge_sha": "mmm"}))
+        after_wu1 = derive(events)
+        require({item.get("id") for item in after_wu1.get("active_leases", [])} == {"L4"}, "merging WU1 must not release independent WU2")
+        require("WU1" in after_wu1.get("merged_work_units", []), "merge must durably unlock dependent work")
+        events.append(event(10, "ROLE_LEASE_RELEASED", "codex", {"lease_id": "L4", "pr": 12, "reason": "merged"}))
+        released = derive(events); require(released.get("active_leases") == [], "releasing all streams must leave zero active writers")
+        events.append(event(11, "SUPERVISION_CHECK", "chatgpt", {"state": "noop"}, event_id="e9"))
         replay = derive(events); require(any(item.get("reason") == "duplicate_event_id_ignored" for item in replay.get("conflicts", [])), "duplicate event IDs must be ignored deterministically")
         print("Ledger race simulation PASS"); return 0
     except AssertionError as exc:

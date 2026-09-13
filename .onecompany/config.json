@@ -13,7 +13,8 @@
     "human_must_approve_autonomy_increase": true
   },
   "delivery": {
-    "single_canonical_stream": true,
+    "single_canonical_stream_per_work_unit": true,
+    "allow_parallel_independent_work_units": true,
     "require_explicit_implementation_lease": true,
     "require_exact_head_gate": true,
     "require_independent_non_author_review": true,

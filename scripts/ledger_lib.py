@@ -217,6 +217,10 @@ def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any
     def add_lease(lease_id: str, actor: str | None, payload: dict[str, Any], event: dict[str, Any]) -> bool:
         role = payload.get("role", "implementation")
         if role == "implementation":
+            # A published implementation lease ID is known even if it loses
+            # arbitration. Stale follow-on failover events from that rejected ID
+            # are another losing claim, not evidence of ledger corruption.
+            known_implementation_leases.add(lease_id)
             candidate = snapshot_item(payload)
             actor_limit = actor_capacities.get(str(actor), 1) if actor else None
             violations = implementation_admission_violations(
@@ -244,10 +248,8 @@ def derive(events: list[dict[str, Any]], pr: int | None = None) -> dict[str, Any
             "status": "active",
             "event": event,
         }
-        if role == "implementation":
-            known_implementation_leases.add(lease_id)
-            if event_pr is not None and actor:
-                authors_by_pr.setdefault(event_pr, set()).add(str(actor))
+        if role == "implementation" and event_pr is not None and actor:
+            authors_by_pr.setdefault(event_pr, set()).add(str(actor))
         return True
 
     for event in events:

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Explicit OneCompany implementation leases with per-WU exclusivity and conflict-aware parallelism."""
+"""Explicit OneCompany implementation leases with durable admission proof."""
 from __future__ import annotations
 
 import argparse
@@ -8,7 +8,14 @@ import sys
 import uuid
 
 from capacity_lib import implementation_active_count, implementation_availability, implementation_capacity_limit
-from ledger_lib import derive, ledger_enabled, list_events, post_event
+from ledger_lib import (
+    derive,
+    ledger_enabled,
+    list_events,
+    post_event,
+    trusted_admission_context,
+    trusted_pr_base,
+)
 from onecompany_lib import CONTROL, active_implementation_leases, emergency_stop_active, load_json, save_json
 from planning_lib import (
     by_id,
@@ -57,9 +64,6 @@ def planning_snapshot(item: dict, work_map: dict[str, dict] | None = None) -> di
         "risk_class": item.get("risk_class", "MEDIUM"),
         "dependencies": direct_dependencies,
     }
-    # New acquisition has the complete queue graph and therefore recomputes the
-    # authoritative closure. Failover deliberately preserves the immutable source
-    # snapshot instead of silently adopting later queue edits.
     if work_map and item.get("id"):
         snapshot["dependency_closure"] = sorted(
             dependency_closure(work_map, str(item.get("id")))
@@ -80,13 +84,17 @@ def admission_snapshot(
     item: dict,
     dependencies_complete: bool,
     transfer_source_lease_id: str | None = None,
+    trusted_ref: str | None = None,
+    policy_blobs: dict | None = None,
+    actor_eligible: bool = True,
+    actor_ineligibility_reasons: list[str] | None = None,
 ) -> dict:
-    """Freeze the admission facts that made this lease valid at grant time."""
-    return {
+    """Record descriptive facts plus the independently verifiable trusted ref."""
+    value = {
         "schema": ADMISSION_SCHEMA,
         "actor": actor,
-        "actor_eligible": True,
-        "actor_ineligibility_reasons": [],
+        "actor_eligible": bool(actor_eligible),
+        "actor_ineligibility_reasons": sorted(set(actor_ineligibility_reasons or [])),
         "actor_limit": int(actor_limit),
         "dependencies": sorted({str(value) for value in item.get("dependencies", []) if value}),
         "dependencies_complete": bool(dependencies_complete),
@@ -94,6 +102,11 @@ def admission_snapshot(
         "dependencies_inherited_from_source": transfer_source_lease_id is not None,
         "recorded_at": dt.datetime.now(dt.timezone.utc).isoformat(),
     }
+    if trusted_ref is not None:
+        value["trusted_ref"] = trusted_ref
+    if policy_blobs is not None:
+        value["policy_blobs"] = dict(policy_blobs)
+    return value
 
 
 def new_lease(
@@ -257,23 +270,23 @@ def _format_admission_violations(violations: list[dict]) -> str:
     return "; ".join(details)
 
 
+def _durable_dependency_check(candidate: dict, durable_done: set[str]) -> tuple[bool, list[str]]:
+    direct = sorted({str(value) for value in candidate.get("dependencies", []) if value})
+    unsatisfied = sorted(set(direct) - durable_done)
+    return not unsatisfied, unsatisfied
+
+
 def acquire(args: argparse.Namespace) -> int:
     if emergency_stop_active():
         print("REFUSED: emergency stop is active; no new implementation lease may be acquired")
         return 2
     state = load_json(CONTROL / "state.json")
-    queue = load_json(CONTROL / "queue.json")
-    planning = load_json(CONTROL / "planning.json")
-    work_map = by_id(queue.get("work_units", []))
-    candidate = work_map.get(args.wu)
-    if candidate is None:
+    local_queue = load_json(CONTROL / "queue.json")
+    local_planning = load_json(CONTROL / "planning.json")
+    local_work_map = by_id(local_queue.get("work_units", []))
+    local_candidate = local_work_map.get(args.wu)
+    if local_candidate is None:
         print(f"REFUSED: work unit {args.wu} does not exist in queue")
-        return 2
-    if candidate.get("status") != "READY":
-        print(
-            f"REFUSED: work unit {args.wu} is not READY "
-            f"(status={candidate.get('status')})"
-        )
         return 2
     if ledger_enabled() and args.pr is None:
         print("REFUSED: durable autonomous implementation lease requires a PR number")
@@ -288,32 +301,76 @@ def acquire(args: argparse.Namespace) -> int:
         return 2
 
     durable_done: set[str] = set()
+    trusted_ref: str | None = None
+    policy_blobs: dict | None = None
     if ledger_enabled():
         try:
-            durable_done = set(derive(list_events()).get("merged_work_units", []))
+            events = list_events()
+            durable_done = set(derive(events).get("merged_work_units", []))
+            trusted_ref = trusted_pr_base(int(args.pr))
+            context, context_error = trusted_admission_context(
+                trusted_ref, args.actor, args.wu, active
+            )
+            if context is None:
+                print(f"REFUSED: cannot verify base-trusted lease admission: {context_error}")
+                return 2
+            candidate = context["work_item"]
+            work_map = context["work_map"]
+            planning = context["planning"]
+            policy_blobs = context["policy_blobs"]
+            actor_limit = int(context.get("actor_limit") or 0)
+            actor_active = implementation_active_count(args.actor, active)
+            if not context.get("actor_eligible"):
+                print(
+                    f"REFUSED: actor {args.actor} is not base-trusted implementation-eligible: "
+                    f"{','.join(context.get('actor_ineligibility_reasons', []))}"
+                )
+                return 2
+            if actor_limit <= actor_active:
+                print(
+                    f"REFUSED: actor {args.actor} has no base-trusted implementation capacity: "
+                    f"{actor_active}/{actor_limit}"
+                )
+                return 2
+            durable_ready, durable_unsatisfied = _durable_dependency_check(candidate, durable_done)
+            if not durable_ready:
+                print(
+                    f"REFUSED: work unit {args.wu} lacks durable MERGED dependency evidence: "
+                    f"{','.join(durable_unsatisfied)}"
+                )
+                return 2
         except Exception as exc:
-            print(f"REFUSED: cannot verify durable dependency state: {exc}")
+            print(f"REFUSED: cannot verify durable admission state: {exc}")
             return 2
-    ready, missing, unsatisfied = dependency_ready(candidate, work_map, durable_done)
-    if not ready:
-        detail = []
-        if missing:
-            detail.append("missing=" + ",".join(sorted(missing)))
-        if unsatisfied:
-            detail.append("unsatisfied=" + ",".join(sorted(unsatisfied)))
-        print(
-            f"REFUSED: work unit {args.wu} dependencies are not complete: "
-            f"{'; '.join(detail)}"
-        )
-        return 2
-
-    slots, reasons, actor_active, actor_limit = actor_capacity_state(args.actor, active)
-    if slots <= 0:
-        print(
-            f"REFUSED: actor {args.actor} is not implementation-available: "
-            f"{','.join(reasons)}"
-        )
-        return 2
+    else:
+        candidate = local_candidate
+        work_map = local_work_map
+        planning = local_planning
+        if candidate.get("status") != "READY":
+            print(
+                f"REFUSED: work unit {args.wu} is not READY "
+                f"(status={candidate.get('status')})"
+            )
+            return 2
+        ready, missing, unsatisfied = dependency_ready(candidate, work_map, durable_done)
+        if not ready:
+            detail = []
+            if missing:
+                detail.append("missing=" + ",".join(sorted(missing)))
+            if unsatisfied:
+                detail.append("unsatisfied=" + ",".join(sorted(unsatisfied)))
+            print(
+                f"REFUSED: work unit {args.wu} dependencies are not complete: "
+                f"{'; '.join(detail)}"
+            )
+            return 2
+        slots, reasons, actor_active, actor_limit = actor_capacity_state(args.actor, active)
+        if slots <= 0:
+            print(
+                f"REFUSED: actor {args.actor} is not implementation-available: "
+                f"{','.join(reasons)}"
+            )
+            return 2
 
     violations = implementation_admission_violations(
         candidate,
@@ -330,12 +387,18 @@ def acquire(args: argparse.Namespace) -> int:
         )
         return 2
 
-    frozen = admission_snapshot(
-        actor=args.actor,
-        actor_limit=actor_limit,
-        item=candidate,
-        dependencies_complete=True,
-    )
+    frozen = None
+    if ledger_enabled():
+        frozen = admission_snapshot(
+            actor=args.actor,
+            actor_limit=actor_limit,
+            item=candidate,
+            dependencies_complete=True,
+            trusted_ref=trusted_ref,
+            policy_blobs=policy_blobs,
+            actor_eligible=True,
+            actor_ineligibility_reasons=[],
+        )
     lease = new_lease(
         args.actor,
         args.wu,
@@ -433,9 +496,9 @@ def transfer(args: argparse.Namespace) -> int:
         )
         return 2
     state = load_json(CONTROL / "state.json")
-    queue = load_json(CONTROL / "queue.json")
-    planning = load_json(CONTROL / "planning.json")
-    work_map = by_id(queue.get("work_units", []))
+    local_queue = load_json(CONTROL / "queue.json")
+    local_planning = load_json(CONTROL / "planning.json")
+    local_work_map = by_id(local_queue.get("work_units", []))
     active, integrity_conflicts = authoritative(state)
     if integrity_conflicts:
         print(
@@ -460,20 +523,59 @@ def transfer(args: argparse.Namespace) -> int:
         print("REFUSED: replacement actor already holds lease")
         return 2
 
-    slots, reasons, actor_active, actor_limit = actor_capacity_state(
-        args.actor, active, str(old.get("id"))
-    )
-    if slots <= 0:
-        print(
-            f"REFUSED: replacement actor {args.actor} is not implementation-available: "
-            f"{','.join(reasons)}"
-        )
-        return 2
-
-    # Failover inherits the source planning snapshot. Queue edits require an
-    # explicit release/re-plan/re-acquire rather than silently changing authority.
-    item = work_item_for_lease(old, work_map)
     other_active = [entry for entry in active if entry.get("id") != old.get("id")]
+    trusted_ref: str | None = None
+    policy_blobs: dict | None = None
+    if ledger_enabled():
+        pr = old.get("pr")
+        if not isinstance(pr, int):
+            print("REFUSED: durable failover source lease has no PR number")
+            return 2
+        try:
+            trusted_ref = trusted_pr_base(pr)
+            context, context_error = trusted_admission_context(
+                trusted_ref, args.actor, None, other_active
+            )
+            if context is None:
+                print(f"REFUSED: cannot verify base-trusted failover admission: {context_error}")
+                return 2
+            if not context.get("actor_eligible"):
+                print(
+                    f"REFUSED: replacement actor {args.actor} is not base-trusted implementation-eligible: "
+                    f"{','.join(context.get('actor_ineligibility_reasons', []))}"
+                )
+                return 2
+            actor_limit = int(context.get("actor_limit") or 0)
+            actor_active = implementation_active_count(
+                args.actor, active, str(old.get("id"))
+            )
+            if actor_limit <= actor_active:
+                print(
+                    f"REFUSED: replacement actor {args.actor} has no base-trusted implementation capacity: "
+                    f"{actor_active}/{actor_limit}"
+                )
+                return 2
+            planning = context["planning"]
+            policy_blobs = context["policy_blobs"]
+            item = {"id": old.get("work_unit"), **(old.get("planning_snapshot") or {})}
+            work_map = None
+        except Exception as exc:
+            print(f"REFUSED: cannot verify durable failover admission: {exc}")
+            return 2
+    else:
+        slots, reasons, actor_active, actor_limit = actor_capacity_state(
+            args.actor, active, str(old.get("id"))
+        )
+        if slots <= 0:
+            print(
+                f"REFUSED: replacement actor {args.actor} is not implementation-available: "
+                f"{','.join(reasons)}"
+            )
+            return 2
+        planning = local_planning
+        work_map = local_work_map
+        item = work_item_for_lease(old, local_work_map)
+
     violations = implementation_admission_violations(
         item,
         other_active,
@@ -488,13 +590,19 @@ def transfer(args: argparse.Namespace) -> int:
         )
         return 2
 
-    frozen = admission_snapshot(
-        actor=args.actor,
-        actor_limit=actor_limit,
-        item=item,
-        dependencies_complete=True,
-        transfer_source_lease_id=str(old.get("id")),
-    )
+    frozen = None
+    if ledger_enabled():
+        frozen = admission_snapshot(
+            actor=args.actor,
+            actor_limit=actor_limit,
+            item=item,
+            dependencies_complete=True,
+            transfer_source_lease_id=str(old.get("id")),
+            trusted_ref=trusted_ref,
+            policy_blobs=policy_blobs,
+            actor_eligible=True,
+            actor_ineligibility_reasons=[],
+        )
     replacement = new_lease(
         args.actor,
         str(old.get("work_unit")),

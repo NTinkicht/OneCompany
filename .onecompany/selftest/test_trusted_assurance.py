@@ -290,8 +290,8 @@ class TrustedAssuranceTests(unittest.TestCase):
         bad["extracted"]["coverage"]["branch"] = 999
         attestation, errors = self.run_verify(packet, artifact=bad)
         self.assertEqual(attestation["verdict"], "UNVERIFIED")
-        self.assertTrue(any("not finite" in error for error in errors), errors)
-        self.assertTrue(any("outside 0..100" in error for error in errors), errors)
+        self.assertTrue(any("must be finite" in error for error in errors), errors)
+        self.assertTrue(any("must be within 0..100" in error for error in errors), errors)
 
     def test_unsupported_parser_version_never_reaches_artifact_verifier(self):
         packet = self.packet()

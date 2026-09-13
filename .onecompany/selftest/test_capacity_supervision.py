@@ -28,7 +28,12 @@ class CapacityAndSupervisionTests(unittest.TestCase):
             "verified_capabilities": ["implementation"],
             "temporarily_unavailable_capabilities": [],
             "repository_access": {"read": True, "write": True},
-            "capacity": {"implementation_streams": capacity},
+            "capacity": {
+                "implementation_streams": capacity,
+                "measured": True,
+                "observed_at": "2026-09-13T00:00:00Z",
+                "evidence": ["selftest:measured-capacity-fixture"],
+            },
             "unattended": {"configured": unattended, "verified": unattended},
         }
 

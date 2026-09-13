@@ -1,6 +1,126 @@
 {
   "$schema": "./schemas/requirements-catalog.schema.json",
   "schema_version": "1.0",
-  "requirements": [],
-  "acceptance_criteria": []
+  "requirements": [
+    {
+      "id": "FR-001",
+      "type": "functional",
+      "statement": "The scheduler shall admit multiple Work Units concurrently only when dependency, write-scope, resource-lock, risk, WIP, and actor-capacity policies permit execution.",
+      "rationale": "Parallelism must increase throughput without creating competing writers.",
+      "source": "Issue #8",
+      "priority": "must",
+      "status": "approved",
+      "verification_method": "test",
+      "acceptance_criteria": ["AC-001", "AC-002"],
+      "risk_ids": ["RISK-001"],
+      "revision": 1,
+      "owner": "human-owner"
+    },
+    {
+      "id": "FR-002",
+      "type": "functional",
+      "statement": "The merge gate shall reject a candidate when the live pull-request diff exceeds the Work Unit's declared write scope.",
+      "rationale": "Declared independence is unsafe unless the actual candidate remains inside the declared scope.",
+      "source": "Issue #8 audit",
+      "priority": "must",
+      "status": "approved",
+      "verification_method": "test",
+      "acceptance_criteria": ["AC-003"],
+      "risk_ids": ["RISK-001"],
+      "revision": 1,
+      "owner": "human-owner"
+    },
+    {
+      "id": "FR-003",
+      "type": "functional",
+      "statement": "The merge executor shall reject a candidate when the pull-request base SHA differs from the base SHA recorded by the current review gate.",
+      "rationale": "A parallel merge can invalidate integration evidence for another branch even when that branch's head SHA is unchanged.",
+      "source": "Issue #8 audit",
+      "priority": "must",
+      "status": "approved",
+      "verification_method": "test",
+      "acceptance_criteria": ["AC-004"],
+      "risk_ids": ["RISK-002"],
+      "revision": 1,
+      "owner": "human-owner"
+    },
+    {
+      "id": "NFR-001",
+      "type": "nonfunctional",
+      "statement": "The planning engine shall produce identical prioritization and parallel-set results for identical versioned inputs.",
+      "rationale": "Autonomous planning decisions need reproducible evidence and auditability.",
+      "source": "OCES planning audit",
+      "priority": "must",
+      "status": "approved",
+      "verification_method": "test",
+      "acceptance_criteria": ["AC-005"],
+      "risk_ids": ["RISK-003"],
+      "nfr_measure": {
+        "metric": "repeatability",
+        "target": "100% identical result for identical fixture and policy inputs",
+        "method": "repeat deterministic planner self-tests",
+        "conditions": "same repository revision, control-plane files, runtime major version, and fixture data"
+      },
+      "revision": 1,
+      "owner": "human-owner"
+    },
+    {
+      "id": "SEC-001",
+      "type": "security",
+      "statement": "The coordination layer shall preserve at most one active implementation lease for each Work Unit across concurrent durable claim races.",
+      "rationale": "Implementation authority is exclusive within a Work Unit even when multiple supervisors race.",
+      "source": "OneCompany Constitution Article II",
+      "priority": "must",
+      "status": "approved",
+      "verification_method": "test",
+      "acceptance_criteria": ["AC-006"],
+      "risk_ids": ["RISK-001"],
+      "revision": 1,
+      "owner": "human-owner"
+    }
+  ],
+  "acceptance_criteria": [
+    {
+      "id": "AC-001",
+      "statement": "Given two READY Work Units with disjoint scopes, locks, dependencies, and eligible worker capacity, the planner selects both when WIP capacity is available.",
+      "verification_method": "automated-test",
+      "status": "approved",
+      "negative_or_failure_case": false
+    },
+    {
+      "id": "AC-002",
+      "statement": "Given two Work Units with overlapping write scopes or resource locks, the second implementation lease is rejected with a deterministic conflict reason.",
+      "verification_method": "automated-test",
+      "status": "approved",
+      "negative_or_failure_case": true
+    },
+    {
+      "id": "AC-003",
+      "statement": "Given a PR that changes at least one path outside its declared write scope, PASS-MERGE_READY publication and merge execution are rejected.",
+      "verification_method": "automated-test",
+      "status": "approved",
+      "negative_or_failure_case": true
+    },
+    {
+      "id": "AC-004",
+      "statement": "Given a reviewed candidate whose target base SHA later changes, merge execution is rejected until the candidate is updated and required evidence is regenerated.",
+      "verification_method": "automated-test",
+      "status": "approved",
+      "negative_or_failure_case": true
+    },
+    {
+      "id": "AC-005",
+      "statement": "Repeated planner evaluation of the same versioned fixture yields the same ranking, conflict reasons, safe parallel set, and critical path.",
+      "verification_method": "automated-test",
+      "status": "approved",
+      "negative_or_failure_case": false
+    },
+    {
+      "id": "AC-006",
+      "statement": "Concurrent durable claims for the same Work Unit leave exactly one active implementation lease and classify every losing claim.",
+      "verification_method": "automated-test",
+      "status": "approved",
+      "negative_or_failure_case": true
+    }
+  ]
 }

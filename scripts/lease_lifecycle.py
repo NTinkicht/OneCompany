@@ -1,9 +1,9 @@
 """Lease lifetime, renewal, reaping and cache-independent coordination views.
 
-This layer intentionally wraps the reviewed durable admission reducer in
-``ledger_lib``.  Admission decides whether a lease ever became canonical;
-this module decides whether that canonical lease still has implementation
-authority at a particular instant.
+Admission decides whether a lease ever became canonical. This layer decides
+whether that canonical lease still has implementation authority. Durable lease
+lifetime is frozen from the exact protected admission base; later candidate or
+legitimate policy edits cannot retroactively lengthen historical leases.
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import ledger_lib
-from onecompany_lib import CONTROL, ROOT, load_json
+from onecompany_lib import ROOT
 
 RENEW_EVENT = "ROLE_LEASE_RENEWED"
 REAP_EVENT = "ROLE_LEASE_REAPED"
@@ -40,19 +40,26 @@ def _parse_time(value: Any) -> dt.datetime | None:
     if not isinstance(value, str) or not value:
         return None
     try:
-        return _utc(dt.datetime.fromisoformat(value.replace("Z", "+00:00")))
+        return _utc(
+            dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+        )
     except ValueError:
         return None
 
 
 def event_time(event: dict[str, Any]) -> dt.datetime:
-    value = _parse_time(event.get("github_created_at")) or _parse_time(event.get("timestamp"))
+    value = _parse_time(event.get("github_created_at")) or _parse_time(
+        event.get("timestamp")
+    )
     if value is None:
-        raise RuntimeError(f"coordination event {event.get('event_id')} has no valid timestamp")
+        raise RuntimeError(
+            f"coordination event {event.get('event_id')} has no valid timestamp"
+        )
     return value
 
 
 def lifecycle_policy() -> dict[str, Any]:
+    """Local/non-durable lifecycle policy; durable leases never trust this live value."""
     try:
         ledger = ledger_lib.ledger_config()
     except Exception:
@@ -68,7 +75,9 @@ def lifecycle_policy() -> dict[str, Any]:
         kinds = ["pr_head"]
     return {
         "ttl_seconds": ttl,
-        "renewal_progress_kinds": sorted({str(item) for item in kinds if item}),
+        "renewal_progress_kinds": sorted(
+            {str(item) for item in kinds if item}
+        ),
         "implicit_expiry_revokes_authority": configured.get(
             "implicit_expiry_revokes_authority", True
         )
@@ -88,8 +97,15 @@ def lease_fingerprint(lease: dict[str, Any]) -> str:
         "parent_lease_id": lease.get("parent_lease_id"),
         "planning_snapshot": lease.get("planning_snapshot", {}),
         "admission_snapshot": lease.get("admission_snapshot"),
+        "lifecycle_policy": lease.get("lifecycle_policy"),
+        "lifecycle_policy_blob_sha": lease.get("lifecycle_policy_blob_sha"),
     }
-    canonical = json.dumps(immutable, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    canonical = json.dumps(
+        immutable,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
@@ -109,9 +125,13 @@ def local_events(path: Path | None = None) -> list[dict[str, Any]]:
             try:
                 event = json.loads(line)
             except json.JSONDecodeError as exc:
-                raise RuntimeError(f"local coordination log is corrupt at line {number}: {exc}") from exc
+                raise RuntimeError(
+                    f"local coordination log is corrupt at line {number}: {exc}"
+                ) from exc
             if not isinstance(event, dict):
-                raise RuntimeError(f"local coordination log line {number} is not an object")
+                raise RuntimeError(
+                    f"local coordination log line {number} is not an object"
+                )
             events.append(event)
     events.sort(
         key=lambda item: (
@@ -135,8 +155,6 @@ def _append_local_event(
     target.parent.mkdir(parents=True, exist_ok=True)
     existing = local_events(target)
     event = {
-        # Local mode has no protected GitHub base to prove. It intentionally uses
-        # the legacy admission envelope but the same reducer/event vocabulary.
         "version": 1,
         "event_id": str(uuid.uuid4()),
         "type": event_type,
@@ -146,7 +164,14 @@ def _append_local_event(
         "local_sequence": len(existing) + 1,
     }
     with target.open("a", encoding="utf-8", newline="\n") as handle:
-        handle.write(json.dumps(event, separators=(",", ":"), ensure_ascii=False) + "\n")
+        handle.write(
+            json.dumps(
+                event,
+                separators=(",", ":"),
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
         handle.flush()
     return event
 
@@ -167,7 +192,13 @@ def append_coordination_event(
 ) -> dict[str, Any]:
     if ledger_lib.ledger_enabled():
         return ledger_lib.post_event(event_type, actor, payload)
-    return _append_local_event(event_type, actor, payload, now=now, path=local_path)
+    return _append_local_event(
+        event_type,
+        actor,
+        payload,
+        now=now,
+        path=local_path,
+    )
 
 
 def _normalize_pr(value: Any) -> int | None:
@@ -185,13 +216,10 @@ def verify_pr_head_progress(
     *,
     cache: dict[tuple[Any, ...], Any] | None = None,
 ) -> tuple[bool, str | None]:
-    """Verify that ``new_head`` is genuine forward progress on the same PR.
-
-    Historical PR heads are not mutable evidence, so replay accepts a recorded
-    head when it is still the current PR head or a verified ancestor of it.
-    The previous->new relation itself must be strictly forward.
-    """
-    if not SHA40_RE.fullmatch(previous_head or "") or not SHA40_RE.fullmatch(new_head or ""):
+    """Verify genuine forward progress on the same PR lineage."""
+    if not SHA40_RE.fullmatch(previous_head or "") or not SHA40_RE.fullmatch(
+        new_head or ""
+    ):
         return False, "progress heads must be exact 40-hex SHAs"
     if previous_head == new_head:
         return False, "heartbeat_or_same_head_is_not_progress"
@@ -199,24 +227,73 @@ def verify_pr_head_progress(
         repo = ledger_lib._repository()
         pr_doc = ledger_lib._pull_request(repo, pr, cache)
         current_head = ((pr_doc.get("head") or {}).get("sha"))
-        if not isinstance(current_head, str) or not SHA40_RE.fullmatch(current_head):
+        if not isinstance(current_head, str) or not SHA40_RE.fullmatch(
+            current_head
+        ):
             return False, "cannot resolve current PR head"
-        forward = ledger_lib._compare(repo, previous_head, new_head, cache)
+        forward = ledger_lib._compare(
+            repo, previous_head, new_head, cache
+        )
         if forward.get("status") != "ahead":
-            return False, f"new head is not strictly ahead of previous head (status={forward.get('status')})"
-        ancestry = ledger_lib._compare(repo, new_head, current_head, cache)
+            return (
+                False,
+                "new head is not strictly ahead of previous head "
+                f"(status={forward.get('status')})",
+            )
+        ancestry = ledger_lib._compare(
+            repo, new_head, current_head, cache
+        )
         if ancestry.get("status") not in {"ahead", "identical"}:
-            return False, "recorded progress head is not on the current PR-head lineage"
+            return (
+                False,
+                "recorded progress head is not on the current PR-head lineage",
+            )
         return True, None
     except Exception as exc:
         return False, str(exc)
 
 
+def _policy_for_event(
+    event: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    durable: bool,
+    cache: dict[tuple[Any, ...], Any],
+) -> tuple[dict[str, Any] | None, str | None, str | None]:
+    if not durable:
+        return lifecycle_policy(), None, None
+    admission = payload.get("admission_snapshot")
+    if not isinstance(admission, dict):
+        return None, None, "durable lease has no admission snapshot"
+    trusted_ref = admission.get("trusted_ref")
+    event_pr = _normalize_pr(payload.get("pr"))
+    if (
+        not isinstance(trusted_ref, str)
+        or not SHA40_RE.fullmatch(trusted_ref)
+        or event_pr is None
+    ):
+        return None, None, "durable lease has no exact base-trusted lifecycle context"
+    try:
+        policy, blob_sha = ledger_lib.trusted_lease_lifecycle(
+            trusted_ref,
+            event_pr,
+            cache=cache,
+        )
+    except Exception as exc:
+        return None, None, str(exc)
+    return policy, blob_sha, None
+
+
 def _lease_from_event(
-    event: dict[str, Any], payload: dict[str, Any], *, ttl_seconds: int
+    event: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    policy: dict[str, Any],
+    policy_blob_sha: str | None,
 ) -> dict[str, Any]:
     issued = event_time(event)
     lease_id = payload.get("new_lease_id") or payload.get("lease_id")
+    ttl_seconds = int(policy["ttl_seconds"])
     lease = {
         "id": lease_id,
         "role": payload.get("role", "implementation"),
@@ -225,12 +302,17 @@ def _lease_from_event(
         "branch": payload.get("branch"),
         "pr": _normalize_pr(payload.get("pr")),
         "start_head": payload.get("start_head"),
-        "parent_lease_id": payload.get("parent_lease_id") or payload.get("old_lease_id"),
+        "parent_lease_id": payload.get("parent_lease_id")
+        or payload.get("old_lease_id"),
         "planning_snapshot": payload.get("planning_snapshot", {}),
         "admission_snapshot": payload.get("admission_snapshot"),
+        "lifecycle_policy": copy.deepcopy(policy),
+        "lifecycle_policy_blob_sha": policy_blob_sha,
         "status": "active",
         "issued_at": _iso(issued),
-        "expires_at": _iso(issued + dt.timedelta(seconds=ttl_seconds)),
+        "expires_at": _iso(
+            issued + dt.timedelta(seconds=ttl_seconds)
+        ),
         "last_progress_head": payload.get("start_head"),
         "last_progress_at": _iso(issued),
         "event": event,
@@ -244,7 +326,9 @@ def _rejected_base_ids(base: dict[str, Any]) -> set[str]:
         for item in base.get("rejected_claims", [])
         if item.get("rejected_lease_id")
     }
-    for conflict in base.get("integrity_conflicts", base.get("conflicts", [])):
+    for conflict in base.get(
+        "integrity_conflicts", base.get("conflicts", [])
+    ):
         for key in ("lease_id", "new_lease_id", "rejected_lease_id"):
             if conflict.get(key):
                 values.add(str(conflict[key]))
@@ -265,20 +349,20 @@ def derive_lifecycle(
     verify_admission_provenance: bool | None = None,
     durable: bool | None = None,
 ) -> dict[str, Any]:
-    """Return one canonical view with admission + lifetime authority applied."""
+    """Return one canonical view with admission + frozen lifetime authority."""
     is_durable = ledger_lib.ledger_enabled() if durable is None else durable
     if verify_admission_provenance is None:
         verify_admission_provenance = is_durable and enforce_actor_policy
     base = ledger_lib.derive(
         events,
         None,
-        enforce_actor_policy=enforce_actor_policy if is_durable else False,
-        verify_admission_provenance=verify_admission_provenance if is_durable else False,
+        enforce_actor_policy=(enforce_actor_policy if is_durable else False),
+        verify_admission_provenance=(
+            verify_admission_provenance if is_durable else False
+        ),
     )
     rejected_ids = _rejected_base_ids(base)
-    policy = lifecycle_policy()
-    ttl = int(policy["ttl_seconds"])
-    allowed_progress = set(policy["renewal_progress_kinds"])
+    local_policy = lifecycle_policy()
     instant = _utc(now)
     active: dict[str, dict[str, Any]] = {}
     history: dict[str, dict[str, Any]] = {}
@@ -286,6 +370,7 @@ def derive_lifecycle(
     lifecycle_rejected: list[dict[str, Any]] = []
     explicitly_reaped: list[dict[str, Any]] = []
     progress_cache: dict[tuple[Any, ...], Any] = {}
+    lifecycle_policy_cache: dict[tuple[Any, ...], Any] = {}
 
     def reject(event: dict[str, Any], reason: str, **details: Any) -> None:
         lifecycle_rejected.append(
@@ -297,14 +382,20 @@ def derive_lifecycle(
             }
         )
 
-    def remember_author(event: dict[str, Any], payload: dict[str, Any]) -> None:
+    def remember_author(
+        event: dict[str, Any], payload: dict[str, Any]
+    ) -> None:
         event_pr = _normalize_pr(payload.get("pr"))
         actor = event.get("actor")
         if event_pr is not None and isinstance(actor, str) and actor:
             authors_by_pr.setdefault(event_pr, set()).add(actor)
 
     for event in events:
-        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        payload = (
+            event.get("payload")
+            if isinstance(event.get("payload"), dict)
+            else {}
+        )
         kind = event.get("type")
         at = event_time(event)
 
@@ -316,7 +407,26 @@ def derive_lifecycle(
             lease_id = str(payload.get("lease_id") or "")
             if not lease_id or lease_id in rejected_ids:
                 continue
-            lease = _lease_from_event(event, payload, ttl_seconds=ttl)
+            policy, blob_sha, policy_error = _policy_for_event(
+                event,
+                payload,
+                durable=is_durable,
+                cache=lifecycle_policy_cache,
+            )
+            if policy is None:
+                reject(
+                    event,
+                    "lifecycle_policy_unverified",
+                    lease_id=lease_id,
+                    detail=policy_error,
+                )
+                continue
+            lease = _lease_from_event(
+                event,
+                payload,
+                policy=policy,
+                policy_blob_sha=blob_sha,
+            )
             active[lease_id] = lease
             history[lease_id] = lease
             remember_author(event, payload)
@@ -338,17 +448,46 @@ def derive_lifecycle(
                 continue
             old = active.get(old_id)
             if old is None:
-                reject(event, "lifecycle_transfer_source_not_active", old_lease_id=old_id, new_lease_id=new_id)
+                reject(
+                    event,
+                    "lifecycle_transfer_source_not_active",
+                    old_lease_id=old_id,
+                    new_lease_id=new_id,
+                )
                 continue
             if _is_expired(old, at):
                 old["status"] = "expired"
                 active.pop(old_id, None)
-                reject(event, "lifecycle_transfer_source_expired", old_lease_id=old_id, new_lease_id=new_id)
+                reject(
+                    event,
+                    "lifecycle_transfer_source_expired",
+                    old_lease_id=old_id,
+                    new_lease_id=new_id,
+                )
+                continue
+            policy, blob_sha, policy_error = _policy_for_event(
+                event,
+                payload,
+                durable=is_durable,
+                cache=lifecycle_policy_cache,
+            )
+            if policy is None:
+                reject(
+                    event,
+                    "lifecycle_policy_unverified",
+                    lease_id=new_id,
+                    detail=policy_error,
+                )
                 continue
             old["status"] = "transferred"
             old["released_at"] = _iso(at)
             active.pop(old_id, None)
-            lease = _lease_from_event(event, payload, ttl_seconds=ttl)
+            lease = _lease_from_event(
+                event,
+                payload,
+                policy=policy,
+                policy_blob_sha=blob_sha,
+            )
             lease["parent_lease_id"] = old_id
             active[new_id] = lease
             history[new_id] = lease
@@ -370,40 +509,87 @@ def derive_lifecycle(
                 reject(event, "renew_actor_mismatch", lease_id=lease_id)
                 continue
             if payload.get("lease_fingerprint") != lease_fingerprint(lease):
-                reject(event, "renew_immutable_lease_mismatch", lease_id=lease_id)
+                reject(
+                    event,
+                    "renew_immutable_lease_mismatch",
+                    lease_id=lease_id,
+                )
                 continue
+            lease_policy = lease.get("lifecycle_policy")
+            if not isinstance(lease_policy, dict):
+                reject(
+                    event,
+                    "renew_lifecycle_policy_missing",
+                    lease_id=lease_id,
+                )
+                continue
+            allowed_progress = set(
+                lease_policy.get("renewal_progress_kinds", [])
+            )
             progress_kind = str(payload.get("progress_kind") or "")
             if progress_kind not in allowed_progress:
-                reject(event, "renew_progress_kind_not_allowed", lease_id=lease_id)
+                reject(
+                    event,
+                    "renew_progress_kind_not_allowed",
+                    lease_id=lease_id,
+                )
                 continue
             previous = str(payload.get("previous_head") or "")
             new_head = str(payload.get("new_head") or "")
             if previous != str(lease.get("last_progress_head") or ""):
-                reject(event, "renew_previous_head_not_current", lease_id=lease_id)
+                reject(
+                    event,
+                    "renew_previous_head_not_current",
+                    lease_id=lease_id,
+                )
                 continue
             if progress_kind == "pr_head":
                 if is_durable:
                     lease_pr = _normalize_pr(lease.get("pr"))
                     if lease_pr is None:
-                        reject(event, "renew_pr_missing", lease_id=lease_id)
+                        reject(
+                            event, "renew_pr_missing", lease_id=lease_id
+                        )
                         continue
                     valid, error = verify_pr_head_progress(
-                        lease_pr, previous, new_head, cache=progress_cache
+                        lease_pr,
+                        previous,
+                        new_head,
+                        cache=progress_cache,
                     )
                     if not valid:
-                        reject(event, "renew_progress_not_verified", lease_id=lease_id, detail=error)
+                        reject(
+                            event,
+                            "renew_progress_not_verified",
+                            lease_id=lease_id,
+                            detail=error,
+                        )
                         continue
                 elif (
                     not SHA40_RE.fullmatch(previous)
                     or not SHA40_RE.fullmatch(new_head)
                     or previous == new_head
                 ):
-                    reject(event, "heartbeat_or_invalid_local_progress", lease_id=lease_id)
+                    reject(
+                        event,
+                        "heartbeat_or_invalid_local_progress",
+                        lease_id=lease_id,
+                    )
                     continue
             old_expiry = _parse_time(lease.get("expires_at"))
+            ttl = int(lease_policy.get("ttl_seconds") or 0)
+            if ttl <= 0:
+                reject(
+                    event,
+                    "renew_lifecycle_ttl_invalid",
+                    lease_id=lease_id,
+                )
+                continue
             proposed = at + dt.timedelta(seconds=ttl)
             if old_expiry is None or proposed <= old_expiry:
-                reject(event, "renewal_not_monotonic", lease_id=lease_id)
+                reject(
+                    event, "renewal_not_monotonic", lease_id=lease_id
+                )
                 continue
             lease["expires_at"] = _iso(proposed)
             lease["last_progress_head"] = new_head
@@ -416,6 +602,10 @@ def derive_lifecycle(
                     "new_head": new_head,
                     "renewed_at": _iso(at),
                     "expires_at": _iso(proposed),
+                    "ttl_seconds": ttl,
+                    "lifecycle_policy_blob_sha": lease.get(
+                        "lifecycle_policy_blob_sha"
+                    ),
                 }
             )
             continue
@@ -437,32 +627,57 @@ def derive_lifecycle(
             continue
 
     expired: list[dict[str, Any]] = []
-    if policy["implicit_expiry_revokes_authority"]:
-        for lease_id, lease in list(active.items()):
-            if _is_expired(lease, instant):
-                lease["status"] = "expired"
-                active.pop(lease_id, None)
-                expired.append(copy.deepcopy(lease))
+    for lease_id, lease in list(active.items()):
+        lease_policy = lease.get("lifecycle_policy")
+        implicit = (
+            isinstance(lease_policy, dict)
+            and lease_policy.get("implicit_expiry_revokes_authority") is True
+        )
+        if implicit and _is_expired(lease, instant):
+            lease["status"] = "expired"
+            active.pop(lease_id, None)
+            expired.append(copy.deepcopy(lease))
 
     active_values = [copy.deepcopy(value) for value in active.values()]
     if pr is not None:
-        active_values = [item for item in active_values if item.get("pr") == pr]
+        active_values = [
+            item for item in active_values if item.get("pr") == pr
+        ]
         authors = sorted(authors_by_pr.get(pr, set()))
     else:
-        authors = sorted({actor for values in authors_by_pr.values() for actor in values})
+        authors = sorted(
+            {
+                actor
+                for values in authors_by_pr.values()
+                for actor in values
+            }
+        )
 
     result = copy.deepcopy(base)
     result["active_leases"] = active_values
     result["material_authors"] = authors
-    result["expired_leases"] = [item for item in expired if pr is None or item.get("pr") == pr]
-    result["reaped_leases"] = [item for item in explicitly_reaped if pr is None or item.get("pr") == pr]
+    result["material_authors_by_pr"] = {
+        key: sorted(values) for key, values in authors_by_pr.items()
+    }
+    result["expired_leases"] = [
+        item for item in expired if pr is None or item.get("pr") == pr
+    ]
+    result["reaped_leases"] = [
+        item
+        for item in explicitly_reaped
+        if pr is None or item.get("pr") == pr
+    ]
     result["lease_history"] = [
         copy.deepcopy(item)
         for item in history.values()
         if pr is None or item.get("pr") == pr
     ]
     result["lifecycle_rejected_claims"] = lifecycle_rejected
-    result["lease_lifecycle_policy"] = policy
+    result["lease_lifecycle_policy"] = (
+        local_policy
+        if not is_durable
+        else {"source": "per_lease_base_trusted"}
+    )
 
     gates = copy.deepcopy(result.get("gates_by_pr", {}))
     for gate_pr, gate in gates.items():
@@ -484,7 +699,9 @@ def derive_lifecycle(
     active_ids = {str(item.get("id") or "") for item in active_values}
     result["current_actor_eligibility"] = {
         key: value
-        for key, value in result.get("current_actor_eligibility", {}).items()
+        for key, value in result.get(
+            "current_actor_eligibility", {}
+        ).items()
         if key in active_ids
     }
     return result
@@ -497,22 +714,32 @@ def coordination_view(
     local_path: Path | None = None,
 ) -> dict[str, Any]:
     events = coordination_events(local_path=local_path)
-    return derive_lifecycle(events, pr, now=now, durable=ledger_lib.ledger_enabled())
+    return derive_lifecycle(
+        events,
+        pr,
+        now=now,
+        durable=ledger_lib.ledger_enabled(),
+    )
 
 
-def renewal_payload(lease: dict[str, Any], new_head: str) -> dict[str, Any]:
+def renewal_payload(
+    lease: dict[str, Any], new_head: str
+) -> dict[str, Any]:
     return {
         "lease_id": lease.get("id"),
         "pr": lease.get("pr"),
         "work_unit": lease.get("work_unit"),
         "progress_kind": "pr_head",
-        "previous_head": lease.get("last_progress_head") or lease.get("start_head"),
+        "previous_head": lease.get("last_progress_head")
+        or lease.get("start_head"),
         "new_head": new_head,
         "lease_fingerprint": lease_fingerprint(lease),
     }
 
 
-def reap_payload(lease: dict[str, Any], reason: str = "lease_expired") -> dict[str, Any]:
+def reap_payload(
+    lease: dict[str, Any], reason: str = "lease_expired"
+) -> dict[str, Any]:
     return {
         "lease_id": lease.get("id"),
         "pr": lease.get("pr"),

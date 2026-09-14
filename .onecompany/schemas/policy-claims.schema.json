@@ -25,17 +25,6 @@
           "removal_rationale": {"type": "string", "minLength": 1},
           "removal_provenance": {"type": "string", "minLength": 1}
         },
-        "allOf": [
-          {
-            "if": {
-              "properties": {"classification": {"const": "REMOVED"}},
-              "required": ["classification"]
-            },
-            "then": {
-              "required": ["removal_rationale", "removal_provenance"]
-            }
-          }
-        ],
         "additionalProperties": false
       }
     }

@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """OneCompany implementation lease CLI with deterministic lifetime semantics.
 
-The KERNEL-001 admission/provenance implementation is preserved in
-``lease_core``. This module wraps it with lifetime authority and keeps the
-existing helper API so older callers and regression tests continue to exercise
-the same admission seams.
+The KERNEL-001 admission/provenance implementation remains in ``lease_core``.
+This wrapper binds its durable admission seams to protected-base runtime policy,
+transitive dependency completion, and the lifecycle authority reducer.
 """
 from __future__ import annotations
 
@@ -19,12 +18,11 @@ import ledger_lib
 from onecompany_lib import CONTROL, emergency_stop_active, load_json, save_json
 from planning_lib import (
     by_id,
-    dependency_ready,
+    dependency_closure,
     implementation_admission_violations,
     work_item_for_lease,
 )
 
-# Compatibility/test seams from the reviewed implementation.
 planning_snapshot = core.planning_snapshot
 admission_snapshot = core.admission_snapshot
 new_lease = core.new_lease
@@ -34,11 +32,65 @@ sync_legacy_aliases = core.sync_legacy_aliases
 _format_admission_violations = core._format_admission_violations
 actor_capacity_state = core.actor_capacity_state
 trusted_pr_base = ledger_lib.trusted_pr_base
-trusted_admission_context = ledger_lib.trusted_admission_context
 list_events = ledger_lib.list_events
 post_event = ledger_lib.post_event
 ledger_enabled = ledger_lib.ledger_enabled
 derive = lifecycle.derive_lifecycle
+
+
+def trusted_admission_context(*args, **kwargs):
+    """Add protected-base stop and transitive closure to core's admission context."""
+    context, error = ledger_lib.trusted_admission_context(*args, **kwargs)
+    if context is None:
+        return None, error
+    base_config = context.get("config")
+    if not isinstance(base_config, dict):
+        return None, "base-trusted admission context has no runtime config"
+    if emergency_stop_active(base_config):
+        return None, "base-trusted emergency stop is active"
+    enriched = dict(context)
+    work_item = context.get("work_item")
+    snapshot = context.get("planning_snapshot")
+    if isinstance(work_item, dict) and isinstance(snapshot, dict):
+        enriched_item = dict(work_item)
+        enriched_item["dependency_closure"] = list(
+            snapshot.get("dependency_closure", [])
+        )
+        enriched["work_item"] = enriched_item
+    return enriched, None
+
+
+def _durable_dependency_check(
+    candidate: dict, durable_done: set[str]
+) -> tuple[bool, list[str]]:
+    closure = candidate.get("dependency_closure")
+    values = closure if isinstance(closure, list) else candidate.get("dependencies", [])
+    required = sorted({str(value) for value in values if value})
+    unsatisfied = sorted(set(required) - durable_done)
+    return not unsatisfied, unsatisfied
+
+
+def _local_dependency_check(
+    candidate: dict,
+    work_map: dict[str, dict[str, Any]],
+    durable_done: set[str],
+) -> tuple[bool, list[str], list[str]]:
+    candidate_id = str(candidate.get("id") or "")
+    required = (
+        dependency_closure(work_map, candidate_id)
+        if candidate_id and candidate_id in work_map
+        else {str(value) for value in candidate.get("dependencies", []) if value}
+    )
+    missing: list[str] = []
+    unsatisfied: list[str] = []
+    for dep in sorted(required):
+        if dep in durable_done:
+            continue
+        if dep not in work_map:
+            missing.append(dep)
+        elif work_map[dep].get("status") not in {"MERGED", "DONE"}:
+            unsatisfied.append(dep)
+    return not missing and not unsatisfied, missing, unsatisfied
 
 
 def authoritative(_state: dict | None = None) -> tuple[list[dict], list[dict]]:
@@ -54,17 +106,13 @@ def authoritative(_state: dict | None = None) -> tuple[list[dict], list[dict]]:
 
 
 def _bind_core() -> None:
-    """Forward wrapper seams into lease_core before delegated durable calls.
-
-    Besides preserving backwards compatibility, this makes mocks hit the same
-    boundary the production wrapper uses rather than silently bypassing tests.
-    """
     core.derive = derive
     core.ledger_enabled = ledger_enabled
     core.list_events = list_events
     core.post_event = post_event
     core.trusted_pr_base = trusted_pr_base
     core.trusted_admission_context = trusted_admission_context
+    core._durable_dependency_check = _durable_dependency_check
     core.authoritative = authoritative
     core.actor_capacity_state = actor_capacity_state
     core.emergency_stop_active = emergency_stop_active
@@ -86,7 +134,8 @@ def _active_view(
 
 
 def _reconcile_cache(pr: int | None = None) -> dict[str, Any]:
-    """Regenerate state.json from event truth; never consume it as authority."""
+    """Regenerate state.json from one event replay; never consume cache as authority."""
+    del pr
     state = load_json(CONTROL / "state.json")
     view = lifecycle.coordination_view()
     active = [
@@ -95,16 +144,25 @@ def _reconcile_cache(pr: int | None = None) -> dict[str, Any]:
         if item.get("role") == "implementation"
     ]
     state["active_leases"] = active
-    state["current_actor_eligibility"] = view.get("current_actor_eligibility", {})
+    state["current_actor_eligibility"] = view.get(
+        "current_actor_eligibility", {}
+    )
+    authors_by_pr = view.get("material_authors_by_pr", {})
+    gates_by_pr = view.get("gates_by_pr", {})
 
     streams: list[dict] = []
     for lease in active:
         stream = _stream_from_lease(lease)
         lease_pr = lease.get("pr")
         if isinstance(lease_pr, int):
-            pr_view = lifecycle.coordination_view(lease_pr)
-            stream["material_authors"] = pr_view.get("material_authors", [])
-            stream["gate"] = pr_view.get("current_gate")
+            authors = authors_by_pr.get(lease_pr)
+            if authors is None:
+                authors = authors_by_pr.get(str(lease_pr), [])
+            gate = gates_by_pr.get(lease_pr)
+            if gate is None:
+                gate = gates_by_pr.get(str(lease_pr))
+            stream["material_authors"] = list(authors or [])
+            stream["gate"] = gate
         stream["expires_at"] = lease.get("expires_at")
         stream["last_progress_head"] = lease.get("last_progress_head")
         streams.append(stream)
@@ -112,12 +170,18 @@ def _reconcile_cache(pr: int | None = None) -> dict[str, Any]:
     state["active_streams"] = streams
     sync_legacy_aliases(state)
     if len(streams) == 1:
-        state["current_material_authors"] = streams[0].get("material_authors", [])
+        state["current_material_authors"] = streams[0].get(
+            "material_authors", []
+        )
         state["current_gate"] = streams[0].get("gate")
     state["company_state"] = (
         "ACTIVE_PARALLEL_IMPLEMENTATION"
         if len(streams) > 1
-        else ("ACTIVE_IMPLEMENTATION" if streams else "POST_LEASE_RECONCILE")
+        else (
+            "ACTIVE_IMPLEMENTATION"
+            if streams
+            else "POST_LEASE_RECONCILE"
+        )
     )
     state["generated_or_reconciled_at"] = dt.datetime.now(
         dt.timezone.utc
@@ -170,7 +234,7 @@ def _local_acquire(args: argparse.Namespace) -> int:
             view.get("merged_work_units", []),
         )
     )
-    ready, missing, unsatisfied = dependency_ready(
+    ready, missing, unsatisfied = _local_dependency_check(
         candidate,
         work_map,
         done,
@@ -307,7 +371,9 @@ def _local_transfer(args: argparse.Namespace) -> int:
     else:
         old = None
     if old is None:
-        print("REFUSED: requested source lease is not active or transfer is ambiguous")
+        print(
+            "REFUSED: requested source lease is not active or transfer is ambiguous"
+        )
         return 2
     if old.get("actor") == args.actor:
         print("REFUSED: replacement actor already holds lease")
@@ -317,9 +383,7 @@ def _local_transfer(args: argparse.Namespace) -> int:
     planning = load_json(CONTROL / "planning.json")
     work_map = by_id(queue.get("work_units", []))
     other_active = [
-        item
-        for item in active
-        if item.get("id") != old.get("id")
+        item for item in active if item.get("id") != old.get("id")
     ]
     slots, reasons, actor_active, actor_limit = actor_capacity_state(
         args.actor,
@@ -392,6 +456,21 @@ def _local_transfer(args: argparse.Namespace) -> int:
     return 0
 
 
+def _durable_lease_base_stop(lease: dict[str, Any]) -> tuple[bool, str | None]:
+    admission = lease.get("admission_snapshot")
+    pr = lease.get("pr")
+    trusted_ref = (
+        admission.get("trusted_ref") if isinstance(admission, dict) else None
+    )
+    if not isinstance(pr, int) or not isinstance(trusted_ref, str):
+        return True, "durable lease has no exact protected admission context"
+    try:
+        runtime = ledger_lib.trusted_runtime_context(trusted_ref, pr, cache={})
+    except Exception as exc:
+        return True, str(exc)
+    return emergency_stop_active(runtime["config"]), None
+
+
 def renew(args: argparse.Namespace) -> int:
     if emergency_stop_active():
         print("REFUSED: emergency stop is active; lease renewal is disabled")
@@ -408,6 +487,19 @@ def renew(args: argparse.Namespace) -> int:
             "(it may already be expired)"
         )
         return 2
+
+    if ledger_enabled():
+        stopped, stop_error = _durable_lease_base_stop(lease)
+        if stop_error:
+            print(
+                f"REFUSED: cannot verify base-trusted emergency stop: {stop_error}"
+            )
+            return 2
+        if stopped:
+            print(
+                "REFUSED: base-trusted emergency stop is active; lease renewal is disabled"
+            )
+            return 2
 
     previous = str(
         lease.get("last_progress_head")
@@ -447,7 +539,10 @@ def renew(args: argparse.Namespace) -> int:
         ),
         None,
     )
-    if renewed is None or renewed.get("last_progress_head") != args.new_head:
+    if (
+        renewed is None
+        or renewed.get("last_progress_head") != args.new_head
+    ):
         print("REFUSED: renewal did not become canonical")
         return 2
 
@@ -487,7 +582,9 @@ def reap(args: argparse.Namespace) -> int:
     }
     _reconcile_cache(None)
     if remaining:
-        print(f"REFUSED: reap did not become canonical for {sorted(remaining)}")
+        print(
+            f"REFUSED: reap did not become canonical for {sorted(remaining)}"
+        )
         return 2
     print(f"LEASES REAPED {len(expired)}")
     return 0

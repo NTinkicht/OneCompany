@@ -2,8 +2,40 @@
   "$schema": "./schemas/readiness.schema.json",
   "schema_version": "1.1",
   "actors": [
-    {"actor_id":"human-owner","setup_state":"not_started","verified_surfaces":[],"verified_capabilities":[],"temporarily_unavailable_capabilities":[],"repository_access":{"read":false,"write":false,"review":false,"merge":false},"unattended":{"configured":false,"verified":false},"capacity":{"implementation_streams":0,"measured":false,"observed_at":null,"evidence":[]},"last_verified_at":null,"evidence":[]},
-    {"actor_id":"chatgpt","setup_state":"not_started","verified_surfaces":[],"verified_capabilities":[],"temporarily_unavailable_capabilities":[],"repository_access":{"read":false,"write":false,"review":false,"merge":false},"unattended":{"configured":false,"verified":false},"capacity":{"implementation_streams":0,"measured":false,"observed_at":null,"evidence":[]},"last_verified_at":null,"evidence":[]},
+    {
+      "actor_id": "human-owner",
+      "setup_state": "ready",
+      "verified_surfaces": ["github-protected-main", "github-codeowner-human"],
+      "verified_capabilities": ["architecture", "planning", "code_review", "security_review", "state_reconciliation", "merge_execution"],
+      "temporarily_unavailable_capabilities": [],
+      "repository_access": {"read": true, "write": true, "review": true, "merge": true},
+      "unattended": {"configured": false, "verified": false},
+      "capacity": {
+        "implementation_streams": 0,
+        "measured": true,
+        "observed_at": "2026-09-14T20:05:00Z",
+        "evidence": ["Protected-main human approvals and merges on PRs #32-#35"]
+      },
+      "last_verified_at": "2026-09-14T20:05:00Z",
+      "evidence": ["Dual-human CODEOWNERS active on protected main; human approval and merge gates exercised on PRs #32-#35"]
+    },
+    {
+      "actor_id": "chatgpt",
+      "setup_state": "ready",
+      "verified_surfaces": ["chatgpt-github-connector-interactive"],
+      "verified_capabilities": ["architecture", "planning", "implementation", "repository_intelligence", "ci_remediation", "code_review", "test_design", "failure_analysis", "documentation", "research", "state_reconciliation", "merge_execution"],
+      "temporarily_unavailable_capabilities": [],
+      "repository_access": {"read": true, "write": true, "review": true, "merge": true},
+      "unattended": {"configured": false, "verified": false},
+      "capacity": {
+        "implementation_streams": 1,
+        "measured": true,
+        "observed_at": "2026-09-14T20:05:00Z",
+        "evidence": ["Interactive GitHub connector implemented/refreshed PRs #33-#35 and executed exact-head merges under protected-main governance"]
+      },
+      "last_verified_at": "2026-09-14T20:05:00Z",
+      "evidence": ["Current authorized ChatGPT GitHub connector demonstrated read/write, CI remediation, state reconciliation and mechanical merge execution on OneCompany"]
+    },
     {"actor_id":"codex","setup_state":"not_started","verified_surfaces":[],"verified_capabilities":[],"temporarily_unavailable_capabilities":[],"repository_access":{"read":false,"write":false,"review":false,"merge":false},"unattended":{"configured":false,"verified":false},"capacity":{"implementation_streams":0,"measured":false,"observed_at":null,"evidence":[]},"last_verified_at":null,"evidence":[]},
     {"actor_id":"claude","setup_state":"not_started","verified_surfaces":[],"verified_capabilities":[],"temporarily_unavailable_capabilities":[],"repository_access":{"read":false,"write":false,"review":false,"merge":false},"unattended":{"configured":false,"verified":false},"capacity":{"implementation_streams":0,"measured":false,"observed_at":null,"evidence":[]},"last_verified_at":null,"evidence":[]},
     {"actor_id":"github-copilot","setup_state":"not_started","verified_surfaces":[],"verified_capabilities":[],"temporarily_unavailable_capabilities":[],"repository_access":{"read":false,"write":false,"review":false,"merge":false},"unattended":{"configured":false,"verified":false},"capacity":{"implementation_streams":0,"measured":false,"observed_at":null,"evidence":[]},"last_verified_at":null,"evidence":[]},

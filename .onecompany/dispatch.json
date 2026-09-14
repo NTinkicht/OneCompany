@@ -12,15 +12,47 @@
     {
       "actor_id": "human-owner",
       "mechanisms": [
-        {"id": "manual-github", "kind": "manual", "configured": false, "unattended": false, "capabilities": ["architecture", "planning", "implementation", "code_review", "security_review", "merge_execution"], "invocation_hint": "Human performs the bounded GitHub action directly.", "evidence": []}
+        {
+          "id": "manual-github",
+          "kind": "manual",
+          "configured": true,
+          "unattended": false,
+          "capabilities": ["architecture", "planning", "code_review", "security_review", "state_reconciliation", "merge_execution"],
+          "invocation_hint": "Human performs the bounded GitHub action directly.",
+          "evidence": ["Human Code Owner approvals and protected-main merges exercised on PRs #32-#35"]
+        }
       ]
     },
     {
       "actor_id": "chatgpt",
       "mechanisms": [
-        {"id": "interactive-connected-chat", "kind": "interactive", "configured": false, "unattended": false, "capabilities": ["architecture", "planning", "implementation", "code_review", "security_review", "state_reconciliation", "merge_execution"], "invocation_hint": "Use an active ChatGPT conversation with the authorized GitHub connection/tools.", "evidence": []},
-        {"id": "scheduled-supervisor", "kind": "scheduled_task", "configured": false, "unattended": true, "capabilities": ["planning", "state_reconciliation"], "invocation_hint": "ChatGPT Scheduled task using live GitHub; see docs/SCHEDULED-SUPERVISION.md.", "evidence": []},
-        {"id": "github-event-work", "kind": "event_trigger", "configured": false, "unattended": true, "capabilities": ["planning", "state_reconciliation"], "invocation_hint": "ChatGPT Work event-triggered task for supported GitHub PR activity.", "evidence": []}
+        {
+          "id": "interactive-connected-chat",
+          "kind": "interactive",
+          "configured": true,
+          "unattended": false,
+          "capabilities": ["architecture", "planning", "implementation", "repository_intelligence", "ci_remediation", "code_review", "test_design", "failure_analysis", "documentation", "research", "state_reconciliation", "merge_execution"],
+          "invocation_hint": "Use an active ChatGPT conversation with the authorized GitHub connection/tools.",
+          "evidence": ["Interactive GitHub connector exercised on OneCompany PRs #33-#35"]
+        },
+        {
+          "id": "scheduled-supervisor",
+          "kind": "scheduled_task",
+          "configured": false,
+          "unattended": true,
+          "capabilities": ["planning", "state_reconciliation"],
+          "invocation_hint": "ChatGPT Scheduled task using live GitHub; see docs/SCHEDULED-SUPERVISION.md.",
+          "evidence": []
+        },
+        {
+          "id": "github-event-work",
+          "kind": "event_trigger",
+          "configured": false,
+          "unattended": true,
+          "capabilities": ["planning", "state_reconciliation"],
+          "invocation_hint": "ChatGPT Work event-triggered task for supported GitHub PR activity.",
+          "evidence": []
+        }
       ]
     },
     {

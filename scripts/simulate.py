@@ -18,6 +18,7 @@ def main() -> int:
     budget = load_json(CONTROL / "budget.json")
     state = load_json(CONTROL / "state.json")
     overlays = load_json(CONTROL / "overlays.json")
+    actors = load_json(CONTROL / "actors.json")
     readiness = load_json(CONTROL / "readiness.json")
     results = []
 
@@ -58,8 +59,28 @@ def main() -> int:
     results.append(check("degraded actor can retain unrelated verified capability", "implementation" in sample["verified_capabilities"] and "implementation" not in sample["temporarily_unavailable_capabilities"]))
     results.append(check("temporary review outage is capability-specific", "code_review" in sample["temporarily_unavailable_capabilities"]))
 
-    # Declared capability is not readiness: a default actor with no verified capabilities must not be considered proven.
-    results.append(check("default readiness does not pretend capabilities are verified", all(not item.get("verified_capabilities") for item in readiness.get("actors", []))))
+    # Declared capability is not readiness. Post-bootstrap activation may verify
+    # explicitly enabled actors, but disabled/unconfigured actors must remain
+    # unproven and cannot inherit readiness merely from their declaration.
+    actor_by_id = {
+        str(item.get("id")): item
+        for item in actors.get("actors", [])
+        if isinstance(item, dict) and item.get("id")
+    }
+    disabled_or_unconfigured_are_unverified = all(
+        not item.get("verified_capabilities")
+        for item in readiness.get("actors", [])
+        if (
+            not actor_by_id.get(str(item.get("actor_id")), {}).get("enabled")
+            or not actor_by_id.get(str(item.get("actor_id")), {}).get("configured")
+        )
+    )
+    results.append(
+        check(
+            "disabled or unconfigured readiness does not pretend capabilities are verified",
+            disabled_or_unconfigured_are_unverified,
+        )
+    )
 
     results.append(check("GitHub remains source of truth", config.get("project", {}).get("source_of_truth") == "github"))
 

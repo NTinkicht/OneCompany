@@ -12,24 +12,25 @@ from typing import Any
 
 from assurance_gate import validate_structure
 from lease_lifecycle import append_coordination_event, coordination_view
-from ledger_lib import ledger_config, ledger_enabled
+from ledger_lib import ledger_enabled
 from onecompany_lib import (
     CONTROL,
     ROOT,
-    always_human_paths,
     autonomy_number,
     command_exists,
     emergency_stop_active,
     github_repo_from_config,
-    governance_config,
+    github_repo_from_remote,
     load_json,
-    protected_control_plane_paths,
+    path_matches_any,
     run,
     save_json,
 )
 from planning_lib import by_id
 from platform_identity import (
     authorize_current_principal,
+    protected_default_branch_context,
+    pull_request_material_author_actor_ids,
     require_authority,
     review_platform_identity,
 )
@@ -72,7 +73,9 @@ def _sync_legacy(state: dict) -> None:
         state["current_gate"] = None
 
 
-def _base_document(repo: str, path: str, base_sha: str) -> tuple[dict | None, str | None]:
+def _base_document(
+    repo: str, path: str, base_sha: str
+) -> tuple[dict | None, str | None]:
     value, _blob, error = _base_json(repo, path, base_sha)
     if value is None:
         return None, error or f"cannot load base-trusted {path}"
@@ -124,11 +127,7 @@ def _load_assurance_packet(
     except (OSError, ValueError):
         return None, None, "assurance packet must be a file inside the repository checkout"
     if not resolved.is_file():
-        return (
-            None,
-            None,
-            f"assurance packet does not exist: {resolved.relative_to(ROOT)}",
-        )
+        return None, None, f"assurance packet does not exist: {resolved.relative_to(ROOT)}"
     try:
         packet = json.loads(resolved.read_text(encoding="utf-8"))
     except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
@@ -172,6 +171,217 @@ def _verify_reviewer(
     return (identity if ok else None), reasons
 
 
+def _repository_from_checkout() -> tuple[str | None, str | None]:
+    candidate = load_json(CONTROL / "config.json")
+    configured = github_repo_from_config(candidate)
+    remote = github_repo_from_remote()
+    if not remote:
+        return None, "cannot derive repository identity from git origin"
+    if configured != remote:
+        return None, (
+            f"candidate repository identity {configured!r} differs from git origin {remote!r}"
+        )
+    return remote, None
+
+
+def _platform_authors(
+    repo: str,
+    pr: int,
+    head_sha: str,
+    base_sha: str,
+) -> tuple[set[str] | None, list[str]]:
+    return pull_request_material_author_actor_ids(repo, pr, head_sha, base_sha)
+
+
+def _final_coordination_check(
+    repo: str,
+    pr: int,
+    approved_sha: str,
+    approved_base: str,
+    review_id: object,
+    expected_authors: set[str],
+) -> tuple[list[dict] | None, list[str]]:
+    """Reconcile mutable authority immediately before the GitHub merge mutation."""
+    errors: list[str] = []
+    live, live_error = live_pr(repo, pr)
+    if live is None:
+        return None, [f"cannot re-read live PR immediately before merge: {live_error}"]
+    if live.get("state") != "OPEN" or live.get("isDraft"):
+        errors.append("PR ceased to be open/ready before merge")
+    if live.get("headRefOid") != approved_sha:
+        errors.append("PR head changed after assurance verification")
+    if live.get("baseRefOid") != approved_base:
+        errors.append("PR base changed after assurance verification")
+    protected, protected_errors = protected_default_branch_context(
+        repo,
+        approved_base,
+        claimed_branch=live.get("baseRefName"),
+    )
+    if protected is None:
+        errors.extend(protected_errors)
+
+    try:
+        view = coordination_view(pr)
+    except Exception as exc:
+        return None, [f"cannot re-read coordination authority before merge: {exc}"]
+    active = [
+        item
+        for item in view.get("active_leases", [])
+        if item.get("role") == "implementation" and item.get("pr") == pr
+    ]
+    if not active:
+        errors.append("implementation lease expired/transferred before merge")
+    authors = set(view.get("material_authors", []))
+    if authors != expected_authors:
+        errors.append("material authorship changed after assurance verification")
+    platform_authors, author_errors = _platform_authors(
+        repo,
+        pr,
+        approved_sha,
+        approved_base,
+    )
+    if platform_authors is None:
+        errors.extend(author_errors)
+    elif not platform_authors.issubset(authors):
+        errors.append("new/unreconciled platform material author appeared before merge")
+
+    gate = view.get("current_gate")
+    if (
+        not gate
+        or gate.get("verdict") != "PASS — MERGE_READY"
+        or gate.get("stale")
+        or gate.get("sha") != approved_sha
+        or gate.get("base_sha") != approved_base
+        or gate.get("review_id") != review_id
+        or set(gate.get("material_authors") or []) != authors
+    ):
+        errors.append("binding coordination gate changed or became stale before merge")
+
+    reviewer, reviewer_errors = _verify_reviewer(
+        repo,
+        pr,
+        approved_sha,
+        approved_base,
+        review_id,
+        authors,
+    )
+    if reviewer is None:
+        errors.append(
+            "reviewer independence changed before merge: " + ",".join(reviewer_errors)
+        )
+    return (active if not errors else None), errors
+
+
+def _github_pr(repo: str, pr: int) -> tuple[dict | None, str | None]:
+    result = run(["gh", "api", f"repos/{repo}/pulls/{pr}"])
+    if result.returncode != 0:
+        return None, result.stderr.strip() or result.stdout.strip() or "cannot read GitHub PR"
+    try:
+        value = json.loads(result.stdout)
+    except json.JSONDecodeError as exc:
+        return None, f"invalid GitHub PR JSON: {exc}"
+    return (value if isinstance(value, dict) else None), None
+
+
+def _reconcile_merged_pr(repo: str, pr: int, actor_assertion: str | None) -> int:
+    """Idempotently recover durable completion after GitHub merged but ledger publication failed."""
+    if not ledger_enabled():
+        print("REFUSED: durable ledger is disabled; there is no durable merge record to reconcile")
+        return 2
+    pr_doc, pr_error = _github_pr(repo, pr)
+    if pr_doc is None:
+        print(f"REFUSED: {pr_error}")
+        return 2
+    if not pr_doc.get("merged_at"):
+        print(f"REFUSED: GitHub PR #{pr} is not merged")
+        return 2
+    base = pr_doc.get("base") or {}
+    head = pr_doc.get("head") or {}
+    base_sha = base.get("sha") if isinstance(base, dict) else None
+    head_sha = head.get("sha") if isinstance(head, dict) else None
+    base_ref = base.get("ref") if isinstance(base, dict) else None
+    merge_sha = pr_doc.get("merge_commit_sha")
+    if not all(isinstance(value, str) and value for value in (base_sha, head_sha, merge_sha)):
+        print("REFUSED: merged PR lacks exact head/base/merge SHA metadata")
+        return 2
+    protected, protected_errors = protected_default_branch_context(
+        repo,
+        str(base_sha),
+        claimed_branch=str(base_ref) if base_ref is not None else None,
+    )
+    if protected is None:
+        for error in protected_errors:
+            print(f"REFUSED: {error}")
+        return 2
+    queue, queue_error = _base_document(repo, BASE_QUEUE_PATH, str(base_sha))
+    if queue is None:
+        print(f"REFUSED: {queue_error}")
+        return 2
+    work_unit = next(
+        (item for item in queue.get("work_units", []) if item.get("pr") == pr),
+        None,
+    )
+    if work_unit is None:
+        print(f"REFUSED: merged PR #{pr} is not mapped in its base-trusted queue")
+        return 2
+    wu_id = str(work_unit.get("id"))
+
+    identity, identity_errors = authorize_current_principal(
+        repo,
+        str(base_sha),
+        "merge_execution",
+    )
+    if identity is None:
+        print(
+            "REFUSED: authenticated principal cannot reconcile merge completion: "
+            + ",".join(identity_errors)
+        )
+        return 2
+    actor = str(identity.get("actor_id"))
+    login = str(identity.get("login"))
+    if actor_assertion and actor_assertion not in {actor, login}:
+        print("REFUSED: --actor assertion does not match authenticated platform principal")
+        return 2
+
+    try:
+        global_view = coordination_view()
+        if wu_id in set(global_view.get("verified_merged_work_units", [])):
+            print(f"MERGE RECONCILED: {wu_id} already has verified durable completion")
+            return 0
+        pr_view = coordination_view(pr)
+        for lease in pr_view.get("active_leases", []):
+            if lease.get("role") == "implementation":
+                append_coordination_event(
+                    "ROLE_LEASE_RELEASED",
+                    str(lease.get("actor") or "system"),
+                    {"lease_id": lease.get("id"), "pr": pr, "reason": "merged_reconcile"},
+                )
+        append_coordination_event(
+            "MERGED",
+            actor,
+            {
+                "pr": pr,
+                "work_unit": wu_id,
+                "approved_head": head_sha,
+                "approved_base": base_sha,
+                "merge_sha": merge_sha,
+                "method": "reconciled",
+                "platform_login": login,
+                "identity_policy_provenance": identity.get("policy_provenance"),
+                "recovered_after_partial_failure": True,
+            },
+        )
+        verified = coordination_view()
+    except Exception as exc:
+        print(f"REFUSED: merge reconciliation publication failed: {exc}")
+        return 2
+    if wu_id not in set(verified.get("verified_merged_work_units", [])):
+        print("REFUSED: recovered MERGED event did not become verified durable completion")
+        return 2
+    print(f"MERGE RECONCILED: PR #{pr} -> {wu_id} ({merge_sha})")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -196,9 +406,13 @@ def main() -> int:
         "--assurance-packet",
         help="repository-relative merge-ready assurance packet",
     )
+    parser.add_argument(
+        "--reconcile-merged",
+        action="store_true",
+        help="Recover an idempotent durable MERGED record after GitHub already merged the PR",
+    )
     args = parser.parse_args()
 
-    # Check out-of-band containment without trusting candidate configuration.
     if emergency_stop_active({"safety": {"emergency_stop": False}}):
         print("REFUSED: external emergency stop is active; autonomous merge is frozen")
         return 2
@@ -206,14 +420,15 @@ def main() -> int:
         print("REFUSED: authenticated gh CLI is required")
         return 2
 
-    candidate_config = load_json(CONTROL / "config.json")
-    state = load_json(CONTROL / "state.json")
-    repo = github_repo_from_config(candidate_config)
-    pr = args.pr
-    if not repo:
-        print("REFUSED: config.project.repository must be owner/name")
+    repo, repo_error = _repository_from_checkout()
+    if repo is None:
+        print(f"REFUSED: {repo_error}")
         return 2
+    pr = args.pr
+    if args.reconcile_merged:
+        return _reconcile_merged_pr(repo, pr, args.actor)
 
+    state = load_json(CONTROL / "state.json")
     live, live_error = live_pr(repo, pr)
     if live is None:
         print(f"REFUSED: cannot read live PR state: {live_error}")
@@ -233,8 +448,24 @@ def main() -> int:
             print(f"REFUSED: {error}")
         return 2
     if github_repo_from_config(base["config"]) != repo:
-        print("REFUSED: candidate repository identity differs from base-trusted configuration")
+        print("REFUSED: base-trusted repository identity differs from git origin")
         return 2
+    protected_context, protected_errors = protected_default_branch_context(
+        repo,
+        live_base,
+        claimed_branch=live.get("baseRefName"),
+    )
+    if protected_context is None:
+        for error in protected_errors:
+            print(f"REFUSED: {error}")
+        return 2
+    if (
+        base["config"].get("project", {}).get("default_branch")
+        != protected_context.get("default_branch")
+    ):
+        print("REFUSED: base-configured default branch differs from GitHub protected default branch")
+        return 2
+
     drift = _automation_policy_drift_errors(base)
     if drift:
         for error in drift:
@@ -251,8 +482,8 @@ def main() -> int:
         return 2
     if (
         level >= 3
-        and ledger_config().get("required_for_autonomous_merge")
-        and not ledger_enabled()
+        and base["ledger"].get("required_for_autonomous_merge")
+        and not base["ledger"].get("enabled")
     ):
         print("REFUSED: L3+ autonomous merge requires durable ledger")
         return 2
@@ -278,7 +509,7 @@ def main() -> int:
         return 2
 
     paths, diff_error = changed_files(repo, pr)
-    governance = governance_config().get("control_plane", {})
+    governance = base["governance"].get("control_plane", {})
     if paths is None:
         if governance.get("fail_closed_if_diff_unavailable", True):
             print(
@@ -287,12 +518,33 @@ def main() -> int:
             )
             return 2
         paths = []
-
-    protected = protected_control_plane_paths(paths)
-    absolute_human = always_human_paths(paths)
+    protected_paths = sorted(
+        path
+        for path in paths
+        if path_matches_any(path, governance.get("protected_paths", []))
+    )
+    absolute_human = sorted(
+        path
+        for path in paths
+        if path_matches_any(path, governance.get("always_human_paths", []))
+    )
 
     gate = view.get("current_gate")
     material_authors = set(view.get("material_authors", []))
+    platform_authors, author_errors = _platform_authors(
+        repo,
+        pr,
+        live_head,
+        live_base,
+    )
+    if platform_authors is None:
+        for error in author_errors:
+            print(f"REFUSED: {error}")
+        return 2
+    if not platform_authors.issubset(material_authors):
+        print("REFUSED: platform commit authors are not reconciled into durable authorship; rerun gate")
+        return 2
+
     if (
         not gate
         or gate.get("verdict") != "PASS — MERGE_READY"
@@ -319,16 +571,12 @@ def main() -> int:
         print("REFUSED: gate must record approved head and base SHAs")
         return 2
     if live_head != approved_sha:
-        print(
-            "REFUSED: expected-head mismatch; "
-            f"approved={approved_sha} live={live_head}"
-        )
+        print(f"REFUSED: expected-head mismatch; approved={approved_sha} live={live_head}")
         return 2
     if live_base != approved_base:
         print(
             "REFUSED: base drift invalidated gate; "
-            f"reviewed_base={approved_base} live_base={live_base}. "
-            "Rebase/update and rerun CI/review."
+            f"reviewed_base={approved_base} live_base={live_base}. Rebase/update and rerun CI/review."
         )
         return 2
 
@@ -368,8 +616,8 @@ def main() -> int:
     merge_login = str(merge_identity.get("login"))
     if args.actor and args.actor not in {merge_actor, merge_login}:
         print(
-            f"REFUSED: descriptive --actor {args.actor!r} does not match "
-            f"authenticated principal actor={merge_actor!r} login={merge_login!r}"
+            f"REFUSED: descriptive --actor {args.actor!r} does not match authenticated "
+            f"principal actor={merge_actor!r} login={merge_login!r}"
         )
         return 2
 
@@ -377,22 +625,19 @@ def main() -> int:
         ok, reasons = require_authority(merge_identity, "root")
         if not ok:
             print(
-                "REFUSED: always-human governance change requires platform root "
-                "authority: "
+                "REFUSED: always-human governance change requires platform root authority: "
                 + ",".join(reasons)
             )
             return 2
-    if protected and governance.get("human_merge_required") is True:
+    if protected_paths and governance.get("human_merge_required") is True:
         ok, reasons = require_authority(merge_identity, "protected_merge")
         if not ok:
             print(
-                "REFUSED: protected control-plane change requires protected_merge "
-                "authority: "
+                "REFUSED: protected control-plane change requires protected_merge authority: "
                 + ",".join(reasons)
             )
             return 2
 
-    # State is cache-only; cache blockers may fail closed but never grant authority.
     cached_stream = next(
         (item for item in state.get("active_streams", []) if item.get("pr") == pr),
         None,
@@ -428,7 +673,6 @@ def main() -> int:
     if packet is None:
         print(f"REFUSED: {packet_error}")
         return 2
-
     structural_errors, structural_warnings = validate_structure(packet)
     if structural_errors:
         for error in structural_errors:
@@ -436,7 +680,6 @@ def main() -> int:
         return 2
     for warning in structural_warnings:
         print(f"WARN: assurance structure: {warning}")
-
     if packet.get("status") not in {"merge_ready", "done"}:
         print(
             "REFUSED: assurance packet status must be merge_ready/done, got "
@@ -449,15 +692,9 @@ def main() -> int:
     if packet.get("candidate_sha") != approved_sha:
         print("REFUSED: assurance packet candidate_sha does not equal approved exact head")
         return 2
-
-    packet_authors = {
-        str(value) for value in packet.get("material_authors", []) if value
-    }
+    packet_authors = {str(value) for value in packet.get("material_authors", []) if value}
     if packet_authors != material_authors:
-        print(
-            "REFUSED: assurance packet material-authorship snapshot differs from "
-            "coordination authorship"
-        )
+        print("REFUSED: assurance packet authorship differs from coordination authorship")
         return 2
 
     attestation, assurance_errors = verify_trusted_packet(
@@ -471,7 +708,6 @@ def main() -> int:
             print(f"REFUSED: assurance evidence: {error}")
         print("REFUSED: no current base-trusted PASS assurance attestation")
         return 2
-
     att_review = attestation.get("review") or {}
     att_reviewer, att_review_errors = _verify_reviewer(
         repo,
@@ -492,6 +728,19 @@ def main() -> int:
         return 2
     assurance_digest = _attestation_digest(attestation)
 
+    active, final_errors = _final_coordination_check(
+        repo,
+        pr,
+        approved_sha,
+        approved_base,
+        gate.get("review_id"),
+        material_authors,
+    )
+    if active is None:
+        for error in final_errors:
+            print(f"REFUSED: final authority reconciliation: {error}")
+        return 2
+
     merge = run(
         [
             "gh",
@@ -508,23 +757,19 @@ def main() -> int:
     if merge.returncode != 0:
         print("MERGE FAILED:", merge.stderr.strip() or merge.stdout.strip())
         return 2
-
     payload = json.loads(merge.stdout)
     if not payload.get("merged"):
         print("MERGE REFUSED BY GITHUB:", payload.get("message"))
         return 2
 
     work_unit = work_unit_record.get("id")
+    post_merge_error: Exception | None = None
     try:
         for lease in active:
             append_coordination_event(
                 "ROLE_LEASE_RELEASED",
                 str(lease.get("actor") or "system"),
-                {
-                    "lease_id": lease.get("id"),
-                    "pr": pr,
-                    "reason": "merged",
-                },
+                {"lease_id": lease.get("id"), "pr": pr, "reason": "merged"},
             )
         append_coordination_event(
             "MERGED",
@@ -544,13 +789,11 @@ def main() -> int:
             },
         )
     except Exception as exc:
-        print(f"WARN: merge succeeded but post-merge coordination record failed: {exc}")
+        post_merge_error = exc
 
     now = dt.datetime.now(dt.timezone.utc).isoformat()
     state["active_leases"] = [
-        lease
-        for lease in state.get("active_leases", [])
-        if lease.get("pr") != pr
+        lease for lease in state.get("active_leases", []) if lease.get("pr") != pr
     ]
     state["active_streams"] = [
         item for item in state.get("active_streams", []) if item.get("pr") != pr
@@ -569,10 +812,10 @@ def main() -> int:
         "assurance_attestation_sha256": assurance_digest,
         "assurance_policy_revision": attestation.get("policy_revision"),
         "merged_at": now,
+        "coordination_recovery_required": post_merge_error is not None,
     }
     state["generated_or_reconciled_at"] = now
     _sync_legacy(state)
-
     active_streams = state.get("active_streams", [])
     if len(active_streams) > 1:
         state["company_state"] = "ACTIVE_PARALLEL_IMPLEMENTATION"
@@ -580,12 +823,19 @@ def main() -> int:
         state["company_state"] = "ACTIVE_IMPLEMENTATION"
     else:
         state["company_state"] = "POST_MERGE_RECONCILE"
-
     save_json(CONTROL / "state.json", state)
+
+    if post_merge_error is not None:
+        print(
+            "MERGE SUCCEEDED BUT DURABLE COORDINATION FAILED: "
+            f"{post_merge_error}. Run: python onecompany.py merge --pr {pr} "
+            "--reconcile-merged"
+        )
+        return 3
+
     print(
         f"MERGED PR #{pr}: {payload.get('sha')} (approved head {approved_sha}, "
-        f"base {approved_base}, principal {merge_login}/{merge_actor}, "
-        f"assurance {assurance_digest})"
+        f"base {approved_base}, principal {merge_login}/{merge_actor}, assurance {assurance_digest})"
     )
     return 0
 

@@ -12,6 +12,10 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import platform_identity
 
+BASE = "b" * 40
+TIP = "d" * 40
+HEAD = "c" * 40
+
 
 def contents_payload(value: dict, sha: str = "a" * 40) -> dict:
     encoded = base64.b64encode(json.dumps(value).encode("utf-8")).decode("ascii")
@@ -32,15 +36,31 @@ POLICY = {
 }
 
 
+def protected_path_response(path: str, *, owner_type: str = "User"):
+    if path == "repos/o/r":
+        return {
+            "default_branch": "main",
+            "owner": {"login": "ActualOwner", "type": owner_type},
+        }, None
+    if path == "repos/o/r/branches/main":
+        return {"commit": {"sha": TIP}}, None
+    if path == f"repos/o/r/compare/{BASE}...{TIP}":
+        return {"status": "ahead"}, None
+    return None
+
+
 class PlatformIdentityTests(unittest.TestCase):
     def test_base_policy_is_used_instead_of_candidate_local_metadata(self):
         def fake(path: str):
+            common = protected_path_response(path)
+            if common is not None:
+                return common
             if "/contents/.onecompany/identity.json?ref=" in path:
                 return contents_payload(POLICY), None
             raise AssertionError(path)
 
         with patch.object(platform_identity, "_gh_json", side_effect=fake):
-            policy, provenance, errors = platform_identity.load_identity_policy("o/r", "b" * 40)
+            policy, provenance, errors = platform_identity.load_identity_policy("o/r", BASE)
         self.assertEqual(errors, [])
         self.assertEqual(provenance["source"], "base")
         identity, error = platform_identity.map_platform_login(policy, "Owner")
@@ -50,14 +70,15 @@ class PlatformIdentityTests(unittest.TestCase):
 
     def test_first_identity_bootstrap_is_repository_owner_only_for_privilege(self):
         def fake(path: str):
+            common = protected_path_response(path)
+            if common is not None:
+                return common
             if "/contents/.onecompany/identity.json?ref=" in path:
                 return None, "gh: Not Found (HTTP 404)"
-            if path == "repos/o/r":
-                return {"owner": {"login": "ActualOwner"}}, None
             raise AssertionError(path)
 
         with patch.object(platform_identity, "_gh_json", side_effect=fake):
-            policy, provenance, errors = platform_identity.load_identity_policy("o/r", "b" * 40)
+            policy, provenance, errors = platform_identity.load_identity_policy("o/r", BASE)
         self.assertEqual(errors, [])
         self.assertEqual(provenance["source"], "repository-owner-bootstrap")
         owner, error = platform_identity.map_platform_login(policy, "ActualOwner")
@@ -67,24 +88,40 @@ class PlatformIdentityTests(unittest.TestCase):
         self.assertIsNone(unknown)
         self.assertIn("unknown", unknown_error)
 
+    def test_organization_owner_cannot_be_implicitly_bootstrapped_as_root(self):
+        def fake(path: str):
+            common = protected_path_response(path, owner_type="Organization")
+            if common is not None:
+                return common
+            if "/contents/.onecompany/identity.json?ref=" in path:
+                return None, "gh: Not Found (HTTP 404)"
+            raise AssertionError(path)
+
+        with patch.object(platform_identity, "_gh_json", side_effect=fake):
+            policy, provenance, errors = platform_identity.load_identity_policy("o/r", BASE)
+        self.assertIsNone(policy)
+        self.assertEqual(provenance["source"], "repository-owner-bootstrap")
+        self.assertTrue(any("concrete GitHub user owner" in error for error in errors), errors)
+
     def test_bootstrap_unknown_exact_reviewer_gets_review_only_authority(self):
         def fake(path: str):
             if path.endswith("/pulls/7/reviews/42"):
                 return {
-                    "commit_id": "c" * 40,
+                    "commit_id": HEAD,
                     "state": "APPROVED",
                     "submitted_at": "2026-01-01T00:00:00Z",
                     "user": {"login": "Independent"},
                 }, None
+            common = protected_path_response(path)
+            if common is not None:
+                return common
             if "/contents/.onecompany/identity.json?ref=" in path:
                 return None, "gh: Not Found (HTTP 404)"
-            if path == "repos/o/r":
-                return {"owner": {"login": "ActualOwner"}}, None
             raise AssertionError(path)
 
         with patch.object(platform_identity, "_gh_json", side_effect=fake):
             identity, errors = platform_identity.review_platform_identity(
-                "o/r", 7, 42, "c" * 40, "b" * 40
+                "o/r", 7, 42, HEAD, BASE
             )
         self.assertEqual(errors, [])
         self.assertTrue(identity["bootstrap_review_only"])
@@ -102,17 +139,20 @@ class PlatformIdentityTests(unittest.TestCase):
         def fake(path: str):
             if path.endswith("/pulls/7/reviews/42"):
                 return {
-                    "commit_id": "c" * 40,
+                    "commit_id": HEAD,
                     "state": "APPROVED",
                     "user": {"login": "Independent"},
                 }, None
+            common = protected_path_response(path)
+            if common is not None:
+                return common
             if "/contents/.onecompany/identity.json?ref=" in path:
                 return contents_payload(POLICY), None
             raise AssertionError(path)
 
         with patch.object(platform_identity, "_gh_json", side_effect=fake):
             identity, errors = platform_identity.review_platform_identity(
-                "o/r", 7, 42, "c" * 40, "b" * 40
+                "o/r", 7, 42, HEAD, BASE
             )
         self.assertIsNone(identity)
         self.assertTrue(any("unknown" in error for error in errors), errors)
@@ -121,13 +161,16 @@ class PlatformIdentityTests(unittest.TestCase):
         def fake(path: str):
             if path == "user":
                 return {"login": "evil-worker"}, None
+            common = protected_path_response(path)
+            if common is not None:
+                return common
             if "/contents/.onecompany/identity.json?ref=" in path:
                 return contents_payload(POLICY), None
             raise AssertionError(path)
 
         with patch.object(platform_identity, "_gh_json", side_effect=fake):
             identity, errors = platform_identity.authorize_current_principal(
-                "o/r", "b" * 40, "protected_merge"
+                "o/r", BASE, "protected_merge"
             )
         self.assertIsNone(identity)
         self.assertTrue(any("unknown" in error for error in errors), errors)
@@ -148,18 +191,21 @@ class PlatformIdentityTests(unittest.TestCase):
         def fake(path: str):
             if path.endswith("/pulls/7/reviews/42"):
                 return {
-                    "commit_id": "c" * 40,
+                    "commit_id": HEAD,
                     "state": "APPROVED",
                     "submitted_at": "2026-01-01T00:00:00Z",
                     "user": {"login": "review-bot"},
                 }, None
+            common = protected_path_response(path)
+            if common is not None:
+                return common
             if "/contents/.onecompany/identity.json?ref=" in path:
                 return contents_payload(POLICY), None
             raise AssertionError(path)
 
         with patch.object(platform_identity, "_gh_json", side_effect=fake):
             identity, errors = platform_identity.review_platform_identity(
-                "o/r", 7, 42, "c" * 40, "b" * 40
+                "o/r", 7, 42, HEAD, BASE
             )
         self.assertEqual(errors, [])
         self.assertEqual(identity["actor_id"], "codex")
@@ -178,7 +224,7 @@ class PlatformIdentityTests(unittest.TestCase):
 
         with patch.object(platform_identity, "_gh_json", side_effect=fake):
             identity, errors = platform_identity.review_platform_identity(
-                "o/r", 7, 42, "c" * 40, "b" * 40
+                "o/r", 7, 42, HEAD, BASE
             )
         self.assertIsNone(identity)
         self.assertIn("platform review does not target exact candidate SHA", errors)

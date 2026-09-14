@@ -93,6 +93,7 @@ class MergeAssuranceTests(unittest.TestCase):
             "isDraft": False,
             "headRefOid": HEAD,
             "baseRefOid": BASE,
+            "baseRefName": "main",
         }
 
     def packet(self) -> dict:
@@ -105,7 +106,7 @@ class MergeAssuranceTests(unittest.TestCase):
 
     def common(self, stack: ExitStack, state: dict, run_side_effect=None) -> None:
         config = {
-            "project": {"repository": "owner/repo"},
+            "project": {"repository": "owner/repo", "default_branch": "main"},
             "autonomy": {"level": "L2"},
             "safety": {"emergency_stop": False},
         }
@@ -113,6 +114,8 @@ class MergeAssuranceTests(unittest.TestCase):
             "control_plane": {
                 "fail_closed_if_diff_unavailable": True,
                 "human_merge_required": False,
+                "protected_paths": [],
+                "always_human_paths": [],
             }
         }
         base_context = {
@@ -136,6 +139,7 @@ class MergeAssuranceTests(unittest.TestCase):
             run_side_effect = lambda command, cwd=None: subprocess.CompletedProcess(
                 command, 0, stdout="", stderr=""
             )
+
         stack.enter_context(patch.object(merge, "emergency_stop_active", return_value=False))
         stack.enter_context(patch.object(merge, "command_exists", return_value=True))
         stack.enter_context(patch.object(merge, "run", side_effect=run_side_effect))
@@ -150,15 +154,45 @@ class MergeAssuranceTests(unittest.TestCase):
         stack.enter_context(
             patch.object(merge, "_automation_policy_drift_errors", return_value=[])
         )
-        stack.enter_context(patch.object(merge, "governance_config", return_value=governance))
-        stack.enter_context(patch.object(merge, "changed_files", return_value=(["src/change.py"], None)))
-        stack.enter_context(patch.object(merge, "protected_control_plane_paths", return_value=[]))
-        stack.enter_context(patch.object(merge, "always_human_paths", return_value=[]))
+        stack.enter_context(
+            patch.object(merge, "github_repo_from_remote", return_value="owner/repo")
+        )
+        stack.enter_context(
+            patch.object(
+                merge,
+                "protected_default_branch_context",
+                return_value=(
+                    {"default_branch": "main", "tip": "c" * 40, "trusted_ref": BASE},
+                    [],
+                ),
+            )
+        )
+        stack.enter_context(
+            patch.object(
+                merge,
+                "_platform_authors",
+                return_value=({"implementer-example"}, []),
+            )
+        )
+        stack.enter_context(
+            patch.object(merge, "changed_files", return_value=(["src/change.py"], None))
+        )
         stack.enter_context(patch.object(merge, "ledger_enabled", return_value=False))
         stack.enter_context(patch.object(merge, "scope_errors", return_value=[]))
         stack.enter_context(patch.object(merge, "live_pr", return_value=(self.live(), None)))
-        stack.enter_context(patch.object(merge, "evaluate_required_checks", return_value=(True, [], [])))
-        stack.enter_context(patch.object(merge, "coordination_view", return_value=self.coordination()))
+        stack.enter_context(
+            patch.object(merge, "evaluate_required_checks", return_value=(True, [], []))
+        )
+        stack.enter_context(
+            patch.object(merge, "coordination_view", return_value=self.coordination())
+        )
+        stack.enter_context(
+            patch.object(
+                merge,
+                "_final_coordination_check",
+                return_value=([self.active_lease()], []),
+            )
+        )
         stack.enter_context(
             patch.object(
                 merge,
@@ -270,7 +304,11 @@ class MergeAssuranceTests(unittest.TestCase):
             self.common(stack, state)
             run_mock = merge.run
             stack.enter_context(
-                patch.object(merge, "_load_assurance_packet", return_value=(self.packet(), "packet.json", None))
+                patch.object(
+                    merge,
+                    "_load_assurance_packet",
+                    return_value=(self.packet(), "packet.json", None),
+                )
             )
             stack.enter_context(patch.object(merge, "validate_structure", return_value=([], [])))
             stack.enter_context(
@@ -284,7 +322,15 @@ class MergeAssuranceTests(unittest.TestCase):
                 patch.object(
                     sys,
                     "argv",
-                    ["merge.py", "--actor", "Owner", "--pr", "1", "--assurance-packet", "packet.json"],
+                    [
+                        "merge.py",
+                        "--actor",
+                        "Owner",
+                        "--pr",
+                        "1",
+                        "--assurance-packet",
+                        "packet.json",
+                    ],
                 )
             )
             result = merge.main()
@@ -317,7 +363,11 @@ class MergeAssuranceTests(unittest.TestCase):
             self.common(stack, state, run_side_effect=fake_run)
             run_mock = merge.run
             stack.enter_context(
-                patch.object(merge, "_load_assurance_packet", return_value=(self.packet(), "packet.json", None))
+                patch.object(
+                    merge,
+                    "_load_assurance_packet",
+                    return_value=(self.packet(), "packet.json", None),
+                )
             )
             stack.enter_context(patch.object(merge, "validate_structure", return_value=([], [])))
             stack.enter_context(
@@ -327,7 +377,15 @@ class MergeAssuranceTests(unittest.TestCase):
                 patch.object(
                     sys,
                     "argv",
-                    ["merge.py", "--actor", "Owner", "--pr", "1", "--assurance-packet", "packet.json"],
+                    [
+                        "merge.py",
+                        "--actor",
+                        "Owner",
+                        "--pr",
+                        "1",
+                        "--assurance-packet",
+                        "packet.json",
+                    ],
                 )
             )
             result = merge.main()

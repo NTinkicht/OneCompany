@@ -72,9 +72,6 @@ jobs:
       # actions/checkout v7.0.1 — immutable pin.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          # Pull-request validation must execute the exact candidate head, not the
-          # synthetic merge ref. Full history is required to resolve the reviewed
-          # base and derive changed-line/mutation evidence.
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
       # actions/setup-python v7.0.0 — immutable pin.
@@ -120,7 +117,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
           RECOVERY_BASE_SHA: 17ccea8d5b252553d54de32accb1b4f922fe83ae
-          RECOVERY_V3_BLOB: ddc86dc0c304bf8e5d68a106ea74259dd30fe00b
+          RECOVERY_V3_BLOB: 46b51f3de9ff311bd938113ddd762a4aa833107c
         run: |
           set -euo pipefail
           mkdir -p .onecompany-evidence "$RUNNER_TEMP/onecompany-quality-trusted"

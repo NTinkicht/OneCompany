@@ -40,37 +40,94 @@ V2 = _load_v2()
 
 
 def _coverage_worker(root: Path) -> dict[str, Any]:
-    """Run candidate tests with low-overhead exact line/branch monitoring."""
+    """Run candidate tests with bounded low-overhead line/branch monitoring."""
     monitoring = getattr(sys, "monitoring", None)
     if monitoring is None:
         raise RuntimeError("Python 3.12+ sys.monitoring is required")
 
+    root = root.resolve()
     executed: set[tuple[str, int]] = set()
     observed_edges: set[tuple[tuple[str, int, str], int, int]] = set()
+    observed_by_source: dict[tuple[tuple[str, int, str], int], set[int]] = {}
     events = monitoring.events
     tool_id = monitoring.COVERAGE_ID
 
+    # Hot callbacks must never call Path.resolve() or repeatedly inspect the
+    # filesystem. Build an immutable filename index once, then cache every code
+    # object's classification. The previous v3 attempt resolved paths on every
+    # PY_START/LINE/BRANCH callback and was slower than the tests themselves by
+    # two orders of magnitude.
+    product_index: dict[str, str] = {}
+    for path in V2._product_sources(root):
+        relative = path.relative_to(root).as_posix()
+        absolute = str(path.resolve())
+        product_index[str(path)] = relative
+        product_index[absolute] = relative
+
+    code_cache: dict[Any, tuple[str, int, str] | None] = {}
+    configured: set[Any] = set()
+
+    _executable, static_edges = V2._static_model(root)
+    expected_by_source: dict[tuple[tuple[str, int, str], int], set[int]] = {}
+    for key, source, target in static_edges:
+        expected_by_source.setdefault((key, source), set()).add(target)
+
+    sentinel = object()
+
     def code_key(code):
-        return V2._code_key(code, root)
+        cached = code_cache.get(code, sentinel)
+        if cached is not sentinel:
+            return cached
+        try:
+            filename = str(code.co_filename)
+            relative = product_index.get(filename)
+            if relative is None:
+                candidate = Path(filename)
+                if not candidate.is_absolute():
+                    candidate = root / candidate
+                relative = product_index.get(str(candidate.absolute()))
+            value = (
+                (relative, int(code.co_firstlineno), str(code.co_name))
+                if relative is not None
+                else None
+            )
+        except (AttributeError, OSError, TypeError, ValueError):
+            value = None
+        code_cache[code] = value
+        return value
 
     def py_start(code, _instruction_offset):
-        try:
-            if V2._is_product_source(Path(code.co_filename), root):
-                monitoring.set_local_events(tool_id, code, events.LINE | events.BRANCH)
-        except (AttributeError, OSError, ValueError):
-            return None
-        return None
+        key = code_key(code)
+        if key is not None and code not in configured:
+            monitoring.set_local_events(tool_id, code, events.LINE | events.BRANCH)
+            configured.add(code)
+        # PY_START is a local event even when globally enabled. Python 3.12
+        # permits DISABLE here, so each code-start location is classified once.
+        return monitoring.DISABLE
 
     def line(code, line_number):
         key = code_key(code)
         if key is not None and isinstance(line_number, int) and line_number > 0:
             executed.add((key[0], line_number))
-        return None
+        # Coverage only needs to know whether a line was observed at least once.
+        return monitoring.DISABLE
 
     def branch(code, instruction_offset, destination_offset):
         key = code_key(code)
-        if key is not None:
-            observed_edges.add((key, int(instruction_offset), int(destination_offset)))
+        if key is None:
+            return monitoring.DISABLE
+        source = int(instruction_offset)
+        target = int(destination_offset)
+        observed_edges.add((key, source, target))
+        branch_key = (key, source)
+        seen = observed_by_source.setdefault(branch_key, set())
+        seen.add(target)
+        expected = expected_by_source.get(branch_key)
+        # Do not disable a conditional branch until every statically-known
+        # destination has been observed; otherwise one outcome could hide the
+        # other and inflate branch coverage.
+        if expected and expected.issubset(seen):
+            return monitoring.DISABLE
         return None
 
     suite = V2._discover_suite(root)
@@ -124,7 +181,9 @@ def _coverage_worker(root: Path) -> dict[str, Any]:
             ]
         ),
         "test_output_tail": output.getvalue()[-4000:],
-        "collector": "sys.monitoring-line-branch",
+        "collector": "sys.monitoring-cached-line-branch",
+        "classified_code_objects": len(code_cache),
+        "instrumented_code_objects": len(configured),
     }
 
 
@@ -215,7 +274,9 @@ def _coverage_measurement(root: Path) -> tuple[dict[str, float], dict[str, Any]]
         "covered_branch_edges": len(observed),
         "executed_lines": sorted([list(value) for value in executed]),
         "test_output_tail": str(raw.get("test_output_tail") or "")[-4000:],
-        "collector": str(raw.get("collector") or "sys.monitoring-line-branch"),
+        "collector": str(raw.get("collector") or "sys.monitoring-cached-line-branch"),
+        "classified_code_objects": int(raw.get("classified_code_objects") or 0),
+        "instrumented_code_objects": int(raw.get("instrumented_code_objects") or 0),
     }
     return {"line": round(line_pct, 2), "branch": round(branch_pct, 2)}, details
 

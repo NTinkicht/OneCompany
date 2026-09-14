@@ -120,7 +120,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
           RECOVERY_BASE_SHA: 17ccea8d5b252553d54de32accb1b4f922fe83ae
-          RECOVERY_V3_BLOB: d8cca317f5d12c2fb81225f5c0403d41f6675952
+          RECOVERY_V3_BLOB: ddc86dc0c304bf8e5d68a106ea74259dd30fe00b
         run: |
           set -euo pipefail
           mkdir -p .onecompany-evidence "$RUNNER_TEMP/onecompany-quality-trusted"

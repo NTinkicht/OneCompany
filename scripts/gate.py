@@ -14,12 +14,18 @@ from onecompany_lib import (
     command_exists,
     emergency_stop_active,
     github_repo_from_config,
+    github_repo_from_remote,
     load_json,
     run,
     save_json,
 )
 from planning_lib import by_id
-from platform_identity import require_authority, review_platform_identity
+from platform_identity import (
+    protected_default_branch_context,
+    pull_request_material_author_actor_ids,
+    require_authority,
+    review_platform_identity,
+)
 from required_checks import evaluate_required_checks
 from scope_guard import changed_files, live_pr, scope_errors
 from trusted_assurance import _base_json
@@ -58,7 +64,9 @@ def _work_unit_for_pr(queue: dict, pr: int, active: list[dict]) -> dict | None:
     return by_id(work).get(str(wu_id)) if wu_id else None
 
 
-def _live_context(repo: str, pr: int, reviewed_sha: str) -> tuple[dict | None, str | None]:
+def _live_context(
+    repo: str, pr: int, reviewed_sha: str
+) -> tuple[dict | None, str | None]:
     live, error = live_pr(repo, pr)
     if live is None:
         return None, f"cannot read live PR state: {error}"
@@ -73,7 +81,9 @@ def _live_context(repo: str, pr: int, reviewed_sha: str) -> tuple[dict | None, s
     return live, None
 
 
-def _base_document(repo: str, path: str, base_sha: str) -> tuple[dict | None, str | None]:
+def _base_document(
+    repo: str, path: str, base_sha: str
+) -> tuple[dict | None, str | None]:
     value, _blob, error = _base_json(repo, path, base_sha)
     if value is None:
         return None, error or f"cannot load base-trusted {path}"
@@ -120,7 +130,6 @@ def _pass_preconditions(
     if not evidence:
         errors.append("PASS — MERGE_READY requires at least one durable evidence reference")
 
-    # State is cache-only. It may add a blocker, but it never grants authority.
     if state.get("open_blockers"):
         errors.append("company-wide open blockers remain")
     if state.get("human_decision_required"):
@@ -216,6 +225,43 @@ def _cache_gate(
         state["company_state"] = "REVIEW_BLOCKED"
 
 
+def _reconcile_platform_authors(
+    repo: str,
+    pr: int,
+    candidate_sha: str,
+    base_sha: str,
+    view: dict,
+) -> tuple[dict | None, list[str]]:
+    platform_authors, errors = pull_request_material_author_actor_ids(
+        repo,
+        pr,
+        candidate_sha,
+        base_sha,
+    )
+    if platform_authors is None:
+        return None, errors
+    existing = set(view.get("material_authors", []))
+    missing = sorted(platform_authors - existing)
+    try:
+        for actor in missing:
+            append_coordination_event(
+                "MATERIAL_AUTHOR",
+                actor,
+                {
+                    "pr": pr,
+                    "candidate_sha": candidate_sha,
+                    "source": "github_pr_commit_author",
+                },
+            )
+        refreshed = coordination_view(pr)
+    except Exception as exc:
+        return None, [f"cannot reconcile platform material authors: {exc}"]
+    reconciled = set(refreshed.get("material_authors", []))
+    if not platform_authors.issubset(reconciled):
+        return None, ["platform material authors did not become durable coordination authors"]
+    return refreshed, []
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -243,7 +289,6 @@ def main() -> int:
     parser.add_argument("--summary", default="")
     args = parser.parse_args()
 
-    # External containment is checked before any repository-controlled document.
     if emergency_stop_active({"safety": {"emergency_stop": False}}):
         print("REFUSED: external emergency stop is active; binding gates are frozen")
         return 2
@@ -253,10 +298,16 @@ def main() -> int:
 
     candidate_config = load_json(CONTROL / "config.json")
     state = load_json(CONTROL / "state.json")
-    repo = github_repo_from_config(candidate_config)
+    configured_repo = github_repo_from_config(candidate_config)
+    repo = github_repo_from_remote()
     pr = args.pr
     if not repo:
-        print("REFUSED: config.project.repository must be owner/name")
+        print("REFUSED: cannot derive repository identity from git origin")
+        return 2
+    if configured_repo != repo:
+        print(
+            f"REFUSED: candidate repository identity {configured_repo!r} differs from git origin {repo!r}"
+        )
         return 2
 
     live, live_error = _live_context(repo, pr, args.sha)
@@ -272,8 +323,24 @@ def main() -> int:
             print(f"REFUSED: {error}")
         return 2
     if github_repo_from_config(base["config"]) != repo:
-        print("REFUSED: candidate repository identity differs from base-trusted configuration")
+        print("REFUSED: base-trusted repository identity differs from git origin")
         return 2
+    protected, protected_errors = protected_default_branch_context(
+        repo,
+        base_sha,
+        claimed_branch=live.get("baseRefName"),
+    )
+    if protected is None:
+        for error in protected_errors:
+            print(f"REFUSED: {error}")
+        return 2
+    configured_default = base["config"].get("project", {}).get("default_branch")
+    if configured_default != protected.get("default_branch"):
+        print(
+            "REFUSED: base-trusted configured default branch differs from GitHub protected default branch"
+        )
+        return 2
+
     drift = _automation_policy_drift_errors(base)
     if drift:
         for error in drift:
@@ -300,7 +367,23 @@ def main() -> int:
         print(f"REFUSED: PR #{pr} is not mapped to a base-trusted Work Unit")
         return 2
 
+    view, author_errors = _reconcile_platform_authors(
+        repo,
+        pr,
+        args.sha,
+        base_sha,
+        view,
+    )
+    if view is None:
+        for error in author_errors:
+            print(f"REFUSED: {error}")
+        return 2
+    active = _active_implementation(view, pr)
+    if not active:
+        print("REFUSED: implementation lease expired or changed during author reconciliation")
+        return 2
     material_authors = set(view.get("material_authors", []))
+
     allowed_states = (
         {"APPROVED"}
         if args.verdict == "PASS — MERGE_READY"
@@ -434,7 +517,6 @@ def main() -> int:
         print("REFUSED: newly published gate did not become the current valid gate")
         return 2
 
-    # Cache mirrors coordination truth for UX only.
     _cache_gate(
         state,
         gate,

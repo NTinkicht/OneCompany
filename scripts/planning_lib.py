@@ -277,11 +277,16 @@ def implementation_admission_violations(
 
 
 def dependency_ready(item: dict[str, Any], work_map: dict[str, dict[str, Any]], durable_done: set[str] | None = None) -> tuple[bool, list[str], list[str]]:
+    """Require the authoritative transitive dependency closure to be complete."""
     durable_done = durable_done or set()
+    item_id = str(item.get("id") or "")
+    if item_id and item_id in work_map:
+        required = dependency_closure(work_map, item_id)
+    else:
+        required = {str(dep) for dep in item.get("dependencies", []) if dep}
     missing: list[str] = []
     unsatisfied: list[str] = []
-    for dep in item.get("dependencies", []):
-        dep = str(dep)
+    for dep in sorted(required):
         if dep in durable_done:
             continue
         if dep not in work_map:

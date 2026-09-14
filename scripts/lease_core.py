@@ -270,9 +270,29 @@ def _format_admission_violations(violations: list[dict]) -> str:
     return "; ".join(details)
 
 
-def _durable_dependency_check(candidate: dict, durable_done: set[str]) -> tuple[bool, list[str]]:
-    direct = sorted({str(value) for value in candidate.get("dependencies", []) if value})
-    unsatisfied = sorted(set(direct) - durable_done)
+def _base_emergency_stop_active(context: dict) -> bool:
+    config = context.get("config")
+    if not isinstance(config, dict):
+        return False
+    safety = config.get("safety")
+    return isinstance(safety, dict) and safety.get("emergency_stop") is True
+
+
+def _durable_dependency_check(
+    candidate: dict,
+    work_map: dict[str, dict],
+    durable_done: set[str],
+) -> tuple[bool, list[str]]:
+    candidate_id = str(candidate.get("id") or "")
+    if candidate_id and candidate_id in work_map:
+        required = dependency_closure(work_map, candidate_id)
+    else:
+        snapshot_closure = candidate.get("dependency_closure")
+        if isinstance(snapshot_closure, list):
+            required = {str(value) for value in snapshot_closure if value}
+        else:
+            required = {str(value) for value in candidate.get("dependencies", []) if value}
+    unsatisfied = sorted(required - durable_done)
     return not unsatisfied, unsatisfied
 
 
@@ -314,6 +334,12 @@ def acquire(args: argparse.Namespace) -> int:
             if context is None:
                 print(f"REFUSED: cannot verify base-trusted lease admission: {context_error}")
                 return 2
+            if _base_emergency_stop_active(context):
+                print(
+                    "REFUSED: base-trusted emergency stop is active; "
+                    "no new implementation lease may be acquired"
+                )
+                return 2
             candidate = context["work_item"]
             work_map = context["work_map"]
             planning = context["planning"]
@@ -332,7 +358,11 @@ def acquire(args: argparse.Namespace) -> int:
                     f"{actor_active}/{actor_limit}"
                 )
                 return 2
-            durable_ready, durable_unsatisfied = _durable_dependency_check(candidate, durable_done)
+            durable_ready, durable_unsatisfied = _durable_dependency_check(
+                candidate,
+                work_map,
+                durable_done,
+            )
             if not durable_ready:
                 print(
                     f"REFUSED: work unit {args.wu} lacks durable MERGED dependency evidence: "
@@ -538,6 +568,12 @@ def transfer(args: argparse.Namespace) -> int:
             )
             if context is None:
                 print(f"REFUSED: cannot verify base-trusted failover admission: {context_error}")
+                return 2
+            if _base_emergency_stop_active(context):
+                print(
+                    "REFUSED: base-trusted emergency stop is active; "
+                    "release/contain work instead of transferring implementation"
+                )
                 return 2
             if not context.get("actor_eligible"):
                 print(

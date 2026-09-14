@@ -7,15 +7,16 @@ import json
 import sys
 
 from ledger_lib import derive, list_events, post_event
-from onecompany_lib import CONTROL, github_repo_from_config, load_json
-from platform_identity import authorize_current_principal
+from onecompany_lib import (
+    CONTROL,
+    github_repo_from_config,
+    github_repo_from_remote,
+    load_json,
+)
+from platform_identity import authorize_current_principal, protected_default_branch_tip
 
-# These events have dedicated commands that bind the platform evidence needed to
-# authorize them. The generic ledger publisher must never bypass those checks.
 ROUTED_ONLY = {"GATE", "MERGED"}
 
-# Administrative events may be appended generically only after authority is
-# derived from the authenticated GitHub principal under an explicit trusted ref.
 PRIVILEGED_AUTHORITIES = {
     "INTEGRITY_CONFLICT_RESOLVED": "root",
     "HUMAN_DECISION": "governance_change",
@@ -24,6 +25,19 @@ PRIVILEGED_AUTHORITIES = {
     "BUDGET_CHANGED": "budget_change",
     "GOVERNANCE_CHANGED": "governance_change",
 }
+
+
+def _repository() -> str:
+    config = load_json(CONTROL / "config.json")
+    configured = github_repo_from_config(config)
+    remote = github_repo_from_remote()
+    if not remote:
+        raise ValueError("cannot derive repository identity from git origin")
+    if configured != remote:
+        raise ValueError(
+            f"candidate repository identity {configured!r} differs from git origin {remote!r}"
+        )
+    return remote
 
 
 def main() -> int:
@@ -42,7 +56,10 @@ def main() -> int:
     )
     post.add_argument(
         "--trusted-ref",
-        help="Exact reviewed base/ref defining identity authority for privileged events",
+        help=(
+            "Deprecated assertion only. Privileged authority is always derived from "
+            "the current protected default-branch tip; any different value is refused."
+        ),
     )
     post.add_argument("--payload-json", default="{}")
 
@@ -68,16 +85,21 @@ def main() -> int:
 
         authority = PRIVILEGED_AUTHORITIES.get(event_type)
         if authority:
-            if not args.trusted_ref:
+            repo = _repository()
+            trusted_ref, ref_errors = protected_default_branch_tip(repo)
+            if trusted_ref is None:
                 raise ValueError(
-                    f"privileged event {event_type} requires --trusted-ref for base-trusted identity authorization"
+                    "cannot resolve protected trust root: " + ",".join(ref_errors)
                 )
-            config = load_json(CONTROL / "config.json")
-            repo = github_repo_from_config(config)
-            if not repo:
-                raise ValueError("config.project.repository must be owner/name")
+            if args.trusted_ref and args.trusted_ref != trusted_ref:
+                raise ValueError(
+                    "caller-selected --trusted-ref is not authoritative; privileged "
+                    f"events use protected default-branch tip {trusted_ref}"
+                )
             identity, errors = authorize_current_principal(
-                repo, args.trusted_ref, authority
+                repo,
+                trusted_ref,
+                authority,
             )
             if identity is None:
                 raise ValueError(
@@ -94,6 +116,7 @@ def main() -> int:
                 **payload,
                 "platform_login": login,
                 "identity_policy_provenance": identity.get("policy_provenance"),
+                "protected_trusted_ref": trusted_ref,
             }
         else:
             if not args.actor:

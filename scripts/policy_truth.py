@@ -267,7 +267,7 @@ def validate_claim_history(
     """Reject silent claim deletion and resurrection relative to the exact base."""
     errors: list[str] = []
     current = {_claim_identity(claim): claim for claim in claims}
-    for position, base_claim in enumerate(base_claims):
+    for base_claim in base_claims:
         identity = _claim_identity(base_claim)
         candidate = current.get(identity)
         if candidate is None:
@@ -300,8 +300,17 @@ def load_claims(control: Path | None = None) -> list[dict[str, Any]]:
 
 
 def pull_request_base_sha() -> str | None:
-    """Return the exact GitHub PR base SHA when running in pull_request CI."""
+    """Return the exact base SHA only for the actual GitHub PR workspace.
+
+    Bootstrap/onboarding smoke tests execute a copied CompanyOS inside temporary
+    repositories while inheriting the parent workflow environment. Those targets
+    must validate their current policy truth but cannot compare against the
+    parent repository's commit history.
+    """
     if os.environ.get("GITHUB_EVENT_NAME") != "pull_request":
+        return None
+    workspace = os.environ.get("GITHUB_WORKSPACE")
+    if workspace and ROOT.resolve() != Path(workspace).resolve():
         return None
     event_path = os.environ.get("GITHUB_EVENT_PATH")
     if not event_path:

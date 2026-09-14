@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - '.onecompany/**'
+      - '.opencodereview/**'
       - 'agents/**'
       - 'company/**'
       - 'patterns/**'
@@ -33,6 +34,7 @@ on:
     branches: [main]
     paths:
       - '.onecompany/**'
+      - '.opencodereview/**'
       - 'agents/**'
       - 'company/**'
       - 'patterns/**'
@@ -100,31 +102,60 @@ jobs:
       - name: Compile Python helpers
         run: python -m compileall -q scripts .onecompany/selftest onecompany.py
 
-      # The candidate may nominate artifact IDs later, but it may not choose the
-      # program that measures itself. On PRs, execute quality_evidence.py exactly
-      # as stored in the reviewed base commit. If the base predates this producer
-      # (the one-time 0.4 bootstrap), skip rather than falling back to candidate code.
+      # Normal post-bootstrap rule: both the aggregation core (v2) and the
+      # low-overhead runner (v3) are copied from the exact reviewed base. A
+      # candidate cannot select or modify the program that measures itself.
+      #
+      # One tightly bounded recovery exists for the 0.4 -> 0.5 transition:
+      # protected main at 17ccea8... contains trusted v2, but v2's per-opcode
+      # coverage worker deterministically exceeds its 180s CI timeout. For that
+      # exact base only, and only for the reviewed v3 blob below, the candidate
+      # v3 runner may execute with the base-trusted v2 core. This recovery must
+      # receive explicit human exact-head verification and independent review.
+      # Once merged, every later base contains v3 and this branch is unreachable.
       - name: Produce base-trusted exact-head quality evidence
         id: trusted_quality
         if: github.event_name == 'pull_request'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+          RECOVERY_BASE_SHA: 17ccea8d5b252553d54de32accb1b4f922fe83ae
+          RECOVERY_V3_BLOB: d8cca317f5d12c2fb81225f5c0403d41f6675952
         run: |
-          mkdir -p .onecompany-evidence
-          if git cat-file -e "$BASE_SHA:scripts/quality_evidence.py" 2>/dev/null; then
-            git show "$BASE_SHA:scripts/quality_evidence.py" > "$RUNNER_TEMP/onecompany-quality-evidence.py"
-            python "$RUNNER_TEMP/onecompany-quality-evidence.py" \
-              --repo-root "$GITHUB_WORKSPACE" \
-              --candidate-sha "$CANDIDATE_SHA" \
-              --base-sha "$BASE_SHA" \
-              --output .onecompany-evidence/quality.json \
-              --max-mutants 30
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "Trusted base does not yet contain scripts/quality_evidence.py; bootstrap artifact generation skipped."
-            echo "ready=false" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          mkdir -p .onecompany-evidence "$RUNNER_TEMP/onecompany-quality-trusted"
+          TRUSTED_DIR="$RUNNER_TEMP/onecompany-quality-trusted"
+
+          if ! git cat-file -e "$BASE_SHA:scripts/quality_evidence.py" 2>/dev/null; then
+            echo "::error::Reviewed base is missing scripts/quality_evidence.py; post-bootstrap evidence cannot be produced."
+            exit 2
           fi
+          git show "$BASE_SHA:scripts/quality_evidence.py" > "$TRUSTED_DIR/quality_evidence_v2.py"
+
+          if git cat-file -e "$BASE_SHA:scripts/quality_evidence_v3.py" 2>/dev/null; then
+            git show "$BASE_SHA:scripts/quality_evidence_v3.py" > "$TRUSTED_DIR/quality_evidence_v3.py"
+            echo "evidence_mode=base-trusted-v3" >> "$GITHUB_OUTPUT"
+          elif [ "$BASE_SHA" = "$RECOVERY_BASE_SHA" ]; then
+            CANDIDATE_V3_BLOB=$(git rev-parse "$CANDIDATE_SHA:scripts/quality_evidence_v3.py" 2>/dev/null || true)
+            if [ "$CANDIDATE_V3_BLOB" != "$RECOVERY_V3_BLOB" ]; then
+              echo "::error::One-time quality-evidence recovery requires reviewed v3 blob $RECOVERY_V3_BLOB; got ${CANDIDATE_V3_BLOB:-missing}."
+              exit 2
+            fi
+            git show "$CANDIDATE_SHA:scripts/quality_evidence_v3.py" > "$TRUSTED_DIR/quality_evidence_v3.py"
+            echo "::warning::Using one-time base-SHA-bound v2->v3 quality-evidence recovery. Human exact-head verification is mandatory before promotion."
+            echo "evidence_mode=one-time-v3-recovery" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Reviewed base is missing scripts/quality_evidence_v3.py; candidate-code fallback is forbidden."
+            exit 2
+          fi
+
+          python "$TRUSTED_DIR/quality_evidence_v3.py" \
+            --repo-root "$GITHUB_WORKSPACE" \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --base-sha "$BASE_SHA" \
+            --output .onecompany-evidence/quality.json \
+            --max-mutants 30
+          echo "ready=true" >> "$GITHUB_OUTPUT"
 
       # actions/upload-artifact v7.0.1 — immutable pin.
       - name: Upload trusted quality evidence

@@ -79,7 +79,34 @@ def trusted_context(dependencies=None) -> dict:
     }
 
 
+def merged_event(index: int, pr: int, work_unit: str, *, base: str, head: str, merge: str) -> dict:
+    return event(
+        index,
+        "MERGED",
+        "human-owner",
+        {
+            "pr": pr,
+            "work_unit": work_unit,
+            "approved_base": base,
+            "approved_head": head,
+            "merge_sha": merge,
+        },
+    )
+
+
+def merged_pr_doc(*, base: str, head: str, merge: str) -> dict:
+    return {
+        "merged_at": "2026-01-02T00:00:00Z",
+        "merge_commit_sha": merge,
+        "base": {"ref": "main", "sha": base},
+        "head": {"sha": head},
+    }
+
+
 class LedgerPlatformProvenanceTests(unittest.TestCase):
+    def tearDown(self):
+        ledger_lib.clear_verified_merge_cache()
+
     def test_stale_default_branch_ancestor_cannot_replace_exact_pr_base(self):
         pr_doc = {"base": {"ref": "main", "sha": BASE}}
         with (
@@ -265,6 +292,174 @@ class LedgerPlatformProvenanceTests(unittest.TestCase):
             second = ledger_lib._trusted_policy_snapshot("owner/repo", BASE, cache)
         self.assertIs(first, second)
         self.assertEqual(reads.call_count, len(ledger_lib.TRUSTED_POLICY_PATHS))
+
+    def test_successive_derive_replays_do_not_reverify_unchanged_merged_history(self):
+        base1, head1, merge1 = "1" * 40, "2" * 40, "3" * 40
+        base2, head2, merge2 = "4" * 40, "5" * 40, "6" * 40
+        events = [
+            merged_event(1, 11, "WU-11", base=base1, head=head1, merge=merge1),
+            merged_event(2, 12, "WU-12", base=base2, head=head2, merge=merge2),
+        ]
+        pr_docs = {
+            11: merged_pr_doc(base=base1, head=head1, merge=merge1),
+            12: merged_pr_doc(base=base2, head=head2, merge=merge2),
+        }
+        queues = {
+            base1: {"work_units": [{"id": "WU-11", "pr": 11}]},
+            base2: {"work_units": [{"id": "WU-12", "pr": 12}]},
+        }
+
+        def read_pr(_repo, pr, _cache):
+            return pr_docs[pr]
+
+        def read_json(_repo, _path, ref, _cache):
+            return queues[ref], f"queue-{ref[:4]}"
+
+        ledger_lib.clear_verified_merge_cache()
+        with (
+            patch.object(ledger_lib, "_repository", return_value="owner/repo"),
+            patch.object(ledger_lib, "_pull_request", side_effect=read_pr) as pulls,
+            patch.object(ledger_lib, "_default_branch_tip", return_value=("main", "f" * 40)),
+            patch.object(ledger_lib, "_assert_trusted_default_branch_history"),
+            patch.object(ledger_lib, "_trusted_json_at_ref", side_effect=read_json) as reads,
+        ):
+            first = ledger_lib.derive(
+                events,
+                enforce_actor_policy=False,
+                verify_admission_provenance=True,
+            )
+            first_pull_count = pulls.call_count
+            first_read_count = reads.call_count
+            second = ledger_lib.derive(
+                events,
+                enforce_actor_policy=False,
+                verify_admission_provenance=True,
+            )
+        self.assertEqual(first["verified_merged_work_units"], ["WU-11", "WU-12"])
+        self.assertEqual(second["verified_merged_work_units"], ["WU-11", "WU-12"])
+        self.assertEqual(first_pull_count, 2)
+        self.assertEqual(first_read_count, 2)
+        self.assertEqual(pulls.call_count, first_pull_count)
+        self.assertEqual(reads.call_count, first_read_count)
+
+    def test_new_merge_triggers_only_new_verification_after_cached_replay(self):
+        base1, head1, merge1 = "1" * 40, "2" * 40, "3" * 40
+        base2, head2, merge2 = "4" * 40, "5" * 40, "6" * 40
+        first_events = [
+            merged_event(1, 11, "WU-11", base=base1, head=head1, merge=merge1),
+        ]
+        second_events = [
+            *first_events,
+            merged_event(2, 12, "WU-12", base=base2, head=head2, merge=merge2),
+        ]
+        pr_docs = {
+            11: merged_pr_doc(base=base1, head=head1, merge=merge1),
+            12: merged_pr_doc(base=base2, head=head2, merge=merge2),
+        }
+        queues = {
+            base1: {"work_units": [{"id": "WU-11", "pr": 11}]},
+            base2: {"work_units": [{"id": "WU-12", "pr": 12}]},
+        }
+
+        ledger_lib.clear_verified_merge_cache()
+        with (
+            patch.object(ledger_lib, "_repository", return_value="owner/repo"),
+            patch.object(ledger_lib, "_pull_request", side_effect=lambda _r, p, _c: pr_docs[p]) as pulls,
+            patch.object(ledger_lib, "_default_branch_tip", return_value=("main", "f" * 40)),
+            patch.object(ledger_lib, "_assert_trusted_default_branch_history"),
+            patch.object(
+                ledger_lib,
+                "_trusted_json_at_ref",
+                side_effect=lambda _r, _p, ref, _c: (queues[ref], f"queue-{ref[:4]}"),
+            ) as reads,
+        ):
+            ledger_lib.derive(
+                first_events,
+                enforce_actor_policy=False,
+                verify_admission_provenance=True,
+            )
+            self.assertEqual(pulls.call_count, 1)
+            self.assertEqual(reads.call_count, 1)
+            second = ledger_lib.derive(
+                second_events,
+                enforce_actor_policy=False,
+                verify_admission_provenance=True,
+            )
+        self.assertEqual(second["verified_merged_work_units"], ["WU-11", "WU-12"])
+        self.assertEqual(pulls.call_count, 2)
+        self.assertEqual(reads.call_count, 2)
+
+    def test_platform_outage_never_caches_unverified_merge_as_authority(self):
+        base, head, merge = "1" * 40, "2" * 40, "3" * 40
+        events = [merged_event(1, 11, "WU-11", base=base, head=head, merge=merge)]
+        ledger_lib.clear_verified_merge_cache()
+        with (
+            patch.object(ledger_lib, "_repository", return_value="owner/repo"),
+            patch.object(ledger_lib, "_pull_request", side_effect=RuntimeError("platform outage")) as pulls,
+        ):
+            first = ledger_lib.derive(
+                events,
+                enforce_actor_policy=False,
+                verify_admission_provenance=True,
+            )
+            second = ledger_lib.derive(
+                events,
+                enforce_actor_policy=False,
+                verify_admission_provenance=True,
+            )
+        self.assertEqual(first["verified_merged_work_units"], [])
+        self.assertEqual(second["verified_merged_work_units"], [])
+        self.assertEqual(pulls.call_count, 2)
+        self.assertTrue(
+            all(
+                item["reason"] == "invalid_merged_evidence"
+                for item in second["integrity_conflicts"]
+            )
+        )
+
+    def test_verified_merge_cache_isolated_by_repo_pr_and_merge_sha(self):
+        base, head, merge = "1" * 40, "2" * 40, "3" * 40
+        wrong_merge = "4" * 40
+        first_event = merged_event(1, 11, "WU-11", base=base, head=head, merge=merge)
+        other_pr_event = merged_event(2, 12, "WU-12", base=base, head=head, merge=merge)
+        wrong_merge_event = merged_event(3, 11, "WU-11", base=base, head=head, merge=wrong_merge)
+        docs = {
+            11: merged_pr_doc(base=base, head=head, merge=merge),
+            12: merged_pr_doc(base=base, head=head, merge=merge),
+        }
+        queue = {"work_units": [{"id": "WU-11", "pr": 11}, {"id": "WU-12", "pr": 12}]}
+
+        ledger_lib.clear_verified_merge_cache()
+        with (
+            patch.object(ledger_lib, "_repository", return_value="owner/repo") as repository,
+            patch.object(ledger_lib, "_pull_request", side_effect=lambda _r, p, _c: docs[p]) as pulls,
+            patch.object(ledger_lib, "_default_branch_tip", return_value=("main", "f" * 40)),
+            patch.object(ledger_lib, "_assert_trusted_default_branch_history"),
+            patch.object(ledger_lib, "_trusted_json_at_ref", return_value=(queue, "queue-blob")),
+        ):
+            context, error = ledger_lib._verify_merged_event(first_event, {})
+            self.assertIsNone(error)
+            self.assertEqual(context["pr"], 11)
+            cached_context, cached_error = ledger_lib._verify_merged_event(first_event, {})
+            self.assertIsNone(cached_error)
+            self.assertEqual(cached_context["pr"], 11)
+            self.assertEqual(pulls.call_count, 1)
+
+            other_pr_context, other_pr_error = ledger_lib._verify_merged_event(other_pr_event, {})
+            self.assertIsNone(other_pr_error)
+            self.assertEqual(other_pr_context["pr"], 12)
+            self.assertEqual(pulls.call_count, 2)
+
+            wrong_context, wrong_error = ledger_lib._verify_merged_event(wrong_merge_event, {})
+            self.assertIsNone(wrong_context)
+            self.assertIn("does not match GitHub PR #11", wrong_error or "")
+            self.assertEqual(pulls.call_count, 3)
+
+            repository.return_value = "other/repo"
+            repo_context, repo_error = ledger_lib._verify_merged_event(first_event, {})
+            self.assertIsNone(repo_error)
+            self.assertEqual(repo_context["pr"], 11)
+            self.assertEqual(pulls.call_count, 4)
 
 
 if __name__ == "__main__":

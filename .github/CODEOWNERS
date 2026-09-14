@@ -1,14 +1,16 @@
 # CompanyOS trusted control-plane ownership.
 # GitHub branch/ruleset protection must require Code Owner review for these paths.
-/.onecompany/ @NTinkicht
-/scripts/ @NTinkicht
-/company/ @NTinkicht
-/agents/ @NTinkicht
-/patterns/ @NTinkicht
-/overlays/ @NTinkicht
-/.github/ @NTinkicht
-/onecompany.py @NTinkicht
-/Makefile @NTinkicht
-/AGENTS.md @NTinkicht
-/CLAUDE.md @NTinkicht
-/GEMINI.md @NTinkicht
+# Keep at least two independent human owners so the author/last pusher cannot deadlock promotion.
+/.onecompany/ @NTinkicht @kaporal159
+/.opencodereview/ @NTinkicht @kaporal159
+/scripts/ @NTinkicht @kaporal159
+/company/ @NTinkicht @kaporal159
+/agents/ @NTinkicht @kaporal159
+/patterns/ @NTinkicht @kaporal159
+/overlays/ @NTinkicht @kaporal159
+/.github/ @NTinkicht @kaporal159
+/onecompany.py @NTinkicht @kaporal159
+/Makefile @NTinkicht @kaporal159
+/AGENTS.md @NTinkicht @kaporal159
+/CLAUDE.md @NTinkicht @kaporal159
+/GEMINI.md @NTinkicht @kaporal159

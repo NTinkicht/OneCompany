@@ -1,0 +1,44 @@
+{
+  "include": [
+    "scripts/**/*.py",
+    ".onecompany/**/*.json",
+    ".onecompany/selftest/**/*.py",
+    ".github/workflows/**/*.{yml,yaml}",
+    ".github/CODEOWNERS",
+    "agents/**/*.md",
+    "company/**/*.md",
+    "AGENTS.md",
+    "CLAUDE.md",
+    "GEMINI.md"
+  ],
+  "exclude": [
+    "**/__pycache__/**",
+    "**/*.pyc"
+  ],
+  "rules": [
+    {
+      "path": "scripts/{gate,merge,ledger,ledger_lib,lease_core,lease_lifecycle,platform_identity,required_checks,quality_evidence,policy_truth,github_audit,github_controls}.py",
+      "rule": "Adversarially review this trusted-kernel file. Treat candidate-controlled identity, policy, cache state, PASS text, workflow metadata, and caller-supplied refs as untrusted unless independently bound to live GitHub/platform evidence. Look specifically for privilege escalation, confused-deputy paths, stale review/authorship, head/base TOCTOU, fail-open behavior, replay, mutable trust roots, cache granting authority, lease resurrection, transitive-dependency loss, evidence provenance gaps, and ways to bypass zero-additional-spend policy. Preserve exact head+base binding, material-author independence, trusted-base governance, progress-only lease renewal, and fail-closed behavior. Report concrete exploit paths and missing regression tests, not style nits."
+    },
+    {
+      "path": ".github/workflows/**/*.{yml,yaml}",
+      "rule": "Review this workflow as part of the trusted execution surface. Reject floating action refs, pull_request_target, broad write permissions, execution of untrusted PR code with secrets, shell injection from PR-controlled values, candidate self-attestation, wrong-SHA checks, and any path that can manufacture merge-grade evidence. External actions must be pinned to immutable commit SHAs. Required evidence must bind the exact PR head and reviewed base. Advisory AI review must never satisfy the independent human approval gate."
+    },
+    {
+      "path": ".github/CODEOWNERS",
+      "rule": "Verify protected CompanyOS surfaces have at least two independent human Code Owners with repository access, so the author/last pusher can be approved by another eligible human. Do not accept bots or AI reviewers as substitutes for the human Code Owner gate. Check for uncovered trusted paths or ownership patterns that could create a promotion deadlock or bypass."
+    },
+    {
+      "path": ".onecompany/**/*.json",
+      "rule": "Review machine policy/configuration for truthfulness and trust boundaries. ENFORCED policy must have a real mechanical consumer and regression evidence; GUIDANCE must not grant authority. Candidate policy must not weaken the rules used to approve itself. Check identity/root mappings, dependency closure, immutable planning snapshots, budget/zero-spend constraints, required-check manifests, evidence bindings, lease lifecycle policy, and removed/deprecated keys for silent enforcement loss."
+    },
+    {
+      "path": ".onecompany/selftest/**/*.py",
+      "rule": "Review tests as adversarial security/liveness regressions, not merely happy-path coverage. Look for mocks that accidentally bypass the production trust boundary, missing exact-head/base assertions, absent negative tests for spoofed identity/stale evidence/lease expiry/transitive dependencies, and tests that can pass without exercising the real production path."
+    },
+    {
+      "path": "{AGENTS.md,CLAUDE.md,GEMINI.md,agents/**/*.md,company/**/*.md}",
+      "rule": "Review governance/instructions for contradictions with mechanically enforced behavior. Flag text that claims guarantees not backed by code, wording that could authorize candidate self-approval, any weakening of exact-head/base or independent-review semantics, and any instruction that permits paid fallback or treats heartbeat/textual PASS/cache state as authority."
+    }
+  ]
+}

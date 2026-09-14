@@ -37,6 +37,11 @@ def _load_v2():
 
 
 V2 = _load_v2()
+# The collector is measurement infrastructure, not product code. v2 already
+# excludes quality_evidence.py itself; extend that trusted exclusion set to the
+# v3 runner so changed-line and mutation metrics cannot be polluted by the
+# instrument that produces them.
+V2.EXCLUDED_SOURCE_NAMES.add("quality_evidence_v3.py")
 
 
 def _coverage_worker(root: Path) -> dict[str, Any]:
@@ -52,11 +57,6 @@ def _coverage_worker(root: Path) -> dict[str, Any]:
     events = monitoring.events
     tool_id = monitoring.COVERAGE_ID
 
-    # Hot callbacks must never call Path.resolve() or repeatedly inspect the
-    # filesystem. Build an immutable filename index once, then cache every code
-    # object's classification. The previous v3 attempt resolved paths on every
-    # PY_START/LINE/BRANCH callback and was slower than the tests themselves by
-    # two orders of magnitude.
     product_index: dict[str, str] = {}
     for path in V2._product_sources(root):
         relative = path.relative_to(root).as_posix()
@@ -101,15 +101,12 @@ def _coverage_worker(root: Path) -> dict[str, Any]:
         if key is not None and code not in configured:
             monitoring.set_local_events(tool_id, code, events.LINE | events.BRANCH)
             configured.add(code)
-        # PY_START is a local event even when globally enabled. Python 3.12
-        # permits DISABLE here, so each code-start location is classified once.
         return monitoring.DISABLE
 
     def line(code, line_number):
         key = code_key(code)
         if key is not None and isinstance(line_number, int) and line_number > 0:
             executed.add((key[0], line_number))
-        # Coverage only needs to know whether a line was observed at least once.
         return monitoring.DISABLE
 
     def branch(code, instruction_offset, destination_offset):
@@ -123,9 +120,6 @@ def _coverage_worker(root: Path) -> dict[str, Any]:
         seen = observed_by_source.setdefault(branch_key, set())
         seen.add(target)
         expected = expected_by_source.get(branch_key)
-        # Do not disable a conditional branch until every statically-known
-        # destination has been observed; otherwise one outcome could hide the
-        # other and inflate branch coverage.
         if expected and expected.issubset(seen):
             return monitoring.DISABLE
         return None

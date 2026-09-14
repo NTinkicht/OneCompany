@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OneCompany Policy Truth Claims",
+  "type": "object",
+  "required": ["$schema", "schema_version", "claims"],
+  "properties": {
+    "$schema": {"const": "./schemas/policy-claims.schema.json"},
+    "schema_version": {"const": "1.0"},
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["file", "path", "classification"],
+        "properties": {
+          "file": {"type": "string", "minLength": 1},
+          "path": {"type": "string", "pattern": "^/"},
+          "classification": {"enum": ["ENFORCED", "GUIDANCE", "REMOVED"]},
+          "owner": {"type": "string", "minLength": 1},
+          "tests": {
+            "type": "array",
+            "items": {"type": "string", "minLength": 1},
+            "uniqueItems": true
+          },
+          "compatibility_note": {"type": "string", "minLength": 1}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

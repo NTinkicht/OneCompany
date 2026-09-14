@@ -1,145 +1,533 @@
 #!/usr/bin/env python3
-"""Record a binding exact-head, base-aware review gate for one PR/Work Unit stream."""
+"""Record an exact-head/base review gate from platform identity and coordination truth."""
 from __future__ import annotations
 
 import argparse
 import datetime as dt
 import json
 import sys
+from typing import Any
 
-from ledger_lib import derive, ledger_enabled, list_events, post_event
-from onecompany_lib import CONTROL, budget_allows, command_exists, emergency_stop_active, github_repo_from_config, load_json, run, save_json
+from lease_lifecycle import append_coordination_event, coordination_view
+from onecompany_lib import (
+    CONTROL,
+    command_exists,
+    emergency_stop_active,
+    github_repo_from_config,
+    github_repo_from_remote,
+    load_json,
+    run,
+    save_json,
+)
 from planning_lib import by_id
+from platform_identity import (
+    protected_default_branch_context,
+    pull_request_material_author_actor_ids,
+    require_authority,
+    review_platform_identity,
+)
+from required_checks import evaluate_required_checks
 from scope_guard import changed_files, live_pr, scope_errors
+from trusted_assurance import _base_json
 
-VERDICTS = ["PASS — MERGE_READY", "CHANGES_REQUIRED", "BLOCKED — CI_RED", "BLOCKED — HUMAN_DECISION", "BLOCKED — CAPACITY"]
-
-
-def reviewer_eligible(actor_id: str, material_authors: set[str]) -> tuple[bool, list[str]]:
-    actors = load_json(CONTROL / "actors.json"); readiness_doc = load_json(CONTROL / "readiness.json"); budget = load_json(CONTROL / "budget.json")
-    actor = next((item for item in actors.get("actors", []) if item.get("id") == actor_id), None)
-    ready = next((item for item in readiness_doc.get("actors", []) if item.get("actor_id") == actor_id), None)
-    reasons: list[str] = []
-    if actor is None: return False, ["unknown_actor"]
-    if actor_id in material_authors: reasons.append("material_author_conflict")
-    if not actor.get("enabled"): reasons.append("disabled")
-    if not actor.get("configured"): reasons.append("not_configured")
-    if "code_review" not in actor.get("capabilities", []): reasons.append("code_review_not_declared")
-    if actor.get("may_independently_gate_own_material_authorship") is True: reasons.append("self_gate_policy_conflict")
-    if not budget_allows(actor.get("cost_class", "UNKNOWN_COST"), budget): reasons.append("forbidden_by_budget")
-    if ready is None: reasons.append("missing_readiness")
-    else:
-        if ready.get("setup_state") not in {"ready", "degraded"}: reasons.append(f"setup_state:{ready.get('setup_state')}")
-        if "code_review" not in ready.get("verified_capabilities", []): reasons.append("code_review_not_verified")
-        if "code_review" in ready.get("temporarily_unavailable_capabilities", []): reasons.append("code_review_temporarily_unavailable")
-        access = ready.get("repository_access", {})
-        if not access.get("read"): reasons.append("repository_read_not_verified")
-        if not access.get("review"): reasons.append("review_publish_not_verified")
-    return not reasons, reasons
+VERDICTS = [
+    "PASS — MERGE_READY",
+    "CHANGES_REQUIRED",
+    "BLOCKED — CI_RED",
+    "BLOCKED — HUMAN_DECISION",
+    "BLOCKED — CAPACITY",
+]
+NON_PASS_REVIEW_STATES = {"APPROVED", "CHANGES_REQUESTED", "COMMENTED"}
+AUTOMATION_FROZEN_POLICY_FILES = {
+    "config": ".onecompany/config.json",
+    "governance": ".onecompany/governance.json",
+    "ledger": ".onecompany/ledger.json",
+}
+BASE_QUEUE_PATH = ".onecompany/queue.json"
 
 
-def _stream_for_pr(state: dict, pr: int) -> dict | None:
-    return next((stream for stream in state.get("active_streams", []) if stream.get("pr") == pr), None)
+def _active_implementation(view: dict, pr: int) -> list[dict]:
+    return [
+        lease
+        for lease in view.get("active_leases", [])
+        if lease.get("role") == "implementation" and lease.get("pr") == pr
+    ]
 
 
-def _work_unit_for_pr(queue: dict, state: dict, pr: int) -> dict | None:
+def _work_unit_for_pr(queue: dict, pr: int, active: list[dict]) -> dict | None:
     work = queue.get("work_units", [])
     direct = next((item for item in work if item.get("pr") == pr), None)
-    if direct is not None: return direct
-    stream = _stream_for_pr(state, pr)
-    wu_id = (stream or {}).get("work_unit") or state.get("current_work_unit")
+    if direct is not None:
+        return direct
+    lease = next((item for item in active if item.get("work_unit")), None)
+    wu_id = (lease or {}).get("work_unit")
     return by_id(work).get(str(wu_id)) if wu_id else None
 
 
-def _default_pr(state: dict) -> int | None:
-    streams = [s for s in state.get("active_streams", []) if isinstance(s.get("pr"), int)]
-    if len(streams) == 1: return streams[0].get("pr")
-    return state.get("current_pr") if len(streams) <= 1 else None
+def _live_context(
+    repo: str, pr: int, reviewed_sha: str
+) -> tuple[dict | None, str | None]:
+    live, error = live_pr(repo, pr)
+    if live is None:
+        return None, f"cannot read live PR state: {error}"
+    live_head = live.get("headRefOid")
+    base_sha = live.get("baseRefOid")
+    if live.get("state") != "OPEN" or live.get("isDraft"):
+        return None, "binding gate requires an open non-draft PR"
+    if live_head != reviewed_sha:
+        return None, f"exact-head mismatch; live={live_head} reviewed={reviewed_sha}"
+    if not isinstance(base_sha, str) or not base_sha:
+        return None, "live PR base SHA is unavailable"
+    return live, None
+
+
+def _base_document(
+    repo: str, path: str, base_sha: str
+) -> tuple[dict | None, str | None]:
+    value, _blob, error = _base_json(repo, path, base_sha)
+    if value is None:
+        return None, error or f"cannot load base-trusted {path}"
+    return value, None
+
+
+def _base_control_context(
+    repo: str, base_sha: str
+) -> tuple[dict[str, dict[str, Any]] | None, list[str]]:
+    documents: dict[str, dict[str, Any]] = {}
+    errors: list[str] = []
+    for key, path in {**AUTOMATION_FROZEN_POLICY_FILES, "queue": BASE_QUEUE_PATH}.items():
+        value, error = _base_document(repo, path, base_sha)
+        if value is None:
+            errors.append(error or f"cannot load {path}")
+        else:
+            documents[key] = value
+    return (documents if not errors else None), errors
+
+
+def _automation_policy_drift_errors(base: dict[str, dict[str, Any]]) -> list[str]:
+    errors: list[str] = []
+    for key, path in AUTOMATION_FROZEN_POLICY_FILES.items():
+        candidate = load_json(CONTROL / path.rsplit("/", 1)[-1])
+        if candidate != base[key]:
+            errors.append(
+                f"candidate changes {path}; binding automation must use the protected "
+                "human policy-change route before a later PR can consume the new policy"
+            )
+    return errors
+
+
+def _pass_preconditions(
+    repo: str,
+    candidate_sha: str,
+    base_sha: str,
+    evidence: list[str],
+    state: dict,
+    cached_stream: dict | None,
+    scope_problems: list[str],
+) -> tuple[list[str], list[dict]]:
+    errors: list[str] = []
+    required_check_evidence: list[dict] = []
+    if not evidence:
+        errors.append("PASS — MERGE_READY requires at least one durable evidence reference")
+
+    if state.get("open_blockers"):
+        errors.append("company-wide open blockers remain")
+    if state.get("human_decision_required"):
+        errors.append("company-wide human decision remains outstanding")
+    if cached_stream and cached_stream.get("open_blockers"):
+        errors.append("cached stream blockers remain")
+    if cached_stream and cached_stream.get("human_decision_required"):
+        errors.append("cached stream human decision remains outstanding")
+
+    errors.extend(scope_problems)
+    checks_ok, check_reasons, required_check_evidence = evaluate_required_checks(
+        repo,
+        candidate_sha,
+        trusted_ref=base_sha,
+    )
+    if not checks_ok:
+        errors.extend(check_reasons)
+    return errors, required_check_evidence
+
+
+def _cache_gate(
+    state: dict,
+    gate: dict,
+    work_unit: dict,
+    live_head: str,
+    base_sha: str,
+    material_authors: set[str],
+) -> None:
+    pr = gate["pr"]
+    matched = False
+    for item in state.setdefault("active_streams", []):
+        if item.get("pr") != pr:
+            continue
+        item.setdefault("open_blockers", [])
+        item.setdefault("human_decision_required", False)
+        item.update(
+            {
+                "work_unit": work_unit.get("id"),
+                "head": live_head,
+                "base_sha": base_sha,
+                "material_authors": sorted(material_authors),
+                "gate": gate,
+                "status": (
+                    "MERGE_READY"
+                    if gate["verdict"] == "PASS — MERGE_READY"
+                    else "REVIEW_BLOCKED"
+                ),
+            }
+        )
+        matched = True
+
+    if not matched:
+        state.setdefault("active_streams", []).append(
+            {
+                "work_unit": work_unit.get("id"),
+                "lease_id": "cache-only",
+                "actor": None,
+                "branch": work_unit.get("branch"),
+                "pr": pr,
+                "head": live_head,
+                "base_sha": base_sha,
+                "material_authors": sorted(material_authors),
+                "gate": gate,
+                "status": (
+                    "MERGE_READY"
+                    if gate["verdict"] == "PASS — MERGE_READY"
+                    else "REVIEW_BLOCKED"
+                ),
+                "open_blockers": [],
+                "human_decision_required": False,
+            }
+        )
+
+    streams = state.get("active_streams", [])
+    if len(streams) == 1:
+        state["current_work_unit"] = work_unit.get("id")
+        state["current_pr"] = pr
+        state["current_pr_head"] = live_head
+        state["current_material_authors"] = sorted(material_authors)
+        state["current_gate"] = gate
+    else:
+        state["current_work_unit"] = None
+        state["current_pr"] = None
+        state["current_pr_head"] = None
+        state["current_material_authors"] = []
+        state["current_gate"] = None
+
+    if len(streams) == 1 and gate["verdict"] == "PASS — MERGE_READY":
+        state["company_state"] = "MERGE_READY"
+    elif len(streams) > 1:
+        state["company_state"] = "ACTIVE_PARALLEL_IMPLEMENTATION"
+    else:
+        state["company_state"] = "REVIEW_BLOCKED"
+
+
+def _reconcile_platform_authors(
+    repo: str,
+    pr: int,
+    candidate_sha: str,
+    base_sha: str,
+    view: dict,
+) -> tuple[dict | None, list[str]]:
+    platform_authors, errors = pull_request_material_author_actor_ids(
+        repo,
+        pr,
+        candidate_sha,
+        base_sha,
+    )
+    if platform_authors is None:
+        return None, errors
+    existing = set(view.get("material_authors", []))
+    missing = sorted(platform_authors - existing)
+    try:
+        for actor in missing:
+            append_coordination_event(
+                "MATERIAL_AUTHOR",
+                actor,
+                {
+                    "pr": pr,
+                    "candidate_sha": candidate_sha,
+                    "source": "github_pr_commit_author",
+                },
+            )
+        refreshed = coordination_view(pr)
+    except Exception as exc:
+        return None, [f"cannot reconcile platform material authors: {exc}"]
+    reconciled = set(refreshed.get("material_authors", []))
+    if not platform_authors.issubset(reconciled):
+        return None, ["platform material authors did not become durable coordination authors"]
+    return refreshed, []
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--reviewer", required=True); parser.add_argument("--sha", required=True)
-    parser.add_argument("--verdict", required=True, choices=VERDICTS); parser.add_argument("--pr", type=int)
-    parser.add_argument("--evidence", action="append", default=[]); parser.add_argument("--summary", default="")
+    parser.add_argument(
+        "--review-id",
+        type=int,
+        required=True,
+        help="GitHub pull-request review ID",
+    )
+    parser.add_argument(
+        "--reviewer",
+        help=(
+            "Optional descriptive assertion; must match the platform-derived "
+            "login or actor ID"
+        ),
+    )
+    parser.add_argument("--sha", required=True)
+    parser.add_argument("--verdict", required=True, choices=VERDICTS)
+    parser.add_argument(
+        "--pr",
+        type=int,
+        required=True,
+        help="Explicit GitHub PR number; consequential authorization never infers it from candidate state",
+    )
+    parser.add_argument("--evidence", action="append", default=[])
+    parser.add_argument("--summary", default="")
     args = parser.parse_args()
-    if emergency_stop_active(): print("REFUSED: emergency stop is active; do not publish binding gates during containment"); return 2
-    if not command_exists("gh") or run(["gh", "auth", "status"]).returncode != 0: print("REFUSED: authenticated gh CLI is required"); return 2
 
-    config = load_json(CONTROL / "config.json"); state = load_json(CONTROL / "state.json"); queue = load_json(CONTROL / "queue.json")
-    repo = github_repo_from_config(config); pr = args.pr or _default_pr(state)
-    if not repo or not pr: print("REFUSED: repository and explicit --pr are required when multiple streams are active"); return 2
-    live, live_error = live_pr(repo, pr)
-    if live is None: print(f"REFUSED: cannot read live PR state: {live_error}"); return 2
-    live_head = live.get("headRefOid"); base_sha = live.get("baseRefOid")
-    if live.get("state") != "OPEN" or live.get("isDraft"): print("REFUSED: binding gate requires an open non-draft PR"); return 2
-    if live_head != args.sha: print(f"REFUSED: exact-head mismatch; live={live_head} reviewed={args.sha}"); return 2
-    if not isinstance(base_sha, str) or not base_sha: print("REFUSED: live PR base SHA is unavailable"); return 2
+    if emergency_stop_active({"safety": {"emergency_stop": False}}):
+        print("REFUSED: external emergency stop is active; binding gates are frozen")
+        return 2
+    if not command_exists("gh") or run(["gh", "auth", "status"]).returncode != 0:
+        print("REFUSED: authenticated gh CLI is required")
+        return 2
 
-    stream = _stream_for_pr(state, pr); work_unit = _work_unit_for_pr(queue, state, pr)
-    if work_unit is None: print(f"REFUSED: PR #{pr} is not mapped to a versioned Work Unit"); return 2
-    material_authors = set((stream or {}).get("material_authors", state.get("current_material_authors", [])))
-    if ledger_enabled():
-        try: material_authors = set(derive(list_events(), pr).get("material_authors", []))
-        except Exception as exc: print(f"REFUSED: cannot read durable authorship ledger: {exc}"); return 2
-    eligible, reasons = reviewer_eligible(args.reviewer, material_authors)
-    if not eligible: print(f"REFUSED: reviewer {args.reviewer} is not eligible: {','.join(reasons)}"); return 2
+    candidate_config = load_json(CONTROL / "config.json")
+    state = load_json(CONTROL / "state.json")
+    configured_repo = github_repo_from_config(candidate_config)
+    repo = github_repo_from_remote()
+    pr = args.pr
+    if not repo:
+        print("REFUSED: cannot derive repository identity from git origin")
+        return 2
+    if configured_repo != repo:
+        print(
+            f"REFUSED: candidate repository identity {configured_repo!r} differs from git origin {repo!r}"
+        )
+        return 2
+
+    live, live_error = _live_context(repo, pr, args.sha)
+    if live is None:
+        print(f"REFUSED: {live_error}")
+        return 2
+    live_head = str(live.get("headRefOid"))
+    base_sha = str(live.get("baseRefOid"))
+
+    base, base_errors = _base_control_context(repo, base_sha)
+    if base is None:
+        for error in base_errors:
+            print(f"REFUSED: {error}")
+        return 2
+    if github_repo_from_config(base["config"]) != repo:
+        print("REFUSED: base-trusted repository identity differs from git origin")
+        return 2
+    protected, protected_errors = protected_default_branch_context(
+        repo,
+        base_sha,
+        claimed_branch=live.get("baseRefName"),
+    )
+    if protected is None:
+        for error in protected_errors:
+            print(f"REFUSED: {error}")
+        return 2
+    configured_default = base["config"].get("project", {}).get("default_branch")
+    if configured_default != protected.get("default_branch"):
+        print(
+            "REFUSED: base-trusted configured default branch differs from GitHub protected default branch"
+        )
+        return 2
+
+    drift = _automation_policy_drift_errors(base)
+    if drift:
+        for error in drift:
+            print(f"REFUSED: {error}")
+        return 2
+    if emergency_stop_active(base["config"]):
+        print("REFUSED: base-trusted emergency stop is active; binding gates are frozen")
+        return 2
+
+    queue = base["queue"]
+    try:
+        view = coordination_view(pr)
+    except Exception as exc:
+        print(f"REFUSED: cannot reconstruct PR coordination authority: {exc}")
+        return 2
+
+    active = _active_implementation(view, pr)
+    if not active:
+        print("REFUSED: PR has no canonical active unexpired implementation lease")
+        return 2
+
+    work_unit = _work_unit_for_pr(queue, pr, active)
+    if work_unit is None:
+        print(f"REFUSED: PR #{pr} is not mapped to a base-trusted Work Unit")
+        return 2
+
+    view, author_errors = _reconcile_platform_authors(
+        repo,
+        pr,
+        args.sha,
+        base_sha,
+        view,
+    )
+    if view is None:
+        for error in author_errors:
+            print(f"REFUSED: {error}")
+        return 2
+    active = _active_implementation(view, pr)
+    if not active:
+        print("REFUSED: implementation lease expired or changed during author reconciliation")
+        return 2
+    material_authors = set(view.get("material_authors", []))
+
+    allowed_states = (
+        {"APPROVED"}
+        if args.verdict == "PASS — MERGE_READY"
+        else NON_PASS_REVIEW_STATES
+    )
+    reviewer_identity, identity_errors = review_platform_identity(
+        repo,
+        pr,
+        args.review_id,
+        args.sha,
+        base_sha,
+        allowed_states=allowed_states,
+    )
+    if reviewer_identity is None:
+        print(
+            "REFUSED: platform reviewer identity is not verified: "
+            + ",".join(identity_errors)
+        )
+        return 2
+
+    reviewer_ok, reviewer_reasons = require_authority(
+        reviewer_identity,
+        "code_review",
+        material_authors,
+    )
+    if not reviewer_ok:
+        print(
+            "REFUSED: platform reviewer lacks independent code-review authority: "
+            + ",".join(reviewer_reasons)
+        )
+        return 2
+
+    reviewer_actor = str(reviewer_identity.get("actor_id"))
+    reviewer_login = str(reviewer_identity.get("login"))
+    if args.reviewer and args.reviewer not in {reviewer_actor, reviewer_login}:
+        print(
+            f"REFUSED: descriptive --reviewer {args.reviewer!r} does not match "
+            f"platform identity actor={reviewer_actor!r} login={reviewer_login!r}"
+        )
+        return 2
 
     paths, diff_error = changed_files(repo, pr)
-    if paths is None: print(f"REFUSED: cannot establish live PR change set: {diff_error}"); return 2
+    if paths is None:
+        print(f"REFUSED: cannot establish live PR change set: {diff_error}")
+        return 2
     scope_problems = scope_errors(paths, work_unit)
 
+    cached_stream = next(
+        (item for item in state.get("active_streams", []) if item.get("pr") == pr),
+        None,
+    )
+    required_check_evidence: list[dict] = []
     if args.verdict == "PASS — MERGE_READY":
-        if not args.evidence: print("REFUSED: PASS — MERGE_READY requires at least one durable evidence reference"); return 2
-        if state.get("open_blockers"): print("REFUSED: company-wide open blockers remain"); return 2
-        if state.get("human_decision_required"): print("REFUSED: company-wide human decision remains outstanding"); return 2
-        if stream and stream.get("open_blockers"): print("REFUSED: stream open blockers remain"); return 2
-        if stream and stream.get("human_decision_required"): print("REFUSED: stream human decision remains outstanding"); return 2
-        if scope_problems:
-            for problem in scope_problems: print(f"REFUSED: {problem}")
+        problems, required_check_evidence = _pass_preconditions(
+            repo,
+            args.sha,
+            base_sha,
+            args.evidence,
+            state,
+            cached_stream,
+            scope_problems,
+        )
+        if problems:
+            for problem in problems:
+                print(f"REFUSED: {problem}")
             return 2
-        checks = run(["gh", "pr", "checks", str(pr), "--repo", repo, "--required"])
-        if checks.returncode != 0 or not checks.stdout.strip(): print("REFUSED: required PR checks are not all green/reported"); return 2
 
-    gate = {
-        "pr": pr, "work_unit": work_unit.get("id"), "sha": args.sha, "base_sha": base_sha, "reviewer_actor": args.reviewer,
-        "verdict": args.verdict, "reviewed_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "material_authors": sorted(material_authors), "evidence": args.evidence, "summary": args.summary,
-        "scope_verified": not scope_problems, "changed_files": paths, "stale": False,
+    review_record = {
+        "review_id": args.review_id,
+        "reviewer_login": reviewer_login,
+        "reviewer_actor": reviewer_actor,
+        "review_state": reviewer_identity.get("review_state"),
+        "review_commit_id": reviewer_identity.get("review_commit_id"),
+        "identity_provider": reviewer_identity.get("provider"),
+        "identity_policy_provenance": reviewer_identity.get("policy_provenance"),
+        "bootstrap_review_only": reviewer_identity.get("bootstrap_review_only") is True,
     }
-    if ledger_enabled():
-        try:
-            event = post_event("GATE", args.reviewer, {
-                "pr": pr, "work_unit": work_unit.get("id"), "sha": args.sha, "base_sha": base_sha, "verdict": args.verdict,
-                "material_authors": sorted(material_authors), "evidence": args.evidence,
-                "summary": args.summary, "scope_verified": not scope_problems, "changed_files": paths,
-            })
-            gate["github_comment_url"] = event.get("github_comment_url"); gate["github_publisher"] = event.get("github_publisher")
-            durable = derive(list_events(), pr).get("current_gate")
-            if not durable or durable.get("sha") != args.sha or durable.get("base_sha") != base_sha or durable.get("reviewer_actor") != args.reviewer or durable.get("stale"):
-                print("REFUSED: newly published gate did not become a current valid durable gate"); return 2
-        except Exception as exc: print(f"REFUSED: durable gate publication failed: {exc}"); return 2
+    gate = {
+        "pr": pr,
+        "work_unit": work_unit.get("id"),
+        "sha": args.sha,
+        "base_sha": base_sha,
+        "reviewer_actor": reviewer_actor,
+        "reviewer_login": reviewer_login,
+        "review_id": args.review_id,
+        "review_identity": review_record,
+        "verdict": args.verdict,
+        "reviewed_at": dt.datetime.now(dt.timezone.utc).isoformat(),
+        "material_authors": sorted(material_authors),
+        "evidence": args.evidence,
+        "required_checks": required_check_evidence,
+        "summary": args.summary,
+        "scope_verified": not scope_problems,
+        "changed_files": paths,
+        "stale": False,
+    }
 
-    matched = False
-    for item in state.setdefault("active_streams", []):
-        if item.get("pr") == pr:
-            item.setdefault("open_blockers", []); item.setdefault("human_decision_required", False)
-            item["work_unit"] = work_unit.get("id"); item["head"] = live_head; item["base_sha"] = base_sha; item["material_authors"] = sorted(material_authors); item["gate"] = gate
-            item["status"] = "MERGE_READY" if args.verdict == "PASS — MERGE_READY" else "REVIEW_BLOCKED"; matched = True
-    if not matched:
-        state.setdefault("active_streams", []).append({
-            "work_unit": work_unit.get("id"), "lease_id": "unreconciled", "actor": None,
-            "branch": work_unit.get("branch"), "pr": pr, "head": live_head, "base_sha": base_sha, "material_authors": sorted(material_authors),
-            "gate": gate, "status": "MERGE_READY" if args.verdict == "PASS — MERGE_READY" else "REVIEW_BLOCKED",
-            "open_blockers": [], "human_decision_required": False,
-        })
-    if len(state.get("active_streams", [])) == 1:
-        state["current_work_unit"] = work_unit.get("id"); state["current_pr"] = pr; state["current_pr_head"] = live_head; state["current_material_authors"] = sorted(material_authors); state["current_gate"] = gate
-    else:
-        state["current_work_unit"] = None; state["current_pr"] = None; state["current_pr_head"] = None; state["current_material_authors"] = []; state["current_gate"] = None
-    state["company_state"] = "MERGE_READY" if len(state.get("active_streams", [])) == 1 and args.verdict == "PASS — MERGE_READY" else ("ACTIVE_PARALLEL_IMPLEMENTATION" if len(state.get("active_streams", [])) > 1 else "REVIEW_BLOCKED")
+    payload = {
+        "pr": pr,
+        "work_unit": work_unit.get("id"),
+        "sha": args.sha,
+        "base_sha": base_sha,
+        "review_id": args.review_id,
+        "reviewer_login": reviewer_login,
+        "review_identity": review_record,
+        "verdict": args.verdict,
+        "material_authors": sorted(material_authors),
+        "evidence": args.evidence,
+        "required_checks": required_check_evidence,
+        "summary": args.summary,
+        "scope_verified": not scope_problems,
+        "changed_files": paths,
+    }
+    try:
+        event = append_coordination_event("GATE", reviewer_actor, payload)
+        gate["github_comment_url"] = event.get("github_comment_url")
+        gate["github_publisher"] = event.get("github_publisher")
+        durable = coordination_view(pr).get("current_gate")
+    except Exception as exc:
+        print(f"REFUSED: binding gate publication failed: {exc}")
+        return 2
+
+    if (
+        not durable
+        or durable.get("sha") != args.sha
+        or durable.get("base_sha") != base_sha
+        or durable.get("reviewer_actor") != reviewer_actor
+        or durable.get("review_id") != args.review_id
+        or durable.get("stale")
+    ):
+        print("REFUSED: newly published gate did not become the current valid gate")
+        return 2
+
+    _cache_gate(
+        state,
+        gate,
+        work_unit,
+        live_head,
+        base_sha,
+        material_authors,
+    )
     save_json(CONTROL / "state.json", state)
-    print(json.dumps(gate, indent=2)); return 0
+    print(json.dumps(gate, indent=2))
+    return 0
 
 
 if __name__ == "__main__":

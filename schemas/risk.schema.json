@@ -15,7 +15,18 @@
     "inherent_score": {"type": "integer", "minimum": 1, "maximum": 25},
     "owner": {"type": "string", "minLength": 1},
     "treatment": {"enum": ["avoid", "reduce", "transfer", "accept"]},
-    "mitigations": {"type": "array", "items": {"type": "string"}},
+    "mitigations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "description"],
+        "properties": {
+          "id": {"type": "string", "pattern": "^MIT-[0-9]{3,}$"},
+          "description": {"type": "string", "minLength": 3}
+        },
+        "additionalProperties": true
+      }
+    },
     "residual_likelihood": {"type": "integer", "minimum": 1, "maximum": 5},
     "residual_impact": {"type": "integer", "minimum": 1, "maximum": 5},
     "residual_score": {"type": "integer", "minimum": 1, "maximum": 25},

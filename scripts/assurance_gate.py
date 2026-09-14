@@ -1,149 +1,175 @@
 #!/usr/bin/env python3
-"""Authoritative merge/readiness assurance gate for OneCompany Work Unit packets."""
+"""Engineering assurance structure gate with optional trusted attestation.
+
+Offline packet validation proves requirements/risk/traceability structure only.
+For ``merge_ready`` and ``done``, merge-grade quality and review truth is provided
+only when live GitHub context is supplied, or directly through ``onecompany.py
+attest``. Legacy packet-authored coverage/PASS/review fields are compatibility
+metadata; they are neutralized before structural validation and can neither grant
+nor deny trusted merge-grade assurance.
+"""
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import re
 import sys
 from pathlib import Path
 
 from assurance import CONTROL, load, policy_errors, validate_packet
+from trusted_assurance import verify_trusted_packet
+
+MERGE_STATUSES = {"merge_ready", "done"}
+SHA40 = re.compile(r"^[0-9a-f]{40}$")
+LEGACY_GATES = {
+    "requirements",
+    "risk",
+    "architecture",
+    "code_quality",
+    "functional_qa",
+    "nonfunctional_qa",
+    "documentation",
+    "independent_review",
+}
 
 
-def hardening_errors(packet: dict) -> list[str]:
+def _platform_reference_errors(packet: dict) -> list[str]:
+    if packet.get("status") not in MERGE_STATUSES:
+        return []
     errors: list[str] = []
-    quality = load(CONTROL / "quality.json")
-    risk_level = packet.get("risk_level", "low")
-    status = packet.get("status")
-    reqs = packet.get("requirements", [])
-    risks = packet.get("risks", [])
-    tests = packet.get("test_plan", {}).get("tests", [])
-    links = packet.get("traceability", [])
-    link_set = {(str(x.get("source")), str(x.get("target")), str(x.get("relationship"))) for x in links}
+    evidence = packet.get("evidence") if isinstance(packet.get("evidence"), dict) else {}
+    references = evidence.get("references")
+    if not isinstance(references, list) or not references:
+        errors.append("merge_ready/done requires evidence.references with platform evidence references")
+        references = []
+    seen: set[str] = set()
+    for index, reference in enumerate(references):
+        if not isinstance(reference, dict):
+            errors.append(f"evidence.references[{index}] must be an object")
+            continue
+        evidence_id = reference.get("id")
+        if not isinstance(evidence_id, str) or not evidence_id:
+            errors.append(f"evidence.references[{index}] requires stable id")
+        elif evidence_id in seen:
+            errors.append(f"duplicate platform evidence reference id: {evidence_id}")
+        else:
+            seen.add(evidence_id)
+        if reference.get("provider") != "github_actions":
+            errors.append(f"evidence reference {evidence_id or index} must use provider=github_actions")
+        if reference.get("source_kind") != "artifact":
+            errors.append(f"evidence reference {evidence_id or index} must use source_kind=artifact")
+        if not isinstance(reference.get("workflow_run_id"), int) or reference.get("workflow_run_id", 0) <= 0:
+            errors.append(f"evidence reference {evidence_id or index} requires positive workflow_run_id")
+        if not isinstance(reference.get("artifact_id"), int) or reference.get("artifact_id", 0) <= 0:
+            errors.append(f"evidence reference {evidence_id or index} requires positive artifact_id")
+        if not reference.get("artifact_name"):
+            errors.append(f"evidence reference {evidence_id or index} requires artifact_name")
+        parser = reference.get("parser")
+        if not isinstance(parser, dict) or not parser.get("kind") or not parser.get("path"):
+            errors.append(f"evidence reference {evidence_id or index} requires parser.kind and parser.path")
 
-    # Requirement baseline quality beyond syntax: active WUs use approved-or-later requirements,
-    # each requirement belongs to an objective, and risk/design trace is explicit where material.
-    active_statuses = {"ready", "in_progress", "review", "merge_ready", "done"}
-    if status in active_statuses:
-        for req in reqs:
-            rid = req.get("id", "<unknown>")
-            if req.get("status") not in {"approved", "implemented", "verified"}:
-                errors.append(f"{rid}: active Work Unit requires approved-or-later requirement status")
-            statement = f" {str(req.get('statement', '')).lower()} "
-            if statement.count(" shall ") != 1:
-                errors.append(f"{rid}: requirement must contain exactly one normative 'shall' obligation")
-            if not any(target == rid and rel == "objective_to_requirement" for _, target, rel in link_set):
-                errors.append(f"traceability missing objective_to_requirement for {rid}")
-            for risk_id in req.get("risk_ids", []):
-                if (rid, risk_id, "requirement_to_risk") not in link_set:
-                    errors.append(f"traceability missing {rid} -> risk {risk_id}")
-            if risk_level in {"high", "critical"} and not any(source == rid and rel == "requirement_to_design_or_architecture" for source, _, rel in link_set):
-                errors.append(f"{risk_level}-risk traceability missing design/architecture link for {rid}")
-
-    # Risk acceptance cannot be an autonomous silent downgrade.
-    for risk in risks:
-        rid = risk.get("id", "<unknown>")
-        residual = risk.get("residual_score", 0)
-        acceptance = risk.get("acceptance")
-        if risk.get("treatment") == "accept" and residual >= 10:
-            if not isinstance(acceptance, dict) or not acceptance.get("approved_by"):
-                errors.append(f"{rid}: accepting high/critical residual risk requires explicit acceptance authority")
-        if residual >= 17:
-            if not isinstance(acceptance, dict) or acceptance.get("human") is not True:
-                errors.append(f"{rid}: critical residual risk acceptance must be human")
-
-    if status not in {"merge_ready", "done"}:
-        return errors
-
-    evidence = packet.get("evidence", {})
-    sha = evidence.get("sha")
-    candidate_sha = packet.get("candidate_sha")
-    if not isinstance(candidate_sha, str) or re.fullmatch(r"[0-9a-fA-F]{40}", candidate_sha) is None:
-        errors.append("merge_ready/done packet requires a 40-hex candidate_sha")
-    if not isinstance(sha, str) or re.fullmatch(r"[0-9a-fA-F]{40}", sha) is None:
-        errors.append("merge_ready/done evidence requires a 40-hex sha")
-    if candidate_sha and sha != candidate_sha:
-        errors.append("quantitative evidence is stale: evidence.sha != candidate_sha")
-
-    # Quantitative quality is enforced, not merely reported.
-    code_change = packet.get("code_change", True)
-    profile_name = packet.get("quality_profile") or quality.get("profile")
-    profile = quality.get("profiles", {}).get(profile_name)
-    if profile is None:
-        errors.append(f"unknown quality_profile {profile_name!r}")
-    elif code_change:
-        coverage = evidence.get("coverage", {})
-        metrics = {
-            "line": "line_coverage_min",
-            "branch": "branch_coverage_min",
-            "changed_line": "changed_line_coverage_min",
-            "mutation": "mutation_score_min",
-        }
-        for metric, threshold_key in metrics.items():
-            minimum = profile.get(threshold_key, 0)
-            value = coverage.get(metric)
-            if not isinstance(value, (int, float)):
-                errors.append(f"coverage.{metric} is required for code-changing {profile_name} merge evidence")
-            elif value < minimum:
-                errors.append(f"coverage.{metric}={value} is below {profile_name} minimum {minimum}")
-
-    # Every risk-required test family must have exact-candidate passing evidence.
-    required_families = set(quality.get("risk_required_families", {}).get(risk_level, []))
-    family_results = evidence.get("test_family_results", {})
-    for family in sorted(required_families):
-        if family_results.get(family) != "pass":
-            errors.append(f"required test family {family} lacks PASS evidence")
-
-    # Planned tests need evidence links at merge time; otherwise the matrix stops before proof.
-    for test in tests:
-        tid = test.get("id")
-        if tid and not any(source == tid and rel == "test_to_evidence" for source, _, rel in link_set):
-            errors.append(f"traceability missing test_to_evidence for {tid}")
-
-    review = evidence.get("independent_review", {})
-    if not isinstance(review, dict):
-        errors.append("independent_review evidence object is required")
-    else:
-        if review.get("verdict") != "pass":
-            errors.append("independent_review.verdict must be pass")
-        if review.get("sha") != candidate_sha:
-            errors.append("independent review must target exact candidate_sha")
-        reviewer = review.get("actor")
-        authors = set(packet.get("material_authors", []))
-        if not reviewer:
-            errors.append("independent review must name reviewer actor")
-        elif reviewer in authors:
-            errors.append("independent reviewer cannot be a material author")
-
+    review_ref = evidence.get("review_reference")
+    if not isinstance(review_ref, dict) or not isinstance(review_ref.get("review_id"), int) or review_ref.get("review_id", 0) <= 0:
+        errors.append("merge_ready/done requires evidence.review_reference.review_id")
     return errors
 
 
-def validate(packet: dict) -> tuple[list[str], list[str]]:
-    errors, warnings = validate_packet(packet)
-    errors.extend(hardening_errors(packet))
-    return errors, warnings
+def _structural_view(packet: dict) -> dict:
+    """Neutralize legacy evidence claims while preserving structural invariants."""
+    view = copy.deepcopy(packet)
+    if view.get("status") not in MERGE_STATUSES:
+        return view
+
+    evidence = view.setdefault("evidence", {})
+    candidate_sha = view.get("candidate_sha")
+    quality = load(CONTROL / "quality.json")
+    profile_name = view.get("quality_profile") or quality.get("profile")
+    profile = quality.get("profiles", {}).get(profile_name, {})
+
+    references = evidence.get("references") if isinstance(evidence.get("references"), list) else []
+    reference_ids = [str(item.get("id")) for item in references if isinstance(item, dict) and item.get("id")]
+    if reference_ids:
+        evidence["artifacts"] = [
+            {"id": evidence_id, "kind": "platform-reference", "reference": f"platform://{evidence_id}"}
+            for evidence_id in reference_ids
+        ]
+
+    # Compatibility placeholders only. trusted_assurance never consumes them.
+    evidence["coverage"] = {
+        "line": profile.get("line_coverage_min", 0),
+        "branch": profile.get("branch_coverage_min", 0),
+        "changed_line": profile.get("changed_line_coverage_min", 0),
+        "mutation": profile.get("mutation_score_min", 0),
+    }
+    planned = view.get("test_plan", {}).get("families", [])
+    evidence["test_family_results"] = {str(family): "pass" for family in planned}
+    evidence["gates"] = {name: "pass" for name in LEGACY_GATES}
+    authors = {str(value) for value in view.get("material_authors", []) if value}
+    placeholder = "platform-review-placeholder"
+    while placeholder in authors:
+        placeholder += "-independent"
+    evidence["independent_review"] = {"actor": placeholder, "sha": candidate_sha, "verdict": "pass"}
+    if isinstance(candidate_sha, str) and SHA40.fullmatch(candidate_sha):
+        evidence["sha"] = candidate_sha
+    return view
+
+
+def validate_structure(packet: dict) -> tuple[list[str], list[str]]:
+    errors, warnings = validate_packet(_structural_view(packet))
+    errors.extend(_platform_reference_errors(packet))
+    return list(dict.fromkeys(errors)), warnings
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="OneCompany authoritative engineering assurance gate")
+    parser = argparse.ArgumentParser(description="OneCompany assurance structure validation with optional trusted attestation")
     parser.add_argument("packet", type=Path)
+    parser.add_argument("--repo", help="owner/repo for live platform attestation")
+    parser.add_argument("--pr", type=int, help="pull request number for live platform attestation")
+    parser.add_argument("--base-sha", help="reviewed base SHA for live platform attestation")
     args = parser.parse_args()
+
     p_errors = policy_errors()
     if p_errors:
         for error in p_errors:
             print(f"ERROR: {error}")
         return 1
+
     packet = load(args.packet)
-    errors, warnings = validate(packet)
+    errors, warnings = validate_structure(packet)
     for warning in warnings:
         print(f"WARN: {warning}")
     if errors:
         for error in errors:
             print(f"ERROR: {error}")
-        print(f"Assurance gate FAILED ({len(errors)} error(s), {len(warnings)} warning(s)).")
+        print(f"Assurance structure FAILED ({len(errors)} error(s), {len(warnings)} warning(s)).")
         return 1
-    print(f"Assurance gate PASS ({len(warnings)} warning(s)).")
+
+    merge_grade = packet.get("status") in MERGE_STATUSES
+    supplied = [args.repo is not None, args.pr is not None, args.base_sha is not None]
+    if any(supplied) and not all(supplied):
+        print("ERROR: live attestation requires --repo, --pr and --base-sha together")
+        return 1
+
+    if not all(supplied):
+        suffix = " This is NOT merge evidence; run `python onecompany.py attest ...` with exact PR/base context." if merge_grade else ""
+        print(f"Assurance structure PASS ({len(warnings)} warning(s)).{suffix}")
+        return 0
+
+    if not isinstance(args.base_sha, str) or not SHA40.fullmatch(args.base_sha):
+        print("ERROR: --base-sha must be a lowercase 40-hex commit SHA")
+        return 1
+
+    attestation, evidence_errors = verify_trusted_packet(packet, repo=args.repo, pr=args.pr, base_sha=args.base_sha)
+    if evidence_errors or not attestation or attestation.get("verdict") != "PASS":
+        for error in evidence_errors:
+            print(f"ERROR: {error}")
+        print(json.dumps({"attestation": attestation}, indent=2))
+        print("Assurance UNVERIFIED: packet claims cannot substitute for platform-backed evidence.")
+        return 1
+
+    print(json.dumps({"attestation": attestation}, indent=2))
+    print("Assurance PASS: structure and base-trusted platform evidence verified.")
     return 0
 
 

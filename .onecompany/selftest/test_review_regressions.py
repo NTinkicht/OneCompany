@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -11,6 +12,23 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import lease
+from onecompany_lib import path_matches_any
+
+
+def base_view(*_args, **_kwargs) -> dict:
+    return {
+        "active_leases": [],
+        "material_authors": [],
+        "current_gate": None,
+        "gates_by_pr": {},
+        "rejected_claims": [],
+        "integrity_conflicts": [],
+        "conflicts": [],
+        "resolved_conflict_ids": [],
+        "merged_work_units": [],
+        "verified_merged_work_units": [],
+        "current_actor_eligibility": {},
+    }
 
 
 class ReviewRegressionTests(unittest.TestCase):
@@ -83,48 +101,33 @@ class ReviewRegressionTests(unittest.TestCase):
         save.assert_not_called()
 
     def test_failover_preserves_all_material_authors_in_local_mode(self):
-        old = {
-            "id": "L1",
-            "work_unit": "WU-1",
-            "role": "implementation",
-            "actor": "first-worker",
-            "branch": "wu-1",
-            "pr": 10,
-            "start_head": "a" * 40,
-            "status": "active",
-            "planning_snapshot": {
-                "write_scope": ["src/**"],
-                "resource_locks": [],
-                "parallelism": "auto",
-                "risk_class": "LOW",
-                "dependencies": [],
-            },
-        }
-        state = {
-            "active_leases": [dict(old)],
-            "active_streams": [{
-                "work_unit": "WU-1",
-                "lease_id": "L1",
-                "actor": "first-worker",
-                "branch": "wu-1",
-                "pr": 10,
-                "head": "a" * 40,
-                "base_sha": None,
-                "status": "ACTIVE_IMPLEMENTATION",
-                "gate": None,
-                "material_authors": ["first-worker", "earlier-worker"],
-                "open_blockers": [],
-                "human_decision_required": False,
-            }],
+        planning_snapshot = {
+            "write_scope": ["src/**"],
+            "resource_locks": [],
+            "parallelism": "auto",
+            "risk_class": "LOW",
+            "dependencies": [],
+            "dependency_closure": [],
         }
         queue = {"work_units": []}
+        planning = {
+            "parallel_execution": {
+                "enabled": True,
+                "max_concurrent_implementation_streams": 3,
+                "require_write_scope_for_parallel": True,
+                "critical_risk_default": "serialize",
+            }
+        }
+        state_cache = {"active_leases": [], "active_streams": []}
 
         def fake_load(path: Path):
             name = Path(path).name
             if name == "state.json":
-                return state
+                return state_cache
             if name == "queue.json":
                 return queue
+            if name == "planning.json":
+                return planning
             raise AssertionError(f"unexpected load: {path}")
 
         args = argparse.Namespace(
@@ -133,24 +136,50 @@ class ReviewRegressionTests(unittest.TestCase):
             current_head="b" * 40,
             reason="failover",
         )
-        with (
-            patch.object(lease, "emergency_stop_active", return_value=False),
-            patch.object(lease, "load_json", side_effect=fake_load),
-            patch.object(lease, "authoritative", return_value=([old], [])),
-            patch.object(lease, "actor_capacity_state", return_value=(1, [], 0, 1)),
-            patch.object(lease, "ledger_enabled", return_value=False),
-            patch.object(lease, "sync_cache"),
-            patch.object(lease, "save_json"),
-        ):
-            result = lease.transfer(args)
+        with tempfile.TemporaryDirectory() as directory:
+            event_path = Path(directory) / "lease-events.jsonl"
+            with (
+                patch.object(lease, "emergency_stop_active", return_value=False),
+                patch.object(lease, "load_json", side_effect=fake_load),
+                patch.object(lease, "actor_capacity_state", return_value=(1, [], 0, 1)),
+                patch.object(lease, "ledger_enabled", return_value=False),
+                patch.object(lease.lifecycle.ledger_lib, "ledger_enabled", return_value=False),
+                patch.object(lease.lifecycle.ledger_lib, "derive", side_effect=base_view),
+                patch.object(lease.lifecycle, "_local_event_path", return_value=event_path),
+                patch.object(lease, "save_json"),
+            ):
+                lease.lifecycle.append_coordination_event(
+                    "ROLE_LEASE_ASSIGNED",
+                    "first-worker",
+                    {
+                        "lease_id": "L1",
+                        "role": "implementation",
+                        "work_unit": "WU-1",
+                        "branch": "wu-1",
+                        "pr": 10,
+                        "start_head": "a" * 40,
+                        "planning_snapshot": planning_snapshot,
+                    },
+                )
+                lease.lifecycle.append_coordination_event(
+                    "MATERIAL_AUTHOR",
+                    "earlier-worker",
+                    {"pr": 10, "work_unit": "WU-1"},
+                )
+                result = lease.transfer(args)
+                view = lease.lifecycle.coordination_view(10)
 
         self.assertEqual(result, 0)
-        authors = set(state["active_streams"][0]["material_authors"])
-        self.assertEqual(authors, {"first-worker", "earlier-worker", "replacement-worker"})
+        self.assertEqual(
+            set(view["material_authors"]),
+            {"first-worker", "earlier-worker", "replacement-worker"},
+        )
+        self.assertEqual(len(view["active_leases"]), 1)
+        self.assertEqual(view["active_leases"][0]["actor"], "replacement-worker")
 
     def test_authorization_planning_baselines_are_protected(self):
         governance = json.loads((ROOT / ".onecompany" / "governance.json").read_text(encoding="utf-8"))
-        protected = set(governance["control_plane"]["protected_paths"])
+        patterns = governance["control_plane"]["protected_paths"]
         expected = {
             ".onecompany/queue.json",
             ".onecompany/portfolio.json",
@@ -158,7 +187,10 @@ class ReviewRegressionTests(unittest.TestCase):
             ".onecompany/acceptance-criteria.json",
             ".onecompany/risk-register.json",
         }
-        self.assertTrue(expected <= protected, sorted(expected - protected))
+        unprotected = sorted(
+            path for path in expected if not path_matches_any(path, patterns)
+        )
+        self.assertEqual(unprotected, [])
 
 
 if __name__ == "__main__":

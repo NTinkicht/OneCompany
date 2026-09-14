@@ -1,160 +1,210 @@
 #!/usr/bin/env python3
-"""Explicit OneCompany implementation leases with per-WU exclusivity and conflict-aware parallelism."""
+"""OneCompany implementation lease CLI with deterministic lifetime semantics.
+
+The KERNEL-001 admission/provenance implementation remains in ``lease_core``.
+This wrapper binds its durable admission seams to protected-base runtime policy,
+transitive dependency completion, and the lifecycle authority reducer.
+"""
 from __future__ import annotations
 
 import argparse
 import datetime as dt
 import sys
-import uuid
+from typing import Any
 
-from capacity_lib import implementation_active_count, implementation_availability, implementation_capacity_limit
-from ledger_lib import derive, ledger_enabled, list_events, post_event
-from onecompany_lib import CONTROL, active_implementation_leases, emergency_stop_active, load_json, save_json
-from planning_lib import by_id, dependency_ready, work_item_for_lease, work_units_conflict
+import lease_core as core
+import lease_lifecycle as lifecycle
+import ledger_lib
+from onecompany_lib import CONTROL, emergency_stop_active, load_json, save_json
+from planning_lib import (
+    by_id,
+    dependency_closure,
+    implementation_admission_violations,
+    work_item_for_lease,
+)
+
+planning_snapshot = core.planning_snapshot
+admission_snapshot = core.admission_snapshot
+new_lease = core.new_lease
+lease_payload = core.lease_payload
+_stream_from_lease = core._stream_from_lease
+sync_legacy_aliases = core.sync_legacy_aliases
+_format_admission_violations = core._format_admission_violations
+actor_capacity_state = core.actor_capacity_state
+trusted_pr_base = ledger_lib.trusted_pr_base
+list_events = ledger_lib.list_events
+post_event = ledger_lib.post_event
+ledger_enabled = ledger_lib.ledger_enabled
+derive = lifecycle.derive_lifecycle
 
 
-def actor_capacity_state(actor_id: str, active: list[dict], exclude_lease_id: str | None = None) -> tuple[int, list[str], int, int]:
-    actors = load_json(CONTROL / "actors.json")
-    readiness_doc = load_json(CONTROL / "readiness.json")
-    budget = load_json(CONTROL / "budget.json")
-    actor = next((item for item in actors.get("actors", []) if item.get("id") == actor_id), None)
-    if actor is None:
-        return 0, ["unknown_actor"], 0, 0
-    ready = next((item for item in readiness_doc.get("actors", []) if item.get("actor_id") == actor_id), None)
-    slots, reasons = implementation_availability(
-        actor,
-        ready,
-        budget,
-        active,
-        exclude_lease_id=exclude_lease_id,
+def trusted_admission_context(*args, **kwargs):
+    """Add protected-base stop and transitive closure to core's admission context."""
+    context, error = ledger_lib.trusted_admission_context(*args, **kwargs)
+    if context is None:
+        return None, error
+    base_config = context.get("config")
+    if not isinstance(base_config, dict):
+        return None, "base-trusted admission context has no runtime config"
+    if emergency_stop_active(base_config):
+        return None, "base-trusted emergency stop is active"
+    enriched = dict(context)
+    work_item = context.get("work_item")
+    snapshot = context.get("planning_snapshot")
+    if isinstance(work_item, dict) and isinstance(snapshot, dict):
+        enriched_item = dict(work_item)
+        enriched_item["dependency_closure"] = list(
+            snapshot.get("dependency_closure", [])
+        )
+        enriched["work_item"] = enriched_item
+    return enriched, None
+
+
+def _durable_dependency_check(
+    candidate: dict, durable_done: set[str]
+) -> tuple[bool, list[str]]:
+    closure = candidate.get("dependency_closure")
+    values = closure if isinstance(closure, list) else candidate.get("dependencies", [])
+    required = sorted({str(value) for value in values if value})
+    unsatisfied = sorted(set(required) - durable_done)
+    return not unsatisfied, unsatisfied
+
+
+def _local_dependency_check(
+    candidate: dict,
+    work_map: dict[str, dict[str, Any]],
+    durable_done: set[str],
+) -> tuple[bool, list[str], list[str]]:
+    candidate_id = str(candidate.get("id") or "")
+    required = (
+        dependency_closure(work_map, candidate_id)
+        if candidate_id and candidate_id in work_map
+        else {str(value) for value in candidate.get("dependencies", []) if value}
     )
-    current = implementation_active_count(actor_id, active, exclude_lease_id)
-    limit = implementation_capacity_limit(ready)
-    return slots, sorted(set(reasons)), current, limit
-
-
-def planning_snapshot(item: dict) -> dict:
-    return {
-        "write_scope": list(item.get("write_scope", [])),
-        "resource_locks": list(item.get("resource_locks", [])),
-        "parallelism": item.get("parallelism", "auto"),
-        "risk_class": item.get("risk_class", "MEDIUM"),
-        "dependencies": list(item.get("dependencies", [])),
-    }
-
-
-def new_lease(actor: str, wu: str, branch: str, pr: int | None, start_head: str, item: dict, parent_lease_id: str | None = None) -> dict:
-    value = {
-        "id": str(uuid.uuid4()),
-        "work_unit": wu,
-        "role": "implementation",
-        "actor": actor,
-        "branch": branch,
-        "pr": pr,
-        "start_head": start_head,
-        "status": "active",
-        "granted_at": dt.datetime.now(dt.timezone.utc).isoformat(),
-        "planning_snapshot": planning_snapshot(item),
-        "failover_conditions": ["quota_exhausted", "unavailable", "no_durable_progress_after_reconciliation", "human_override"],
-    }
-    if parent_lease_id:
-        value["parent_lease_id"] = parent_lease_id
-    return value
-
-
-def lease_payload(lease: dict) -> dict:
-    return {
-        "lease_id": lease.get("id"),
-        "role": lease.get("role"),
-        "work_unit": lease.get("work_unit"),
-        "branch": lease.get("branch"),
-        "pr": lease.get("pr"),
-        "start_head": lease.get("start_head"),
-        "parent_lease_id": lease.get("parent_lease_id"),
-        "planning_snapshot": lease.get("planning_snapshot", {}),
-    }
-
-
-def authoritative(state: dict) -> tuple[list[dict], list[dict]]:
-    if ledger_enabled():
-        view = derive(list_events())
-        return [item for item in view.get("active_leases", []) if item.get("role") == "implementation"], view.get("conflicts", [])
-    return active_implementation_leases(state), []
-
-
-def _stream_from_lease(lease: dict) -> dict:
-    actor = lease.get("actor")
-    return {
-        "work_unit": lease.get("work_unit"),
-        "lease_id": lease.get("id"),
-        "actor": actor,
-        "branch": lease.get("branch"),
-        "pr": lease.get("pr"),
-        "head": lease.get("start_head"),
-        "base_sha": None,
-        "status": "ACTIVE_IMPLEMENTATION",
-        "gate": None,
-        "material_authors": [actor] if isinstance(actor, str) and actor else [],
-        "open_blockers": [],
-        "human_decision_required": False,
-    }
-
-
-def sync_legacy_aliases(state: dict) -> None:
-    active = [item for item in state.get("active_leases", []) if item.get("status") == "active" and item.get("role") == "implementation"]
-    if len(active) == 1:
-        lease = active[0]
-        state["current_work_unit"] = lease.get("work_unit")
-        state["current_pr"] = lease.get("pr")
-        state["current_pr_head"] = lease.get("start_head")
-    else:
-        state["current_work_unit"] = None
-        state["current_pr"] = None
-        state["current_pr_head"] = None
-        state["current_material_authors"] = []
-        state["current_gate"] = None
-
-
-def sync_cache(state: dict, pr: int | None) -> None:
-    if ledger_enabled():
-        events = list_events()
-        global_view = derive(events)
-        state["active_leases"] = global_view.get("active_leases", [])
-        if pr is not None:
-            pr_view = derive(events, pr)
-            for stream in state.setdefault("active_streams", []):
-                if stream.get("pr") == pr:
-                    stream["material_authors"] = pr_view.get("material_authors", [])
-                    stream["gate"] = pr_view.get("current_gate")
-    existing = {stream.get("lease_id"): stream for stream in state.setdefault("active_streams", [])}
-    streams: list[dict] = []
-    for lease in state.get("active_leases", []):
-        if lease.get("status") != "active" or lease.get("role") != "implementation":
+    missing: list[str] = []
+    unsatisfied: list[str] = []
+    for dep in sorted(required):
+        if dep in durable_done:
             continue
-        stream = existing.get(lease.get("id"), _stream_from_lease(lease))
-        stream.setdefault("open_blockers", [])
-        stream.setdefault("human_decision_required", False)
-        stream.setdefault("base_sha", None)
-        stream.setdefault("material_authors", [lease.get("actor")] if lease.get("actor") else [])
-        stream.update({
-            "actor": lease.get("actor"),
-            "branch": lease.get("branch"),
-            "pr": lease.get("pr"),
-            "work_unit": lease.get("work_unit"),
-        })
+        if dep not in work_map:
+            missing.append(dep)
+        elif work_map[dep].get("status") not in {"MERGED", "DONE"}:
+            unsatisfied.append(dep)
+    return not missing and not unsatisfied, missing, unsatisfied
+
+
+def authoritative(_state: dict | None = None) -> tuple[list[dict], list[dict]]:
+    view = lifecycle.coordination_view()
+    return (
+        [
+            item
+            for item in view.get("active_leases", [])
+            if item.get("role") == "implementation"
+        ],
+        view.get("integrity_conflicts", view.get("conflicts", [])),
+    )
+
+
+def _bind_core() -> None:
+    core.derive = derive
+    core.ledger_enabled = ledger_enabled
+    core.list_events = list_events
+    core.post_event = post_event
+    core.trusted_pr_base = trusted_pr_base
+    core.trusted_admission_context = trusted_admission_context
+    core._durable_dependency_check = _durable_dependency_check
+    core.authoritative = authoritative
+    core.actor_capacity_state = actor_capacity_state
+    core.emergency_stop_active = emergency_stop_active
+    core.load_json = load_json
+    core.save_json = save_json
+
+
+def _active_view(
+    *,
+    now: dt.datetime | None = None,
+) -> tuple[dict[str, Any], list[dict]]:
+    view = lifecycle.coordination_view(now=now)
+    active = [
+        item
+        for item in view.get("active_leases", [])
+        if item.get("role") == "implementation"
+    ]
+    return view, active
+
+
+def _reconcile_cache(pr: int | None = None) -> dict[str, Any]:
+    """Regenerate state.json from one event replay; never consume cache as authority."""
+    del pr
+    state = load_json(CONTROL / "state.json")
+    view = lifecycle.coordination_view()
+    active = [
+        item
+        for item in view.get("active_leases", [])
+        if item.get("role") == "implementation"
+    ]
+    state["active_leases"] = active
+    state["current_actor_eligibility"] = view.get(
+        "current_actor_eligibility", {}
+    )
+    authors_by_pr = view.get("material_authors_by_pr", {})
+    gates_by_pr = view.get("gates_by_pr", {})
+
+    streams: list[dict] = []
+    for lease in active:
+        stream = _stream_from_lease(lease)
+        lease_pr = lease.get("pr")
+        if isinstance(lease_pr, int):
+            authors = authors_by_pr.get(lease_pr)
+            if authors is None:
+                authors = authors_by_pr.get(str(lease_pr), [])
+            gate = gates_by_pr.get(lease_pr)
+            if gate is None:
+                gate = gates_by_pr.get(str(lease_pr))
+            stream["material_authors"] = list(authors or [])
+            stream["gate"] = gate
+        stream["expires_at"] = lease.get("expires_at")
+        stream["last_progress_head"] = lease.get("last_progress_head")
         streams.append(stream)
+
     state["active_streams"] = streams
     sync_legacy_aliases(state)
     if len(streams) == 1:
-        state["current_material_authors"] = streams[0].get("material_authors", state.get("current_material_authors", []))
-        state["current_gate"] = streams[0].get("gate", state.get("current_gate"))
+        state["current_material_authors"] = streams[0].get(
+            "material_authors", []
+        )
+        state["current_gate"] = streams[0].get("gate")
+    state["company_state"] = (
+        "ACTIVE_PARALLEL_IMPLEMENTATION"
+        if len(streams) > 1
+        else (
+            "ACTIVE_IMPLEMENTATION"
+            if streams
+            else "POST_LEASE_RECONCILE"
+        )
+    )
+    state["generated_or_reconciled_at"] = dt.datetime.now(
+        dt.timezone.utc
+    ).isoformat()
+    state["note"] = (
+        "Generated cache only. Implementation authority is reconstructed from "
+        "coordination events; editing or deleting this file cannot grant a lease."
+    )
+    save_json(CONTROL / "state.json", state)
+    return state
 
 
-def acquire(args: argparse.Namespace) -> int:
+def sync_cache(_state: dict | None = None, pr: int | None = None) -> None:
+    _reconcile_cache(pr)
+
+
+def _local_acquire(args: argparse.Namespace) -> int:
     if emergency_stop_active():
-        print("REFUSED: emergency stop is active; no new implementation lease may be acquired")
+        print(
+            "REFUSED: emergency stop is active; no new implementation lease may be acquired"
+        )
         return 2
-    state = load_json(CONTROL / "state.json")
+
     queue = load_json(CONTROL / "queue.json")
     planning = load_json(CONTROL / "planning.json")
     work_map = by_id(queue.get("work_units", []))
@@ -163,143 +213,206 @@ def acquire(args: argparse.Namespace) -> int:
         print(f"REFUSED: work unit {args.wu} does not exist in queue")
         return 2
     if candidate.get("status") != "READY":
-        print(f"REFUSED: work unit {args.wu} is not READY (status={candidate.get('status')})")
-        return 2
-    if ledger_enabled() and args.pr is None:
-        print("REFUSED: durable autonomous implementation lease requires a PR number")
-        return 2
-
-    active, conflicts = authoritative(state)
-    if conflicts:
-        print(f"REFUSED: durable coordination conflicts must be reconciled first: {conflicts}")
+        print(
+            f"REFUSED: work unit {args.wu} is not READY "
+            f"(status={candidate.get('status')})"
+        )
         return 2
 
-    durable_done: set[str] = set()
-    if ledger_enabled():
-        try:
-            durable_done = set(derive(list_events()).get("merged_work_units", []))
-        except Exception as exc:
-            print(f"REFUSED: cannot verify durable dependency state: {exc}")
-            return 2
-    ready, missing, unsatisfied = dependency_ready(candidate, work_map, durable_done)
+    view, active = _active_view()
+    integrity = view.get("integrity_conflicts", view.get("conflicts", []))
+    if integrity:
+        print(
+            "REFUSED: coordination integrity conflicts must be reconciled first: "
+            f"{integrity}"
+        )
+        return 2
+
+    done = set(
+        view.get(
+            "verified_merged_work_units",
+            view.get("merged_work_units", []),
+        )
+    )
+    ready, missing, unsatisfied = _local_dependency_check(
+        candidate,
+        work_map,
+        done,
+    )
     if not ready:
-        detail = []
+        detail: list[str] = []
         if missing:
             detail.append("missing=" + ",".join(sorted(missing)))
         if unsatisfied:
             detail.append("unsatisfied=" + ",".join(sorted(unsatisfied)))
-        print(f"REFUSED: work unit {args.wu} dependencies are not complete: {'; '.join(detail)}")
+        print(
+            f"REFUSED: work unit {args.wu} dependencies are not complete: "
+            f"{'; '.join(detail)}"
+        )
         return 2
 
-    if any(item.get("work_unit") == args.wu for item in active):
-        print(f"REFUSED: implementation lease already active for {args.wu}")
-        return 2
-
-    limit = int(planning.get("parallel_execution", {}).get("max_concurrent_implementation_streams", 1) or 1)
-    if len(active) >= limit:
-        print(f"REFUSED: implementation WIP limit reached ({len(active)}/{limit})")
-        return 2
-    for other in active:
-        other_wu = str(other.get("work_unit") or "")
-        other_item = work_item_for_lease(other, work_map)
-        conflict, reasons = work_units_conflict(candidate, other_item, planning, work_map)
-        if conflict:
-            print(f"REFUSED: {args.wu} conflicts with active {other_wu}: {','.join(reasons)}")
-            return 2
-
-    slots, reasons, actor_active, actor_limit = actor_capacity_state(args.actor, active)
+    slots, reasons, actor_active, actor_limit = actor_capacity_state(
+        args.actor,
+        active,
+    )
     if slots <= 0:
-        print(f"REFUSED: actor {args.actor} is not implementation-available: {','.join(reasons)}")
+        print(
+            f"REFUSED: actor {args.actor} is not implementation-available: "
+            f"{','.join(reasons)}"
+        )
         return 2
 
-    lease = new_lease(args.actor, args.wu, args.branch, args.pr, args.start_head, candidate)
-    if ledger_enabled():
-        try:
-            post_event("ROLE_LEASE_ASSIGNED", args.actor, lease_payload(lease))
-            winner = next((item for item in derive(list_events()).get("active_leases", []) if item.get("id") == lease.get("id")), None)
-            if not winner:
-                print("REFUSED: lease lost concurrent claim/conflict/capacity race")
-                return 2
-        except Exception as exc:
-            print(f"REFUSED: durable lease record failed: {exc}")
-            return 2
+    violations = implementation_admission_violations(
+        candidate,
+        active,
+        planning,
+        work_map,
+        actor=args.actor,
+        actor_limit=actor_limit,
+    )
+    if violations:
+        print(
+            "REFUSED: implementation admission denied: "
+            f"{_format_admission_violations(violations)}"
+        )
+        return 2
 
-    state.setdefault("active_leases", []).append(lease)
-    state.setdefault("active_streams", []).append(_stream_from_lease(lease))
-    sync_cache(state, args.pr)
-    state["company_state"] = "ACTIVE_PARALLEL_IMPLEMENTATION" if len(active) + 1 > 1 else "ACTIVE_IMPLEMENTATION"
-    save_json(CONTROL / "state.json", state)
+    lease = new_lease(
+        args.actor,
+        args.wu,
+        args.branch,
+        args.pr,
+        args.start_head,
+        candidate,
+        work_map=work_map,
+    )
+    lifecycle.append_coordination_event(
+        "ROLE_LEASE_ASSIGNED",
+        args.actor,
+        lease_payload(lease),
+    )
+    after = lifecycle.coordination_view()
+    winner = next(
+        (
+            item
+            for item in after.get("active_leases", [])
+            if item.get("id") == lease.get("id")
+        ),
+        None,
+    )
+    if winner is None:
+        print("REFUSED: lease lost canonical admission race")
+        return 2
+
+    _reconcile_cache(args.pr)
+    limit = int(
+        planning.get("parallel_execution", {}).get(
+            "max_concurrent_implementation_streams",
+            1,
+        )
+        or 1
+    )
     print(
         f"LEASED {args.wu} to {args.actor} on {args.branch} ({lease['id']}); "
-        f"active_streams={len(active)+1}/{limit}; actor_capacity={actor_active+1}/{actor_limit}"
+        f"active_streams={len(active) + 1}/{limit}; "
+        f"actor_capacity={actor_active + 1}/{actor_limit}; "
+        f"expires_at={winner.get('expires_at')}"
     )
     return 0
 
 
-def release(args: argparse.Namespace) -> int:
-    state = load_json(CONTROL / "state.json")
-    active, _ = authoritative(state)
-    old = next((item for item in active if item.get("id") == args.lease_id), None)
-    if not old:
+def _local_release(args: argparse.Namespace) -> int:
+    _view, active = _active_view()
+    old = next(
+        (item for item in active if item.get("id") == args.lease_id),
+        None,
+    )
+    if old is None:
         print("REFUSED: active lease not found")
         return 2
-    if ledger_enabled():
-        try:
-            post_event("ROLE_LEASE_RELEASED", str(old.get("actor") or "system"), {"lease_id": args.lease_id, "pr": old.get("pr"), "reason": args.reason})
-        except Exception as exc:
-            print(f"REFUSED: durable lease release failed: {exc}")
-            return 2
-    now = dt.datetime.now(dt.timezone.utc).isoformat()
-    for lease in state.get("active_leases", []):
-        if lease.get("id") == args.lease_id and lease.get("status") == "active":
-            lease["status"] = "released"
-            lease["released_at"] = now
-            lease["release_reason"] = args.reason
-    state["active_streams"] = [stream for stream in state.get("active_streams", []) if stream.get("lease_id") != args.lease_id]
-    sync_cache(state, old.get("pr"))
-    state["company_state"] = (
-        "ACTIVE_PARALLEL_IMPLEMENTATION"
-        if len(state.get("active_streams", [])) > 1
-        else ("ACTIVE_IMPLEMENTATION" if state.get("active_streams") else "POST_LEASE_RECONCILE")
+    lifecycle.append_coordination_event(
+        "ROLE_LEASE_RELEASED",
+        str(old.get("actor") or "system"),
+        {
+            "lease_id": args.lease_id,
+            "pr": old.get("pr"),
+            "reason": args.reason,
+        },
     )
-    save_json(CONTROL / "state.json", state)
+    _reconcile_cache(old.get("pr"))
     print("LEASE RELEASED")
     return 0
 
 
-def transfer(args: argparse.Namespace) -> int:
+def _local_transfer(args: argparse.Namespace) -> int:
     if emergency_stop_active():
-        print("REFUSED: emergency stop is active; release/contain work instead of transferring implementation")
+        print(
+            "REFUSED: emergency stop is active; release/contain work instead of "
+            "transferring implementation"
+        )
         return 2
-    state = load_json(CONTROL / "state.json")
-    queue = load_json(CONTROL / "queue.json")
-    work_map = by_id(queue.get("work_units", []))
-    active, conflicts = authoritative(state)
-    if conflicts:
-        print(f"REFUSED: durable coordination conflicts must be reconciled first: {conflicts}")
+
+    view, active = _active_view()
+    integrity = view.get("integrity_conflicts", view.get("conflicts", []))
+    if integrity:
+        print(
+            "REFUSED: coordination integrity conflicts must be reconciled first: "
+            f"{integrity}"
+        )
         return 2
+
     if args.lease_id:
-        old = next((item for item in active if item.get("id") == args.lease_id), None)
-        if old is None:
-            print("REFUSED: requested source lease is not active")
-            return 2
+        old = next(
+            (item for item in active if item.get("id") == args.lease_id),
+            None,
+        )
     elif len(active) == 1:
         old = active[0]
     else:
-        print(f"REFUSED: transfer is ambiguous with {len(active)} active implementation leases; pass --lease-id")
+        old = None
+    if old is None:
+        print(
+            "REFUSED: requested source lease is not active or transfer is ambiguous"
+        )
         return 2
     if old.get("actor") == args.actor:
         print("REFUSED: replacement actor already holds lease")
         return 2
 
-    slots, reasons, actor_active, actor_limit = actor_capacity_state(args.actor, active, str(old.get("id")))
+    queue = load_json(CONTROL / "queue.json")
+    planning = load_json(CONTROL / "planning.json")
+    work_map = by_id(queue.get("work_units", []))
+    other_active = [
+        item for item in active if item.get("id") != old.get("id")
+    ]
+    slots, reasons, actor_active, actor_limit = actor_capacity_state(
+        args.actor,
+        active,
+        str(old.get("id")),
+    )
     if slots <= 0:
-        print(f"REFUSED: replacement actor {args.actor} is not implementation-available: {','.join(reasons)}")
+        print(
+            f"REFUSED: replacement actor {args.actor} is not implementation-available: "
+            f"{','.join(reasons)}"
+        )
         return 2
 
-    # Failover inherits the original lease planning snapshot. Queue edits require
-    # an explicit release/re-plan/re-acquire rather than silently changing scope.
     item = work_item_for_lease(old, work_map)
+    violations = implementation_admission_violations(
+        item,
+        other_active,
+        planning,
+        work_map,
+        actor=args.actor,
+        actor_limit=actor_limit,
+    )
+    if violations:
+        print(
+            "REFUSED: failover admission denied: "
+            f"{_format_admission_violations(violations)}"
+        )
+        return 2
+
     replacement = new_lease(
         args.actor,
         str(old.get("work_unit")),
@@ -315,50 +428,202 @@ def transfer(args: argparse.Namespace) -> int:
         "old_actor": old.get("actor"),
         "reason": args.reason,
     }
-    if ledger_enabled():
-        try:
-            post_event("ROLE_LEASE_TRANSFERRED", args.actor, payload)
-            winner = next((item for item in derive(list_events()).get("active_leases", []) if item.get("id") == replacement.get("id")), None)
-            if not winner:
-                print("REFUSED: durable transfer did not become canonical")
-                return 2
-        except Exception as exc:
-            print(f"REFUSED: durable failover record failed: {exc}")
-            return 2
+    lifecycle.append_coordination_event(
+        "ROLE_LEASE_TRANSFERRED",
+        args.actor,
+        payload,
+    )
+    after = lifecycle.coordination_view()
+    winner = next(
+        (
+            entry
+            for entry in after.get("active_leases", [])
+            if entry.get("id") == replacement.get("id")
+        ),
+        None,
+    )
+    if winner is None:
+        print("REFUSED: transfer did not become canonical")
+        return 2
 
-    now = dt.datetime.now(dt.timezone.utc).isoformat()
-    for lease in state.get("active_leases", []):
-        if lease.get("id") == old.get("id") and lease.get("status") == "active":
-            lease["status"] = "released"
-            lease["released_at"] = now
-            lease["release_reason"] = args.reason
-    state.setdefault("active_leases", []).append(replacement)
-    old_stream = next((stream for stream in state.get("active_streams", []) if stream.get("lease_id") == old.get("id")), None)
-    state["active_streams"] = [stream for stream in state.get("active_streams", []) if stream.get("lease_id") != old.get("id")]
-    new_stream = _stream_from_lease(replacement)
-    authors = set(new_stream.get("material_authors", []))
-    if old.get("actor"):
-        authors.add(str(old.get("actor")))
-    if old_stream:
-        authors.update(str(value) for value in old_stream.get("material_authors", []) if value)
-        new_stream["open_blockers"] = old_stream.get("open_blockers", [])
-        new_stream["human_decision_required"] = old_stream.get("human_decision_required", False)
-        new_stream["base_sha"] = old_stream.get("base_sha")
-    new_stream["material_authors"] = sorted(authors)
-    state.setdefault("active_streams", []).append(new_stream)
-    sync_cache(state, old.get("pr"))
-    state["company_state"] = "ACTIVE_PARALLEL_IMPLEMENTATION" if len(state.get("active_streams", [])) > 1 else "ACTIVE_IMPLEMENTATION"
-    save_json(CONTROL / "state.json", state)
+    _reconcile_cache(old.get("pr"))
     print(
-        f"LEASE FAILOVER {old.get('actor')} -> {args.actor}; WU={old.get('work_unit')} "
-        f"branch={old.get('branch')} pr={old.get('pr')}; actor_capacity={actor_active+1}/{actor_limit}"
+        f"LEASE FAILOVER {old.get('actor')} -> {args.actor}; "
+        f"WU={old.get('work_unit')} branch={old.get('branch')} pr={old.get('pr')}; "
+        f"actor_capacity={actor_active + 1}/{actor_limit}; "
+        f"expires_at={winner.get('expires_at')}"
     )
     return 0
+
+
+def _durable_lease_base_stop(lease: dict[str, Any]) -> tuple[bool, str | None]:
+    admission = lease.get("admission_snapshot")
+    pr = lease.get("pr")
+    trusted_ref = (
+        admission.get("trusted_ref") if isinstance(admission, dict) else None
+    )
+    if not isinstance(pr, int) or not isinstance(trusted_ref, str):
+        return True, "durable lease has no exact protected admission context"
+    try:
+        runtime = ledger_lib.trusted_runtime_context(trusted_ref, pr, cache={})
+    except Exception as exc:
+        return True, str(exc)
+    return emergency_stop_active(runtime["config"]), None
+
+
+def renew(args: argparse.Namespace) -> int:
+    if emergency_stop_active():
+        print("REFUSED: emergency stop is active; lease renewal is disabled")
+        return 2
+
+    _view, active = _active_view()
+    lease = next(
+        (item for item in active if item.get("id") == args.lease_id),
+        None,
+    )
+    if lease is None:
+        print(
+            "REFUSED: lease is not canonical and active "
+            "(it may already be expired)"
+        )
+        return 2
+
+    if ledger_enabled():
+        stopped, stop_error = _durable_lease_base_stop(lease)
+        if stop_error:
+            print(
+                f"REFUSED: cannot verify base-trusted emergency stop: {stop_error}"
+            )
+            return 2
+        if stopped:
+            print(
+                "REFUSED: base-trusted emergency stop is active; lease renewal is disabled"
+            )
+            return 2
+
+    previous = str(
+        lease.get("last_progress_head")
+        or lease.get("start_head")
+        or ""
+    )
+    if ledger_enabled():
+        pr = lease.get("pr")
+        if not isinstance(pr, int):
+            print("REFUSED: durable lease has no PR number")
+            return 2
+        valid, error = lifecycle.verify_pr_head_progress(
+            pr,
+            previous,
+            args.new_head,
+            cache={},
+        )
+        if not valid:
+            print(f"REFUSED: progress is not platform-verifiable: {error}")
+            return 2
+    elif previous == args.new_head:
+        print("REFUSED: heartbeat/same-head observation is not durable progress")
+        return 2
+
+    actor = str(lease.get("actor") or "")
+    lifecycle.append_coordination_event(
+        lifecycle.RENEW_EVENT,
+        actor,
+        lifecycle.renewal_payload(lease, args.new_head),
+    )
+    after = lifecycle.coordination_view()
+    renewed = next(
+        (
+            item
+            for item in after.get("active_leases", [])
+            if item.get("id") == args.lease_id
+        ),
+        None,
+    )
+    if (
+        renewed is None
+        or renewed.get("last_progress_head") != args.new_head
+    ):
+        print("REFUSED: renewal did not become canonical")
+        return 2
+
+    _reconcile_cache(lease.get("pr"))
+    print(
+        f"LEASE RENEWED {args.lease_id}; expires_at={renewed.get('expires_at')}"
+    )
+    return 0
+
+
+def reap(args: argparse.Namespace) -> int:
+    now = dt.datetime.now(dt.timezone.utc)
+    view = lifecycle.coordination_view(now=now)
+    expired = view.get("expired_leases", [])
+    if args.lease_id:
+        expired = [
+            item
+            for item in expired
+            if item.get("id") == args.lease_id
+        ]
+    if not expired:
+        print("NO EXPIRED LEASES TO REAP")
+        return 0
+
+    for lease in expired:
+        lifecycle.append_coordination_event(
+            lifecycle.REAP_EVENT,
+            args.actor,
+            lifecycle.reap_payload(lease, args.reason),
+            now=now,
+        )
+    after = lifecycle.coordination_view(now=now)
+    remaining = {
+        str(item.get("id"))
+        for item in after.get("expired_leases", [])
+        if not args.lease_id or item.get("id") == args.lease_id
+    }
+    _reconcile_cache(None)
+    if remaining:
+        print(
+            f"REFUSED: reap did not become canonical for {sorted(remaining)}"
+        )
+        return 2
+    print(f"LEASES REAPED {len(expired)}")
+    return 0
+
+
+def acquire(args: argparse.Namespace) -> int:
+    if ledger_enabled():
+        _bind_core()
+        result = core.acquire(args)
+        if result == 0:
+            _reconcile_cache(args.pr)
+        return result
+    return _local_acquire(args)
+
+
+def release(args: argparse.Namespace) -> int:
+    if ledger_enabled():
+        _bind_core()
+        result = core.release(args)
+        if result == 0:
+            _reconcile_cache(None)
+        return result
+    return _local_release(args)
+
+
+def transfer(args: argparse.Namespace) -> int:
+    if ledger_enabled():
+        _bind_core()
+        result = core.transfer(args)
+        if result == 0:
+            _reconcile_cache(None)
+        return result
+    return _local_transfer(args)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
+
     acquire_p = sub.add_parser("acquire")
     acquire_p.add_argument("--wu", required=True)
     acquire_p.add_argument("--actor", required=True)
@@ -366,16 +631,30 @@ def main() -> int:
     acquire_p.add_argument("--start-head", required=True)
     acquire_p.add_argument("--pr", type=int)
     acquire_p.set_defaults(func=acquire)
+
     release_p = sub.add_parser("release")
     release_p.add_argument("--lease-id", required=True)
     release_p.add_argument("--reason", default="completed_or_failover")
     release_p.set_defaults(func=release)
+
     transfer_p = sub.add_parser("transfer")
     transfer_p.add_argument("--lease-id")
     transfer_p.add_argument("--actor", required=True)
     transfer_p.add_argument("--current-head", required=True)
     transfer_p.add_argument("--reason", default="capability_failover")
     transfer_p.set_defaults(func=transfer)
+
+    renew_p = sub.add_parser("renew")
+    renew_p.add_argument("--lease-id", required=True)
+    renew_p.add_argument("--new-head", required=True)
+    renew_p.set_defaults(func=renew)
+
+    reap_p = sub.add_parser("reap")
+    reap_p.add_argument("--lease-id")
+    reap_p.add_argument("--actor", default="system-reaper")
+    reap_p.add_argument("--reason", default="lease_expired")
+    reap_p.set_defaults(func=reap)
+
     args = parser.parse_args()
     return args.func(args)
 

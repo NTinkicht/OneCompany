@@ -6,7 +6,8 @@ import argparse
 import json
 import sys
 
-from ledger_lib import derive, ledger_enabled, list_events
+from lease_lifecycle import coordination_view
+from ledger_lib import ledger_enabled
 from onecompany_lib import CONTROL, emergency_stop_active, load_json
 
 WRITE_CAPABILITIES = {"implementation", "ci_remediation", "merge_execution"}
@@ -58,10 +59,10 @@ def main() -> int:
             reasons.append("active_lease_id_required_for_unattended_write")
         else:
             try:
-                view = derive(list_events())
+                view = coordination_view()
                 lease = next((item for item in view.get("active_leases", []) if item.get("id") == args.lease_id), None)
                 if not lease:
-                    reasons.append("lease_not_canonical_or_active")
+                    reasons.append("lease_not_canonical_active_and_unexpired")
                 elif lease.get("actor") != args.actor:
                     reasons.append("lease_actor_mismatch")
             except Exception as exc:

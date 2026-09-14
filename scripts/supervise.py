@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read live GitHub + durable ledger and decide conflict-aware supervisory actions."""
+"""Read live GitHub + coordination events and decide conflict-aware supervisory actions."""
 from __future__ import annotations
 
 import argparse
@@ -8,10 +8,10 @@ import json
 import sys
 
 from capacity_lib import implementation_pool
-from ledger_lib import derive, ledger_enabled, list_events
+from lease_lifecycle import coordination_view
+from ledger_lib import ledger_enabled
 from onecompany_lib import (
     CONTROL,
-    active_implementation_leases,
     autonomy_number,
     command_exists,
     emergency_stop_active,
@@ -75,7 +75,6 @@ def decide_ready_work_action(
     continuous_allowed: bool,
     unattended_slots: int,
 ) -> tuple[str, str, list[str]] | None:
-    """Translate planning-safe work into an authority/capacity-aware supervisor state."""
     if not plan_safe:
         return None
     if not continuous_allowed:
@@ -107,7 +106,7 @@ def dedup_and_post(repo: str, issue: int, action: str, head: str | None, detail:
         return
     body = (
         f"{marker}\nSUPERVISION_CHECK\n\naction: {action}\nhead: {head or 'none'}\n"
-        f"detail: {detail}\n\nThis is a liveness signal, not an implementation lease."
+        f"detail: {detail}\n\nThis is a liveness signal, not implementation progress and never renews a lease."
     )
     result = run(["gh", "issue", "comment", str(issue), "--repo", repo, "--body", body])
     if result.returncode != 0:
@@ -125,7 +124,6 @@ def main() -> int:
 
     config = load_json(CONTROL / "config.json")
     supervision = load_json(CONTROL / "supervision.json")
-    state = load_json(CONTROL / "state.json")
     queue = load_json(CONTROL / "queue.json")
     planning = load_json(CONTROL / "planning.json")
     actors = load_json(CONTROL / "actors.json")
@@ -156,18 +154,19 @@ def main() -> int:
         print(f"ERROR: cannot inspect GitHub: {exc}")
         return 2
 
-    ledger_events: list[dict] = []
-    active = active_implementation_leases(state)
-    durable_done: set[str] = set()
-    if ledger_enabled():
-        try:
-            ledger_events = list_events()
-            global_view = derive(ledger_events)
-            active = [item for item in global_view.get("active_leases", []) if item.get("role") == "implementation"]
-            durable_done = set(global_view.get("merged_work_units", []))
-        except Exception as exc:
-            print(f"ERROR: cannot inspect durable coordination ledger: {exc}")
-            return 2
+    try:
+        global_view = coordination_view()
+        active = [
+            item
+            for item in global_view.get("active_leases", [])
+            if item.get("role") == "implementation"
+        ]
+        durable_done = set(
+            global_view.get("verified_merged_work_units", global_view.get("merged_work_units", []))
+        )
+    except Exception as exc:
+        print(f"ERROR: cannot reconstruct coordination authority: {exc}")
+        return 2
 
     stream_actions: list[dict] = []
     leased_prs: set[int] = set()
@@ -201,11 +200,7 @@ def main() -> int:
         head = live.get("headRefOid")
         base = live.get("baseRefOid")
         check_state = checks_state(live.get("statusCheckRollup") or [])
-        gate = (
-            derive(ledger_events, pr_number).get("current_gate")
-            if ledger_enabled()
-            else next((s.get("gate") for s in state.get("active_streams", []) if s.get("pr") == pr_number), None)
-        )
+        gate = coordination_view(pr_number).get("current_gate")
         if check_state == "failure":
             action, detail = "CI_REMEDIATION_NEEDED", "At least one deterministic check is failing on current head."
         elif gate and gate.get("sha") == head and gate.get("base_sha") and gate.get("base_sha") != base:
@@ -239,6 +234,7 @@ def main() -> int:
             "pr": pr_number,
             "head": head,
             "base": base,
+            "expires_at": lease.get("expires_at"),
             "action": action,
             "detail": detail,
         })
@@ -270,7 +266,7 @@ def main() -> int:
     actionable_streams = [item for item in stream_actions if item.get("action") in ACTIONABLE]
     if unleased_prs:
         top_action = "RECONCILE_OPEN_PRS"
-        detail = f"{len(unleased_prs)} open PR(s) are not tied to an active implementation lease."
+        detail = f"{len(unleased_prs)} open PR(s) are not tied to an active unexpired implementation lease."
     elif actionable_streams:
         unique = {item.get("action") for item in actionable_streams}
         top_action = next(iter(unique)) if len(unique) == 1 else "MULTI_ACTION"
@@ -309,6 +305,7 @@ def main() -> int:
         "unattended_implementation_slots": unattended_slots,
         "unattended_implementation_actors": unattended.get("actors", []),
         "active_implementation_streams": len(active),
+        "expired_unreaped_streams": len(global_view.get("expired_leases", [])),
         "max_concurrent_implementation_streams": plan.get("limit"),
         "available_parallel_slots": plan.get("available_slots"),
         "durable_ledger": ledger_enabled(),

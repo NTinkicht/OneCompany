@@ -1,0 +1,14 @@
+# CompanyOS trusted control-plane ownership.
+# GitHub branch/ruleset protection must require Code Owner review for these paths.
+/.onecompany/ @NTinkicht
+/scripts/ @NTinkicht
+/company/ @NTinkicht
+/agents/ @NTinkicht
+/patterns/ @NTinkicht
+/overlays/ @NTinkicht
+/.github/ @NTinkicht
+/onecompany.py @NTinkicht
+/Makefile @NTinkicht
+/AGENTS.md @NTinkicht
+/CLAUDE.md @NTinkicht
+/GEMINI.md @NTinkicht

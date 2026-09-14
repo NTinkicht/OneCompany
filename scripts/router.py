@@ -7,8 +7,8 @@ import json
 import sys
 
 from capacity_lib import configured_dispatch_exists, implementation_availability
-from ledger_lib import derive, ledger_enabled, list_events
-from onecompany_lib import CONTROL, active_implementation_leases, budget_allows, load_json
+from lease_lifecycle import coordination_view
+from onecompany_lib import CONTROL, budget_allows, load_json
 
 WRITE_CAPS = {"implementation", "ci_remediation"}
 REVIEW_CAPS = {"code_review", "security_review"}
@@ -29,53 +29,46 @@ def main() -> int:
     routing_doc = load_json(CONTROL / "routing.json")
     dispatch_doc = load_json(CONTROL / "dispatch.json")
     budget = load_json(CONTROL / "budget.json")
-    state = load_json(CONTROL / "state.json")
     readiness = {item.get("actor_id"): item for item in readiness_doc.get("actors", [])}
     required = set(args.capability)
 
-    active = active_implementation_leases(state)
-    durable_events: list[dict] | None = None
-    if ledger_enabled():
-        try:
-            durable_events = list_events()
-            active = [
-                item
-                for item in derive(durable_events).get("active_leases", [])
-                if item.get("role") == "implementation"
-            ]
-        except Exception as exc:
-            print(json.dumps({
-                "status": "BLOCKED_LEDGER_UNAVAILABLE",
-                "error": str(exc),
-                "eligible": [],
-                "note": "Routing fails closed when durable coordination truth cannot be read.",
-            }, indent=2))
-            return 2
+    try:
+        global_view = coordination_view()
+        active = [
+            item
+            for item in global_view.get("active_leases", [])
+            if item.get("role") == "implementation"
+        ]
+    except Exception as exc:
+        print(json.dumps({
+            "status": "BLOCKED_COORDINATION_UNAVAILABLE",
+            "error": str(exc),
+            "eligible": [],
+            "note": "Routing fails closed when coordination truth cannot be reconstructed.",
+        }, indent=2))
+        return 2
 
     excluded = set(args.exclude_author)
     if args.for_independent_gate:
-        if args.pr is None and len(state.get("active_streams", [])) > 1:
+        if args.pr is not None:
+            try:
+                excluded.update(coordination_view(args.pr).get("material_authors", []))
+            except Exception as exc:
+                print(json.dumps({
+                    "status": "BLOCKED_COORDINATION_UNAVAILABLE",
+                    "error": str(exc),
+                    "eligible": [],
+                }, indent=2))
+                return 2
+        elif len(active) > 1:
             print(json.dumps({
                 "status": "BLOCKED_AMBIGUOUS_REVIEW_STREAM",
                 "eligible": [],
                 "note": "Pass --pr when more than one implementation stream exists so authorship exclusion is stream-specific.",
             }, indent=2))
             return 2
-        if args.pr is not None and durable_events is not None:
-            excluded.update(derive(durable_events, args.pr).get("material_authors", []))
-        elif args.pr is not None:
-            stream = next((item for item in state.get("active_streams", []) if item.get("pr") == args.pr), None)
-            if stream is None:
-                print(json.dumps({
-                    "status": "BLOCKED_UNKNOWN_REVIEW_STREAM",
-                    "pr": args.pr,
-                    "eligible": [],
-                    "note": "PR-specific independent routing requires a reconciled stream when the durable ledger is disabled.",
-                }, indent=2))
-                return 2
-            excluded.update(stream.get("material_authors", []))
         else:
-            excluded.update(state.get("current_material_authors", []))
+            excluded.update(global_view.get("material_authors", []))
 
     preferences = routing_doc.get("preference_by_capability", {})
     actor_order = {actor.get("id"): index for index, actor in enumerate(actors_doc.get("actors", []))}

@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
+from install_identity import resolve_install_principals
 from onecompany_lib import CONTROL, ROOT, load_json, save_json
 
 SOURCE_REPOSITORY = "NTinkicht/OneCompany"
@@ -44,26 +44,6 @@ def infer_repo() -> str | None:
 def infer_default_branch() -> str:
     symbolic = git("symbolic-ref", "--short", "refs/remotes/origin/HEAD")
     return symbolic.split("/", 1)[1] if symbolic and "/" in symbolic else "main"
-
-
-def normalize_code_owner(value: str) -> str:
-    owner = value.strip()
-    if not owner.startswith("@"):
-        owner = "@" + owner
-    if not re.fullmatch(r"@[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)?", owner):
-        raise ValueError(
-            "code owner must be a GitHub user or team such as @octocat or @org/team"
-        )
-    return owner
-
-
-def normalize_platform_login(value: str) -> str:
-    login = value.strip().lstrip("@")
-    if not re.fullmatch(r"[A-Za-z0-9_.-]+", login):
-        raise ValueError(
-            "root principal must be one concrete GitHub user login, such as octocat"
-        )
-    return login
 
 
 def configure_codeowners(owner: str) -> None:
@@ -244,24 +224,21 @@ def main() -> int:
         "--repository",
         help="Target owner/name; inferred from git origin when possible",
     )
-    parser.add_argument(
-        "--project-name",
-        help="Target display name; defaults to repository name",
-    )
-    parser.add_argument(
-        "--default-branch",
-        help="Target default branch; inferred when possible",
-    )
+    parser.add_argument("--project-name", help="Target display name; defaults to repository name")
+    parser.add_argument("--default-branch", help="Target default branch; inferred when possible")
     parser.add_argument(
         "--code-owner",
-        help="GitHub user/team for protected CompanyOS paths; defaults to repository owner",
+        help=(
+            "GitHub user/team for protected CompanyOS paths. User-owned repositories "
+            "may infer the user owner; organization-owned repositories must pass this explicitly."
+        ),
     )
     parser.add_argument(
         "--root-principal",
         help=(
-            "Concrete GitHub user receiving human-owner/root platform authority; "
-            "defaults to repository owner. Required explicitly when the repository "
-            "owner is an organization and a human login differs."
+            "Concrete GitHub user receiving human-owner/root platform authority. "
+            "User-owned repositories may infer the user owner; organization-owned "
+            "repositories must pass this explicitly."
         ),
     )
     parser.add_argument("--initialize-contracts", action="store_true")
@@ -285,19 +262,16 @@ def main() -> int:
         print("REFUSED: target repository must differ from the OneCompany source repository")
         return 2
 
-    repository_owner = repository.split("/", 1)[0]
     project_name = args.project_name or repository.split("/", 1)[1]
     default_branch = args.default_branch or infer_default_branch()
     try:
-        code_owner = normalize_code_owner(args.code_owner or repository_owner)
-        root_principal = normalize_platform_login(args.root_principal or repository_owner)
-        configure_codeowners(code_owner)
-        reset_control_plane(
-            project_name,
+        code_owner, root_principal = resolve_install_principals(
             repository,
-            default_branch,
-            root_principal,
+            code_owner=args.code_owner,
+            root_principal=args.root_principal,
         )
+        configure_codeowners(code_owner)
+        reset_control_plane(project_name, repository, default_branch, root_principal)
     except (ValueError, FileNotFoundError) as exc:
         print(f"REFUSED: {exc}")
         return 2
@@ -314,7 +288,7 @@ def main() -> int:
         "and verified."
     )
     print(
-        "Next: python onecompany.py validate && python onecompany.py github-audit && "
+        "Next: python onecompany.py validate && python onecompany.py audit-github && "
         "python onecompany.py plan summary && python onecompany.py status"
     )
     return 0

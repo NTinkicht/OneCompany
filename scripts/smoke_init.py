@@ -56,6 +56,10 @@ def main() -> int:
                     "example/template-copy",
                     "--project-name",
                     "Template Copy",
+                    "--code-owner",
+                    "@example/reviewers",
+                    "--root-principal",
+                    "example-admin",
                     "--initialize-contracts",
                 ],
                 target,
@@ -65,24 +69,14 @@ def main() -> int:
                 f"init failed:\n{initialized.stdout}\n{initialized.stderr}",
             )
 
-            config = json.loads(
-                (target / ".onecompany" / "config.json").read_text()
-            )
-            queue = json.loads(
-                (target / ".onecompany" / "queue.json").read_text()
-            )
-            portfolio = json.loads(
-                (target / ".onecompany" / "portfolio.json").read_text()
-            )
+            config = json.loads((target / ".onecompany" / "config.json").read_text())
+            queue = json.loads((target / ".onecompany" / "queue.json").read_text())
+            portfolio = json.loads((target / ".onecompany" / "portfolio.json").read_text())
             catalog = json.loads(
                 (target / ".onecompany" / "requirements-catalog.json").read_text()
             )
-            state = json.loads(
-                (target / ".onecompany" / "state.json").read_text()
-            )
-            identity = json.loads(
-                (target / ".onecompany" / "identity.json").read_text()
-            )
+            state = json.loads((target / ".onecompany" / "state.json").read_text())
+            identity = json.loads((target / ".onecompany" / "identity.json").read_text())
             codeowners = (target / ".github" / "CODEOWNERS").read_text()
 
             require(
@@ -99,13 +93,9 @@ def main() -> int:
                 portfolio["entities"] == [] and portfolio["links"] == [],
                 "init must clear portfolio",
             )
+            require(catalog["requirements"] == [], "init must clear requirements")
             require(
-                catalog["requirements"] == [],
-                "init must clear requirements",
-            )
-            require(
-                state["active_streams"] == []
-                and state["safe_start_candidates"] == [],
+                state["active_streams"] == [] and state["safe_start_candidates"] == [],
                 "init must clear parallel flow state",
             )
             require(
@@ -116,9 +106,9 @@ def main() -> int:
                 "init must disable ledger",
             )
             require(
-                json.loads(
-                    (target / ".onecompany" / "supervision.json").read_text()
-                )["enabled"]
+                json.loads((target / ".onecompany" / "supervision.json").read_text())[
+                    "enabled"
+                ]
                 is False,
                 "init must disable supervision",
             )
@@ -130,12 +120,13 @@ def main() -> int:
             ]
             require(
                 len(root_principals) == 1
-                and root_principals[0].get("login") == "example",
-                "init must rebind root platform identity to the target owner",
+                and root_principals[0].get("login") == "example-admin",
+                "init must bind the explicit concrete root platform identity",
             )
             require(
-                "@NTinkicht" not in codeowners and "@example" in codeowners,
-                "init must replace source CODEOWNERS with target ownership",
+                "@NTinkicht" not in codeowners
+                and "@example/reviewers" in codeowners,
+                "init must replace source CODEOWNERS with explicit target ownership",
             )
 
             for command in (
@@ -157,6 +148,10 @@ def main() -> int:
                     "init",
                     "--repository",
                     "example/again",
+                    "--code-owner",
+                    "@example/reviewers",
+                    "--root-principal",
+                    "example-admin",
                 ],
                 target,
             )

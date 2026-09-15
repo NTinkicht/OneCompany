@@ -35,6 +35,12 @@ from onecompany_lib import (
 WRITE_CAPABILITIES = {"implementation", "ci_remediation"}
 ATTENDED_MECHANISM_KINDS = {"interactive", "manual"}
 ACTIVE_STATES = {"DISPATCH_CLAIMED", "DISPATCH_STARTED"}
+KNOWN_STATES = {
+    "DISPATCH_CLAIMED",
+    "DISPATCH_STARTED",
+    "DISPATCH_COMPLETED",
+    "DISPATCH_FAILED_SAFE",
+}
 LOCK_METADATA_NAME = "owner.json"
 DEFAULT_STALE_LOCK_SECONDS = 30.0
 
@@ -49,6 +55,22 @@ def utc_now() -> str:
 def dispatch_journal_path() -> Path:
     """Return the untracked local dispatch evidence path."""
     return ROOT / ".git" / "onecompany" / "dispatch-events.jsonl"
+
+
+def _validate_event(event: dict[str, Any], number: int) -> None:
+    """Reject malformed journal evidence before it can influence claim decisions."""
+    if event.get("version") != 1:
+        raise RuntimeError(f"dispatch journal line {number} has invalid version")
+    for field in ("event_id", "dispatch_id", "attempt_id", "state", "timestamp"):
+        value = event.get(field)
+        if not isinstance(value, str) or not value:
+            raise RuntimeError(
+                f"dispatch journal line {number} has invalid {field}"
+            )
+    if event["state"] not in KNOWN_STATES:
+        raise RuntimeError(f"dispatch journal line {number} has unknown state")
+    if not isinstance(event.get("evidence"), dict):
+        raise RuntimeError(f"dispatch journal line {number} has invalid evidence")
 
 
 def load_dispatch_events(path: Path | None = None) -> list[dict[str, Any]]:
@@ -71,6 +93,7 @@ def load_dispatch_events(path: Path | None = None) -> list[dict[str, Any]]:
                 raise RuntimeError(
                     f"dispatch journal line {number} is not an object"
                 )
+            _validate_event(event, number)
             events.append(event)
     return events
 
@@ -186,10 +209,30 @@ def _reclaim_stale_lock(lock_dir: Path, stale_after_seconds: float) -> bool:
     finally:
         try:
             marker.unlink()
-        except FileNotFoundError:
+        except (FileNotFoundError, OSError):
             pass
-        except OSError:
-            pass
+
+
+def _cleanup_staging_lock(staging: Path) -> None:
+    """Best-effort cleanup for a lock directory that was never published."""
+    try:
+        _lock_metadata_path(staging).unlink()
+    except (FileNotFoundError, OSError):
+        pass
+    try:
+        staging.rmdir()
+    except (FileNotFoundError, OSError):
+        pass
+
+
+def _publish_lock(staging: Path, lock_dir: Path) -> None:
+    """Atomically publish a fully initialized lock directory or report contention."""
+    try:
+        os.rename(staging, lock_dir)
+    except OSError as exc:
+        if exc.errno in {errno.EEXIST, errno.ENOTEMPTY, errno.EACCES, errno.EPERM}:
+            raise FileExistsError(str(lock_dir)) from exc
+        raise
 
 
 @contextmanager
@@ -198,35 +241,33 @@ def journal_lock(
     timeout_seconds: float = 5.0,
     stale_after_seconds: float = DEFAULT_STALE_LOCK_SECONDS,
 ) -> Iterator[None]:
-    """Acquire the journal lock, recovering only provably abandoned lock owners."""
+    """Acquire the journal lock, publishing only locks with valid owner metadata."""
     target = path or dispatch_journal_path()
     lock_dir = target.with_name(target.name + ".lock")
     lock_dir.parent.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + timeout_seconds
     owner_token = str(uuid.uuid4())
+
     while True:
+        staging = lock_dir.with_name(f"{lock_dir.name}.staging-{owner_token}")
         try:
-            lock_dir.mkdir()
+            staging.mkdir()
             try:
-                _write_lock_metadata(lock_dir, owner_token)
+                _write_lock_metadata(staging, owner_token)
+                _publish_lock(staging, lock_dir)
             except Exception:
-                try:
-                    _lock_metadata_path(lock_dir).unlink()
-                except FileNotFoundError:
-                    pass
-                try:
-                    lock_dir.rmdir()
-                except OSError:
-                    pass
+                _cleanup_staging_lock(staging)
                 raise
             break
         except FileExistsError as exc:
+            _cleanup_staging_lock(staging)
             if time.monotonic() >= deadline:
                 if _reclaim_stale_lock(lock_dir, stale_after_seconds):
                     deadline = time.monotonic() + timeout_seconds
                     continue
                 raise RuntimeError("dispatch_journal_locked") from exc
             time.sleep(0.02)
+
     try:
         yield
     finally:
@@ -355,7 +396,7 @@ def claim_dispatch(
         events = load_dispatch_events(target)
         last = _last_dispatch_event(events, dispatch_id)
         if last:
-            state = str(last.get("state") or "")
+            state = str(last["state"])
             if state in ACTIVE_STATES:
                 return "DISPATCH_ALREADY_ACTIVE", None, last
             if state == "DISPATCH_COMPLETED":

@@ -153,7 +153,7 @@ jobs:
           PROMPT="Perform a read-only repository analysis for OneCompany dispatch ${DISPATCH_ID}, work unit ${WORK_UNIT}, capability ${CAPABILITY}. Inspect repository files only. Do not modify files, execute shell commands, access network resources, use MCP servers or subagents, create branches/issues/pull requests, or change Git state. Return concise findings, evidence paths, and suggested next steps."
           copilot -p "$PROMPT" \
             --model=auto \
-            --max-ai-credits=5 \
+            --max-ai-credits=30 \
             --available-tools='view,grep,glob' \
             --allow-tool='read' \
             --no-ask-user \
@@ -180,5 +180,5 @@ jobs:
             echo "- Exact checkout head: \`${GITHUB_SHA}\`"
             echo "- Duplicate AI invocation skipped: \`${DUPLICATE:-false}\`"
             echo '- Tool surface: `view,grep,glob` only; read permission only'
-            echo '- Per-response AI credit cap: `5`'
+            echo '- Per-response AI credit cap: `30` (minimum accepted by Copilot CLI 1.0.83)'
           } >> "${GITHUB_STEP_SUMMARY}"

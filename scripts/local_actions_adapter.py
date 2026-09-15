@@ -116,7 +116,7 @@ def list_worker_runs(repository: str, *, runner: Runner = subprocess.run) -> lis
             "api",
             "--paginate",
             "--slurp",
-            f"/repos/{repository}/actions/workflows/{WORKFLOW_FILE}/runs?event=workflow_dispatch&per_page=100",
+            f"/repos/{repository}/actions/workflows/{WORKFLOW_FILE}/runs?per_page=100",
         ],
         runner=runner,
     )
@@ -138,6 +138,7 @@ def list_worker_runs(repository: str, *, runner: Runner = subprocess.run) -> lis
                 {
                     "databaseId": item.get("id"),
                     "displayTitle": item.get("display_title"),
+                    "event": item.get("event"),
                     "status": item.get("status"),
                     "conclusion": item.get("conclusion"),
                     "url": item.get("html_url"),
@@ -150,7 +151,12 @@ def list_worker_runs(repository: str, *, runner: Runner = subprocess.run) -> lis
 
 def _matching_run(runs: list[dict[str, Any]], dispatch_id: str) -> dict[str, Any] | None:
     title = f"OneCompany Local {dispatch_id}"
-    matching = [item for item in runs if item.get("displayTitle") == title]
+    matching = [
+        item
+        for item in runs
+        if item.get("event") == "workflow_dispatch"
+        and item.get("displayTitle") == title
+    ]
     if not matching:
         return None
     return sorted(

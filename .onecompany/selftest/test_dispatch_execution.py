@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -8,6 +9,7 @@ import threading
 import time
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "scripts"
@@ -134,6 +136,177 @@ class DispatchExecutionTests(unittest.TestCase):
                 [event["state"] for event in events],
                 ["DISPATCH_CLAIMED", "DISPATCH_STARTED"],
             )
+
+    def test_successful_adapter_with_unrecorded_outcome_stays_non_retryable(self):
+        request = {"dispatch_id": "dispatch-test-unrecorded"}
+        calls = 0
+
+        def adapter(_request):
+            nonlocal calls
+            calls += 1
+            return {
+                "status": "DISPATCH_STARTED",
+                "evidence": {"run_id": "run-unrecorded"},
+            }
+
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory) / "dispatch-events.jsonl"
+            with patch.object(
+                dispatch_execute,
+                "record_dispatch_outcome",
+                side_effect=RuntimeError("simulated fsync failure"),
+            ):
+                first = dispatch_execute.execute_with_adapter(
+                    request,
+                    adapter,
+                    journal_path=journal,
+                )
+
+            second = dispatch_execute.execute_with_adapter(
+                request,
+                adapter,
+                journal_path=journal,
+                retry_failed=True,
+            )
+
+            self.assertEqual(first["status"], "DISPATCH_OUTCOME_UNRECORDED")
+            self.assertEqual(first["adapter_status"], "DISPATCH_STARTED")
+            self.assertEqual(second["status"], "DISPATCH_ALREADY_ACTIVE")
+            self.assertEqual(calls, 1)
+            events = dispatch_execute.load_dispatch_events(journal)
+            self.assertEqual(
+                [event["state"] for event in events],
+                ["DISPATCH_CLAIMED"],
+            )
+
+    def test_outcome_rejects_foreign_attempt_and_invalid_transition(self):
+        dispatch_id = "dispatch-test-transition"
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory) / "dispatch-events.jsonl"
+            state, attempt_id, _ = dispatch_execute.claim_dispatch(
+                dispatch_id,
+                journal_path=journal,
+            )
+            self.assertEqual(state, "DISPATCH_CLAIMED")
+            self.assertIsNotNone(attempt_id)
+            assert attempt_id is not None
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "dispatch_outcome_attempt_mismatch",
+            ):
+                dispatch_execute.record_dispatch_outcome(
+                    dispatch_id,
+                    "foreign-attempt",
+                    "DISPATCH_FAILED_SAFE",
+                    {},
+                    journal_path=journal,
+                )
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "dispatch_outcome_invalid_transition",
+            ):
+                dispatch_execute.record_dispatch_outcome(
+                    dispatch_id,
+                    attempt_id,
+                    "DISPATCH_COMPLETED",
+                    {},
+                    journal_path=journal,
+                )
+
+            retry_state, _, _ = dispatch_execute.claim_dispatch(
+                dispatch_id,
+                journal_path=journal,
+                retry_failed=True,
+            )
+            self.assertEqual(retry_state, "DISPATCH_ALREADY_ACTIVE")
+
+    def test_adapter_completion_records_started_then_completed(self):
+        request = {"dispatch_id": "dispatch-test-completed"}
+
+        def adapter(_request):
+            return {
+                "status": "DISPATCH_COMPLETED",
+                "evidence": {"run_id": "run-complete"},
+            }
+
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory) / "dispatch-events.jsonl"
+            result = dispatch_execute.execute_with_adapter(
+                request,
+                adapter,
+                journal_path=journal,
+            )
+            self.assertEqual(result["status"], "DISPATCH_COMPLETED")
+            events = dispatch_execute.load_dispatch_events(journal)
+            self.assertEqual(
+                [event["state"] for event in events],
+                ["DISPATCH_CLAIMED", "DISPATCH_STARTED", "DISPATCH_COMPLETED"],
+            )
+
+    def test_stale_lock_recovery_requires_old_and_provably_dead_owner(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory) / "dispatch-events.jsonl"
+            lock_dir = journal.with_name(journal.name + ".lock")
+            lock_dir.mkdir()
+            metadata = {
+                "version": 1,
+                "pid": 999999,
+                "acquired_at_epoch": time.time() - 60,
+                "owner_token": "dead-owner",
+            }
+            (lock_dir / dispatch_execute.LOCK_METADATA_NAME).write_text(
+                json.dumps(metadata),
+                encoding="utf-8",
+            )
+
+            with patch.object(dispatch_execute, "_pid_alive", return_value=False):
+                with dispatch_execute.journal_lock(
+                    journal,
+                    timeout_seconds=0,
+                    stale_after_seconds=1,
+                ):
+                    current = dispatch_execute._read_lock_metadata(lock_dir)
+                    self.assertIsNotNone(current)
+                    self.assertEqual(current["pid"], os.getpid())
+            self.assertFalse(lock_dir.exists())
+
+    def test_stale_lock_recovery_fails_closed_for_missing_metadata(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory) / "dispatch-events.jsonl"
+            lock_dir = journal.with_name(journal.name + ".lock")
+            lock_dir.mkdir()
+            with self.assertRaisesRegex(RuntimeError, "dispatch_journal_locked"):
+                with dispatch_execute.journal_lock(
+                    journal,
+                    timeout_seconds=0,
+                    stale_after_seconds=0,
+                ):
+                    self.fail("invalid lock metadata must not be reclaimed")
+
+    def test_stale_lock_recovery_never_steals_live_owner(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory) / "dispatch-events.jsonl"
+            lock_dir = journal.with_name(journal.name + ".lock")
+            lock_dir.mkdir()
+            metadata = {
+                "version": 1,
+                "pid": os.getpid(),
+                "acquired_at_epoch": time.time() - 3600,
+                "owner_token": "live-owner",
+            }
+            (lock_dir / dispatch_execute.LOCK_METADATA_NAME).write_text(
+                json.dumps(metadata),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(RuntimeError, "dispatch_journal_locked"):
+                with dispatch_execute.journal_lock(
+                    journal,
+                    timeout_seconds=0,
+                    stale_after_seconds=1,
+                ):
+                    self.fail("a live owner must never be reclaimed based on age")
 
     def test_failed_start_is_safe_and_not_retried_implicitly(self):
         request = {"dispatch_id": "dispatch-test-failure"}

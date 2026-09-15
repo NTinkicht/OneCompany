@@ -99,7 +99,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_TITLE: OneCompany Copilot ${{ steps.prepare.outputs.dispatch_id }}
         run: |
-          gh api --paginate --slurp "/repos/${GITHUB_REPOSITORY}/actions/workflows/onecompany-copilot-readonly.yml/runs?event=workflow_dispatch&per_page=100" > "${RUNNER_TEMP}/copilot-runs.json"
+          gh api --paginate --slurp "/repos/${GITHUB_REPOSITORY}/actions/workflows/onecompany-copilot-readonly.yml/runs?per_page=100" > "${RUNNER_TEMP}/copilot-runs.json"
           python - <<'PY'
           import json
           import os
@@ -119,7 +119,8 @@ jobs:
           matching = [
               item
               for item in workflow_runs
-              if item.get('display_title') == title
+              if item.get('event') == 'workflow_dispatch'
+              and item.get('display_title') == title
               and isinstance(item.get('created_at'), str)
               and int(item.get('id', 0)) > 0
           ]

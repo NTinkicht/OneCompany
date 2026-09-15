@@ -53,6 +53,7 @@ class CopilotActionsAdapterTests(unittest.TestCase):
         return {
             "id": run["databaseId"],
             "display_title": run["displayTitle"],
+            "event": run.get("event", "workflow_dispatch"),
             "status": run["status"],
             "conclusion": run.get("conclusion"),
             "html_url": run["url"],
@@ -101,6 +102,24 @@ class CopilotActionsAdapterTests(unittest.TestCase):
             request["mechanism"] = dict(request["mechanism"], kind="local_cli")
             self.assertTrue(adapter.validate_request(request))
 
+    def test_dispatch_tokens_are_validated_before_any_provider_call(self):
+        for field, value in (
+            ("dispatch_id", "contains space"),
+            ("work_unit", "bad/slash"),
+            ("dispatch_id", "x" * 161),
+        ):
+            request = self.request()
+            request[field] = value
+
+            def runner(*_args, **_kwargs):
+                raise AssertionError("provider must not be called for invalid dispatch tokens")
+
+            with patch.object(adapter, "load_json", return_value=self.good_budget()):
+                reasons = adapter.validate_request(request)
+                self.assertIn(f"copilot_adapter_{field}_invalid", reasons)
+                with self.assertRaisesRegex(RuntimeError, f"copilot_adapter_{field}_invalid"):
+                    adapter.invoke(request, runner=runner)
+
     def test_existing_provider_run_is_reconciled_without_second_dispatch(self):
         request = self.request()
         run = {
@@ -125,7 +144,24 @@ class CopilotActionsAdapterTests(unittest.TestCase):
         self.assertEqual(result["status"], "DISPATCH_STARTED")
         self.assertEqual(result["evidence"]["run_id"], 101)
         self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0][0:4], ["gh", "api", "--paginate", "--slurp"])
+        self.assertNotIn("event=workflow_dispatch", calls[0][-1])
+
+    def test_non_dispatch_same_title_does_not_reconcile(self):
+        push_run = {
+            "databaseId": 99,
+            "displayTitle": "OneCompany Copilot dispatch-a3b-test",
+            "event": "push",
+            "status": "completed",
+            "conclusion": "success",
+            "url": "https://github.com/NTinkicht/OneCompany/actions/runs/99",
+            "headSha": "f" * 40,
+            "createdAt": "2026-09-15T22:00:00Z",
+        }
+        normalized = adapter.list_worker_runs(
+            "NTinkicht/OneCompany",
+            runner=lambda args, **_kwargs: self.completed(args, self.paginated([push_run])),
+        )
+        self.assertIsNone(adapter._matching_run(normalized, "dispatch-a3b-test"))
 
     def test_matching_run_beyond_first_hundred_is_reconciled_without_post(self):
         request = self.request()
@@ -163,6 +199,7 @@ class CopilotActionsAdapterTests(unittest.TestCase):
         self.assertEqual(result["evidence"]["run_id"], 88)
         self.assertFalse(any(call[0:3] == ["gh", "api", "--method"] for call in calls))
         self.assertIn("per_page=100", calls[0][-1])
+        self.assertNotIn("event=workflow_dispatch", calls[0][-1])
 
     def test_dispatch_uses_exact_main_workflow_and_returns_run_evidence(self):
         request = self.request()
@@ -267,6 +304,8 @@ class CopilotActionsAdapterTests(unittest.TestCase):
         self.assertNotIn("--allow-all", text)
         self.assertIn("Refuse duplicate workflow-dispatch AI invocation", text)
         self.assertIn("gh api --paginate --slurp", text)
+        self.assertNotIn("?event=workflow_dispatch", text)
+        self.assertIn("item.get('event') == 'workflow_dispatch'", text)
         self.assertIn("workflow_runs.extend(page['workflow_runs'])", text)
         self.assertIn("canonical = min(", text)
         self.assertIn("current workflow run is missing from duplicate-election evidence", text)

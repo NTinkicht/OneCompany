@@ -7,6 +7,7 @@ It never creates lease authority, branches, pull requests, or paid fallback path
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import time
 from typing import Any, Callable
@@ -16,6 +17,7 @@ from onecompany_lib import CONTROL, load_json
 WORKFLOW_FILE = "onecompany-copilot-readonly.yml"
 MECHANISM_ID = "copilot-actions-readonly"
 ACTOR_ID = "github-copilot"
+SAFE_TOKEN = re.compile(r"^[A-Za-z0-9._:-]{1,160}$")
 READ_ONLY_CAPABILITIES = {
     "repository_intelligence",
     "test_design",
@@ -81,7 +83,7 @@ def validate_request(request: dict[str, Any]) -> list[str]:
         reasons.append("copilot_adapter_repository_invalid")
     for field in ("dispatch_id", "work_unit"):
         value = request.get(field)
-        if not isinstance(value, str) or not value:
+        if not isinstance(value, str) or not SAFE_TOKEN.fullmatch(value):
             reasons.append(f"copilot_adapter_{field}_invalid")
     reasons.extend(zero_spend_policy_reasons(load_json(CONTROL / "budget.json")))
     return sorted(set(reasons))
@@ -110,7 +112,7 @@ def list_worker_runs(repository: str, *, runner: Runner = subprocess.run) -> lis
             "api",
             "--paginate",
             "--slurp",
-            f"/repos/{repository}/actions/workflows/{WORKFLOW_FILE}/runs?event=workflow_dispatch&per_page=100",
+            f"/repos/{repository}/actions/workflows/{WORKFLOW_FILE}/runs?per_page=100",
         ],
         runner=runner,
     )
@@ -132,6 +134,7 @@ def list_worker_runs(repository: str, *, runner: Runner = subprocess.run) -> lis
                 {
                     "databaseId": item.get("id"),
                     "displayTitle": item.get("display_title"),
+                    "event": item.get("event"),
                     "status": item.get("status"),
                     "conclusion": item.get("conclusion"),
                     "url": item.get("html_url"),
@@ -146,7 +149,12 @@ def _matching_run(
     runs: list[dict[str, Any]], dispatch_id: str
 ) -> dict[str, Any] | None:
     title = f"OneCompany Copilot {dispatch_id}"
-    matching = [item for item in runs if item.get("displayTitle") == title]
+    matching = [
+        item
+        for item in runs
+        if item.get("event") == "workflow_dispatch"
+        and item.get("displayTitle") == title
+    ]
     if not matching:
         return None
     return sorted(

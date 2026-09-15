@@ -12,6 +12,7 @@ on:
       - .onecompany/supervision.json
       - scripts/bootstrap.py
       - scripts/smoke_bootstrap.py
+      - scripts/dispatch.py
       - scripts/ledger.py
       - scripts/ledger_lib.py
       - scripts/ledger_validate.py
@@ -161,11 +162,12 @@ jobs:
           if before != after:
               raise SystemExit("canonical ledger replay changed after local cache deletion")
 
+          proof_event_id = "b1-human-publisher-proof-20260915"
           proof = next(
               (
                   event
                   for event in events
-                  if event.get("event_id") == "b1-human-publisher-proof-20260915"
+                  if event.get("event_id") == proof_event_id
               ),
               None,
           )
@@ -177,10 +179,33 @@ jobs:
               raise SystemExit("B1 publisher proof has unexpected event type")
           if (proof.get("payload") or {}).get("authority") != "none":
               raise SystemExit("B1 identity proof must not carry coordination authority")
-          if before.get("active_leases"):
-              raise SystemExit("publisher identity proof unexpectedly created lease authority")
-          if before.get("current_gate"):
-              raise SystemExit("publisher identity proof unexpectedly created gate authority")
+
+          baseline_events = [
+              event for event in before_events if event.get("event_id") != proof_event_id
+          ]
+          baseline = ledger_lib.derive(
+              baseline_events,
+              enforce_actor_policy=False,
+              verify_admission_provenance=False,
+          )
+          authority_fields = (
+              "active_leases",
+              "material_authors",
+              "material_authors_by_pr",
+              "current_gate",
+              "gates_by_pr",
+              "merged_work_units",
+              "verified_merged_work_units",
+              "current_actor_eligibility",
+          )
+          changed_authority = [
+              field for field in authority_fields if baseline.get(field) != before.get(field)
+          ]
+          if changed_authority:
+              raise SystemExit(
+                  "B1 publisher proof unexpectedly changed authority fields: "
+                  + ",".join(changed_authority)
+              )
 
           print(
               json.dumps(
@@ -191,6 +216,7 @@ jobs:
                       "trusted_event_count": len(events),
                       "immutable_snapshot_replay": True,
                       "cache_independent_replay": True,
+                      "proof_authority_delta": [],
                   },
                   sort_keys=True,
               )
@@ -215,6 +241,7 @@ jobs:
             echo "- Exact checkout head: \`${GITHUB_SHA}\`"
             echo '- Remote comments fetched once into an immutable snapshot: `yes`'
             echo '- Local `state.json` deleted between derivations: `yes`'
+            echo '- Proof event compared against a proof-free authority baseline: `yes`'
             echo '- Feature checkouts cannot activate durable-ledger authority.'
             echo '- This smoke cannot publish ledger events or mutate repository content.'
           } >> "${GITHUB_STEP_SUMMARY}"

@@ -56,6 +56,20 @@
       ]
     },
     {
+      "actor_id": "onecompany-local",
+      "mechanisms": [
+        {
+          "id": "onecompany-actions-readonly",
+          "kind": "github_action",
+          "configured": true,
+          "unattended": true,
+          "capabilities": ["repository_intelligence"],
+          "invocation_hint": "python onecompany.py execute-dispatch --actor onecompany-local --capability repository_intelligence --mechanism onecompany-actions-readonly --work-unit <WU> --unattended",
+          "evidence": ["Live feature-branch smoke run 35026542482 completed successfully: https://github.com/NTinkicht/OneCompany/actions/runs/35026542482", "Exact smoke head 3a0d2571ad9e655ff3b130f10fd787703f74f603 used the reviewed public-runner zero-spend and read-only workflow"]
+        }
+      ]
+    },
+    {
       "actor_id": "codex",
       "mechanisms": [
         {"id": "codex-github-assignment", "kind": "github_native", "configured": false, "unattended": true, "capabilities": ["implementation", "ci_remediation", "code_review", "test_design", "state_reconciliation", "merge_execution"], "invocation_hint": "Use the configured Codex GitHub/native assignment or executable workspace path on the canonical stream.", "evidence": []},
@@ -74,7 +88,8 @@
       "mechanisms": [
         {"id": "copilot-coding-agent", "kind": "github_native", "configured": false, "unattended": true, "capabilities": ["implementation", "ci_remediation", "test_design", "documentation"], "invocation_hint": "Assign the canonical issue/PR to the configured Copilot coding agent.", "evidence": []},
         {"id": "copilot-code-review", "kind": "github_review", "configured": false, "unattended": true, "capabilities": ["code_review", "test_design"], "invocation_hint": "Request Copilot Code Review only when the actor is independent of the exact target head.", "evidence": []},
-        {"id": "copilot-ide", "kind": "interactive", "configured": false, "unattended": false, "capabilities": ["implementation", "repository_intelligence", "ci_remediation", "test_design", "failure_analysis", "documentation"], "invocation_hint": "Use the authenticated IDE/CLI surface.", "evidence": []}
+        {"id": "copilot-ide", "kind": "interactive", "configured": false, "unattended": false, "capabilities": ["implementation", "repository_intelligence", "ci_remediation", "test_design", "failure_analysis", "documentation"], "invocation_hint": "Use the authenticated IDE/CLI surface.", "evidence": []},
+        {"id": "copilot-actions-readonly", "kind": "github_action", "configured": false, "unattended": true, "capabilities": ["repository_intelligence", "test_design", "failure_analysis"], "invocation_hint": "Dormant bounded Copilot CLI workflow; re-verify only when included owner quota is available.", "evidence": ["Capacity probe run 35026335944 reached authenticated Copilot CLI with read-only tools but provider returned monthly quota exceeded and 0 Premium requests"]}
       ]
     },
     {

@@ -25,6 +25,17 @@
       "may_independently_gate_own_material_authorship": false
     },
     {
+      "id": "onecompany-local",
+      "display_name": "OneCompany Local Worker",
+      "enabled": true,
+      "configured": true,
+      "execution_modes": ["github_action"],
+      "cost_class": "FREE_ALLOWANCE",
+      "permissions": ["read"],
+      "capabilities": ["repository_intelligence"],
+      "may_independently_gate_own_material_authorship": false
+    },
+    {
       "id": "codex",
       "display_name": "Codex",
       "enabled": false,

@@ -21,12 +21,13 @@ def load(name: str) -> dict:
 
 
 class InteractiveActivationTests(unittest.TestCase):
-    def test_only_human_owner_and_chatgpt_are_enabled(self):
+    def test_only_evidence_backed_actors_are_enabled(self):
         actors = load("actors.json")["actors"]
         enabled = {item["id"] for item in actors if item.get("enabled")}
         configured = {item["id"] for item in actors if item.get("configured")}
-        self.assertEqual(enabled, {"human-owner", "chatgpt"})
-        self.assertEqual(configured, {"human-owner", "chatgpt"})
+        expected = {"human-owner", "chatgpt", "onecompany-local"}
+        self.assertEqual(enabled, expected)
+        self.assertEqual(configured, expected)
 
     def test_readiness_is_evidence_backed_and_capacity_is_conservative(self):
         actors = {item["id"]: item for item in load("actors.json")["actors"]}
@@ -49,8 +50,19 @@ class InteractiveActivationTests(unittest.TestCase):
         self.assertTrue(chatgpt["capacity"]["measured"])
         self.assertTrue(chatgpt["capacity"]["evidence"])
 
+        local = readiness["onecompany-local"]
+        self.assertEqual(local["setup_state"], "ready")
+        self.assertEqual(local["verified_capabilities"], ["repository_intelligence"])
+        self.assertTrue(local["repository_access"]["read"])
+        self.assertFalse(local["repository_access"]["write"])
+        self.assertFalse(local["repository_access"]["review"])
+        self.assertFalse(local["repository_access"]["merge"])
+        self.assertEqual(local["capacity"]["implementation_streams"], 0)
+        self.assertTrue(local["capacity"]["measured"])
+        self.assertTrue(local["capacity"]["evidence"])
+
         for actor_id, actor in actors.items():
-            if actor_id in {"human-owner", "chatgpt"}:
+            if actor_id in {"human-owner", "chatgpt", "onecompany-local"}:
                 continue
             self.assertFalse(actor["enabled"], actor_id)
             self.assertFalse(actor["configured"], actor_id)
@@ -128,14 +140,18 @@ class InteractiveActivationTests(unittest.TestCase):
             )
         )
 
-    def test_no_unattended_path_is_activated(self):
+    def test_only_verified_readonly_a3b_path_is_unattended(self):
         readiness = {item["actor_id"]: item for item in load("readiness.json")["actors"]}
         dispatch = {item["actor_id"]: item for item in load("dispatch.json")["actors"]}
 
         for actor_id, record in readiness.items():
             unattended = record["unattended"]
-            self.assertFalse(unattended["configured"], actor_id)
-            self.assertFalse(unattended["verified"], actor_id)
+            if actor_id == "onecompany-local":
+                self.assertTrue(unattended["configured"])
+                self.assertTrue(unattended["verified"])
+            else:
+                self.assertFalse(unattended["configured"], actor_id)
+                self.assertFalse(unattended["verified"], actor_id)
 
         configured_unattended = [
             (actor_id, mechanism["id"])
@@ -143,7 +159,10 @@ class InteractiveActivationTests(unittest.TestCase):
             for mechanism in record.get("mechanisms", [])
             if mechanism.get("configured") and mechanism.get("unattended")
         ]
-        self.assertEqual(configured_unattended, [])
+        self.assertEqual(
+            configured_unattended,
+            [("onecompany-local", "onecompany-actions-readonly")],
+        )
 
     def test_chatgpt_interactive_implementation_dispatch_is_ready(self):
         completed = subprocess.run(

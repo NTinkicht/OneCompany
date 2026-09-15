@@ -1,0 +1,207 @@
+name: OneCompany Local Readonly Worker
+run-name: OneCompany Local ${{ github.event_name == 'workflow_dispatch' && inputs.dispatch_id || format('smoke-{0}', github.sha) }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      dispatch_id:
+        description: Canonical OneCompany dispatch identity
+        required: true
+        type: string
+      work_unit:
+        description: Work Unit being analyzed
+        required: true
+        type: string
+      capability:
+        description: Read-only capability
+        required: true
+        type: choice
+        options:
+          - repository_intelligence
+  push:
+    branches:
+      - epic-0.6-a3b-copilot-actions-adapter
+    paths:
+      - .github/workflows/onecompany-local-readonly.yml
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: onecompany-local-${{ github.event_name == 'workflow_dispatch' && inputs.dispatch_id || github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  repository-intelligence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout reviewed repository state
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Validate zero-spend policy, public runner, and bounded inputs
+        id: prepare
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_DISPATCH_ID: ${{ inputs.dispatch_id }}
+          INPUT_WORK_UNIT: ${{ inputs.work_unit }}
+          INPUT_CAPABILITY: ${{ inputs.capability }}
+        run: |
+          set -euo pipefail
+          PRIVATE=$(gh api "/repos/${GITHUB_REPOSITORY}" --jq '.private')
+          if [ "${PRIVATE}" != "false" ]; then
+            echo 'Standard hosted-runner zero-spend proof requires a public repository.' >&2
+            exit 1
+          fi
+          python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          budget = json.loads(Path('.onecompany/budget.json').read_text(encoding='utf-8'))
+          ai = budget.get('ai', {})
+          allowed = set(budget.get('cost_classes', {}).get('allowed', []))
+          required_zero = {
+              'additional_monthly_spend_cap': 0,
+              'allow_paid_fallback': False,
+              'allow_overage': False,
+              'allow_auto_topup': False,
+              'allow_new_paid_vendor': False,
+          }
+          for key, expected in required_zero.items():
+              if ai.get(key) != expected:
+                  raise SystemExit(f'zero-spend policy mismatch: {key}')
+          if 'FREE_ALLOWANCE' not in allowed:
+              raise SystemExit('FREE_ALLOWANCE is not budget-allowed')
+
+          if os.environ['EVENT_NAME'] == 'workflow_dispatch':
+              dispatch_id = os.environ.get('INPUT_DISPATCH_ID', '')
+              work_unit = os.environ.get('INPUT_WORK_UNIT', '')
+              capability = os.environ.get('INPUT_CAPABILITY', '')
+          else:
+              dispatch_id = f"smoke-{os.environ['GITHUB_SHA']}"
+              work_unit = 'A3B-LOCAL-SMOKE'
+              capability = 'repository_intelligence'
+
+          safe_token = re.compile(r'^[A-Za-z0-9._:-]{1,160}$')
+          if not safe_token.fullmatch(dispatch_id):
+              raise SystemExit('invalid dispatch_id')
+          if not safe_token.fullmatch(work_unit):
+              raise SystemExit('invalid work_unit')
+          if capability != 'repository_intelligence':
+              raise SystemExit('capability is not read-only allowlisted')
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
+              out.write(f'dispatch_id={dispatch_id}\n')
+              out.write(f'work_unit={work_unit}\n')
+              out.write(f'capability={capability}\n')
+          PY
+
+      - name: Refuse duplicate workflow-dispatch execution
+        if: github.event_name == 'workflow_dispatch'
+        id: dedupe
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_TITLE: OneCompany Local ${{ steps.prepare.outputs.dispatch_id }}
+        run: |
+          gh api --paginate --slurp "/repos/${GITHUB_REPOSITORY}/actions/workflows/onecompany-local-readonly.yml/runs?per_page=100" > "${RUNNER_TEMP}/local-runs.json"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          pages = json.loads((Path(os.environ['RUNNER_TEMP']) / 'local-runs.json').read_text(encoding='utf-8'))
+          if not isinstance(pages, list):
+              raise SystemExit('workflow run pagination evidence is not a list')
+          workflow_runs = []
+          for page in pages:
+              if not isinstance(page, dict) or not isinstance(page.get('workflow_runs'), list):
+                  raise SystemExit('workflow run pagination page is malformed')
+              workflow_runs.extend(page['workflow_runs'])
+
+          current = int(os.environ['GITHUB_RUN_ID'])
+          title = os.environ['EXPECTED_TITLE']
+          matching = [
+              item
+              for item in workflow_runs
+              if item.get('event') == 'workflow_dispatch'
+              and item.get('display_title') == title
+              and isinstance(item.get('created_at'), str)
+              and int(item.get('id', 0)) > 0
+          ]
+          if not any(int(item['id']) == current for item in matching):
+              raise SystemExit('current workflow run is missing from duplicate-election evidence')
+          canonical = min(
+              matching,
+              key=lambda item: (item['created_at'], int(item['id'])),
+          )
+          duplicate = int(canonical['id']) != current
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as out:
+              out.write(f"duplicate={'true' if duplicate else 'false'}\n")
+          PY
+
+      - name: Run deterministic repository intelligence
+        if: steps.dedupe.outputs.duplicate != 'true'
+        env:
+          DISPATCH_ID: ${{ steps.prepare.outputs.dispatch_id }}
+          WORK_UNIT: ${{ steps.prepare.outputs.work_unit }}
+          CAPABILITY: ${{ steps.prepare.outputs.capability }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path('.')
+          files = sorted(
+              path for path in root.rglob('*')
+              if path.is_file() and '.git' not in path.parts
+          )
+          actors = json.loads(Path('.onecompany/actors.json').read_text(encoding='utf-8'))
+          readiness = json.loads(Path('.onecompany/readiness.json').read_text(encoding='utf-8'))
+          dispatch = json.loads(Path('.onecompany/dispatch.json').read_text(encoding='utf-8'))
+          result = {
+              'version': 1,
+              'dispatch_id': os.environ['DISPATCH_ID'],
+              'work_unit': os.environ['WORK_UNIT'],
+              'capability': os.environ['CAPABILITY'],
+              'head_sha': os.environ['GITHUB_SHA'],
+              'file_count': len(files),
+              'python_file_count': sum(path.suffix == '.py' for path in files),
+              'workflow_file_count': sum('.github/workflows' in path.as_posix() for path in files),
+              'enabled_actor_count': sum(item.get('enabled') is True for item in actors.get('actors', [])),
+              'ready_actor_count': sum(item.get('setup_state') == 'ready' for item in readiness.get('actors', [])),
+              'configured_mechanism_count': sum(
+                  mechanism.get('configured') is True
+                  for actor in dispatch.get('actors', [])
+                  for mechanism in actor.get('mechanisms', [])
+              ),
+          }
+          output = json.dumps(result, sort_keys=True)
+          print(output)
+          Path(os.environ['RUNNER_TEMP'], 'onecompany-local-result.json').write_text(output + '\n', encoding='utf-8')
+          PY
+
+      - name: Publish execution evidence summary
+        if: always()
+        env:
+          DUPLICATE: ${{ steps.dedupe.outputs.duplicate }}
+        run: |
+          {
+            echo '## OneCompany local read-only worker'
+            echo
+            echo "- Dispatch: \`${{ steps.prepare.outputs.dispatch_id }}\`"
+            echo "- Work Unit: \`${{ steps.prepare.outputs.work_unit }}\`"
+            echo "- Capability: \`${{ steps.prepare.outputs.capability }}\`"
+            echo "- Run ID: \`${GITHUB_RUN_ID}\`"
+            echo "- Exact checkout head: \`${GITHUB_SHA}\`"
+            echo "- Duplicate execution skipped: \`${DUPLICATE:-false}\`"
+            echo '- GitHub permissions: `contents: read`, `actions: read`'
+            echo '- Runner eligibility: standard GitHub-hosted runner on public repository'
+          } >> "${GITHUB_STEP_SUMMARY}"

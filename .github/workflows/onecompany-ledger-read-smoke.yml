@@ -6,6 +6,7 @@ on:
       - epic-0.6-b1-durable-ledger-activation
     paths:
       - .github/workflows/onecompany-ledger-read-smoke.yml
+      - .github/workflows/onecompany-validate.yml
       - .onecompany/ledger.json
       - .onecompany/supervision.json
       - scripts/ledger.py

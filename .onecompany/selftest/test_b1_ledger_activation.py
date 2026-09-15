@@ -106,7 +106,7 @@ class B1LedgerActivationTests(unittest.TestCase):
         self.assertNotIn("write-all", text)
         self.assertNotRegex(text, r"(?m)^\s{2,}[A-Za-z0-9_-]+:\s*write\s*$")
 
-    def test_runtime_activation_guard_binds_clean_checkout_to_protected_history(self):
+    def test_runtime_activation_guard_requires_current_protected_tip(self):
         head = "a" * 40
 
         def fake_run(command, cwd=None):
@@ -120,11 +120,40 @@ class B1LedgerActivationTests(unittest.TestCase):
         with (
             patch.object(ledger_lib, "run", side_effect=fake_run),
             patch.object(ledger_lib, "_repository", return_value="NTinkicht/OneCompany"),
-            patch.object(ledger_lib, "_assert_trusted_default_branch_history") as verify,
+            patch.object(ledger_lib, "_default_branch_tip", return_value=("main", head)) as tip,
         ):
             ledger_lib._assert_ledger_runtime_activation()
 
-        verify.assert_called_once_with("NTinkicht/OneCompany", head)
+        tip.assert_called_once_with("NTinkicht/OneCompany")
+
+    def test_runtime_activation_guard_rejects_feature_or_stale_checkout(self):
+        protected_tip = "f" * 40
+        for label, checkout in (
+            ("feature-ref", "e" * 40),
+            ("older-main", "d" * 40),
+        ):
+            with self.subTest(label=label):
+                def fake_run(command, cwd=None):
+                    del cwd
+                    if command[:3] == ["git", "diff", "--quiet"]:
+                        return SimpleNamespace(returncode=0, stdout="", stderr="")
+                    if command == ["git", "rev-parse", "HEAD"]:
+                        return SimpleNamespace(returncode=0, stdout=checkout + "\n", stderr="")
+                    raise AssertionError(f"unexpected command: {command}")
+
+                with (
+                    patch.object(ledger_lib, "run", side_effect=fake_run),
+                    patch.object(ledger_lib, "_repository", return_value="NTinkicht/OneCompany"),
+                    patch.object(
+                        ledger_lib,
+                        "_default_branch_tip",
+                        return_value=("main", protected_tip),
+                    ),
+                ):
+                    with self.assertRaisesRegex(
+                        RuntimeError, "current protected default-branch tip"
+                    ):
+                        ledger_lib._assert_ledger_runtime_activation()
 
     def test_runtime_activation_guard_rejects_dirty_policy_before_network(self):
         with (

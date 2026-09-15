@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import subprocess
 import sys
@@ -8,6 +9,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTROL = ROOT / ".onecompany"
+SCRIPTS = ROOT / "scripts"
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
+
+import simulate as simulate_script  # noqa: E402
 
 
 def load(name: str) -> dict:
@@ -50,6 +56,43 @@ class InteractiveActivationTests(unittest.TestCase):
             self.assertFalse(actor["configured"], actor_id)
             self.assertEqual(readiness[actor_id]["setup_state"], "not_started")
             self.assertEqual(readiness[actor_id]["verified_capabilities"], [])
+
+    def test_verified_capability_requires_configured_dispatch_mechanism(self):
+        actors = load("actors.json")
+        readiness = load("readiness.json")
+        dispatch = load("dispatch.json")
+        self.assertTrue(
+            simulate_script.verified_capabilities_have_configured_dispatch(
+                actors,
+                readiness,
+                dispatch,
+            )
+        )
+
+        inconsistent_dispatch = copy.deepcopy(dispatch)
+        chatgpt = next(
+            item
+            for item in inconsistent_dispatch["actors"]
+            if item["actor_id"] == "chatgpt"
+        )
+        interactive = next(
+            item
+            for item in chatgpt["mechanisms"]
+            if item["id"] == "interactive-connected-chat"
+        )
+        interactive["capabilities"] = [
+            capability
+            for capability in interactive["capabilities"]
+            if capability != "implementation"
+        ]
+
+        self.assertFalse(
+            simulate_script.verified_capabilities_have_configured_dispatch(
+                actors,
+                readiness,
+                inconsistent_dispatch,
+            )
+        )
 
     def test_no_unattended_path_is_activated(self):
         readiness = {item["actor_id"]: item for item in load("readiness.json")["actors"]}

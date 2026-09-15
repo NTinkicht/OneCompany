@@ -103,29 +103,43 @@ def _run(
 
 
 def list_worker_runs(repository: str, *, runner: Runner = subprocess.run) -> list[dict[str, Any]]:
-    """Read workflow-run evidence from GitHub without mutating repository state."""
+    """Read the complete retained Copilot workflow-run history from GitHub."""
     completed = _run(
         [
             "gh",
-            "run",
-            "list",
-            "--repo",
-            repository,
-            "--workflow",
-            WORKFLOW_FILE,
-            "--event",
-            "workflow_dispatch",
-            "--limit",
-            "100",
-            "--json",
-            "databaseId,displayTitle,status,conclusion,url,headSha,createdAt",
+            "api",
+            "--paginate",
+            "--slurp",
+            f"/repos/{repository}/actions/workflows/{WORKFLOW_FILE}/runs?event=workflow_dispatch&per_page=100",
         ],
         runner=runner,
     )
-    payload = json.loads(completed.stdout or "[]")
-    if not isinstance(payload, list):
-        raise RuntimeError("copilot_actions_runs_not_list")
-    return [item for item in payload if isinstance(item, dict)]
+    pages = json.loads(completed.stdout or "[]")
+    if not isinstance(pages, list):
+        raise RuntimeError("copilot_actions_run_pages_not_list")
+
+    runs: list[dict[str, Any]] = []
+    for page in pages:
+        if not isinstance(page, dict):
+            raise RuntimeError("copilot_actions_run_page_invalid")
+        page_runs = page.get("workflow_runs")
+        if not isinstance(page_runs, list):
+            raise RuntimeError("copilot_actions_run_page_missing_runs")
+        for item in page_runs:
+            if not isinstance(item, dict):
+                raise RuntimeError("copilot_actions_run_item_invalid")
+            runs.append(
+                {
+                    "databaseId": item.get("id"),
+                    "displayTitle": item.get("display_title"),
+                    "status": item.get("status"),
+                    "conclusion": item.get("conclusion"),
+                    "url": item.get("html_url"),
+                    "headSha": item.get("head_sha"),
+                    "createdAt": item.get("created_at"),
+                }
+            )
+    return runs
 
 
 def _matching_run(

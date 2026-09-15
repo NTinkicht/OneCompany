@@ -49,6 +49,22 @@ class CopilotActionsAdapterTests(unittest.TestCase):
     def completed(self, args, stdout=""):
         return subprocess.CompletedProcess(args=args, returncode=0, stdout=stdout, stderr="")
 
+    def api_run(self, run):
+        return {
+            "id": run["databaseId"],
+            "display_title": run["displayTitle"],
+            "status": run["status"],
+            "conclusion": run.get("conclusion"),
+            "html_url": run["url"],
+            "head_sha": run.get("headSha"),
+            "created_at": run["createdAt"],
+        }
+
+    def paginated(self, *pages):
+        return json.dumps(
+            [{"workflow_runs": [self.api_run(run) for run in page]} for page in pages]
+        )
+
     def test_zero_spend_policy_rejects_any_paid_escape_hatch(self):
         budget = self.good_budget()
         self.assertEqual(adapter.zero_spend_policy_reasons(budget), [])
@@ -100,14 +116,53 @@ class CopilotActionsAdapterTests(unittest.TestCase):
 
         def runner(args, **_kwargs):
             calls.append(args)
-            return self.completed(args, json.dumps([run]))
+            if args[0:4] == ["gh", "api", "--paginate", "--slurp"]:
+                return self.completed(args, self.paginated([run]))
+            raise AssertionError(args)
 
         with patch.object(adapter, "load_json", return_value=self.good_budget()):
             result = adapter.invoke(request, runner=runner, sleeper=lambda _: None)
         self.assertEqual(result["status"], "DISPATCH_STARTED")
         self.assertEqual(result["evidence"]["run_id"], 101)
         self.assertEqual(len(calls), 1)
-        self.assertEqual(calls[0][0:3], ["gh", "run", "list"])
+        self.assertEqual(calls[0][0:4], ["gh", "api", "--paginate", "--slurp"])
+
+    def test_matching_run_beyond_first_hundred_is_reconciled_without_post(self):
+        request = self.request()
+        first_page = [
+            {
+                "databaseId": 2000 + index,
+                "displayTitle": f"OneCompany Copilot unrelated-{index}",
+                "status": "completed",
+                "conclusion": "success",
+                "url": f"https://github.com/NTinkicht/OneCompany/actions/runs/{2000 + index}",
+                "headSha": "d" * 40,
+                "createdAt": f"2026-09-16T00:{index // 60:02d}:{index % 60:02d}Z",
+            }
+            for index in range(100)
+        ]
+        older_match = {
+            "databaseId": 88,
+            "displayTitle": "OneCompany Copilot dispatch-a3b-test",
+            "status": "in_progress",
+            "conclusion": None,
+            "url": "https://github.com/NTinkicht/OneCompany/actions/runs/88",
+            "headSha": "e" * 40,
+            "createdAt": "2026-09-15T23:00:00Z",
+        }
+        calls: list[list[str]] = []
+
+        def runner(args, **_kwargs):
+            calls.append(args)
+            if args[0:4] == ["gh", "api", "--paginate", "--slurp"]:
+                return self.completed(args, self.paginated(first_page, [older_match]))
+            raise AssertionError(args)
+
+        with patch.object(adapter, "load_json", return_value=self.good_budget()):
+            result = adapter.invoke(request, runner=runner, sleeper=lambda _: None)
+        self.assertEqual(result["evidence"]["run_id"], 88)
+        self.assertFalse(any(call[0:3] == ["gh", "api", "--method"] for call in calls))
+        self.assertIn("per_page=100", calls[0][-1])
 
     def test_dispatch_uses_exact_main_workflow_and_returns_run_evidence(self):
         request = self.request()
@@ -121,12 +176,12 @@ class CopilotActionsAdapterTests(unittest.TestCase):
             "createdAt": "2026-09-16T00:00:01Z",
         }
         calls: list[list[str]] = []
-        listings = iter([[], [run]])
+        listings = iter([self.paginated([]), self.paginated([run])])
 
         def runner(args, **_kwargs):
             calls.append(args)
-            if args[0:3] == ["gh", "run", "list"]:
-                return self.completed(args, json.dumps(next(listings)))
+            if args[0:4] == ["gh", "api", "--paginate", "--slurp"]:
+                return self.completed(args, next(listings))
             if args[0:3] == ["gh", "api", "--method"]:
                 return self.completed(args, "")
             raise AssertionError(args)
@@ -153,14 +208,14 @@ class CopilotActionsAdapterTests(unittest.TestCase):
         request = self.request()
 
         def success_runner(args, **_kwargs):
-            return self.completed(args, json.dumps([{**base, "conclusion": "success"}]))
+            return self.completed(args, self.paginated([{**base, "conclusion": "success"}]))
 
         with patch.object(adapter, "load_json", return_value=self.good_budget()):
             result = adapter.invoke(request, runner=success_runner, sleeper=lambda _: None)
         self.assertEqual(result["status"], "DISPATCH_COMPLETED")
 
         def failure_runner(args, **_kwargs):
-            return self.completed(args, json.dumps([{**base, "conclusion": "failure"}]))
+            return self.completed(args, self.paginated([{**base, "conclusion": "failure"}]))
 
         with patch.object(adapter, "load_json", return_value=self.good_budget()):
             with self.assertRaisesRegex(RuntimeError, "copilot_actions_run_failed"):
@@ -170,9 +225,11 @@ class CopilotActionsAdapterTests(unittest.TestCase):
         request = self.request()
 
         def runner(args, **_kwargs):
-            if args[0:3] == ["gh", "run", "list"]:
-                return self.completed(args, "[]")
-            return self.completed(args, "")
+            if args[0:4] == ["gh", "api", "--paginate", "--slurp"]:
+                return self.completed(args, self.paginated([]))
+            if args[0:3] == ["gh", "api", "--method"]:
+                return self.completed(args, "")
+            raise AssertionError(args)
 
         with patch.object(adapter, "load_json", return_value=self.good_budget()):
             with self.assertRaisesRegex(RuntimeError, "run_evidence_not_observed"):
@@ -209,6 +266,8 @@ class CopilotActionsAdapterTests(unittest.TestCase):
         self.assertNotIn("--yolo", text)
         self.assertNotIn("--allow-all", text)
         self.assertIn("Refuse duplicate workflow-dispatch AI invocation", text)
+        self.assertIn("gh api --paginate --slurp", text)
+        self.assertIn("workflow_runs.extend(page['workflow_runs'])", text)
         self.assertIn("canonical = min(", text)
         self.assertIn("current workflow run is missing from duplicate-election evidence", text)
         self.assertIn("key=lambda item: (item['created_at'], int(item['id']))", text)

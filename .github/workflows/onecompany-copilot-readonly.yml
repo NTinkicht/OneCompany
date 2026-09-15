@@ -132,7 +132,11 @@ jobs:
 
       - name: Set up pinned Copilot CLI runtime
         if: steps.dedupe.outputs.duplicate != 'true'
-        run: npm install --global @github/copilot@1.0.83
+        env:
+          COPILOT_SCOPE: '@github'
+          COPILOT_PACKAGE: copilot
+          COPILOT_VERSION: '1.0.83'
+        run: npm install --global "${COPILOT_SCOPE}/${COPILOT_PACKAGE}@${COPILOT_VERSION}"
 
       - name: Record Copilot CLI version
         if: steps.dedupe.outputs.duplicate != 'true'

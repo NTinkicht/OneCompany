@@ -64,6 +64,7 @@ on:
 
 permissions:
   contents: read
+  issues: read
 
 jobs:
   validate:
@@ -83,6 +84,8 @@ jobs:
       - name: Validate reference high-risk assurance packet
         run: python onecompany.py assurance .onecompany/reference/assurance/WU900.json
       - name: Test unit and assurance invariants
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: python -m unittest discover -s .onecompany/selftest -p 'test_*.py'
       - name: Simulate core policy invariants
         run: python onecompany.py simulate

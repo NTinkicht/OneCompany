@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import errno
 import hashlib
 import json
 import os
@@ -34,6 +35,8 @@ from onecompany_lib import (
 WRITE_CAPABILITIES = {"implementation", "ci_remediation"}
 ATTENDED_MECHANISM_KINDS = {"interactive", "manual"}
 ACTIVE_STATES = {"DISPATCH_CLAIMED", "DISPATCH_STARTED"}
+LOCK_METADATA_NAME = "owner.json"
+DEFAULT_STALE_LOCK_SECONDS = 30.0
 
 Adapter = Callable[[dict[str, Any]], dict[str, Any]]
 
@@ -72,28 +75,168 @@ def load_dispatch_events(path: Path | None = None) -> list[dict[str, Any]]:
     return events
 
 
+def _lock_metadata_path(lock_dir: Path) -> Path:
+    return lock_dir / LOCK_METADATA_NAME
+
+
+def _write_lock_metadata(lock_dir: Path, owner_token: str) -> None:
+    metadata = {
+        "version": 1,
+        "pid": os.getpid(),
+        "acquired_at_epoch": time.time(),
+        "owner_token": owner_token,
+    }
+    path = _lock_metadata_path(lock_dir)
+    with path.open("x", encoding="utf-8", newline="\n") as handle:
+        json.dump(metadata, handle, sort_keys=True, separators=(",", ":"))
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def _read_lock_metadata(lock_dir: Path) -> dict[str, Any] | None:
+    path = _lock_metadata_path(lock_dir)
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            metadata = json.load(handle)
+    except (FileNotFoundError, OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(metadata, dict):
+        return None
+    pid = metadata.get("pid")
+    acquired = metadata.get("acquired_at_epoch")
+    token = metadata.get("owner_token")
+    if (
+        not isinstance(pid, int)
+        or isinstance(pid, bool)
+        or pid <= 0
+        or not isinstance(acquired, (int, float))
+        or isinstance(acquired, bool)
+        or not isinstance(token, str)
+        or not token
+    ):
+        return None
+    return metadata
+
+
+def _pid_alive(pid: int) -> bool | None:
+    """Return live/dead when demonstrable; None means the platform cannot prove it."""
+    if pid == os.getpid():
+        return True
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError as exc:
+        if exc.errno == errno.ESRCH:
+            return False
+        if exc.errno == errno.EPERM:
+            return True
+        return None
+    return True
+
+
+def _reclaim_stale_lock(lock_dir: Path, stale_after_seconds: float) -> bool:
+    """Reclaim only a valid, old lock whose recorded owner is provably dead."""
+    metadata = _read_lock_metadata(lock_dir)
+    if metadata is None:
+        return False
+    age = time.time() - float(metadata["acquired_at_epoch"])
+    if age < stale_after_seconds:
+        return False
+    if _pid_alive(int(metadata["pid"])) is not False:
+        return False
+
+    marker = lock_dir / "reclaim.json"
+    reclaim_token = str(uuid.uuid4())
+    try:
+        with marker.open("x", encoding="utf-8", newline="\n") as handle:
+            json.dump(
+                {
+                    "pid": os.getpid(),
+                    "owner_token": reclaim_token,
+                    "created_at_epoch": time.time(),
+                },
+                handle,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+    except (FileExistsError, FileNotFoundError, OSError):
+        return False
+
+    try:
+        if _read_lock_metadata(lock_dir) != metadata:
+            return False
+        if _pid_alive(int(metadata["pid"])) is not False:
+            return False
+        children = {item.name for item in lock_dir.iterdir()}
+        if children != {LOCK_METADATA_NAME, marker.name}:
+            return False
+        _lock_metadata_path(lock_dir).unlink()
+        marker.unlink()
+        lock_dir.rmdir()
+        return True
+    except (FileNotFoundError, OSError):
+        return False
+    finally:
+        try:
+            marker.unlink()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            pass
+
+
 @contextmanager
-def journal_lock(path: Path | None = None, timeout_seconds: float = 5.0) -> Iterator[None]:
-    """Acquire a dependency-free cross-platform lock directory or fail closed."""
+def journal_lock(
+    path: Path | None = None,
+    timeout_seconds: float = 5.0,
+    stale_after_seconds: float = DEFAULT_STALE_LOCK_SECONDS,
+) -> Iterator[None]:
+    """Acquire the journal lock, recovering only provably abandoned lock owners."""
     target = path or dispatch_journal_path()
     lock_dir = target.with_name(target.name + ".lock")
     lock_dir.parent.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + timeout_seconds
+    owner_token = str(uuid.uuid4())
     while True:
         try:
             lock_dir.mkdir()
+            try:
+                _write_lock_metadata(lock_dir, owner_token)
+            except Exception:
+                try:
+                    _lock_metadata_path(lock_dir).unlink()
+                except FileNotFoundError:
+                    pass
+                try:
+                    lock_dir.rmdir()
+                except OSError:
+                    pass
+                raise
             break
-        except FileExistsError:
+        except FileExistsError as exc:
             if time.monotonic() >= deadline:
-                raise RuntimeError("dispatch_journal_locked")
+                if _reclaim_stale_lock(lock_dir, stale_after_seconds):
+                    deadline = time.monotonic() + timeout_seconds
+                    continue
+                raise RuntimeError("dispatch_journal_locked") from exc
             time.sleep(0.02)
     try:
         yield
     finally:
-        try:
-            lock_dir.rmdir()
-        except FileNotFoundError:
-            pass
+        metadata = _read_lock_metadata(lock_dir)
+        if metadata and metadata.get("owner_token") == owner_token:
+            try:
+                _lock_metadata_path(lock_dir).unlink()
+                lock_dir.rmdir()
+            except FileNotFoundError:
+                pass
 
 
 def _append_event_unlocked(
@@ -193,7 +336,9 @@ def repository_identity() -> tuple[str | None, list[str]]:
     return repository, []
 
 
-def _last_dispatch_event(events: list[dict[str, Any]], dispatch_id: str) -> dict[str, Any] | None:
+def _last_dispatch_event(
+    events: list[dict[str, Any]], dispatch_id: str
+) -> dict[str, Any] | None:
     matching = [event for event in events if event.get("dispatch_id") == dispatch_id]
     return matching[-1] if matching else None
 
@@ -236,11 +381,22 @@ def record_dispatch_outcome(
     *,
     journal_path: Path | None = None,
 ) -> dict[str, Any]:
-    """Append a terminal/start outcome for the exact claimed attempt."""
+    """Append only a valid state transition for the exact active attempt."""
     if state not in {"DISPATCH_STARTED", "DISPATCH_COMPLETED", "DISPATCH_FAILED_SAFE"}:
         raise ValueError(f"unsupported dispatch outcome: {state}")
     target = journal_path or dispatch_journal_path()
     with journal_lock(target):
+        last = _last_dispatch_event(load_dispatch_events(target), dispatch_id)
+        if last is None:
+            raise RuntimeError("dispatch_outcome_without_claim")
+        if last.get("attempt_id") != attempt_id:
+            raise RuntimeError("dispatch_outcome_attempt_mismatch")
+        allowed = {
+            "DISPATCH_CLAIMED": {"DISPATCH_STARTED", "DISPATCH_FAILED_SAFE"},
+            "DISPATCH_STARTED": {"DISPATCH_COMPLETED", "DISPATCH_FAILED_SAFE"},
+        }.get(str(last.get("state") or ""), set())
+        if state not in allowed:
+            raise RuntimeError("dispatch_outcome_invalid_transition")
         return _append_event_unlocked(
             target,
             dispatch_id=dispatch_id,
@@ -248,6 +404,26 @@ def record_dispatch_outcome(
             attempt_id=attempt_id,
             evidence=evidence,
         )
+
+
+def _outcome_unrecorded(
+    dispatch_id: str,
+    attempt_id: str,
+    adapter_status: str,
+    adapter_evidence: dict[str, Any],
+    exc: Exception,
+) -> dict[str, Any]:
+    """Report journal failure without changing the active claim into retryable failure."""
+    return {
+        "status": "DISPATCH_OUTCOME_UNRECORDED",
+        "dispatch_id": dispatch_id,
+        "attempt_id": attempt_id,
+        "adapter_status": adapter_status,
+        "evidence": {
+            "journal_error": str(exc),
+            "adapter_evidence": adapter_evidence,
+        },
+    }
 
 
 def execute_with_adapter(
@@ -271,6 +447,7 @@ def execute_with_adapter(
             "existing_event": existing,
         }
     assert attempt_id is not None
+
     try:
         adapter_result = adapter(request)
         if not isinstance(adapter_result, dict):
@@ -278,28 +455,24 @@ def execute_with_adapter(
         outcome = str(adapter_result.get("status") or "")
         if outcome not in {"DISPATCH_STARTED", "DISPATCH_COMPLETED"}:
             raise RuntimeError("adapter_did_not_return_verified_start_or_completion")
-        record_dispatch_outcome(
-            dispatch_id,
-            attempt_id,
-            outcome,
-            adapter_result.get("evidence", {}),
-            journal_path=journal_path,
-        )
-        return {
-            "status": outcome,
-            "dispatch_id": dispatch_id,
-            "attempt_id": attempt_id,
-            "evidence": adapter_result.get("evidence", {}),
-        }
     except Exception as exc:
         evidence = {"error": str(exc)}
-        record_dispatch_outcome(
-            dispatch_id,
-            attempt_id,
-            "DISPATCH_FAILED_SAFE",
-            evidence,
-            journal_path=journal_path,
-        )
+        try:
+            record_dispatch_outcome(
+                dispatch_id,
+                attempt_id,
+                "DISPATCH_FAILED_SAFE",
+                evidence,
+                journal_path=journal_path,
+            )
+        except Exception as journal_exc:
+            return _outcome_unrecorded(
+                dispatch_id,
+                attempt_id,
+                "DISPATCH_FAILED_SAFE",
+                evidence,
+                journal_exc,
+            )
         return {
             "status": "DISPATCH_FAILED_SAFE",
             "dispatch_id": dispatch_id,
@@ -307,8 +480,45 @@ def execute_with_adapter(
             "evidence": evidence,
         }
 
+    adapter_evidence = adapter_result.get("evidence", {})
+    try:
+        if outcome == "DISPATCH_COMPLETED":
+            record_dispatch_outcome(
+                dispatch_id,
+                attempt_id,
+                "DISPATCH_STARTED",
+                {
+                    "adapter_reported_completion": True,
+                    "adapter_evidence": adapter_evidence,
+                },
+                journal_path=journal_path,
+            )
+        record_dispatch_outcome(
+            dispatch_id,
+            attempt_id,
+            outcome,
+            adapter_evidence,
+            journal_path=journal_path,
+        )
+    except Exception as exc:
+        return _outcome_unrecorded(
+            dispatch_id,
+            attempt_id,
+            outcome,
+            adapter_evidence,
+            exc,
+        )
+    return {
+        "status": outcome,
+        "dispatch_id": dispatch_id,
+        "attempt_id": attempt_id,
+        "evidence": adapter_evidence,
+    }
 
-def build_execution_request(args: argparse.Namespace) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+
+def build_execution_request(
+    args: argparse.Namespace,
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     """Revalidate route, budget and lease immediately before an execution attempt."""
     resolution = resolve_dispatch(
         args.actor,

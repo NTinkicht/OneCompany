@@ -49,6 +49,22 @@ class LocalActionsAdapterTests(unittest.TestCase):
     def completed(self, args, stdout=""):
         return subprocess.CompletedProcess(args=args, returncode=0, stdout=stdout, stderr="")
 
+    def api_run(self, run):
+        return {
+            "id": run["databaseId"],
+            "display_title": run["displayTitle"],
+            "status": run["status"],
+            "conclusion": run.get("conclusion"),
+            "html_url": run["url"],
+            "head_sha": run.get("headSha"),
+            "created_at": run["createdAt"],
+        }
+
+    def paginated(self, *pages):
+        return json.dumps(
+            [{"workflow_runs": [self.api_run(run) for run in page]} for page in pages]
+        )
+
     def test_policy_and_request_fail_closed(self):
         with patch.object(adapter, "load_json", return_value=self.good_budget()):
             self.assertEqual(adapter.validate_request(self.request()), [])
@@ -109,8 +125,8 @@ class LocalActionsAdapterTests(unittest.TestCase):
             calls.append(args)
             if args[0:2] == ["gh", "api"] and "--jq" in args:
                 return self.completed(args, "false\n")
-            if args[0:3] == ["gh", "run", "list"]:
-                return self.completed(args, json.dumps([run]))
+            if args[0:4] == ["gh", "api", "--paginate", "--slurp"]:
+                return self.completed(args, self.paginated([run]))
             raise AssertionError(args)
 
         with patch.object(adapter, "load_json", return_value=self.good_budget()):
@@ -118,6 +134,48 @@ class LocalActionsAdapterTests(unittest.TestCase):
         self.assertEqual(result["status"], "DISPATCH_STARTED")
         self.assertEqual(result["evidence"]["run_id"], 401)
         self.assertFalse(any(call[0:3] == ["gh", "api", "--method"] for call in calls))
+
+    def test_matching_run_beyond_first_hundred_is_reconciled_without_post(self):
+        request = self.request()
+        first_page = [
+            {
+                "databaseId": 1000 + index,
+                "displayTitle": f"OneCompany Local unrelated-{index}",
+                "status": "completed",
+                "conclusion": "success",
+                "url": f"https://github.com/NTinkicht/OneCompany/actions/runs/{1000 + index}",
+                "headSha": "a" * 40,
+                "createdAt": f"2026-09-16T00:{index // 60:02d}:{index % 60:02d}Z",
+            }
+            for index in range(100)
+        ]
+        older_match = {
+            "databaseId": 77,
+            "displayTitle": "OneCompany Local dispatch-local-a3b",
+            "status": "in_progress",
+            "conclusion": None,
+            "url": "https://github.com/NTinkicht/OneCompany/actions/runs/77",
+            "headSha": "b" * 40,
+            "createdAt": "2026-09-15T23:00:00Z",
+        }
+        calls: list[list[str]] = []
+
+        def runner(args, **_kwargs):
+            calls.append(args)
+            if args[0:2] == ["gh", "api"] and "--jq" in args:
+                return self.completed(args, "false\n")
+            if args[0:4] == ["gh", "api", "--paginate", "--slurp"]:
+                return self.completed(args, self.paginated(first_page, [older_match]))
+            raise AssertionError(args)
+
+        with patch.object(adapter, "load_json", return_value=self.good_budget()):
+            result = adapter.invoke(request, runner=runner, sleeper=lambda _: None)
+        self.assertEqual(result["evidence"]["run_id"], 77)
+        self.assertFalse(any(call[0:3] == ["gh", "api", "--method"] for call in calls))
+        history_call = next(
+            call for call in calls if call[0:4] == ["gh", "api", "--paginate", "--slurp"]
+        )
+        self.assertIn("per_page=100", history_call[-1])
 
     def test_dispatches_exact_main_workflow_and_observes_evidence(self):
         request = self.request()
@@ -130,15 +188,15 @@ class LocalActionsAdapterTests(unittest.TestCase):
             "headSha": "e" * 40,
             "createdAt": "2026-09-16T00:00:01Z",
         }
-        listings = iter([[], [run]])
+        listings = iter([self.paginated([]), self.paginated([run])])
         calls: list[list[str]] = []
 
         def runner(args, **_kwargs):
             calls.append(args)
             if args[0:2] == ["gh", "api"] and "--jq" in args:
                 return self.completed(args, "false\n")
-            if args[0:3] == ["gh", "run", "list"]:
-                return self.completed(args, json.dumps(next(listings)))
+            if args[0:4] == ["gh", "api", "--paginate", "--slurp"]:
+                return self.completed(args, next(listings))
             if args[0:3] == ["gh", "api", "--method"]:
                 return self.completed(args, "")
             raise AssertionError(args)
@@ -170,8 +228,8 @@ class LocalActionsAdapterTests(unittest.TestCase):
             calls.append(args)
             if args[0:2] == ["gh", "api"] and "--jq" in args:
                 return self.completed(args, "false\n")
-            if args[0:3] == ["gh", "run", "list"]:
-                return self.completed(args, "[]")
+            if args[0:4] == ["gh", "api", "--paginate", "--slurp"]:
+                return self.completed(args, self.paginated([]))
             if args[0:3] == ["gh", "api", "--method"]:
                 return self.completed(args, "")
             raise AssertionError(args)
@@ -191,7 +249,9 @@ class LocalActionsAdapterTests(unittest.TestCase):
 
         self.assertEqual(sleeps, [1.0, 1.5])
         self.assertEqual(now[0], 2.5)
-        list_calls = [call for call in calls if call[0:3] == ["gh", "run", "list"]]
+        list_calls = [
+            call for call in calls if call[0:4] == ["gh", "api", "--paginate", "--slurp"]
+        ]
         self.assertEqual(len(list_calls), 4)
 
     def test_completed_failure_never_becomes_retryable_success(self):
@@ -209,7 +269,9 @@ class LocalActionsAdapterTests(unittest.TestCase):
         def runner(args, **_kwargs):
             if args[0:2] == ["gh", "api"] and "--jq" in args:
                 return self.completed(args, "false\n")
-            return self.completed(args, json.dumps([run]))
+            if args[0:4] == ["gh", "api", "--paginate", "--slurp"]:
+                return self.completed(args, self.paginated([run]))
+            raise AssertionError(args)
 
         with patch.object(adapter, "load_json", return_value=self.good_budget()):
             with self.assertRaisesRegex(RuntimeError, "local_actions_run_failed"):
@@ -231,6 +293,8 @@ class LocalActionsAdapterTests(unittest.TestCase):
         self.assertIn("Standard hosted-runner zero-spend proof requires a public repository", text)
         self.assertIn("Refuse duplicate workflow-dispatch execution", text)
         self.assertIn("persist-credentials: false", text)
+        self.assertIn("gh api --paginate --slurp", text)
+        self.assertIn("workflow_runs.extend(page['workflow_runs'])", text)
         self.assertIn("canonical = min(", text)
         self.assertIn("current workflow run is missing from duplicate-election evidence", text)
         self.assertIn("key=lambda item: (item['created_at'], int(item['id']))", text)

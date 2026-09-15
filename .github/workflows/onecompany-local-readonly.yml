@@ -110,18 +110,26 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_TITLE: OneCompany Local ${{ steps.prepare.outputs.dispatch_id }}
         run: |
-          gh api "/repos/${GITHUB_REPOSITORY}/actions/workflows/onecompany-local-readonly.yml/runs?event=workflow_dispatch&per_page=100" > "${RUNNER_TEMP}/local-runs.json"
+          gh api --paginate --slurp "/repos/${GITHUB_REPOSITORY}/actions/workflows/onecompany-local-readonly.yml/runs?event=workflow_dispatch&per_page=100" > "${RUNNER_TEMP}/local-runs.json"
           python - <<'PY'
           import json
           import os
           from pathlib import Path
 
-          runs = json.loads((Path(os.environ['RUNNER_TEMP']) / 'local-runs.json').read_text(encoding='utf-8'))
+          pages = json.loads((Path(os.environ['RUNNER_TEMP']) / 'local-runs.json').read_text(encoding='utf-8'))
+          if not isinstance(pages, list):
+              raise SystemExit('workflow run pagination evidence is not a list')
+          workflow_runs = []
+          for page in pages:
+              if not isinstance(page, dict) or not isinstance(page.get('workflow_runs'), list):
+                  raise SystemExit('workflow run pagination page is malformed')
+              workflow_runs.extend(page['workflow_runs'])
+
           current = int(os.environ['GITHUB_RUN_ID'])
           title = os.environ['EXPECTED_TITLE']
           matching = [
               item
-              for item in runs.get('workflow_runs', [])
+              for item in workflow_runs
               if item.get('display_title') == title
               and isinstance(item.get('created_at'), str)
               and int(item.get('id', 0)) > 0

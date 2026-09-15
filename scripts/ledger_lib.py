@@ -55,7 +55,7 @@ def _checkout_head() -> str:
 
 
 def _assert_ledger_runtime_activation() -> None:
-    """Require clean ledger policy from protected default-branch history."""
+    """Require clean ledger policy from the current protected default-branch tip."""
     dirty = run(
         [
             "git",
@@ -72,7 +72,13 @@ def _assert_ledger_runtime_activation() -> None:
             "durable ledger activation requires clean ledger/config policy from the checked-out commit"
         )
     repo = _repository()
-    _assert_trusted_default_branch_history(repo, _checkout_head())
+    checkout = _checkout_head()
+    default_branch, tip = _default_branch_tip(repo)
+    if checkout != tip:
+        raise RuntimeError(
+            "durable ledger activation requires current protected default-branch tip "
+            f"{default_branch}@{tip}; checkout is {checkout}"
+        )
 
 
 def ledger_enabled() -> bool:

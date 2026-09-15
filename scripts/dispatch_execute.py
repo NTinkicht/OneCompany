@@ -98,11 +98,13 @@ def load_dispatch_events(path: Path | None = None) -> list[dict[str, Any]]:
     return events
 
 
-def _lock_metadata_path(lock_dir: Path) -> Path:
-    return lock_dir / LOCK_METADATA_NAME
+def _lock_metadata_path(lock_path: Path) -> Path:
+    """Return metadata location for staged/legacy-directory locks."""
+    return lock_path / LOCK_METADATA_NAME
 
 
 def _write_lock_metadata(lock_dir: Path, owner_token: str) -> None:
+    """Write and fsync metadata inside an unpublished staging directory."""
     metadata = {
         "version": 1,
         "pid": os.getpid(),
@@ -117,12 +119,17 @@ def _write_lock_metadata(lock_dir: Path, owner_token: str) -> None:
         os.fsync(handle.fileno())
 
 
-def _read_lock_metadata(lock_dir: Path) -> dict[str, Any] | None:
-    path = _lock_metadata_path(lock_dir)
+def _metadata_file(lock_path: Path) -> Path:
+    """Support new file locks and pre-A3 legacy directory locks."""
+    return _lock_metadata_path(lock_path) if lock_path.is_dir() else lock_path
+
+
+def _read_lock_metadata(lock_path: Path) -> dict[str, Any] | None:
+    path = _metadata_file(lock_path)
     try:
         with path.open("r", encoding="utf-8") as handle:
             metadata = json.load(handle)
-    except (FileNotFoundError, OSError, json.JSONDecodeError):
+    except (FileNotFoundError, IsADirectoryError, OSError, json.JSONDecodeError):
         return None
     if not isinstance(metadata, dict):
         return None
@@ -161,9 +168,15 @@ def _pid_alive(pid: int) -> bool | None:
     return True
 
 
-def _reclaim_stale_lock(lock_dir: Path, stale_after_seconds: float) -> bool:
+def _reclaim_marker_path(lock_path: Path) -> Path:
+    if lock_path.is_dir():
+        return lock_path / "reclaim.json"
+    return lock_path.with_name(lock_path.name + ".reclaim")
+
+
+def _reclaim_stale_lock(lock_path: Path, stale_after_seconds: float) -> bool:
     """Reclaim only a valid, old lock whose recorded owner is provably dead."""
-    metadata = _read_lock_metadata(lock_dir)
+    metadata = _read_lock_metadata(lock_path)
     if metadata is None:
         return False
     age = time.time() - float(metadata["acquired_at_epoch"])
@@ -172,7 +185,7 @@ def _reclaim_stale_lock(lock_dir: Path, stale_after_seconds: float) -> bool:
     if _pid_alive(int(metadata["pid"])) is not False:
         return False
 
-    marker = lock_dir / "reclaim.json"
+    marker = _reclaim_marker_path(lock_path)
     reclaim_token = str(uuid.uuid4())
     try:
         with marker.open("x", encoding="utf-8", newline="\n") as handle:
@@ -193,16 +206,19 @@ def _reclaim_stale_lock(lock_dir: Path, stale_after_seconds: float) -> bool:
         return False
 
     try:
-        if _read_lock_metadata(lock_dir) != metadata:
+        if _read_lock_metadata(lock_path) != metadata:
             return False
         if _pid_alive(int(metadata["pid"])) is not False:
             return False
-        children = {item.name for item in lock_dir.iterdir()}
-        if children != {LOCK_METADATA_NAME, marker.name}:
-            return False
-        _lock_metadata_path(lock_dir).unlink()
-        marker.unlink()
-        lock_dir.rmdir()
+        if lock_path.is_dir():
+            children = {item.name for item in lock_path.iterdir()}
+            if children != {LOCK_METADATA_NAME, marker.name}:
+                return False
+            _lock_metadata_path(lock_path).unlink()
+            marker.unlink()
+            lock_path.rmdir()
+        else:
+            lock_path.unlink()
         return True
     except (FileNotFoundError, OSError):
         return False
@@ -225,13 +241,19 @@ def _cleanup_staging_lock(staging: Path) -> None:
         pass
 
 
-def _publish_lock(staging: Path, lock_dir: Path) -> None:
-    """Atomically publish a fully initialized lock directory or report contention."""
+def _publish_lock(staging: Path, lock_path: Path) -> None:
+    """Atomically publish complete metadata without replacing an existing lock."""
+    metadata_path = _lock_metadata_path(staging)
     try:
-        os.rename(staging, lock_dir)
+        os.link(metadata_path, lock_path)
     except OSError as exc:
-        if exc.errno in {errno.EEXIST, errno.ENOTEMPTY, errno.EACCES, errno.EPERM}:
-            raise FileExistsError(str(lock_dir)) from exc
+        if exc.errno in {
+            errno.EEXIST,
+            errno.EACCES,
+            errno.EPERM,
+            errno.EISDIR,
+        }:
+            raise FileExistsError(str(lock_path)) from exc
         raise
 
 
@@ -241,28 +263,29 @@ def journal_lock(
     timeout_seconds: float = 5.0,
     stale_after_seconds: float = DEFAULT_STALE_LOCK_SECONDS,
 ) -> Iterator[None]:
-    """Acquire the journal lock, publishing only locks with valid owner metadata."""
+    """Acquire a no-overwrite lock whose visible form always has valid metadata."""
     target = path or dispatch_journal_path()
-    lock_dir = target.with_name(target.name + ".lock")
-    lock_dir.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = target.with_name(target.name + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
     deadline = time.monotonic() + timeout_seconds
     owner_token = str(uuid.uuid4())
 
     while True:
-        staging = lock_dir.with_name(f"{lock_dir.name}.staging-{owner_token}")
+        staging = lock_path.with_name(f"{lock_path.name}.staging-{owner_token}")
         try:
             staging.mkdir()
             try:
                 _write_lock_metadata(staging, owner_token)
-                _publish_lock(staging, lock_dir)
+                _publish_lock(staging, lock_path)
             except Exception:
                 _cleanup_staging_lock(staging)
                 raise
+            _cleanup_staging_lock(staging)
             break
         except FileExistsError as exc:
             _cleanup_staging_lock(staging)
             if time.monotonic() >= deadline:
-                if _reclaim_stale_lock(lock_dir, stale_after_seconds):
+                if _reclaim_stale_lock(lock_path, stale_after_seconds):
                     deadline = time.monotonic() + timeout_seconds
                     continue
                 raise RuntimeError("dispatch_journal_locked") from exc
@@ -271,11 +294,14 @@ def journal_lock(
     try:
         yield
     finally:
-        metadata = _read_lock_metadata(lock_dir)
+        metadata = _read_lock_metadata(lock_path)
         if metadata and metadata.get("owner_token") == owner_token:
             try:
-                _lock_metadata_path(lock_dir).unlink()
-                lock_dir.rmdir()
+                if lock_path.is_dir():
+                    _lock_metadata_path(lock_path).unlink()
+                    lock_path.rmdir()
+                else:
+                    lock_path.unlink()
             except FileNotFoundError:
                 pass
 

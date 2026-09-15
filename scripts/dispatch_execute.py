@@ -33,7 +33,6 @@ from onecompany_lib import (
 
 WRITE_CAPABILITIES = {"implementation", "ci_remediation"}
 ATTENDED_MECHANISM_KINDS = {"interactive", "manual"}
-TERMINAL_SAFE_STATES = {"DISPATCH_COMPLETED", "DISPATCH_FAILED_SAFE"}
 ACTIVE_STATES = {"DISPATCH_CLAIMED", "DISPATCH_STARTED"}
 
 Adapter = Callable[[dict[str, Any]], dict[str, Any]]
@@ -409,7 +408,6 @@ def main() -> int:
     parser.add_argument("--work-unit", required=True)
     parser.add_argument("--lease-id")
     parser.add_argument("--unattended", action="store_true")
-    parser.add_argument("--retry-failed", action="store_true")
     args = parser.parse_args()
 
     request, blocked = build_execution_request(args)

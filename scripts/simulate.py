@@ -18,11 +18,16 @@ def verified_capabilities_have_configured_dispatch(
     readiness: dict,
     dispatch: dict,
 ) -> bool:
-    """Require every verified capability of an enabled actor to be executable."""
+    """Require enabled actors to have verified, executable capability evidence."""
     actor_by_id = {
         str(item.get("id")): item
         for item in actors.get("actors", [])
         if isinstance(item, dict) and item.get("id")
+    }
+    readiness_by_id = {
+        str(item.get("actor_id")): item
+        for item in readiness.get("actors", [])
+        if isinstance(item, dict) and item.get("actor_id")
     }
     dispatch_by_id = {
         str(item.get("actor_id")): item
@@ -30,15 +35,19 @@ def verified_capabilities_have_configured_dispatch(
         if isinstance(item, dict) and item.get("actor_id")
     }
 
-    for item in readiness.get("actors", []):
-        if not isinstance(item, dict) or not item.get("actor_id"):
-            continue
-        actor_id = str(item["actor_id"])
-        actor = actor_by_id.get(actor_id, {})
+    for actor_id, actor in actor_by_id.items():
         if not actor.get("enabled") or not actor.get("configured"):
             continue
 
-        verified = set(item.get("verified_capabilities", []))
+        ready = readiness_by_id.get(actor_id)
+        if not isinstance(ready, dict):
+            return False
+
+        verified_list = ready.get("verified_capabilities")
+        if not isinstance(verified_list, list) or not verified_list:
+            return False
+        verified = set(verified_list)
+
         configured_capabilities: set[str] = set()
         entry = dispatch_by_id.get(actor_id, {})
         for mechanism in entry.get("mechanisms", []):

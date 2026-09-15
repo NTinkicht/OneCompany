@@ -67,6 +67,24 @@ class LocalActionsAdapterTests(unittest.TestCase):
         changed["ai"]["allow_overage"] = True
         self.assertTrue(adapter.zero_spend_policy_reasons(changed))
 
+    def test_dispatch_tokens_are_validated_before_any_provider_call(self):
+        for field, value in (
+            ("dispatch_id", "contains space"),
+            ("work_unit", "bad/slash"),
+            ("dispatch_id", "x" * 161),
+        ):
+            request = self.request()
+            request[field] = value
+
+            def runner(*_args, **_kwargs):
+                raise AssertionError("provider must not be called for invalid dispatch tokens")
+
+            with patch.object(adapter, "load_json", return_value=self.good_budget()):
+                reasons = adapter.validate_request(request)
+                self.assertIn(f"local_adapter_{field}_invalid", reasons)
+                with self.assertRaisesRegex(RuntimeError, f"local_adapter_{field}_invalid"):
+                    adapter.invoke(request, runner=runner)
+
     def test_private_repository_is_rejected_before_dispatch(self):
         def runner(args, **_kwargs):
             return self.completed(args, "true\n")
@@ -135,6 +153,47 @@ class LocalActionsAdapterTests(unittest.TestCase):
         self.assertIn("inputs[capability]=repository_intelligence", post)
         self.assertIn(adapter.WORKFLOW_FILE, " ".join(post))
 
+    def test_visibility_polling_uses_bounded_backoff_deadline(self):
+        request = self.request()
+        calls: list[list[str]] = []
+        now = [0.0]
+        sleeps: list[float] = []
+
+        def clock():
+            return now[0]
+
+        def sleeper(seconds):
+            sleeps.append(seconds)
+            now[0] += seconds
+
+        def runner(args, **_kwargs):
+            calls.append(args)
+            if args[0:2] == ["gh", "api"] and "--jq" in args:
+                return self.completed(args, "false\n")
+            if args[0:3] == ["gh", "run", "list"]:
+                return self.completed(args, "[]")
+            if args[0:3] == ["gh", "api", "--method"]:
+                return self.completed(args, "")
+            raise AssertionError(args)
+
+        with patch.object(adapter, "load_json", return_value=self.good_budget()):
+            with self.assertRaisesRegex(RuntimeError, "local_actions_run_evidence_not_observed"):
+                adapter.invoke(
+                    request,
+                    runner=runner,
+                    sleeper=sleeper,
+                    clock=clock,
+                    poll_attempts=10,
+                    poll_delay_seconds=1.0,
+                    poll_timeout_seconds=2.5,
+                    max_poll_delay_seconds=4.0,
+                )
+
+        self.assertEqual(sleeps, [1.0, 1.5])
+        self.assertEqual(now[0], 2.5)
+        list_calls = [call for call in calls if call[0:3] == ["gh", "run", "list"]]
+        self.assertEqual(len(list_calls), 4)
+
     def test_completed_failure_never_becomes_retryable_success(self):
         request = self.request()
         run = {
@@ -172,6 +231,9 @@ class LocalActionsAdapterTests(unittest.TestCase):
         self.assertIn("Standard hosted-runner zero-spend proof requires a public repository", text)
         self.assertIn("Refuse duplicate workflow-dispatch execution", text)
         self.assertIn("persist-credentials: false", text)
+        self.assertIn("canonical = min(", text)
+        self.assertIn("current workflow run is missing from duplicate-election evidence", text)
+        self.assertIn("key=lambda item: (item['created_at'], int(item['id']))", text)
 
 
 if __name__ == "__main__":

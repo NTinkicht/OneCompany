@@ -5,8 +5,8 @@
     {
       "id": "human-owner",
       "display_name": "Human Owner",
-      "enabled": false,
-      "configured": false,
+      "enabled": true,
+      "configured": true,
       "execution_modes": ["human_github"],
       "cost_class": "HUMAN",
       "permissions": ["owner_defined"],
@@ -16,8 +16,8 @@
     {
       "id": "chatgpt",
       "display_name": "ChatGPT",
-      "enabled": false,
-      "configured": false,
+      "enabled": true,
+      "configured": true,
       "execution_modes": ["interactive", "connector"],
       "cost_class": "INCLUDED_SUBSCRIPTION",
       "permissions": ["read", "write_if_connected"],

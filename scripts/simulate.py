@@ -13,12 +13,61 @@ def check(name: str, condition: bool) -> bool:
     return condition
 
 
+def verified_capabilities_have_configured_dispatch(
+    actors: dict,
+    readiness: dict,
+    dispatch: dict,
+) -> bool:
+    """Require enabled actors to have verified, executable capability evidence."""
+    actor_by_id = {
+        str(item.get("id")): item
+        for item in actors.get("actors", [])
+        if isinstance(item, dict) and item.get("id")
+    }
+    readiness_by_id = {
+        str(item.get("actor_id")): item
+        for item in readiness.get("actors", [])
+        if isinstance(item, dict) and item.get("actor_id")
+    }
+    dispatch_by_id = {
+        str(item.get("actor_id")): item
+        for item in dispatch.get("actors", [])
+        if isinstance(item, dict) and item.get("actor_id")
+    }
+
+    for actor_id, actor in actor_by_id.items():
+        if not actor.get("enabled") or not actor.get("configured"):
+            continue
+
+        ready = readiness_by_id.get(actor_id)
+        if not isinstance(ready, dict):
+            return False
+
+        verified_list = ready.get("verified_capabilities")
+        if not isinstance(verified_list, list) or not verified_list:
+            return False
+        verified = set(verified_list)
+
+        configured_capabilities: set[str] = set()
+        entry = dispatch_by_id.get(actor_id, {})
+        for mechanism in entry.get("mechanisms", []):
+            if isinstance(mechanism, dict) and mechanism.get("configured"):
+                configured_capabilities.update(mechanism.get("capabilities", []))
+
+        if not verified.issubset(configured_capabilities):
+            return False
+
+    return True
+
+
 def main() -> int:
     config = load_json(CONTROL / "config.json")
     budget = load_json(CONTROL / "budget.json")
     state = load_json(CONTROL / "state.json")
     overlays = load_json(CONTROL / "overlays.json")
+    actors = load_json(CONTROL / "actors.json")
     readiness = load_json(CONTROL / "readiness.json")
+    dispatch = load_json(CONTROL / "dispatch.json")
     results = []
 
     zero_spend = copy.deepcopy(budget)
@@ -58,8 +107,35 @@ def main() -> int:
     results.append(check("degraded actor can retain unrelated verified capability", "implementation" in sample["verified_capabilities"] and "implementation" not in sample["temporarily_unavailable_capabilities"]))
     results.append(check("temporary review outage is capability-specific", "code_review" in sample["temporarily_unavailable_capabilities"]))
 
-    # Declared capability is not readiness: a default actor with no verified capabilities must not be considered proven.
-    results.append(check("default readiness does not pretend capabilities are verified", all(not item.get("verified_capabilities") for item in readiness.get("actors", []))))
+    # Declared capability is not readiness. Post-bootstrap activation may verify
+    # explicitly enabled actors, but disabled/unconfigured actors must remain
+    # unproven and cannot inherit readiness merely from their declaration.
+    actor_by_id = {
+        str(item.get("id")): item
+        for item in actors.get("actors", [])
+        if isinstance(item, dict) and item.get("id")
+    }
+    disabled_or_unconfigured_are_unverified = all(
+        not item.get("verified_capabilities")
+        for item in readiness.get("actors", [])
+        if (
+            not actor_by_id.get(str(item.get("actor_id")), {}).get("enabled")
+            or not actor_by_id.get(str(item.get("actor_id")), {}).get("configured")
+        )
+    )
+    results.append(
+        check(
+            "disabled or unconfigured readiness does not pretend capabilities are verified",
+            disabled_or_unconfigured_are_unverified,
+        )
+    )
+
+    results.append(
+        check(
+            "verified capabilities have a configured dispatch mechanism",
+            verified_capabilities_have_configured_dispatch(actors, readiness, dispatch),
+        )
+    )
 
     results.append(check("GitHub remains source of truth", config.get("project", {}).get("source_of_truth") == "github"))
 

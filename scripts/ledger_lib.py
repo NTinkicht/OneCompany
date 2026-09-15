@@ -46,8 +46,40 @@ def ledger_config() -> dict[str, Any]:
     return load_json(CONTROL / "ledger.json")
 
 
+def _checkout_head() -> str:
+    result = run(["git", "rev-parse", "HEAD"])
+    head = result.stdout.strip().lower() if result.returncode == 0 else ""
+    if not SHA40_RE.fullmatch(head):
+        raise RuntimeError("cannot resolve exact checked-out Git commit for ledger activation")
+    return head
+
+
+def _assert_ledger_runtime_activation() -> None:
+    """Require clean ledger policy from protected default-branch history."""
+    dirty = run(
+        [
+            "git",
+            "diff",
+            "--quiet",
+            "HEAD",
+            "--",
+            ".onecompany/ledger.json",
+            ".onecompany/config.json",
+        ]
+    )
+    if dirty.returncode != 0:
+        raise RuntimeError(
+            "durable ledger activation requires clean ledger/config policy from the checked-out commit"
+        )
+    repo = _repository()
+    _assert_trusted_default_branch_history(repo, _checkout_head())
+
+
 def ledger_enabled() -> bool:
-    return bool(ledger_config().get("enabled"))
+    enabled = bool(ledger_config().get("enabled"))
+    if enabled:
+        _assert_ledger_runtime_activation()
+    return enabled
 
 
 def _repository() -> str:
@@ -118,6 +150,7 @@ def _event_version_allowed(
 
 
 def list_events() -> list[dict[str, Any]]:
+    _assert_ledger_runtime_activation()
     repo, issue = _repo_and_issue()
     ledger = ledger_config()
     trusted = _trusted_publishers()
@@ -747,6 +780,7 @@ def post_event(
     ledger = ledger_config()
     if not ledger.get("enabled"):
         raise RuntimeError("durable ledger is disabled")
+    _assert_ledger_runtime_activation()
     if event_type not in set(ledger.get("accepted_event_types", [])):
         raise RuntimeError(f"unsupported ledger event type: {event_type}")
     trusted = _trusted_publishers()

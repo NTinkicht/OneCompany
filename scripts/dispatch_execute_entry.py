@@ -1,13 +1,21 @@
 #!/usr/bin/env python3
-"""A3b execute-dispatch entrypoint with one reviewed automatic adapter."""
+"""A3b execute-dispatch entrypoint with reviewed automatic adapters."""
 from __future__ import annotations
 
 import argparse
 import json
 import sys
+from typing import Callable
 
 import copilot_actions_adapter
 import dispatch_execute
+import local_actions_adapter
+
+AutomaticAdapter = Callable[[dict], dict]
+ADAPTERS: dict[str, AutomaticAdapter] = {
+    copilot_actions_adapter.MECHANISM_ID: copilot_actions_adapter.invoke,
+    local_actions_adapter.MECHANISM_ID: local_actions_adapter.invoke,
+}
 
 
 def _option_value(argv: list[str], name: str) -> str | None:
@@ -21,7 +29,8 @@ def _option_value(argv: list[str], name: str) -> str | None:
     return None
 
 
-def _copilot_main() -> int:
+def _automatic_main(adapter: AutomaticAdapter) -> int:
+    """Execute one exact reviewed automatic mechanism through the A3a contract."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--actor", required=True)
     parser.add_argument("--capability", required=True)
@@ -36,10 +45,7 @@ def _copilot_main() -> int:
         print(json.dumps(blocked, indent=2))
         return 2
 
-    result = dispatch_execute.execute_with_adapter(
-        request,
-        copilot_actions_adapter.invoke,
-    )
+    result = dispatch_execute.execute_with_adapter(request, adapter)
     print(json.dumps(result, indent=2))
     return 0 if result.get("status") in {
         "DISPATCH_STARTED",
@@ -49,11 +55,12 @@ def _copilot_main() -> int:
 
 
 def main() -> int:
-    """Delegate all legacy mechanisms unchanged; handle only the exact A3b mechanism."""
+    """Delegate legacy mechanisms unchanged and select only reviewed A3b adapters."""
     mechanism = _option_value(sys.argv[1:], "--mechanism")
-    if mechanism != copilot_actions_adapter.MECHANISM_ID:
+    adapter = ADAPTERS.get(str(mechanism or ""))
+    if adapter is None:
         return dispatch_execute.main()
-    return _copilot_main()
+    return _automatic_main(adapter)
 
 
 if __name__ == "__main__":

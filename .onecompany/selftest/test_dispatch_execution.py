@@ -308,6 +308,117 @@ class DispatchExecutionTests(unittest.TestCase):
                 ):
                     self.fail("a live owner must never be reclaimed based on age")
 
+    def test_lock_is_published_only_after_valid_metadata_exists(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory) / "dispatch-events.jsonl"
+            lock_dir = journal.with_name(journal.name + ".lock")
+            original_publish = dispatch_execute._publish_lock
+            observed = {"checked": False}
+
+            def checked_publish(staging, final_lock):
+                observed["checked"] = True
+                self.assertEqual(final_lock, lock_dir)
+                self.assertFalse(final_lock.exists())
+                metadata = dispatch_execute._read_lock_metadata(staging)
+                self.assertIsNotNone(metadata)
+                self.assertEqual(metadata["pid"], os.getpid())
+                original_publish(staging, final_lock)
+
+            with patch.object(
+                dispatch_execute,
+                "_publish_lock",
+                side_effect=checked_publish,
+            ):
+                with dispatch_execute.journal_lock(journal):
+                    self.assertTrue(lock_dir.exists())
+                    self.assertIsNotNone(
+                        dispatch_execute._read_lock_metadata(lock_dir)
+                    )
+
+            self.assertTrue(observed["checked"])
+            self.assertFalse(lock_dir.exists())
+
+    def test_metadata_failure_never_publishes_incomplete_lock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory) / "dispatch-events.jsonl"
+            lock_dir = journal.with_name(journal.name + ".lock")
+            with patch.object(
+                dispatch_execute,
+                "_write_lock_metadata",
+                side_effect=RuntimeError("metadata write failed"),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "metadata write failed"):
+                    with dispatch_execute.journal_lock(journal):
+                        self.fail("metadata failure must prevent lock publication")
+
+            self.assertFalse(lock_dir.exists())
+            self.assertEqual(
+                list(Path(directory).glob("dispatch-events.jsonl.lock.staging-*")),
+                [],
+            )
+
+    def test_malformed_journal_event_fails_closed_before_second_claim(self):
+        dispatch_id = "dispatch-test-malformed"
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory) / "dispatch-events.jsonl"
+            state, attempt_id, _ = dispatch_execute.claim_dispatch(
+                dispatch_id,
+                journal_path=journal,
+            )
+            self.assertEqual(state, "DISPATCH_CLAIMED")
+            self.assertIsNotNone(attempt_id)
+            assert attempt_id is not None
+
+            malformed = {
+                "version": 1,
+                "event_id": "malformed-event",
+                "dispatch_id": dispatch_id,
+                "attempt_id": attempt_id,
+                "timestamp": dispatch_execute.utc_now(),
+                "evidence": {},
+            }
+            with journal.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(malformed) + "\n")
+
+            with self.assertRaisesRegex(RuntimeError, "invalid state"):
+                dispatch_execute.claim_dispatch(
+                    dispatch_id,
+                    journal_path=journal,
+                    retry_failed=True,
+                )
+
+            self.assertEqual(len(journal.read_text(encoding="utf-8").splitlines()), 2)
+
+    def test_unknown_journal_state_fails_closed_before_second_claim(self):
+        dispatch_id = "dispatch-test-unknown-state"
+        with tempfile.TemporaryDirectory() as directory:
+            journal = Path(directory) / "dispatch-events.jsonl"
+            state, attempt_id, _ = dispatch_execute.claim_dispatch(
+                dispatch_id,
+                journal_path=journal,
+            )
+            self.assertEqual(state, "DISPATCH_CLAIMED")
+            assert attempt_id is not None
+
+            malformed = {
+                "version": 1,
+                "event_id": "unknown-state-event",
+                "dispatch_id": dispatch_id,
+                "attempt_id": attempt_id,
+                "state": "DISPATCH_MAYBE",
+                "timestamp": dispatch_execute.utc_now(),
+                "evidence": {},
+            }
+            with journal.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(malformed) + "\n")
+
+            with self.assertRaisesRegex(RuntimeError, "unknown state"):
+                dispatch_execute.claim_dispatch(
+                    dispatch_id,
+                    journal_path=journal,
+                    retry_failed=True,
+                )
+
     def test_failed_start_is_safe_and_not_retried_implicitly(self):
         request = {"dispatch_id": "dispatch-test-failure"}
         calls = 0

@@ -1,0 +1,108 @@
+name: OneCompany Ledger Read Smoke
+
+on:
+  push:
+    branches:
+      - epic-0.6-b1-durable-ledger-activation
+    paths:
+      - .github/workflows/onecompany-ledger-read-smoke.yml
+      - .onecompany/ledger.json
+      - .onecompany/supervision.json
+      - scripts/ledger.py
+      - scripts/ledger_lib.py
+      - scripts/ledger_validate.py
+      - .onecompany/selftest/test_b1_ledger_activation.py
+      - docs/B1-DURABLE-LEDGER-ACTIVATION.md
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  replay-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout reviewed repository state
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Validate activated ledger configuration
+        run: python scripts/ledger_validate.py
+
+      - name: Replay live Team Room before and after deleting local cache
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python onecompany.py ledger read --events > "${RUNNER_TEMP}/ledger-before.json"
+          rm -f .onecompany/state.json
+          python onecompany.py ledger read --events > "${RUNNER_TEMP}/ledger-after.json"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          temp = Path(os.environ["RUNNER_TEMP"])
+          before = json.loads((temp / "ledger-before.json").read_text(encoding="utf-8"))
+          after = json.loads((temp / "ledger-after.json").read_text(encoding="utf-8"))
+
+          if before.get("derived") != after.get("derived"):
+              raise SystemExit("canonical ledger replay changed after local cache deletion")
+
+          events = before.get("events")
+          if not isinstance(events, list):
+              raise SystemExit("ledger smoke did not return raw trusted events")
+          proof = next(
+              (
+                  event
+                  for event in events
+                  if event.get("event_id") == "b1-human-publisher-proof-20260915"
+              ),
+              None,
+          )
+          if proof is None:
+              raise SystemExit("B1 publisher proof event is missing from Team Room replay")
+          if proof.get("github_publisher") != "NTinkicht":
+              raise SystemExit("B1 publisher proof did not resolve to NTinkicht")
+          if proof.get("type") != "SUPERVISION_CHECK":
+              raise SystemExit("B1 publisher proof has unexpected event type")
+          if (proof.get("payload") or {}).get("authority") != "none":
+              raise SystemExit("B1 identity proof must not carry coordination authority")
+
+          derived = before.get("derived") or {}
+          if derived.get("active_leases"):
+              raise SystemExit("publisher identity proof unexpectedly created lease authority")
+          if derived.get("current_gate"):
+              raise SystemExit("publisher identity proof unexpectedly created gate authority")
+
+          print(
+              json.dumps(
+                  {
+                      "team_room_issue": 45,
+                      "publisher": proof.get("github_publisher"),
+                      "proof_comment_id": proof.get("github_comment_id"),
+                      "trusted_event_count": len(events),
+                      "cache_independent_replay": True,
+                  },
+                  sort_keys=True,
+              )
+          )
+          PY
+
+      - name: Publish B1 replay evidence summary
+        if: always()
+        run: |
+          {
+            echo '## OneCompany B1 durable-ledger replay proof'
+            echo
+            echo '- Team Room: `#45`'
+            echo '- Trusted publisher configured: `NTinkicht` only'
+            echo '- Workflow permissions: `contents: read`, `issues: read`'
+            echo "- Exact checkout head: \`${GITHUB_SHA}\`"
+            echo '- Local `state.json` deleted between replays: `yes`'
+            echo '- This smoke cannot publish ledger events or mutate repository content.'
+          } >> "${GITHUB_STEP_SUMMARY}"

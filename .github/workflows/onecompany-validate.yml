@@ -83,10 +83,32 @@ jobs:
         run: python onecompany.py validate
       - name: Validate reference high-risk assurance packet
         run: python onecompany.py assurance .onecompany/reference/assurance/WU900.json
-      - name: Test unit and assurance invariants
+      - name: Test B1 activation invariants against enabled configuration
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python -m unittest discover -s .onecompany/selftest -p 'test_*.py'
+        run: python -m unittest discover -s .onecompany/selftest -p 'test_b1_ledger_activation.py'
+      - name: Test unit and assurance invariants with explicit offline ledger fixture
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cp .onecompany/ledger.json "${RUNNER_TEMP}/ledger.json.enabled"
+          restore_ledger() {
+            cp "${RUNNER_TEMP}/ledger.json.enabled" .onecompany/ledger.json
+          }
+          trap restore_ledger EXIT
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          path = Path('.onecompany/ledger.json')
+          ledger = json.loads(path.read_text(encoding='utf-8'))
+          ledger['enabled'] = False
+          path.write_text(json.dumps(ledger, indent=2) + '\n', encoding='utf-8')
+          PY
+          python -m unittest discover -s .onecompany/selftest -p 'test_*.py'
+          restore_ledger
+          trap - EXIT
       - name: Simulate core policy invariants
         run: python onecompany.py simulate
       - name: Simulate durable-ledger races

@@ -53,6 +53,7 @@ class LocalActionsAdapterTests(unittest.TestCase):
         return {
             "id": run["databaseId"],
             "display_title": run["displayTitle"],
+            "event": run.get("event", "workflow_dispatch"),
             "status": run["status"],
             "conclusion": run.get("conclusion"),
             "html_url": run["url"],
@@ -133,7 +134,28 @@ class LocalActionsAdapterTests(unittest.TestCase):
             result = adapter.invoke(request, runner=runner, sleeper=lambda _: None)
         self.assertEqual(result["status"], "DISPATCH_STARTED")
         self.assertEqual(result["evidence"]["run_id"], 401)
+        history_call = next(
+            call for call in calls if call[0:4] == ["gh", "api", "--paginate", "--slurp"]
+        )
+        self.assertNotIn("event=workflow_dispatch", history_call[-1])
         self.assertFalse(any(call[0:3] == ["gh", "api", "--method"] for call in calls))
+
+    def test_non_dispatch_same_title_does_not_reconcile(self):
+        push_run = {
+            "databaseId": 400,
+            "displayTitle": "OneCompany Local dispatch-local-a3b",
+            "event": "push",
+            "status": "completed",
+            "conclusion": "success",
+            "url": "https://github.com/NTinkicht/OneCompany/actions/runs/400",
+            "headSha": "0" * 40,
+            "createdAt": "2026-09-15T22:00:00Z",
+        }
+        normalized = adapter.list_worker_runs(
+            "NTinkicht/OneCompany",
+            runner=lambda args, **_kwargs: self.completed(args, self.paginated([push_run])),
+        )
+        self.assertIsNone(adapter._matching_run(normalized, "dispatch-local-a3b"))
 
     def test_matching_run_beyond_first_hundred_is_reconciled_without_post(self):
         request = self.request()
@@ -176,6 +198,7 @@ class LocalActionsAdapterTests(unittest.TestCase):
             call for call in calls if call[0:4] == ["gh", "api", "--paginate", "--slurp"]
         )
         self.assertIn("per_page=100", history_call[-1])
+        self.assertNotIn("event=workflow_dispatch", history_call[-1])
 
     def test_dispatches_exact_main_workflow_and_observes_evidence(self):
         request = self.request()
@@ -294,6 +317,8 @@ class LocalActionsAdapterTests(unittest.TestCase):
         self.assertIn("Refuse duplicate workflow-dispatch execution", text)
         self.assertIn("persist-credentials: false", text)
         self.assertIn("gh api --paginate --slurp", text)
+        self.assertNotIn("?event=workflow_dispatch", text)
+        self.assertIn("item.get('event') == 'workflow_dispatch'", text)
         self.assertIn("workflow_runs.extend(page['workflow_runs'])", text)
         self.assertIn("canonical = min(", text)
         self.assertIn("current workflow run is missing from duplicate-election evidence", text)

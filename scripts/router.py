@@ -8,20 +8,88 @@ import sys
 
 from capacity_lib import configured_dispatch_exists, implementation_availability
 from lease_lifecycle import coordination_view
-from onecompany_lib import CONTROL, budget_allows, load_json
+from onecompany_lib import CONTROL, load_json
 
 WRITE_CAPS = {"implementation", "ci_remediation"}
 REVIEW_CAPS = {"code_review", "security_review"}
 MERGE_CAPS = {"merge_execution"}
+FAILOVER_TRIGGERS = {
+    "quota_exhausted",
+    "capacity_exhausted",
+    "runtime_unavailable",
+    "environment_unavailable",
+    "permission_failure",
+    "no_progress_after_reconcile",
+    "repeated_failed_remediation",
+    "security_concern",
+    "human_override",
+}
+
+
+def dispatch_gaps(
+    dispatch_doc: dict,
+    actor_id: str,
+    required: set[str],
+    unattended: bool,
+) -> list[str]:
+    """Return requested capabilities that lack a configured execution mechanism."""
+    return sorted(
+        capability
+        for capability in required
+        if not configured_dispatch_exists(
+            dispatch_doc,
+            actor_id,
+            capability,
+            unattended,
+        )
+    )
+
+
+def zero_spend_budget_allows(cost_class: str, budget: dict) -> bool:
+    """Allow only cost classes explicitly approved for the zero-extra-spend router."""
+    return cost_class in set(budget.get("cost_classes", {}).get("allowed", []))
+
+
+def failover_context(
+    active: list[dict],
+    replace_lease_id: str | None,
+    trigger: str | None,
+    required: set[str],
+) -> tuple[dict | None, list[str]]:
+    """Validate an explicit failover proposal without mutating lease authority."""
+    if replace_lease_id is None and trigger is None:
+        return None, []
+    reasons: list[str] = []
+    if "implementation" not in required:
+        reasons.append("failover_requires_implementation_capability")
+    if not replace_lease_id:
+        reasons.append("failover_source_lease_required")
+    if not trigger:
+        reasons.append("failover_trigger_required")
+    elif trigger not in FAILOVER_TRIGGERS:
+        reasons.append("failover_trigger_not_allowed")
+
+    source = None
+    if replace_lease_id:
+        source = next(
+            (item for item in active if item.get("id") == replace_lease_id),
+            None,
+        )
+        if source is None:
+            reasons.append("failover_source_lease_not_active")
+    return source, sorted(set(reasons))
 
 
 def main() -> int:
+    """Resolve a deterministic route proposal; never create or transfer authority."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--capability", action="append", required=True, help="Required capability; repeatable")
     parser.add_argument("--exclude-author", action="append", default=[], help="Additional actor ID materially conflicted for independent gate")
     parser.add_argument("--for-independent-gate", action="store_true")
     parser.add_argument("--pr", type=int, help="PR whose authorship should be excluded for independent review")
     parser.add_argument("--unattended", action="store_true", help="Require a verified configured unattended execution path")
+    parser.add_argument("--replace-lease-id", help="Canonical active implementation lease being considered for failover")
+    parser.add_argument("--failover-trigger", help="Explicit allowlisted reason for a same-stream failover proposal")
     args = parser.parse_args()
 
     actors_doc = load_json(CONTROL / "actors.json")
@@ -48,6 +116,21 @@ def main() -> int:
         }, indent=2))
         return 2
 
+    source_lease, failover_reasons = failover_context(
+        active,
+        args.replace_lease_id,
+        args.failover_trigger,
+        required,
+    )
+    if failover_reasons:
+        print(json.dumps({
+            "status": "BLOCKED_FAILOVER_NOT_AUTHORIZED",
+            "eligible": [],
+            "reasons": failover_reasons,
+            "note": "A route proposal cannot create failover authority. Timer/heartbeat-only failover is not accepted.",
+        }, indent=2))
+        return 2
+
     excluded = set(args.exclude_author)
     if args.for_independent_gate:
         if args.pr is not None:
@@ -71,8 +154,6 @@ def main() -> int:
             excluded.update(global_view.get("material_authors", []))
 
     preferences = routing_doc.get("preference_by_capability", {})
-    actor_order = {actor.get("id"): index for index, actor in enumerate(actors_doc.get("actors", []))}
-
     eligible = []
     rejected = []
     for actor in actors_doc.get("actors", []):
@@ -118,15 +199,18 @@ def main() -> int:
                 unattended = status.get("unattended", {})
                 if unattended.get("configured") is not True or unattended.get("verified") is not True:
                     reasons.append("unattended_not_verified")
-                missing_dispatch = sorted(
-                    capability
-                    for capability in required
-                    if not configured_dispatch_exists(dispatch_doc, actor_id, capability, True)
-                )
-                if missing_dispatch:
-                    reasons.append("unattended_dispatch_missing:" + ",".join(missing_dispatch))
 
-        if not budget_allows(actor.get("cost_class", "UNKNOWN_COST"), budget):
+        missing_dispatch = dispatch_gaps(
+            dispatch_doc,
+            actor_id,
+            required,
+            args.unattended,
+        )
+        if missing_dispatch:
+            prefix = "unattended_dispatch_missing:" if args.unattended else "dispatch_missing:"
+            reasons.append(prefix + ",".join(missing_dispatch))
+
+        if not zero_spend_budget_allows(actor.get("cost_class", "UNKNOWN_COST"), budget):
             reasons.append("forbidden_by_budget")
 
         free_implementation_slots: int | None = None
@@ -138,10 +222,17 @@ def main() -> int:
                 active,
                 dispatch_doc=dispatch_doc if args.unattended else None,
                 require_unattended=args.unattended,
+                exclude_lease_id=(
+                    str(source_lease.get("id"))
+                    if source_lease is not None
+                    else None
+                ),
             )
             free_implementation_slots = slots
             if slots <= 0:
                 reasons.extend(availability_reasons)
+            if source_lease is not None and actor_id == source_lease.get("actor"):
+                reasons.append("failover_source_actor")
 
         if args.for_independent_gate and actor_id in excluded:
             reasons.append("material_author_conflict")
@@ -160,7 +251,7 @@ def main() -> int:
             try:
                 rank = ordered.index(actor_id)
             except ValueError:
-                rank = len(ordered) + actor_order.get(actor_id, 999)
+                rank = len(ordered) + 1000
             ranks[capability] = rank
             rank_total += rank
 
@@ -174,16 +265,29 @@ def main() -> int:
             "unattended": args.unattended,
         })
 
-    eligible.sort(key=lambda item: (item["preference_score"], actor_order.get(item["actor"], 999)))
-    print(json.dumps({
+    eligible.sort(key=lambda item: (item["preference_score"], item["actor"]))
+    payload = {
+        "status": "ROUTE_READY" if eligible else "BLOCKED_NO_ELIGIBLE_ROUTE",
         "required": sorted(required),
         "pr": args.pr,
         "unattended_required": args.unattended,
         "material_authors_excluded": sorted(excluded) if args.for_independent_gate else [],
+        "proposed_actor": eligible[0]["actor"] if eligible else None,
         "eligible": eligible,
         "rejected": rejected,
-        "note": "Routing preference is advisory ordering after hard eligibility/capacity/dispatch filters; the first eligible actor is a proposal, not a lease.",
-    }, indent=2))
+        "failover": (
+            {
+                "source_lease_id": source_lease.get("id"),
+                "source_actor": source_lease.get("actor"),
+                "trigger": args.failover_trigger,
+                "requires_atomic_lease_transfer": True,
+            }
+            if source_lease is not None
+            else None
+        ),
+        "note": "Routing is a deterministic proposal after hard eligibility, zero-spend, capacity, dispatch and authorship filters. It never creates or transfers a lease.",
+    }
+    print(json.dumps(payload, indent=2))
     return 0 if eligible else 2
 
 

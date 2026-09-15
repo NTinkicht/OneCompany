@@ -36,6 +36,23 @@
       "last_verified_at": "2026-09-14T20:05:00Z",
       "evidence": ["Current authorized ChatGPT GitHub connector demonstrated read/write, CI remediation, state reconciliation and mechanical merge execution on OneCompany"]
     },
+    {
+      "actor_id": "onecompany-local",
+      "setup_state": "ready",
+      "verified_surfaces": ["github-actions-standard-public-runner-readonly"],
+      "verified_capabilities": ["repository_intelligence"],
+      "temporarily_unavailable_capabilities": [],
+      "repository_access": {"read": true, "write": false, "review": false, "merge": false},
+      "unattended": {"configured": true, "verified": true},
+      "capacity": {
+        "implementation_streams": 0,
+        "measured": true,
+        "observed_at": "2026-09-15T21:36:23Z",
+        "evidence": ["GitHub Actions run 35026542482 completed successfully on exact smoke head 3a0d2571ad9e655ff3b130f10fd787703f74f603 with contents/actions read-only permissions and zero-spend public-runner preflight"]
+      },
+      "last_verified_at": "2026-09-15T21:36:23Z",
+      "evidence": ["OneCompany Local smoke run 35026542482: https://github.com/NTinkicht/OneCompany/actions/runs/35026542482", "Worker checkout used persist-credentials:false and repository access remained read-only", "Public-repository standard GitHub-hosted runner path passed zero-extra-spend preflight"]
+    },
     {"actor_id":"codex","setup_state":"not_started","verified_surfaces":[],"verified_capabilities":[],"temporarily_unavailable_capabilities":[],"repository_access":{"read":false,"write":false,"review":false,"merge":false},"unattended":{"configured":false,"verified":false},"capacity":{"implementation_streams":0,"measured":false,"observed_at":null,"evidence":[]},"last_verified_at":null,"evidence":[]},
     {"actor_id":"claude","setup_state":"not_started","verified_surfaces":[],"verified_capabilities":[],"temporarily_unavailable_capabilities":[],"repository_access":{"read":false,"write":false,"review":false,"merge":false},"unattended":{"configured":false,"verified":false},"capacity":{"implementation_streams":0,"measured":false,"observed_at":null,"evidence":[]},"last_verified_at":null,"evidence":[]},
     {"actor_id":"github-copilot","setup_state":"not_started","verified_surfaces":[],"verified_capabilities":[],"temporarily_unavailable_capabilities":[],"repository_access":{"read":false,"write":false,"review":false,"merge":false},"unattended":{"configured":false,"verified":false},"capacity":{"implementation_streams":0,"measured":false,"observed_at":null,"evidence":[]},"last_verified_at":null,"evidence":[]},

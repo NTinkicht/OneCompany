@@ -13,6 +13,44 @@ def check(name: str, condition: bool) -> bool:
     return condition
 
 
+def verified_capabilities_have_configured_dispatch(
+    actors: dict,
+    readiness: dict,
+    dispatch: dict,
+) -> bool:
+    """Require every verified capability of an enabled actor to be executable."""
+    actor_by_id = {
+        str(item.get("id")): item
+        for item in actors.get("actors", [])
+        if isinstance(item, dict) and item.get("id")
+    }
+    dispatch_by_id = {
+        str(item.get("actor_id")): item
+        for item in dispatch.get("actors", [])
+        if isinstance(item, dict) and item.get("actor_id")
+    }
+
+    for item in readiness.get("actors", []):
+        if not isinstance(item, dict) or not item.get("actor_id"):
+            continue
+        actor_id = str(item["actor_id"])
+        actor = actor_by_id.get(actor_id, {})
+        if not actor.get("enabled") or not actor.get("configured"):
+            continue
+
+        verified = set(item.get("verified_capabilities", []))
+        configured_capabilities: set[str] = set()
+        entry = dispatch_by_id.get(actor_id, {})
+        for mechanism in entry.get("mechanisms", []):
+            if isinstance(mechanism, dict) and mechanism.get("configured"):
+                configured_capabilities.update(mechanism.get("capabilities", []))
+
+        if not verified.issubset(configured_capabilities):
+            return False
+
+    return True
+
+
 def main() -> int:
     config = load_json(CONTROL / "config.json")
     budget = load_json(CONTROL / "budget.json")
@@ -20,6 +58,7 @@ def main() -> int:
     overlays = load_json(CONTROL / "overlays.json")
     actors = load_json(CONTROL / "actors.json")
     readiness = load_json(CONTROL / "readiness.json")
+    dispatch = load_json(CONTROL / "dispatch.json")
     results = []
 
     zero_spend = copy.deepcopy(budget)
@@ -79,6 +118,13 @@ def main() -> int:
         check(
             "disabled or unconfigured readiness does not pretend capabilities are verified",
             disabled_or_unconfigured_are_unverified,
+        )
+    )
+
+    results.append(
+        check(
+            "verified capabilities have a configured dispatch mechanism",
+            verified_capabilities_have_configured_dispatch(actors, readiness, dispatch),
         )
     )
 

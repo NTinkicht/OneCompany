@@ -73,12 +73,78 @@ def _validate_event(event: dict[str, Any], number: int) -> None:
         raise RuntimeError(f"dispatch journal line {number} has invalid evidence")
 
 
+def _validate_history_event(
+    event: dict[str, Any],
+    number: int,
+    last_by_dispatch: dict[str, dict[str, Any]],
+) -> None:
+    """Validate one event against the complete prior history of its dispatch."""
+    dispatch_id = str(event["dispatch_id"])
+    state = str(event["state"])
+    attempt_id = str(event["attempt_id"])
+    previous = last_by_dispatch.get(dispatch_id)
+
+    if previous is None:
+        if state != "DISPATCH_CLAIMED":
+            raise RuntimeError(
+                f"dispatch journal line {number} history must start with DISPATCH_CLAIMED"
+            )
+        last_by_dispatch[dispatch_id] = event
+        return
+
+    previous_state = str(previous["state"])
+    previous_attempt = str(previous["attempt_id"])
+
+    if previous_state == "DISPATCH_CLAIMED":
+        if attempt_id != previous_attempt:
+            raise RuntimeError(
+                f"dispatch journal line {number} history attempt mismatch"
+            )
+        if state not in {"DISPATCH_STARTED", "DISPATCH_FAILED_SAFE"}:
+            raise RuntimeError(
+                f"dispatch journal line {number} has invalid history transition"
+            )
+    elif previous_state == "DISPATCH_STARTED":
+        if attempt_id != previous_attempt:
+            raise RuntimeError(
+                f"dispatch journal line {number} history attempt mismatch"
+            )
+        if state not in {"DISPATCH_COMPLETED", "DISPATCH_FAILED_SAFE"}:
+            raise RuntimeError(
+                f"dispatch journal line {number} has invalid history transition"
+            )
+    elif previous_state == "DISPATCH_FAILED_SAFE":
+        if state != "DISPATCH_CLAIMED":
+            raise RuntimeError(
+                f"dispatch journal line {number} has invalid history transition"
+            )
+        if attempt_id == previous_attempt:
+            raise RuntimeError(
+                f"dispatch journal line {number} retry reused attempt_id"
+            )
+        if event["evidence"].get("retry_failed") is not True:
+            raise RuntimeError(
+                f"dispatch journal line {number} retry lacks explicit retry evidence"
+            )
+    elif previous_state == "DISPATCH_COMPLETED":
+        raise RuntimeError(
+            f"dispatch journal line {number} follows completed dispatch"
+        )
+    else:
+        raise RuntimeError(
+            f"dispatch journal line {number} has invalid prior history state"
+        )
+
+    last_by_dispatch[dispatch_id] = event
+
+
 def load_dispatch_events(path: Path | None = None) -> list[dict[str, Any]]:
     """Load append-only dispatch evidence and fail closed on corruption."""
     target = path or dispatch_journal_path()
     if not target.exists():
         return []
     events: list[dict[str, Any]] = []
+    last_by_dispatch: dict[str, dict[str, Any]] = {}
     with target.open("r", encoding="utf-8") as handle:
         for number, line in enumerate(handle, 1):
             if not line.strip():
@@ -94,6 +160,7 @@ def load_dispatch_events(path: Path | None = None) -> list[dict[str, Any]]:
                     f"dispatch journal line {number} is not an object"
                 )
             _validate_event(event, number)
+            _validate_history_event(event, number, last_by_dispatch)
             events.append(event)
     return events
 

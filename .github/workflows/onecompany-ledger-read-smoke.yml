@@ -13,11 +13,13 @@ on:
       - scripts/bootstrap.py
       - scripts/smoke_bootstrap.py
       - scripts/dispatch.py
+      - scripts/lease.py
       - scripts/ledger.py
       - scripts/ledger_lib.py
       - scripts/ledger_validate.py
       - .onecompany/selftest/test_a3b_activation.py
       - .onecompany/selftest/test_b1_ledger_activation.py
+      - .onecompany/selftest/test_lease_command_fail_closed.py
       - docs/B1-DURABLE-LEDGER-ACTIVATION.md
   workflow_dispatch:
 

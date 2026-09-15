@@ -471,6 +471,25 @@ def _durable_lease_base_stop(lease: dict[str, Any]) -> tuple[bool, str | None]:
     return emergency_stop_active(runtime["config"]), None
 
 
+def _fail_closed_command(operation: str):
+    """Translate coordination RuntimeError failures into deterministic CLI refusal."""
+
+    def decorate(func):
+        def guarded(args):
+            try:
+                return func(args)
+            except RuntimeError as exc:
+                print(
+                    f"REFUSED: {operation} cannot use coordination safely: {exc}"
+                )
+                return 2
+
+        return guarded
+
+    return decorate
+
+
+@_fail_closed_command("renew")
 def renew(args: argparse.Namespace) -> int:
     if emergency_stop_active():
         print("REFUSED: emergency stop is active; lease renewal is disabled")
@@ -553,6 +572,7 @@ def renew(args: argparse.Namespace) -> int:
     return 0
 
 
+@_fail_closed_command("reap")
 def reap(args: argparse.Namespace) -> int:
     now = dt.datetime.now(dt.timezone.utc)
     view = lifecycle.coordination_view(now=now)
@@ -590,6 +610,7 @@ def reap(args: argparse.Namespace) -> int:
     return 0
 
 
+@_fail_closed_command("acquire")
 def acquire(args: argparse.Namespace) -> int:
     if ledger_enabled():
         _bind_core()
@@ -600,6 +621,7 @@ def acquire(args: argparse.Namespace) -> int:
     return _local_acquire(args)
 
 
+@_fail_closed_command("release")
 def release(args: argparse.Namespace) -> int:
     if ledger_enabled():
         _bind_core()
@@ -610,6 +632,7 @@ def release(args: argparse.Namespace) -> int:
     return _local_release(args)
 
 
+@_fail_closed_command("transfer")
 def transfer(args: argparse.Namespace) -> int:
     if ledger_enabled():
         _bind_core()

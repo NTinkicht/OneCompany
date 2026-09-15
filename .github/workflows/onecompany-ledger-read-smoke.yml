@@ -9,6 +9,8 @@ on:
       - .github/workflows/onecompany-validate.yml
       - .onecompany/ledger.json
       - .onecompany/supervision.json
+      - scripts/bootstrap.py
+      - scripts/smoke_bootstrap.py
       - scripts/ledger.py
       - scripts/ledger_lib.py
       - scripts/ledger_validate.py

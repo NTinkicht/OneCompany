@@ -8,7 +8,7 @@ import sys
 
 from capacity_lib import configured_dispatch_exists, implementation_availability
 from lease_lifecycle import coordination_view
-from onecompany_lib import CONTROL, budget_allows, load_json
+from onecompany_lib import CONTROL, load_json
 
 WRITE_CAPS = {"implementation", "ci_remediation"}
 REVIEW_CAPS = {"code_review", "security_review"}
@@ -43,6 +43,11 @@ def dispatch_gaps(
             unattended,
         )
     )
+
+
+def zero_spend_budget_allows(cost_class: str, budget: dict) -> bool:
+    """Allow only cost classes explicitly approved for the zero-extra-spend router."""
+    return cost_class in set(budget.get("cost_classes", {}).get("allowed", []))
 
 
 def failover_context(
@@ -205,7 +210,7 @@ def main() -> int:
             prefix = "unattended_dispatch_missing:" if args.unattended else "dispatch_missing:"
             reasons.append(prefix + ",".join(missing_dispatch))
 
-        if not budget_allows(actor.get("cost_class", "UNKNOWN_COST"), budget):
+        if not zero_spend_budget_allows(actor.get("cost_class", "UNKNOWN_COST"), budget):
             reasons.append("forbidden_by_budget")
 
         free_implementation_slots: int | None = None

@@ -4,7 +4,10 @@ import json
 import subprocess
 import sys
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "scripts"
@@ -89,6 +92,23 @@ class ZeroSpendRouterTests(unittest.TestCase):
             ["planning"],
         )
 
+    def test_zero_spend_filter_rejects_conditional_and_unknown_cost_classes(self):
+        """Positive caps or permissive unknown-cost settings must not escape A2 zero-spend routing."""
+        budget = {
+            "ai": {
+                "additional_monthly_spend_cap": 100,
+                "unknown_cost_behavior": "allow_within_cap",
+            },
+            "cost_classes": {
+                "allowed": ["INCLUDED_SUBSCRIPTION"],
+                "conditionally_allowed": ["METERED_ALLOWED"],
+                "forbidden": [],
+            },
+        }
+        self.assertTrue(router.zero_spend_budget_allows("INCLUDED_SUBSCRIPTION", budget))
+        self.assertFalse(router.zero_spend_budget_allows("METERED_ALLOWED", budget))
+        self.assertFalse(router.zero_spend_budget_allows("UNKNOWN_COST", budget))
+
     def test_failover_requires_canonical_active_source_and_allowlisted_trigger(self):
         """A timer string or stale lease ID must never authorize a competing writer."""
         active = [
@@ -125,6 +145,115 @@ class ZeroSpendRouterTests(unittest.TestCase):
         )
         self.assertEqual(source["actor"], "chatgpt")
         self.assertEqual(reasons, [])
+
+    def test_valid_failover_routes_through_main_to_different_actor(self):
+        """A valid failover CLI proposal excludes its source actor and reports replacement capacity."""
+        docs = {
+            "actors.json": {
+                "actors": [
+                    {
+                        "id": "source",
+                        "enabled": True,
+                        "configured": True,
+                        "capabilities": ["implementation"],
+                        "cost_class": "INCLUDED_SUBSCRIPTION",
+                    },
+                    {
+                        "id": "replacement",
+                        "enabled": True,
+                        "configured": True,
+                        "capabilities": ["implementation"],
+                        "cost_class": "INCLUDED_SUBSCRIPTION",
+                    },
+                ]
+            },
+            "readiness.json": {
+                "actors": [
+                    {
+                        "actor_id": actor_id,
+                        "setup_state": "ready",
+                        "verified_capabilities": ["implementation"],
+                        "temporarily_unavailable_capabilities": [],
+                        "repository_access": {
+                            "read": True,
+                            "write": True,
+                            "review": False,
+                            "merge": False,
+                        },
+                    }
+                    for actor_id in ("source", "replacement")
+                ]
+            },
+            "routing.json": {"preference_by_capability": {"implementation": ["source", "replacement"]}},
+            "dispatch.json": {
+                "actors": [
+                    {
+                        "actor_id": actor_id,
+                        "mechanisms": [
+                            {
+                                "id": "interactive",
+                                "configured": True,
+                                "unattended": False,
+                                "capabilities": ["implementation"],
+                            }
+                        ],
+                    }
+                    for actor_id in ("source", "replacement")
+                ]
+            },
+            "budget.json": {
+                "cost_classes": {
+                    "allowed": ["INCLUDED_SUBSCRIPTION"],
+                    "conditionally_allowed": [],
+                    "forbidden": ["UNKNOWN_COST"],
+                }
+            },
+        }
+        view = {
+            "active_leases": [
+                {
+                    "id": "lease-1",
+                    "role": "implementation",
+                    "actor": "source",
+                    "work_unit": "WU-X",
+                }
+            ],
+            "material_authors": [],
+        }
+
+        def fake_load(path: Path) -> dict:
+            return docs[path.name]
+
+        def fake_availability(actor, status, budget, active, **kwargs):
+            self.assertEqual(kwargs.get("exclude_lease_id"), "lease-1")
+            return 1, []
+
+        output = StringIO()
+        argv = [
+            "router.py",
+            "--capability",
+            "implementation",
+            "--replace-lease-id",
+            "lease-1",
+            "--failover-trigger",
+            "quota_exhausted",
+        ]
+        with (
+            mock.patch.object(router, "load_json", side_effect=fake_load),
+            mock.patch.object(router, "coordination_view", return_value=view),
+            mock.patch.object(router, "implementation_availability", side_effect=fake_availability),
+            mock.patch.object(sys, "argv", argv),
+            redirect_stdout(output),
+        ):
+            rc = router.main()
+
+        payload = json.loads(output.getvalue())
+        self.assertEqual(rc, 0)
+        self.assertEqual(payload["status"], "ROUTE_READY")
+        self.assertEqual(payload["proposed_actor"], "replacement")
+        self.assertNotEqual(payload["proposed_actor"], payload["failover"]["source_actor"])
+        self.assertEqual(payload["eligible"][0]["free_implementation_slots"], 1)
+        self.assertEqual(payload["failover"]["source_lease_id"], "lease-1")
 
     def test_failover_proposal_never_applies_to_nonimplementation_capability(self):
         """Review or planning routing cannot smuggle an implementation-lease transfer."""

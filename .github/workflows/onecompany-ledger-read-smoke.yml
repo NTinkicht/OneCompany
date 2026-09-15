@@ -16,6 +16,7 @@ on:
       - scripts/ledger.py
       - scripts/ledger_lib.py
       - scripts/ledger_validate.py
+      - .onecompany/selftest/test_a3b_activation.py
       - .onecompany/selftest/test_b1_ledger_activation.py
       - docs/B1-DURABLE-LEDGER-ACTIVATION.md
   workflow_dispatch:

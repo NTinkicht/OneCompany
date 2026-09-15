@@ -209,6 +209,9 @@ class CopilotActionsAdapterTests(unittest.TestCase):
         self.assertNotIn("--yolo", text)
         self.assertNotIn("--allow-all", text)
         self.assertIn("Refuse duplicate workflow-dispatch AI invocation", text)
+        self.assertIn("canonical = min(", text)
+        self.assertIn("current workflow run is missing from duplicate-election evidence", text)
+        self.assertIn("key=lambda item: (item['created_at'], int(item['id']))", text)
 
 
 if __name__ == "__main__":

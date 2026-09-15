@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import time
 from typing import Any, Callable
@@ -13,6 +14,7 @@ WORKFLOW_FILE = "onecompany-local-readonly.yml"
 MECHANISM_ID = "onecompany-actions-readonly"
 ACTOR_ID = "onecompany-local"
 CAPABILITY = "repository_intelligence"
+SAFE_TOKEN = re.compile(r"^[A-Za-z0-9._:-]{1,160}$")
 FAILURE_CONCLUSIONS = {
     "failure",
     "cancelled",
@@ -24,6 +26,7 @@ FAILURE_CONCLUSIONS = {
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 Sleeper = Callable[[float], None]
+Clock = Callable[[], float]
 
 
 def zero_spend_policy_reasons(budget: dict[str, Any]) -> list[str]:
@@ -72,7 +75,7 @@ def validate_request(request: dict[str, Any]) -> list[str]:
         reasons.append("local_adapter_repository_invalid")
     for field in ("dispatch_id", "work_unit"):
         value = request.get(field)
-        if not isinstance(value, str) or not value:
+        if not isinstance(value, str) or not SAFE_TOKEN.fullmatch(value):
             reasons.append(f"local_adapter_{field}_invalid")
     reasons.extend(zero_spend_policy_reasons(load_json(CONTROL / "budget.json")))
     return sorted(set(reasons))
@@ -203,8 +206,11 @@ def invoke(
     *,
     runner: Runner = subprocess.run,
     sleeper: Sleeper = time.sleep,
+    clock: Clock = time.monotonic,
     poll_attempts: int = 12,
-    poll_delay_seconds: float = 1.0,
+    poll_delay_seconds: float = 0.5,
+    poll_timeout_seconds: float = 30.0,
+    max_poll_delay_seconds: float = 4.0,
 ) -> dict[str, Any]:
     """Start or reconcile one provider-side idempotent read-only Actions run."""
     reasons = validate_request(request)
@@ -220,10 +226,25 @@ def invoke(
         return _outcome_from_run(existing)
 
     dispatch_workflow(request, runner=runner)
-    for attempt in range(poll_attempts):
+    attempts = max(1, int(poll_attempts))
+    delay = max(0.0, float(poll_delay_seconds))
+    deadline = clock() + max(0.0, float(poll_timeout_seconds))
+    max_delay = max(delay, float(max_poll_delay_seconds))
+
+    for attempt in range(attempts):
         found = _matching_run(list_worker_runs(repository, runner=runner), dispatch_id)
         if found is not None:
             return _outcome_from_run(found)
-        if attempt + 1 < poll_attempts:
-            sleeper(poll_delay_seconds)
+
+        if attempt + 1 >= attempts:
+            break
+        remaining = deadline - clock()
+        if remaining <= 0:
+            break
+        sleep_for = min(delay, remaining)
+        if sleep_for > 0:
+            sleeper(sleep_for)
+        if delay > 0:
+            delay = min(max_delay, delay * 2)
+
     raise RuntimeError("local_actions_run_evidence_not_observed")

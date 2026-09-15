@@ -1,12 +1,21 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTROL = ROOT / ".onecompany"
+SCRIPTS = ROOT / "scripts"
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
+
+import ledger_lib  # noqa: E402
 
 
 def top_level_permissions(path: Path) -> dict[str, str]:
@@ -31,6 +40,8 @@ class B1LedgerActivationTests(unittest.TestCase):
     """Regress the repo-specific B1 activation without broadening authority."""
 
     def setUp(self):
+        if os.environ.get("ONECOMPANY_OFFLINE_UNIT_FIXTURE") == "1":
+            self.skipTest("B1 activation is exercised separately from the offline unit fixture")
         self.config = json.loads((CONTROL / "config.json").read_text(encoding="utf-8"))
         repository = self.config.get("project", {}).get("repository")
         if repository != "NTinkicht/OneCompany":
@@ -77,7 +88,7 @@ class B1LedgerActivationTests(unittest.TestCase):
             {"contents": "read", "issues": "read"},
         )
         self.assertIn("persist-credentials: false", text)
-        self.assertIn("rm -f .onecompany/state.json", text)
+        self.assertIn(".unlink(missing_ok=True)", text)
         self.assertEqual(text.count("issues/45/comments?per_page=100"), 1)
         self.assertIn("trusted-events.json", text)
         self.assertIn("canonical ledger replay changed after local cache deletion", text)
@@ -94,6 +105,39 @@ class B1LedgerActivationTests(unittest.TestCase):
         text = workflow.read_text(encoding="utf-8")
         self.assertNotIn("write-all", text)
         self.assertNotRegex(text, r"(?m)^\s{2,}[A-Za-z0-9_-]+:\s*write\s*$")
+
+    def test_runtime_activation_guard_binds_clean_checkout_to_protected_history(self):
+        head = "a" * 40
+
+        def fake_run(command, cwd=None):
+            del cwd
+            if command[:3] == ["git", "diff", "--quiet"]:
+                return SimpleNamespace(returncode=0, stdout="", stderr="")
+            if command == ["git", "rev-parse", "HEAD"]:
+                return SimpleNamespace(returncode=0, stdout=head + "\n", stderr="")
+            raise AssertionError(f"unexpected command: {command}")
+
+        with (
+            patch.object(ledger_lib, "run", side_effect=fake_run),
+            patch.object(ledger_lib, "_repository", return_value="NTinkicht/OneCompany"),
+            patch.object(ledger_lib, "_assert_trusted_default_branch_history") as verify,
+        ):
+            ledger_lib._assert_ledger_runtime_activation()
+
+        verify.assert_called_once_with("NTinkicht/OneCompany", head)
+
+    def test_runtime_activation_guard_rejects_dirty_policy_before_network(self):
+        with (
+            patch.object(
+                ledger_lib,
+                "run",
+                return_value=SimpleNamespace(returncode=1, stdout="", stderr=""),
+            ),
+            patch.object(ledger_lib, "_repository") as repository,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "clean ledger/config policy"):
+                ledger_lib._assert_ledger_runtime_activation()
+        repository.assert_not_called()
 
     def test_zero_extra_spend_and_human_sovereignty_remain_unchanged(self):
         budget = json.loads((CONTROL / "budget.json").read_text(encoding="utf-8"))

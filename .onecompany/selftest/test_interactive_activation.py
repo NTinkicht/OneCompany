@@ -94,6 +94,40 @@ class InteractiveActivationTests(unittest.TestCase):
             )
         )
 
+    def test_enabled_actor_requires_usable_readiness_before_dispatch_coverage(self):
+        actors = load("actors.json")
+        readiness = load("readiness.json")
+        dispatch = load("dispatch.json")
+
+        missing_readiness = copy.deepcopy(readiness)
+        missing_readiness["actors"] = [
+            item
+            for item in missing_readiness["actors"]
+            if item["actor_id"] != "chatgpt"
+        ]
+        self.assertFalse(
+            simulate_script.verified_capabilities_have_configured_dispatch(
+                actors,
+                missing_readiness,
+                dispatch,
+            )
+        )
+
+        empty_readiness = copy.deepcopy(readiness)
+        chatgpt = next(
+            item
+            for item in empty_readiness["actors"]
+            if item["actor_id"] == "chatgpt"
+        )
+        chatgpt["verified_capabilities"] = []
+        self.assertFalse(
+            simulate_script.verified_capabilities_have_configured_dispatch(
+                actors,
+                empty_readiness,
+                dispatch,
+            )
+        )
+
     def test_no_unattended_path_is_activated(self):
         readiness = {item["actor_id"]: item for item in load("readiness.json")["actors"]}
         dispatch = {item["actor_id"]: item for item in load("dispatch.json")["actors"]}

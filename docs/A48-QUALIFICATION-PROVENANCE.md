@@ -23,11 +23,26 @@ authority = advisory_only
 authority_effects = []
 ```
 
-## Canonical scenarios
+## Canonical scenarios and fixture
 
 The reviewed catalog is `.onecompany/qualification/scenarios.json`.
 
 Each scenario has a stable ID and is bound at evaluation time to the SHA-256 hash of its canonical JSON representation. The result must supply that exact hash and the exact scenario condition. Candidate-controlled result files cannot substitute a different scenario definition.
+
+The catalog also defines the trusted fixture identity used by this first qualification suite:
+
+- fixture ID: `onecompany-qualification-v1`;
+- repository: `NTinkicht/OneCompany`;
+- exact base commit: `ca4721e2f2f53d381fe6175074b62bb067ad1658`;
+- canonical catalog path: `.onecompany/qualification/scenarios.json`.
+
+Each scenario names that fixture and defines an ordered `required_evidence_refs` contract that binds the scenario to:
+
+1. `fixture:onecompany-qualification-v1/<scenario-id>`;
+2. `git:ca4721e2f2f53d381fe6175074b62bb067ad1658`;
+3. `repo:.onecompany/qualification/scenarios.json`.
+
+Evaluation requires exact equality with the canonical fixture repository, base commit, fixture ID, and exact ordered evidence-reference list. Arbitrary repositories, commits, fixture IDs, opaque evidence substitutions, reordered evidence, or extra evidence references fail closed before a PASS/FAIL verdict is produced.
 
 The initial catalog covers:
 
@@ -48,14 +63,14 @@ A harness produces `onecompany-qualification-result-v1` with only these top-leve
 
 - `schema`;
 - `scenario_id` and `scenario_sha256`;
-- `fixture` - normalized repository identifier, exact 40-character base commit, normalized fixture ID;
+- `fixture` - must exactly equal the scenario's reviewed canonical fixture repository, base commit, and fixture ID;
 - `executor` - normalized actor, mechanism, model label, and harness version identifiers;
 - `condition`;
 - `attempt` and `retry`;
 - timezone-aware `started_at` and `ended_at`;
 - `actions` - labels drawn only from the scenario's reviewed `forbidden_actions` catalog;
 - `decisions` - labels drawn only from the scenario's reviewed `required_decisions` catalog;
-- `evidence_refs`;
+- `evidence_refs` - must exactly equal the scenario's reviewed ordered evidence contract;
 - `usage` - token values only when reliably available, plus normalized source/completeness.
 
 Unknown top-level fields fail closed. This deliberately prevents a result from smuggling fields such as `readiness_grant`, `lease_grant`, or `merge_authority` into the provenance surface.
@@ -70,7 +85,7 @@ Qualification provenance must not contain:
 - chain-of-thought or hidden reasoning;
 - unrestricted local filesystem paths.
 
-Evidence references must use normalized repository/Git/fixture references or HTTPS URLs. HTTPS evidence rejects embedded user information, fragments, malformed hosts/ports, and secret-like query parameters such as tokens, credentials, passwords, API keys, signatures, or authentication values.
+Evidence references must use normalized repository/Git/fixture references or HTTPS URLs. HTTPS evidence rejects embedded user information, fragments, malformed hosts/ports, and secret-like query parameters such as tokens, credentials, passwords, API keys, signatures, or authentication values. Structural validation is necessary but not sufficient for a qualification result: the result must also match the exact scenario-bound evidence-reference contract.
 
 ## Deterministic scoring
 
@@ -88,11 +103,12 @@ The evaluator checks:
 
 1. catalog/schema/authority invariants;
 2. exact scenario hash and condition;
-3. reproducible fixture identity;
-4. normalized executor and timing metadata;
-5. privacy-safe, structured evidence references;
-6. catalog-backed observable action labels;
-7. catalog-backed required safety decisions.
+3. exact canonical fixture repository, base commit, and fixture ID;
+4. exact scenario-bound evidence references;
+5. normalized executor and timing metadata;
+6. privacy-safe structured evidence references;
+7. catalog-backed observable action labels;
+8. catalog-backed required safety decisions.
 
 Exit codes:
 
@@ -109,11 +125,11 @@ Without `--output`, provenance is written to stdout. File output is restricted t
 The scorer emits `onecompany-qualification-provenance-v1` containing:
 
 - exact scenario ID/hash/category/condition;
-- fixture repository/base/ID;
+- exact canonical fixture repository/base/ID;
 - executor metadata;
 - start/end/duration/attempt/retry;
 - verdict and normalized failures;
-- evidence references;
+- exact scenario-bound evidence references;
 - usage source/completeness;
 - explicit empty authority effects.
 

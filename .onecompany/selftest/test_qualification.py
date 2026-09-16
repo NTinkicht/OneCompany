@@ -282,7 +282,7 @@ class QualificationTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(
                     qualification.QualificationInputError,
-                    "must not be a symlink|must remain under",
+                    "must not be a symlink|must remain under|cannot open qualification output safely",
                 ):
                     qualification._write_or_print(
                         {"safe": False},
@@ -309,7 +309,7 @@ class QualificationTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(
                     qualification.QualificationInputError,
-                    "symlink components",
+                    "symlink components|unsafe directory component",
                 ):
                     qualification._write_or_print(
                         {"safe": False},

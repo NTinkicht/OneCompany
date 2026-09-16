@@ -681,6 +681,7 @@ def _write_new_output(parent_fd: int, filename: str, text: str) -> None:
 
     fd: int | None = _open_secure_output_file(parent_fd, filename)
     validation_fd: int | None = None
+    published = False
     try:
         try:
             validation_fd = os.dup(fd)
@@ -724,32 +725,32 @@ def _write_new_output(parent_fd: int, filename: str, text: str) -> None:
             and _same_inode(after_write, final_entry)
         )
         if not publication_safe:
-            if _same_inode(after_write, final_entry):
-                try:
-                    os.unlink(filename, dir_fd=parent_fd)
-                except OSError:
-                    pass
             raise QualificationInputError(
                 "published qualification output failed final inode/link validation"
             )
+        published = True
     finally:
-        if fd is not None:
-            try:
-                metadata = os.fstat(fd)
+        if not published:
+            identity_fd = validation_fd if validation_fd is not None else fd
+            if identity_fd is not None:
                 try:
-                    entry = os.stat(filename, dir_fd=parent_fd, follow_symlinks=False)
-                except (OSError, TypeError, NotImplementedError):
-                    entry = None
-                if entry is not None and _same_inode(metadata, entry):
+                    metadata = os.fstat(identity_fd)
                     try:
-                        os.unlink(filename, dir_fd=parent_fd)
-                    except OSError:
-                        pass
-            finally:
-                try:
-                    os.close(fd)
+                        entry = os.stat(filename, dir_fd=parent_fd, follow_symlinks=False)
+                    except (OSError, TypeError, NotImplementedError):
+                        entry = None
+                    if entry is not None and _same_inode(metadata, entry):
+                        try:
+                            os.unlink(filename, dir_fd=parent_fd)
+                        except OSError:
+                            pass
                 except OSError:
                     pass
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
         if validation_fd is not None:
             try:
                 os.close(validation_fd)

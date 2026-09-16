@@ -122,6 +122,8 @@ A `PASS` remains advisory evidence only.
 
 Without `--output`, provenance is written to stdout. File output is restricted to the dedicated `.onecompany-evidence/qualification/` artifact tree. Paths outside that tree - including `.onecompany/config.json` and other control-plane files - are rejected. Existing output files are not overwritten unless `--overwrite` is supplied explicitly.
 
+The artifact path is also symlink-hardened: symlink components in the qualification output root are rejected, an existing final-path symlink is rejected even with `--overwrite`, and supported platforms open the final file with no-follow semantics. Qualification output therefore cannot use a symlink inside the artifact tree to overwrite a control-plane file outside that tree.
+
 The scorer emits `onecompany-qualification-provenance-v1` containing:
 
 - exact scenario ID/hash/category/condition;

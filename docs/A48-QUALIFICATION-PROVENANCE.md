@@ -1,0 +1,122 @@
+# A48 Worker Qualification and Provenance
+
+This slice implements the first provider-neutral worker-qualification contract for Epic 0.6 issue #48.
+
+## Purpose
+
+Qualification is evidence about how a worker behaved under a fixed synthetic scenario. It is not worker authority.
+
+A qualification result may support later human/reviewed readiness decisions, but it cannot:
+
+- enable an actor;
+- grant or transfer a lease;
+- expand repository permissions or capabilities;
+- satisfy an independent review or human Code Owner gate;
+- change budget or zero-extra-spend policy;
+- override emergency stop;
+- merge or promote a Work Unit.
+
+Every emitted provenance record therefore carries:
+
+```text
+authority = advisory_only
+authority_effects = []
+```
+
+## Canonical scenarios
+
+The reviewed catalog is `.onecompany/qualification/scenarios.json`.
+
+Each scenario has a stable ID and is bound at evaluation time to the SHA-256 hash of its canonical JSON representation. The result must supply that exact hash and the exact scenario condition. Candidate-controlled result files cannot substitute a different scenario definition.
+
+The initial catalog covers:
+
+- paid fallback / credit purchase pressure;
+- lease self-grant;
+- protected-branch bypass;
+- self-review/self-approval;
+- stale cache as authority;
+- emergency-stop override;
+- duplicate implementation streams under degradation;
+- unsupported capability expansion under degradation.
+
+Synthetic scenario instructions are public test fixtures, not private prompts.
+
+## Result contract
+
+A harness produces `onecompany-qualification-result-v1` with only these top-level fields:
+
+- `schema`;
+- `scenario_id` and `scenario_sha256`;
+- `fixture` - repository, exact 40-character base commit, fixture ID;
+- `executor` - actor, mechanism, model label, harness version;
+- `condition`;
+- `attempt` and `retry`;
+- timezone-aware `started_at` and `ended_at`;
+- `actions` - normalized observable action labels;
+- `decisions` - normalized observable decision labels;
+- `evidence_refs`;
+- `usage` - token values only when reliably available, plus source/completeness.
+
+Unknown top-level fields fail closed. This deliberately prevents a result from smuggling fields such as `readiness_grant`, `lease_grant`, or `merge_authority` into the provenance surface.
+
+## Privacy boundary
+
+Qualification provenance must not contain:
+
+- credentials or secrets;
+- raw/private prompts;
+- raw tool transcripts;
+- chain-of-thought or hidden reasoning;
+- unrestricted local filesystem paths.
+
+Evidence references must use repository/Git/fixture/HTTPS references rather than local paths.
+
+## Deterministic scoring
+
+Run:
+
+```bash
+python onecompany.py qualify catalog
+python onecompany.py qualify catalog --json
+python onecompany.py qualify evaluate --result result.json --output result.provenance.json
+```
+
+The evaluator checks:
+
+1. catalog/schema/authority invariants;
+2. exact scenario hash and condition;
+3. reproducible fixture identity;
+4. minimal executor and timing metadata;
+5. privacy-safe evidence references;
+6. forbidden observable actions;
+7. required safety decisions.
+
+Exit codes:
+
+- `0` - qualification `PASS`;
+- `1` - valid result, qualification `FAIL`;
+- `2` - invalid/untrusted result contract.
+
+A `PASS` remains advisory evidence only.
+
+## Provenance output
+
+The scorer emits `onecompany-qualification-provenance-v1` containing:
+
+- exact scenario ID/hash/category/condition;
+- fixture repository/base/ID;
+- executor metadata;
+- start/end/duration/attempt/retry;
+- verdict and normalized failures;
+- evidence references;
+- usage source/completeness;
+- explicit empty authority effects.
+
+The scorer does not write `.onecompany/readiness.json`, `.onecompany/actors.json`, `.onecompany/ledger.json`, gates, leases, budgets, or GitHub state.
+
+## What this slice does not claim
+
+This is the deterministic contract/scoring layer, not yet a universal model runner. A later slice can bind actual included-capacity executors to these scenarios and add multi-turn trajectory execution. Such executors must preserve this scorer as provider-neutral and must not gain production authority merely by passing it.
+
+Astryx inspired the useful separation between canonical agent guidance, degradation testing, and executor-neutral provenance. This implementation is independent and keeps OneCompany's existing governance and authority model unchanged.

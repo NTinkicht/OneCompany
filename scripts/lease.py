@@ -198,6 +198,9 @@ def sync_cache(_state: dict | None = None, pr: int | None = None) -> None:
     _reconcile_cache(pr)
 
 
+MUTATION_UNCERTAINTY_ERRORS = (RuntimeError, OSError)
+
+
 def _indeterminate(operation: str, exc: Exception | str) -> int:
     """Report mutation uncertainty without inviting an unsafe automatic retry."""
     print(
@@ -302,7 +305,7 @@ def _local_acquire(args: argparse.Namespace) -> int:
             lease_payload(lease),
         )
         after = lifecycle.coordination_view()
-    except RuntimeError as exc:
+    except MUTATION_UNCERTAINTY_ERRORS as exc:
         return _indeterminate("acquire", exc)
     winner = next(
         (
@@ -318,7 +321,7 @@ def _local_acquire(args: argparse.Namespace) -> int:
 
     try:
         _reconcile_cache(args.pr)
-    except RuntimeError as exc:
+    except MUTATION_UNCERTAINTY_ERRORS as exc:
         return _indeterminate("acquire", exc)
     limit = int(
         planning.get("parallel_execution", {}).get(
@@ -356,7 +359,7 @@ def _local_release(args: argparse.Namespace) -> int:
             },
         )
         _reconcile_cache(old.get("pr"))
-    except RuntimeError as exc:
+    except MUTATION_UNCERTAINTY_ERRORS as exc:
         return _indeterminate("release", exc)
     print("LEASE RELEASED")
     return 0
@@ -453,7 +456,7 @@ def _local_transfer(args: argparse.Namespace) -> int:
             payload,
         )
         after = lifecycle.coordination_view()
-    except RuntimeError as exc:
+    except MUTATION_UNCERTAINTY_ERRORS as exc:
         return _indeterminate("transfer", exc)
     winner = next(
         (
@@ -469,7 +472,7 @@ def _local_transfer(args: argparse.Namespace) -> int:
 
     try:
         _reconcile_cache(old.get("pr"))
-    except RuntimeError as exc:
+    except MUTATION_UNCERTAINTY_ERRORS as exc:
         return _indeterminate("transfer", exc)
     print(
         f"LEASE FAILOVER {old.get('actor')} -> {args.actor}; "
@@ -530,7 +533,7 @@ def _run_durable_core_command(
     _bind_core(tracked_post_event)
     try:
         result = func(args)
-    except RuntimeError as exc:
+    except MUTATION_UNCERTAINTY_ERRORS as exc:
         if mutation_attempted:
             return _indeterminate(operation, exc)
         raise
@@ -543,7 +546,7 @@ def _run_durable_core_command(
         return result
     try:
         _reconcile_cache(reconcile_pr)
-    except RuntimeError as exc:
+    except MUTATION_UNCERTAINTY_ERRORS as exc:
         return _indeterminate(operation, exc)
     return 0
 
@@ -610,7 +613,7 @@ def renew(args: argparse.Namespace) -> int:
             lifecycle.renewal_payload(lease, args.new_head),
         )
         after = lifecycle.coordination_view()
-    except RuntimeError as exc:
+    except MUTATION_UNCERTAINTY_ERRORS as exc:
         return _indeterminate("renew", exc)
     renewed = next(
         (
@@ -629,7 +632,7 @@ def renew(args: argparse.Namespace) -> int:
 
     try:
         _reconcile_cache(lease.get("pr"))
-    except RuntimeError as exc:
+    except MUTATION_UNCERTAINTY_ERRORS as exc:
         return _indeterminate("renew", exc)
     print(
         f"LEASE RENEWED {args.lease_id}; expires_at={renewed.get('expires_at')}"
@@ -661,7 +664,7 @@ def reap(args: argparse.Namespace) -> int:
                 now=now,
             )
         after = lifecycle.coordination_view(now=now)
-    except RuntimeError as exc:
+    except MUTATION_UNCERTAINTY_ERRORS as exc:
         return _indeterminate("reap", exc)
     remaining = {
         str(item.get("id"))
@@ -675,7 +678,7 @@ def reap(args: argparse.Namespace) -> int:
         )
     try:
         _reconcile_cache(None)
-    except RuntimeError as exc:
+    except MUTATION_UNCERTAINTY_ERRORS as exc:
         return _indeterminate("reap", exc)
     print(f"LEASES REAPED {len(expired)}")
     return 0

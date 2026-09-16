@@ -126,8 +126,16 @@ def load_manifest(root: Path = KNOWLEDGE_ROOT) -> dict[str, Any]:
     manifest = _read_json(root / "manifest.json")
     if not isinstance(manifest, dict):
         raise KnowledgeError("knowledge manifest must be an object")
-    qualification._reject_sensitive_keys(manifest, "knowledge_manifest")
-    qualification._reject_sensitive_values(manifest, "knowledge_manifest")
+
+    # The fixed privacy-policy keys intentionally contain words such as
+    # "credential" and "tool_transcript" while declaring that storage is false.
+    # Validate that subtree below by an exact all-false schema. The rest of the
+    # manifest still receives the shared recursive secret/key scan.
+    scan_manifest = copy.deepcopy(manifest)
+    scan_manifest["privacy"] = {}
+    qualification._reject_sensitive_keys(scan_manifest, "knowledge_manifest")
+    qualification._reject_sensitive_values(scan_manifest, "knowledge_manifest")
+
     unknown = sorted(set(manifest) - MANIFEST_KEYS)
     missing = sorted(MANIFEST_KEYS - set(manifest))
     if unknown or missing:
@@ -176,7 +184,7 @@ def load_manifest(root: Path = KNOWLEDGE_ROOT) -> dict[str, Any]:
         },
         "privacy",
     )
-    if any(privacy.values()):
+    if any(privacy.values()) or not all(isinstance(value, bool) for value in privacy.values()):
         raise KnowledgeError("knowledge privacy policy cannot enable sensitive storage")
 
     max_lessons = manifest.get("max_injected_lessons")

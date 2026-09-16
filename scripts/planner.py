@@ -7,6 +7,7 @@ import json
 import sys
 
 import knowledge
+import qualification
 from lease_lifecycle import coordination_view
 from onecompany_lib import CONTROL, load_json
 from planning_lib import by_id, critical_path, priority_score, rank_work, select_parallel_set
@@ -36,11 +37,17 @@ def learning_preflight(work_item: dict) -> dict:
             files=[str(path) for path in work_item.get("write_scope", [])],
             risk=str(work_item.get("risk_class") or "").lower() or None,
         )
-    except knowledge.KnowledgeError as exc:
+    except (knowledge.KnowledgeError, qualification.QualificationInputError) as exc:
         return {
-            "lessons": [],
-            "diagnostic": f"advisory knowledge unavailable: {exc}",
+            "schema": "onecompany-learning-preflight-v1",
+            "authority": knowledge.AUTHORITY,
+            "authority_effects": [],
             "hard_gate_created": False,
+            "questions": [],
+            "lesson_ids": [],
+            "checks": [],
+            "regression_tests": [],
+            "diagnostic": f"advisory knowledge unavailable: {exc}",
         }
 
 

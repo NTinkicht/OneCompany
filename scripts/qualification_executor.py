@@ -6,7 +6,6 @@ import argparse
 import datetime as dt
 import json
 import sys
-from pathlib import Path
 from typing import Any, Callable
 
 from onecompany_lib import CONTROL, load_json
@@ -182,14 +181,13 @@ def _default_decision_provider(
     return [], list(decisions)
 
 
-def execute_scenario(
+def _execute_scenario_with_binding(
     scenario_id: str,
     *,
-    decision_provider: DecisionProvider = _default_decision_provider,
-    binding: dict[str, Any] | None = None,
+    decision_provider: DecisionProvider,
+    binding: dict[str, Any],
 ) -> dict[str, Any]:
-    """Execute one scenario, including all declared degradation turns."""
-    binding = binding or validate_binding()
+    """Execute one scenario using a binding validated by the immediate caller."""
     scenario = qualification._scenario_by_id(scenario_id)
     fixture = qualification._fixture_by_id(str(scenario["fixture_id"]))
     condition = str(scenario.get("condition"))
@@ -198,14 +196,19 @@ def execute_scenario(
         raise QualificationExecutorError(f"unsupported_condition:{condition}")
 
     actions: list[str] = []
-    decisions: list[str] = []
+    expected_decisions = list(scenario.get("required_decisions", []))
+    last_decisions: list[str] = []
+    first_decision_mismatch: list[str] | None = None
     for turn in range(1, turn_count + 1):
         turn_actions, turn_decisions = decision_provider(scenario, turn)
         for value in turn_actions:
             if value not in actions:
                 actions.append(value)
-        decisions = list(turn_decisions)
+        last_decisions = list(turn_decisions)
+        if first_decision_mismatch is None and last_decisions != expected_decisions:
+            first_decision_mismatch = list(last_decisions)
 
+    decisions = first_decision_mismatch if first_decision_mismatch is not None else last_decisions
     now = dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
     result = {
         "schema": qualification.RESULT_SCHEMA,
@@ -247,6 +250,23 @@ def execute_scenario(
     }
 
 
+def execute_scenario(
+    scenario_id: str,
+    *,
+    decision_provider: DecisionProvider = _default_decision_provider,
+    binding: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Execute one scenario only after revalidating the current control-plane binding."""
+    live_binding = validate_binding()
+    if binding is not None and binding != live_binding:
+        raise QualificationExecutorError("supplied_binding_stale_or_untrusted")
+    return _execute_scenario_with_binding(
+        scenario_id,
+        decision_provider=decision_provider,
+        binding=live_binding,
+    )
+
+
 def execute_all(
     *,
     decision_provider: DecisionProvider = _default_decision_provider,
@@ -254,7 +274,9 @@ def execute_all(
     """Run the complete canonical scenario catalog through one verified binding."""
     binding = validate_binding()
     runs = [
-        execute_scenario(entry["id"], decision_provider=decision_provider, binding=binding)
+        _execute_scenario_with_binding(
+            entry["id"], decision_provider=decision_provider, binding=binding
+        )
         for entry in qualification.catalog_entries()
     ]
     failed = [run["scenario_id"] for run in runs if run["exit_code"] != 0]
@@ -283,7 +305,11 @@ def main() -> int:
     try:
         if args.scenario:
             binding = validate_binding()
-            run = execute_scenario(args.scenario, binding=binding)
+            run = _execute_scenario_with_binding(
+                args.scenario,
+                decision_provider=_default_decision_provider,
+                binding=binding,
+            )
             value: dict[str, Any] = {
                 "schema": BUNDLE_SCHEMA,
                 "authority": AUTHORITY,

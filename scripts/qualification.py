@@ -6,6 +6,7 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -518,8 +519,26 @@ def evaluate(result: Any) -> tuple[int, dict[str, Any]]:
     return (0 if verdict == "PASS" else 1), provenance
 
 
+def _reject_symlinked_output_root() -> None:
+    """Reject symlinks in the repository-owned artifact-root path."""
+    try:
+        relative = OUTPUT_ROOT.relative_to(ROOT)
+    except ValueError as exc:
+        raise QualificationInputError(
+            "qualification output root must remain inside the repository"
+        ) from exc
+    current = ROOT
+    for part in relative.parts:
+        current = current / part
+        if current.is_symlink():
+            raise QualificationInputError(
+                "qualification output root must not contain symlink components"
+            )
+
+
 def _resolve_output(output: Path) -> Path:
-    root = OUTPUT_ROOT.resolve()
+    _reject_symlinked_output_root()
+    root = OUTPUT_ROOT.resolve(strict=False)
     if output.is_absolute():
         candidate = output.resolve(strict=False)
     else:
@@ -543,26 +562,38 @@ def _write_or_print(
         return
     target = _resolve_output(output)
     target.parent.mkdir(parents=True, exist_ok=True)
-    # Re-resolve after directory creation so an existing symlinked parent cannot
-    # redirect the write outside the dedicated artifact tree.
+    _reject_symlinked_output_root()
     resolved_parent = target.parent.resolve()
-    root = OUTPUT_ROOT.resolve()
+    root = OUTPUT_ROOT.resolve(strict=False)
     if resolved_parent != root and root not in resolved_parent.parents:
         raise QualificationInputError(
             "qualification output parent escaped the artifact directory"
+        )
+    if target.is_symlink():
+        raise QualificationInputError(
+            "qualification output file must not be a symlink"
         )
     if target.exists() and not overwrite:
         raise QualificationInputError(
             "qualification output already exists; pass --overwrite to replace it"
         )
-    mode = "w" if overwrite else "x"
+
+    flags = os.O_WRONLY | os.O_CREAT
+    flags |= os.O_TRUNC if overwrite else os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
     try:
-        with target.open(mode, encoding="utf-8", newline="\n") as handle:
-            handle.write(text)
+        fd = os.open(target, flags, 0o600)
     except FileExistsError as exc:
         raise QualificationInputError(
             "qualification output already exists; pass --overwrite to replace it"
         ) from exc
+    except OSError as exc:
+        raise QualificationInputError(f"cannot open qualification output safely: {exc}") from exc
+
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
     except OSError as exc:
         raise QualificationInputError(f"cannot write qualification output: {exc}") from exc
 

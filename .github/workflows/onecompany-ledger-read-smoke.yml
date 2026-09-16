@@ -1,6 +1,27 @@
 name: OneCompany Ledger Read Smoke
 
 on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/onecompany-ledger-read-smoke.yml
+      - .github/workflows/onecompany-validate.yml
+      - .onecompany/ledger.json
+      - .onecompany/supervision.json
+      - scripts/bootstrap.py
+      - scripts/smoke_bootstrap.py
+      - scripts/dispatch.py
+      - scripts/lease.py
+      - scripts/local_event_mutation.py
+      - scripts/ledger.py
+      - scripts/ledger_lib.py
+      - scripts/ledger_validate.py
+      - .onecompany/selftest/test_a3b_activation.py
+      - .onecompany/selftest/test_b1_ledger_activation.py
+      - .onecompany/selftest/test_lease_command_fail_closed.py
+      - .onecompany/selftest/test_local_event_mutation.py
+      - docs/B1-DURABLE-LEDGER-ACTIVATION.md
   push:
     branches:
       - main
@@ -14,12 +35,14 @@ on:
       - scripts/smoke_bootstrap.py
       - scripts/dispatch.py
       - scripts/lease.py
+      - scripts/local_event_mutation.py
       - scripts/ledger.py
       - scripts/ledger_lib.py
       - scripts/ledger_validate.py
       - .onecompany/selftest/test_a3b_activation.py
       - .onecompany/selftest/test_b1_ledger_activation.py
       - .onecompany/selftest/test_lease_command_fail_closed.py
+      - .onecompany/selftest/test_local_event_mutation.py
       - docs/B1-DURABLE-LEDGER-ACTIVATION.md
   workflow_dispatch:
 
@@ -35,6 +58,7 @@ jobs:
       - name: Checkout reviewed repository state
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
@@ -241,7 +265,7 @@ jobs:
             echo '- Team Room: `#45`'
             echo '- Trusted publisher configured: `NTinkicht` only'
             echo '- Workflow permissions: `contents: read`, `issues: read`'
-            echo "- Exact checkout head: \`${GITHUB_SHA}\`"
+            echo "- Exact checkout head: \`${{ github.event.pull_request.head.sha || github.sha }}\`"
             echo '- Remote comments fetched once into an immutable snapshot: `yes`'
             echo '- Local `state.json` deleted between derivations: `yes`'
             echo '- Proof event compared against a proof-free authority baseline: `yes`'

@@ -1,0 +1,25 @@
+{
+  "schema": "onecompany-knowledge-manifest-v1",
+  "authority": "advisory_only",
+  "authority_effects": [],
+  "canonical_root": ".onecompany/knowledge",
+  "states": ["candidate", "current", "archived"],
+  "default_injected_state": "current",
+  "max_injected_lessons": 8,
+  "external_index": {
+    "required": false,
+    "authoritative": false,
+    "rebuildable": true
+  },
+  "promotion": {
+    "automatic": false,
+    "requires_validation_evidence": true,
+    "knowledge_can_create_hard_gate": false
+  },
+  "privacy": {
+    "store_credentials": false,
+    "store_private_prompts": false,
+    "store_raw_tool_transcripts": false,
+    "store_hidden_reasoning": false
+  }
+}

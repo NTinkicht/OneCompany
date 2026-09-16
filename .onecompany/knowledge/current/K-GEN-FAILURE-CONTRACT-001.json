@@ -1,0 +1,49 @@
+{
+  "schema": "onecompany-knowledge-v1",
+  "id": "K-GEN-FAILURE-CONTRACT-001",
+  "title": "Preserve caller failure contracts when hardening lower layers",
+  "status": "current",
+  "authority": "advisory_only",
+  "authority_effects": [],
+  "category": "reliability",
+  "summary": "Security or durability hardening below an API must preserve the caller-visible distinction between safe refusal, ordinary failure and uncertain mutation.",
+  "problem_pattern": "A lower-level helper becomes stricter and broad exception handling accidentally reclassifies pre-mutation failures as indeterminate or masks the original error.",
+  "failure_mode": "Callers retry unsafe operations, stop on safe failures, or lose the real failure cause.",
+  "root_cause": "The mutation boundary and descriptor/resource ownership are not explicit in the failure contract.",
+  "prevention_rule": "Define the mutation point, transfer resource ownership explicitly, preserve original exceptions and mark uncertainty only after mutation may have occurred.",
+  "preflight_checks": [
+    "identify the exact mutation boundary",
+    "separate pre-mutation refusal from post-mutation uncertainty",
+    "verify cleanup cannot mask the original exception",
+    "add regressions for both pre-write and post-write failure paths"
+  ],
+  "regression_tests": [
+    "test_pre_write_open_failure_remains_plain_oserror",
+    "test_write_failure_is_explicitly_uncertain",
+    "test_flush_failure_is_explicitly_uncertain"
+  ],
+  "scope_tags": ["failure-contract", "mutation", "durability", "cleanup", "reconciliation"],
+  "source_evidence": [
+    {
+      "kind": "repository_policy",
+      "ref": "repo:docs/LEARNING-PLANE.md",
+      "actor": "onecompany",
+      "severity": "high",
+      "commit": null
+    }
+  ],
+  "first_observed_at": "2026-09-16T00:00:00Z",
+  "last_confirmed_at": "2026-09-16T00:00:00Z",
+  "observed_count": 1,
+  "confidence": "high",
+  "supersedes": [],
+  "superseded_by": [],
+  "applicability_notes": "Generic for filesystem, ledger, API and external side-effect operations.",
+  "bootstrap_safe": true,
+  "validation": {
+    "validated": true,
+    "method": "regression_test",
+    "evidence_refs": ["repo:.onecompany/selftest/test_local_event_mutation.py"],
+    "validated_at": "2026-09-16T00:00:00Z"
+  }
+}

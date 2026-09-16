@@ -17,6 +17,7 @@ COMMANDS = {
     "assurance": ["assurance_gate.py"], "trace": ["assurance.py", "trace"], "risk": ["assurance.py", "risk"], "evidence": ["assurance.py", "evidence"],
     "verify-evidence": ["evidence_verify.py"], "attest": ["trusted_assurance.py"],
     "qualify": ["qualification.py"], "qualify-worker": ["qualification_executor.py"],
+    "knowledge": ["knowledge.py"],
 }
 
 

@@ -1,0 +1,51 @@
+{
+  "schema": "onecompany-knowledge-v1",
+  "id": "K-OC-QUALIFICATION-TOCTOU-001",
+  "title": "Qualification artifact temporary-file hard-link race",
+  "status": "candidate",
+  "authority": "advisory_only",
+  "authority_effects": [],
+  "category": "security",
+  "summary": "CodeRabbit identified that a visible replacement temporary file could gain a hard link after initial validation and before rename.",
+  "problem_pattern": "A visible temporary inode is validated once and later published after a mutable interval.",
+  "failure_mode": "A concurrent process can create another hard link so a multiply linked inode is written or published.",
+  "root_cause": "Initial link-count validation was treated as durable across the write/publication interval.",
+  "prevention_rule": "Retain descriptor identity across the write and revalidate inode/link state at the publication boundary; add a deterministic race regression.",
+  "preflight_checks": [
+    "inspect temporary-file visibility before publication",
+    "revalidate descriptor and directory entry immediately before rename",
+    "test a hard link created after initial validation"
+  ],
+  "regression_tests": [".onecompany/selftest/test_qualification_output_race.py::test_temp_hard_link_injected_after_initial_validation_fails_closed"],
+  "scope_tags": ["onecompany", "qualification", "security", "filesystem", "toctou", "hardlink"],
+  "source_evidence": [
+    {
+      "kind": "review_finding",
+      "ref": "https://api.github.com/repos/NTinkicht/OneCompany/issues/comments/5691535741",
+      "actor": "coderabbitai",
+      "severity": "major",
+      "commit": "03fe07a7bc5325e5f3984e954d42047d4c195658"
+    },
+    {
+      "kind": "remediation_commit",
+      "ref": "git:cdf66d2095a20e177da7792e43ad9a6618f44688",
+      "actor": "NTinkicht",
+      "severity": "n/a",
+      "commit": "cdf66d2095a20e177da7792e43ad9a6618f44688"
+    }
+  ],
+  "first_observed_at": "2026-09-16T03:26:34Z",
+  "last_confirmed_at": "2026-09-16T04:50:55Z",
+  "observed_count": 2,
+  "confidence": "high",
+  "supersedes": [],
+  "superseded_by": [],
+  "applicability_notes": "Project-specific evidence. Generalized prevention is captured separately in K-GEN-RACE-BOUNDARY-001.",
+  "bootstrap_safe": false,
+  "validation": {
+    "validated": false,
+    "method": null,
+    "evidence_refs": [],
+    "validated_at": null
+  }
+}

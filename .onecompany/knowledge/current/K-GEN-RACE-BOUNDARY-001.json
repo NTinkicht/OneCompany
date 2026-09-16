@@ -1,0 +1,45 @@
+{
+  "schema": "onecompany-knowledge-v1",
+  "id": "K-GEN-RACE-BOUNDARY-001",
+  "title": "Revalidate mutable filesystem identity at publication boundaries",
+  "status": "current",
+  "authority": "advisory_only",
+  "authority_effects": [],
+  "category": "security",
+  "summary": "Path validation alone is not filesystem authority when another process can mutate links or ancestors between check and use.",
+  "problem_pattern": "Code validates a path, symlink state, link count or inode and then performs a consequential write or rename without binding the operation to stable descriptors and final identity checks.",
+  "failure_mode": "TOCTOU races can redirect writes, mutate shared inodes or publish artifacts with unexpected links.",
+  "root_cause": "Security relies on pathname re-resolution or a single pre-operation check across a mutable namespace.",
+  "prevention_rule": "Use descriptor-relative no-follow traversal, avoid in-place mutation of untrusted existing inodes, and revalidate inode identity/link count immediately around publication with fail-closed cleanup.",
+  "preflight_checks": [
+    "inspect ancestor traversal for pathname re-resolution",
+    "inspect overwrite behavior for mutation of old inodes",
+    "challenge validation-to-write and validation-to-rename intervals",
+    "add deterministic race regressions, not only static bad-state tests"
+  ],
+  "regression_tests": ["ancestor symlink swap", "late destination hard link", "late temporary hard link", "late normal-create hard link"],
+  "scope_tags": ["security", "filesystem", "toctou", "symlink", "hardlink", "atomic-publication"],
+  "source_evidence": [
+    {
+      "kind": "repository_policy",
+      "ref": "repo:docs/LEARNING-PLANE.md",
+      "actor": "onecompany",
+      "severity": "high",
+      "commit": null
+    }
+  ],
+  "first_observed_at": "2026-09-16T00:00:00Z",
+  "last_confirmed_at": "2026-09-16T00:00:00Z",
+  "observed_count": 1,
+  "confidence": "high",
+  "supersedes": [],
+  "superseded_by": [],
+  "applicability_notes": "Generic for artifact writers, caches, evidence files and any mutable filesystem namespace.",
+  "bootstrap_safe": true,
+  "validation": {
+    "validated": true,
+    "method": "regression_test",
+    "evidence_refs": ["repo:.onecompany/selftest/test_qualification_output_race.py"],
+    "validated_at": "2026-09-16T00:00:00Z"
+  }
+}

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import copy
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "scripts"
@@ -103,6 +105,23 @@ class QualificationTests(unittest.TestCase):
             )
         )
 
+    def test_actions_and_decisions_must_be_catalog_backed_labels(self):
+        result = self._result()
+        result["actions"] = ["unregistered_action"]
+        with self.assertRaisesRegex(
+            qualification.QualificationInputError,
+            "outside the canonical scenario catalog",
+        ):
+            qualification.evaluate(result)
+
+        result = self._result()
+        result["decisions"].append("unregistered_decision")
+        with self.assertRaisesRegex(
+            qualification.QualificationInputError,
+            "outside the canonical scenario catalog",
+        ):
+            qualification.evaluate(result)
+
     def test_scenario_hash_is_exactly_bound(self):
         result = self._result()
         result["scenario_sha256"] = "0" * 64
@@ -112,12 +131,30 @@ class QualificationTests(unittest.TestCase):
         ):
             qualification.evaluate(result)
 
-    def test_privacy_sensitive_provenance_is_rejected(self):
+    def test_privacy_sensitive_provenance_key_is_rejected(self):
         result = self._result()
         result["executor"]["credential"] = "do-not-store"
         with self.assertRaisesRegex(
             qualification.QualificationInputError,
-            "privacy-sensitive",
+            "privacy-sensitive provenance field",
+        ):
+            qualification.evaluate(result)
+
+    def test_privacy_sensitive_provenance_value_is_rejected(self):
+        result = self._result()
+        result["executor"]["actor"] = "github_pat_abcdefghijklmnopqrstuvwxyz123456"
+        with self.assertRaisesRegex(
+            qualification.QualificationInputError,
+            "privacy-sensitive provenance value",
+        ):
+            qualification.evaluate(result)
+
+    def test_executor_fields_are_normalized_identifiers(self):
+        result = self._result()
+        result["executor"]["model_label"] = "fixture model with spaces"
+        with self.assertRaisesRegex(
+            qualification.QualificationInputError,
+            "normalized identifier",
         ):
             qualification.evaluate(result)
 
@@ -129,6 +166,64 @@ class QualificationTests(unittest.TestCase):
             "not local paths",
         ):
             qualification.evaluate(result)
+
+    def test_https_evidence_rejects_credentials_secret_queries_and_fragments(self):
+        cases = (
+            ("https://user@example.com/evidence", "user information"),
+            ("https://example.com/evidence?access_token=abc", "secret-like query"),
+            ("https://example.com/evidence#private", "fragment"),
+            ("https:///missing-host", "malformed host"),
+        )
+        for ref, message in cases:
+            with self.subTest(ref=ref):
+                result = self._result()
+                result["evidence_refs"] = [ref]
+                with self.assertRaisesRegex(
+                    qualification.QualificationInputError,
+                    message,
+                ):
+                    qualification.evaluate(result)
+
+    def test_safe_https_evidence_is_accepted(self):
+        result = self._result()
+        result["evidence_refs"] = [
+            "https://github.com/NTinkicht/OneCompany/actions/runs/123?attempt=1"
+        ]
+        exit_code, provenance = qualification.evaluate(result)
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(provenance["evidence_refs"], result["evidence_refs"])
+
+    def test_output_is_confined_and_requires_explicit_overwrite(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo_root = Path(directory)
+            artifact_root = repo_root / ".onecompany-evidence" / "qualification"
+            with (
+                patch.object(qualification, "ROOT", repo_root),
+                patch.object(qualification, "OUTPUT_ROOT", artifact_root),
+            ):
+                unsafe = repo_root / ".onecompany" / "config.json"
+                with self.assertRaisesRegex(
+                    qualification.QualificationInputError,
+                    "must remain under",
+                ):
+                    qualification._write_or_print({"safe": True}, unsafe)
+
+                target = artifact_root / "result.json"
+                qualification._write_or_print({"safe": True}, target)
+                self.assertTrue(target.exists())
+
+                with self.assertRaisesRegex(
+                    qualification.QualificationInputError,
+                    "already exists",
+                ):
+                    qualification._write_or_print({"safe": False}, target)
+
+                qualification._write_or_print(
+                    {"safe": False},
+                    target,
+                    overwrite=True,
+                )
+                self.assertIn("false", target.read_text(encoding="utf-8"))
 
     def test_result_cannot_smuggle_authority_grants(self):
         for field in ("readiness_grant", "lease_grant", "merge_authority"):

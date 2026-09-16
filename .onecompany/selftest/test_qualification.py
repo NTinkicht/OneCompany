@@ -170,7 +170,7 @@ class QualificationTests(unittest.TestCase):
     def test_https_evidence_rejects_credentials_secret_queries_and_fragments(self):
         cases = (
             ("https://user@example.com/evidence", "user information"),
-            ("https://example.com/evidence?access_token=abc", "secret-like query"),
+            ("https://example.com/evidence?auth=abc", "secret-like query"),
             ("https://example.com/evidence#private", "fragment"),
             ("https:///missing-host", "malformed host"),
         )

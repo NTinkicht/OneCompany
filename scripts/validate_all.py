@@ -21,6 +21,7 @@ def main() -> int:
         "dispatch_validate.py",
         "ledger_validate.py",
         "supervision_validate.py",
+        "handoff_validate.py",
         "knowledge_validate.py",
         "hardening_audit.py",
         "policy_truth.py",

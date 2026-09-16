@@ -21,7 +21,7 @@
   "source_evidence": [
     {
       "kind": "review_finding",
-      "ref": "https://github.com/NTinkicht/OneCompany/pull/55#issuecomment-5691535741",
+      "ref": "https://api.github.com/repos/NTinkicht/OneCompany/issues/comments/5691535741",
       "actor": "coderabbitai",
       "severity": "major",
       "commit": "03fe07a7bc5325e5f3984e954d42047d4c195658"

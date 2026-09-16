@@ -266,6 +266,58 @@ class QualificationTests(unittest.TestCase):
                 )
                 self.assertIn("false", target.read_text(encoding="utf-8"))
 
+    def test_overwrite_rejects_final_output_symlink(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo_root = Path(directory)
+            control = repo_root / ".onecompany" / "config.json"
+            control.parent.mkdir(parents=True)
+            control.write_text("protected\n", encoding="utf-8")
+            artifact_root = repo_root / ".onecompany-evidence" / "qualification"
+            artifact_root.mkdir(parents=True)
+            target = artifact_root / "result.json"
+            target.symlink_to(control)
+            with (
+                patch.object(qualification, "ROOT", repo_root),
+                patch.object(qualification, "OUTPUT_ROOT", artifact_root),
+            ):
+                with self.assertRaisesRegex(
+                    qualification.QualificationInputError,
+                    "must not be a symlink",
+                ):
+                    qualification._write_or_print(
+                        {"safe": False},
+                        target,
+                        overwrite=True,
+                    )
+            self.assertEqual(control.read_text(encoding="utf-8"), "protected\n")
+
+    def test_symlinked_artifact_root_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo_root = Path(directory)
+            control_dir = repo_root / ".onecompany"
+            control_dir.mkdir(parents=True)
+            protected = control_dir / "config.json"
+            protected.write_text("protected\n", encoding="utf-8")
+            evidence_parent = repo_root / ".onecompany-evidence"
+            evidence_parent.mkdir()
+            artifact_root = evidence_parent / "qualification"
+            artifact_root.symlink_to(control_dir, target_is_directory=True)
+            target = artifact_root / "config.json"
+            with (
+                patch.object(qualification, "ROOT", repo_root),
+                patch.object(qualification, "OUTPUT_ROOT", artifact_root),
+            ):
+                with self.assertRaisesRegex(
+                    qualification.QualificationInputError,
+                    "symlink components",
+                ):
+                    qualification._write_or_print(
+                        {"safe": False},
+                        target,
+                        overwrite=True,
+                    )
+            self.assertEqual(protected.read_text(encoding="utf-8"), "protected\n")
+
     def test_result_cannot_smuggle_authority_grants(self):
         for field in ("readiness_grant", "lease_grant", "merge_authority"):
             with self.subTest(field=field):

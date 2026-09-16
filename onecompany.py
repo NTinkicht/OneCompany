@@ -16,6 +16,7 @@ COMMANDS = {
     "bootstrap": ["bootstrap.py"], "init": ["init_project.py"],
     "assurance": ["assurance_gate.py"], "trace": ["assurance.py", "trace"], "risk": ["assurance.py", "risk"], "evidence": ["assurance.py", "evidence"],
     "verify-evidence": ["evidence_verify.py"], "attest": ["trusted_assurance.py"],
+    "qualify": ["qualification.py"],
 }
 
 

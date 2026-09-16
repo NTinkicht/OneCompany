@@ -46,6 +46,70 @@ class QualificationOutputRaceTests(unittest.TestCase):
                 )
                 self.assertIn('"value": 3', target.read_text(encoding="utf-8"))
 
+    def test_normal_create_hard_link_injected_during_write_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo_root = Path(directory)
+            artifact_root = repo_root / ".onecompany-evidence" / "qualification"
+            artifact_root.mkdir(parents=True)
+            target = artifact_root / "result.json"
+            leak = artifact_root / "leak.json"
+            real_write = qualification._write_open_fd
+            injected = False
+
+            def write_then_link(fd, text):
+                nonlocal injected
+                real_write(fd, text)
+                os.link(target, leak)
+                injected = True
+
+            with (
+                patch.object(qualification, "ROOT", repo_root),
+                patch.object(qualification, "OUTPUT_ROOT", artifact_root),
+                patch.object(
+                    qualification,
+                    "_write_open_fd",
+                    side_effect=write_then_link,
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    qualification.QualificationInputError,
+                    "failed final inode/link validation",
+                ):
+                    qualification._write_or_print({"safe": True}, target)
+
+            self.assertTrue(injected)
+            self.assertFalse(target.exists())
+            self.assertTrue(leak.exists())
+            self.assertIn('"safe": true', leak.read_text(encoding="utf-8"))
+
+    def test_normal_create_write_failure_removes_partial_publication(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo_root = Path(directory)
+            artifact_root = repo_root / ".onecompany-evidence" / "qualification"
+            artifact_root.mkdir(parents=True)
+            target = artifact_root / "result.json"
+
+            def close_then_fail(fd, _text):
+                os.close(fd)
+                raise qualification.QualificationInputError("simulated create write failure")
+
+            with (
+                patch.object(qualification, "ROOT", repo_root),
+                patch.object(qualification, "OUTPUT_ROOT", artifact_root),
+                patch.object(
+                    qualification,
+                    "_write_open_fd",
+                    side_effect=close_then_fail,
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    qualification.QualificationInputError,
+                    "simulated create write failure",
+                ):
+                    qualification._write_or_print({"safe": True}, target)
+
+            self.assertFalse(target.exists())
+
     def test_final_component_symlink_cannot_overwrite_control_plane(self):
         with tempfile.TemporaryDirectory() as directory:
             repo_root = Path(directory)

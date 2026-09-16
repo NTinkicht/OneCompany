@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://onecompany.dev/schemas/handoffs.schema.json",
+  "title": "OneCompany Event-Driven Handoffs",
+  "type": "object",
+  "required": ["schema_version", "enabled", "mode", "activation", "wake_hints", "publisher_policy", "safety"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "enabled": {"type": "boolean"},
+    "mode": {"enum": ["staged_only", "active"]},
+    "activation": {
+      "type": "object",
+      "required": ["requires_b1_protected_main", "requires_ledger_replay_proof", "b1_protected_main_proven", "ledger_replay_proven", "evidence_refs"],
+      "properties": {
+        "requires_b1_protected_main": {"const": true},
+        "requires_ledger_replay_proof": {"const": true},
+        "b1_protected_main_proven": {"type": "boolean"},
+        "ledger_replay_proven": {"type": "boolean"},
+        "evidence_refs": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+      },
+      "additionalProperties": false
+    },
+    "wake_hints": {
+      "type": "array",
+      "items": {"enum": ["WORK_READY", "LEASE_CHANGED", "PR_CHANGED", "CI_CHANGED", "REVIEW_CHANGED", "MERGE_CHANGED", "RECONCILE"]},
+      "uniqueItems": true,
+      "minItems": 7,
+      "maxItems": 7
+    },
+    "publisher_policy": {
+      "type": "object",
+      "required": ["publisher_identity_and_event_type_both_required", "automation_publishers"],
+      "properties": {
+        "publisher_identity_and_event_type_both_required": {"const": true},
+        "automation_publishers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {"type": "string"},
+            "uniqueItems": true
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "safety": {
+      "type": "object",
+      "required": ["events_are_wake_hints_only", "must_reconcile_authoritative_state", "hint_payload_can_create_authority", "proposal_only_until_activation", "never_create_duplicate_writer", "emergency_stop_is_sovereign", "human_code_owner_remains_human", "zero_extra_spend_required", "pull_request_target_forbidden", "candidate_cache_is_authority"],
+      "properties": {
+        "events_are_wake_hints_only": {"const": true},
+        "must_reconcile_authoritative_state": {"const": true},
+        "hint_payload_can_create_authority": {"const": false},
+        "proposal_only_until_activation": {"const": true},
+        "never_create_duplicate_writer": {"const": true},
+        "emergency_stop_is_sovereign": {"const": true},
+        "human_code_owner_remains_human": {"const": true},
+        "zero_extra_spend_required": {"const": true},
+        "pull_request_target_forbidden": {"const": true},
+        "candidate_cache_is_authority": {"const": false}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": true
+}

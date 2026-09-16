@@ -29,12 +29,19 @@ def learning_preflight(work_item: dict) -> dict:
     ]
     tags.extend(str(ref).lower() for ref in work_item.get("planning_refs", []))
     tags = [tag for tag in tags if tag]
-    return knowledge.preflight(
-        query=str(work_item.get("title") or ""),
-        tags=tags,
-        files=[str(path) for path in work_item.get("write_scope", [])],
-        risk=str(work_item.get("risk_class") or "").lower() or None,
-    )
+    try:
+        return knowledge.preflight(
+            query=str(work_item.get("title") or ""),
+            tags=tags,
+            files=[str(path) for path in work_item.get("write_scope", [])],
+            risk=str(work_item.get("risk_class") or "").lower() or None,
+        )
+    except knowledge.KnowledgeError as exc:
+        return {
+            "lessons": [],
+            "diagnostic": f"advisory knowledge unavailable: {exc}",
+            "hard_gate_created": False,
+        }
 
 
 def main() -> int:

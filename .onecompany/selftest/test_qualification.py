@@ -19,16 +19,20 @@ class QualificationTests(unittest.TestCase):
     def _scenario(self, scenario_id: str) -> dict:
         return qualification._scenario_by_id(scenario_id)
 
+    def _fixture(self, scenario: dict) -> dict:
+        return qualification._fixture_by_id(str(scenario["fixture_id"]))
+
     def _result(self, scenario_id: str = "Q-BUDGET-001") -> dict:
         scenario = self._scenario(scenario_id)
+        fixture = self._fixture(scenario)
         return {
             "schema": qualification.RESULT_SCHEMA,
             "scenario_id": scenario_id,
             "scenario_sha256": qualification.scenario_sha256(scenario),
             "fixture": {
-                "repository": "NTinkicht/OneCompany",
-                "base_commit": "a" * 40,
-                "fixture_id": "qualification-fixture-1",
+                "repository": fixture["repository"],
+                "base_commit": fixture["base_commit"],
+                "fixture_id": fixture["id"],
             },
             "executor": {
                 "actor": "fixture-worker",
@@ -43,7 +47,7 @@ class QualificationTests(unittest.TestCase):
             "ended_at": "2026-09-16T00:00:01+00:00",
             "actions": [],
             "decisions": list(scenario["required_decisions"]),
-            "evidence_refs": ["fixture:qualification-fixture-1"],
+            "evidence_refs": list(scenario["required_evidence_refs"]),
             "usage": {
                 "input_tokens": None,
                 "output_tokens": None,
@@ -68,6 +72,7 @@ class QualificationTests(unittest.TestCase):
             }.issubset(categories)
         )
         self.assertTrue(all(len(entry["sha256"]) == 64 for entry in entries))
+        self.assertTrue(all(entry["fixture_id"] == "onecompany-qualification-v1" for entry in entries))
 
     def test_passing_result_emits_advisory_only_provenance(self):
         result = self._result()
@@ -77,6 +82,8 @@ class QualificationTests(unittest.TestCase):
         self.assertEqual(provenance["authority"], "advisory_only")
         self.assertEqual(provenance["authority_effects"], [])
         self.assertEqual(provenance["execution"]["duration_ms"], 1000)
+        self.assertEqual(provenance["fixture"], result["fixture"])
+        self.assertEqual(provenance["evidence_refs"], result["evidence_refs"])
         self.assertEqual(
             provenance["scenario"]["sha256"],
             result["scenario_sha256"],
@@ -131,6 +138,48 @@ class QualificationTests(unittest.TestCase):
         ):
             qualification.evaluate(result)
 
+    def test_fixture_repository_commit_and_id_are_exactly_bound(self):
+        mutations = (
+            ("repository", "attacker/other"),
+            ("base_commit", "f" * 40),
+            ("fixture_id", "other-fixture"),
+        )
+        for key, value in mutations:
+            with self.subTest(key=key):
+                result = self._result()
+                result["fixture"][key] = value
+                with self.assertRaisesRegex(
+                    qualification.QualificationInputError,
+                    "canonical scenario fixture|canonical fixture catalog",
+                ):
+                    qualification.evaluate(result)
+
+    def test_evidence_refs_are_exactly_bound_to_scenario_fixture(self):
+        result = self._result()
+        result["evidence_refs"] = list(result["evidence_refs"])
+        result["evidence_refs"][0] = "fixture:onecompany-qualification-v1/Q-LEASE-001"
+        with self.assertRaisesRegex(
+            qualification.QualificationInputError,
+            "canonical scenario fixture contract",
+        ):
+            qualification.evaluate(result)
+
+        result = self._result()
+        result["evidence_refs"] = list(reversed(result["evidence_refs"]))
+        with self.assertRaisesRegex(
+            qualification.QualificationInputError,
+            "canonical scenario fixture contract",
+        ):
+            qualification.evaluate(result)
+
+        result = self._result()
+        result["evidence_refs"].append("https://example.com/extra")
+        with self.assertRaisesRegex(
+            qualification.QualificationInputError,
+            "canonical scenario fixture contract",
+        ):
+            qualification.evaluate(result)
+
     def test_privacy_sensitive_provenance_key_is_rejected(self):
         result = self._result()
         result["executor"]["credential"] = "do-not-store"
@@ -159,13 +208,11 @@ class QualificationTests(unittest.TestCase):
             qualification.evaluate(result)
 
     def test_local_filesystem_evidence_is_rejected(self):
-        result = self._result()
-        result["evidence_refs"] = ["/home/worker/transcript.txt"]
         with self.assertRaisesRegex(
             qualification.QualificationInputError,
             "not local paths",
         ):
-            qualification.evaluate(result)
+            qualification._validate_evidence_ref("/home/worker/transcript.txt")
 
     def test_https_evidence_rejects_credentials_secret_queries_and_fragments(self):
         cases = (
@@ -176,22 +223,16 @@ class QualificationTests(unittest.TestCase):
         )
         for ref, message in cases:
             with self.subTest(ref=ref):
-                result = self._result()
-                result["evidence_refs"] = [ref]
                 with self.assertRaisesRegex(
                     qualification.QualificationInputError,
                     message,
                 ):
-                    qualification.evaluate(result)
+                    qualification._validate_evidence_ref(ref)
 
-    def test_safe_https_evidence_is_accepted(self):
-        result = self._result()
-        result["evidence_refs"] = [
+    def test_safe_https_evidence_is_structurally_accepted(self):
+        qualification._validate_evidence_ref(
             "https://github.com/NTinkicht/OneCompany/actions/runs/123?attempt=1"
-        ]
-        exit_code, provenance = qualification.evaluate(result)
-        self.assertEqual(exit_code, 0)
-        self.assertEqual(provenance["evidence_refs"], result["evidence_refs"])
+        )
 
     def test_output_is_confined_and_requires_explicit_overwrite(self):
         with tempfile.TemporaryDirectory() as directory:

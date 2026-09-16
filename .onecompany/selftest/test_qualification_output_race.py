@@ -202,6 +202,40 @@ class QualificationOutputRaceTests(unittest.TestCase):
             self.assertIn('"safe": true', target.read_text(encoding="utf-8"))
             self.assertNotEqual(os.stat(control).st_ino, os.stat(target).st_ino)
 
+    def test_replacement_write_failure_preserves_error_and_cleans_temp(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo_root = Path(directory)
+            artifact_root = repo_root / ".onecompany-evidence" / "qualification"
+            artifact_root.mkdir(parents=True)
+            target = artifact_root / "result.json"
+            target.write_text("original\n", encoding="utf-8")
+
+            def close_then_fail(fd, _text):
+                os.close(fd)
+                raise qualification.QualificationInputError("simulated replacement write failure")
+
+            with (
+                patch.object(qualification, "ROOT", repo_root),
+                patch.object(qualification, "OUTPUT_ROOT", artifact_root),
+                patch.object(
+                    qualification,
+                    "_write_open_fd",
+                    side_effect=close_then_fail,
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    qualification.QualificationInputError,
+                    "simulated replacement write failure",
+                ):
+                    qualification._write_or_print(
+                        {"safe": True},
+                        target,
+                        overwrite=True,
+                    )
+
+            self.assertEqual(target.read_text(encoding="utf-8"), "original\n")
+            self.assertEqual(list(artifact_root.glob(".result.json.tmp-*")), [])
+
 
 if __name__ == "__main__":
     unittest.main()

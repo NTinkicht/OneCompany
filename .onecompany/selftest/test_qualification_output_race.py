@@ -202,6 +202,49 @@ class QualificationOutputRaceTests(unittest.TestCase):
             self.assertIn('"safe": true', target.read_text(encoding="utf-8"))
             self.assertNotEqual(os.stat(control).st_ino, os.stat(target).st_ino)
 
+    def test_temp_hard_link_injected_after_initial_validation_fails_closed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo_root = Path(directory)
+            artifact_root = repo_root / ".onecompany-evidence" / "qualification"
+            artifact_root.mkdir(parents=True)
+            target = artifact_root / "result.json"
+            target.write_text("original\n", encoding="utf-8")
+            leak = artifact_root / "leak.json"
+            real_write = qualification._write_open_fd
+            injected = False
+
+            def write_then_link(fd, text):
+                nonlocal injected
+                real_write(fd, text)
+                temp_candidates = list(artifact_root.glob(".result.json.tmp-*"))
+                self.assertEqual(len(temp_candidates), 1)
+                os.link(temp_candidates[0], leak)
+                injected = True
+
+            with (
+                patch.object(qualification, "ROOT", repo_root),
+                patch.object(qualification, "OUTPUT_ROOT", artifact_root),
+                patch.object(
+                    qualification,
+                    "_write_open_fd",
+                    side_effect=write_then_link,
+                ),
+            ):
+                with self.assertRaisesRegex(
+                    qualification.QualificationInputError,
+                    "multiply linked or changed before publish",
+                ):
+                    qualification._write_or_print(
+                        {"safe": True},
+                        target,
+                        overwrite=True,
+                    )
+
+            self.assertTrue(injected)
+            self.assertEqual(target.read_text(encoding="utf-8"), "original\n")
+            self.assertTrue(leak.exists())
+            self.assertEqual(list(artifact_root.glob(".result.json.tmp-*")), [])
+
     def test_replacement_write_failure_preserves_error_and_cleans_temp(self):
         with tempfile.TemporaryDirectory() as directory:
             repo_root = Path(directory)

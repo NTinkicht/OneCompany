@@ -148,6 +148,91 @@ class LeaseCommandFailClosedTests(unittest.TestCase):
             self.assertIn("INDETERMINATE:", output)
             self.assertIn("reconcile before retry", output)
 
+    def test_post_mutation_oserror_is_indeterminate_across_operations(self):
+        def mutate_then_succeed(_args):
+            lease.core.post_event(
+                "ROLE_LEASE_ASSIGNED",
+                "worker",
+                {"lease_id": "L1"},
+            )
+            return 0
+
+        for operation, func in (
+            ("acquire", lease.acquire),
+            ("release", lease.release),
+            ("transfer", lease.transfer),
+        ):
+            with (
+                self.subTest(operation=operation),
+                patch.object(lease, "ledger_enabled", return_value=True),
+                patch.object(lease, "post_event", return_value={}),
+                patch.object(lease.core, operation, side_effect=mutate_then_succeed),
+                patch.object(
+                    lease,
+                    "_reconcile_cache",
+                    side_effect=OSError("disk full"),
+                ),
+            ):
+                result, output = self._capture(func, self._args(operation))
+            self.assertEqual(result, 3)
+            self.assertIn("INDETERMINATE:", output)
+            self.assertIn("reconcile before retry", output)
+
+        active_lease = {
+            "id": "L1",
+            "actor": "worker",
+            "pr": 7,
+            "start_head": "a" * 40,
+            "last_progress_head": "a" * 40,
+        }
+        renewed_lease = {
+            **active_lease,
+            "last_progress_head": "b" * 40,
+        }
+        with (
+            patch.object(lease, "emergency_stop_active", return_value=False),
+            patch.object(lease, "_active_view", return_value=({}, [active_lease])),
+            patch.object(lease, "ledger_enabled", return_value=False),
+            patch.object(lease.lifecycle, "append_coordination_event", return_value={}),
+            patch.object(
+                lease.lifecycle,
+                "coordination_view",
+                return_value={"active_leases": [renewed_lease]},
+            ),
+            patch.object(
+                lease,
+                "_reconcile_cache",
+                side_effect=OSError("disk full"),
+            ),
+        ):
+            result, output = self._capture(lease.renew, self._args("renew"))
+        self.assertEqual(result, 3)
+        self.assertIn("INDETERMINATE:", output)
+        self.assertIn("reconcile before retry", output)
+
+        expired = {"id": "L1"}
+        with (
+            patch.object(
+                lease.lifecycle,
+                "coordination_view",
+                side_effect=[
+                    {"expired_leases": [expired]},
+                    {"expired_leases": []},
+                ],
+            ),
+            patch.object(lease.lifecycle, "append_coordination_event", return_value={}),
+            patch.object(lease.lifecycle, "reap_payload", return_value={}),
+            patch.object(
+                lease,
+                "_reconcile_cache",
+                side_effect=OSError("disk full"),
+            ),
+        ):
+            result, output = self._capture(lease.reap, self._args("reap"))
+        self.assertEqual(result, 3)
+        self.assertIn("INDETERMINATE:", output)
+        self.assertIn("reconcile before retry", output)
+
     def test_post_append_failures_are_indeterminate_for_renew_and_reap(self):
         active_lease = {
             "id": "L1",

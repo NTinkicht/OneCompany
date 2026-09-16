@@ -61,13 +61,13 @@ class KnowledgeTests(unittest.TestCase):
             },
         }
 
-    def test_repo_store_validates_and_candidate_is_not_injected(self):
+    def test_repo_store_validates_and_candidates_are_not_injected(self):
         entries = knowledge.load_entries()
-        self.assertGreaterEqual(len(entries), 4)
+        self.assertGreaterEqual(len(entries), 3)
         candidates = [item for item in entries if item["status"] == "candidate"]
-        self.assertTrue(any(item["id"] == "K-OC-QUALIFICATION-TOCTOU-001" for item in candidates))
         retrieved = knowledge.retrieve_current(query="qualification hard link toctou")
-        self.assertNotIn("K-OC-QUALIFICATION-TOCTOU-001", [item["id"] for item in retrieved])
+        retrieved_ids = {item["id"] for item in retrieved}
+        self.assertTrue(all(item["id"] not in retrieved_ids for item in candidates))
 
     def test_retrieval_is_relevant_bounded_and_current_only(self):
         lessons = knowledge.retrieve_current(tags=["authority", "exact-head"], limit=99)

@@ -17,7 +17,11 @@
     "verify cleanup cannot mask the original exception",
     "add regressions for both pre-write and post-write failure paths"
   ],
-  "regression_tests": ["pre-mutation failure remains retry-safe", "post-mutation uncertainty requires reconciliation", "cleanup preserves original error"],
+  "regression_tests": [
+    "test_pre_write_open_failure_remains_plain_oserror",
+    "test_write_failure_is_explicitly_uncertain",
+    "test_flush_failure_is_explicitly_uncertain"
+  ],
   "scope_tags": ["failure-contract", "mutation", "durability", "cleanup", "reconciliation"],
   "source_evidence": [
     {
@@ -39,7 +43,7 @@
   "validation": {
     "validated": true,
     "method": "regression_test",
-    "evidence_refs": ["repo:.onecompany/selftest"],
+    "evidence_refs": ["repo:.onecompany/selftest/test_local_event_mutation.py"],
     "validated_at": "2026-09-16T00:00:00Z"
   }
 }

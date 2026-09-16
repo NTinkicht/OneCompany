@@ -15,6 +15,10 @@ from typing import Any
 import lease_core as core
 import lease_lifecycle as lifecycle
 import ledger_lib
+from local_event_mutation import (
+    LocalEventMutationUncertainError,
+    append_local_event,
+)
 from onecompany_lib import CONTROL, emergency_stop_active, load_json, save_json
 from planning_lib import (
     by_id,
@@ -198,6 +202,9 @@ def sync_cache(_state: dict | None = None, pr: int | None = None) -> None:
     _reconcile_cache(pr)
 
 
+MUTATION_UNCERTAINTY_ERRORS = (RuntimeError, OSError)
+
+
 def _indeterminate(operation: str, exc: Exception | str) -> int:
     """Report mutation uncertainty without inviting an unsafe automatic retry."""
     print(
@@ -296,13 +303,17 @@ def _local_acquire(args: argparse.Namespace) -> int:
         work_map=work_map,
     )
     try:
-        lifecycle.append_coordination_event(
+        append_local_event(
             "ROLE_LEASE_ASSIGNED",
             args.actor,
             lease_payload(lease),
         )
+    except LocalEventMutationUncertainError as exc:
+        return _indeterminate("acquire", exc)
+
+    try:
         after = lifecycle.coordination_view()
-    except RuntimeError as exc:
+    except MUTATION_UNCERTAINTY_ERRORS as exc:
         return _indeterminate("acquire", exc)
     winner = next(
         (
@@ -318,7 +329,7 @@ def _local_acquire(args: argparse.Namespace) -> int:
 
     try:
         _reconcile_cache(args.pr)
-    except RuntimeError as exc:
+    except MUTATION_UNCERTAINTY_ERRORS as exc:
         return _indeterminate("acquire", exc)
     limit = int(
         planning.get("parallel_execution", {}).get(
@@ -346,7 +357,7 @@ def _local_release(args: argparse.Namespace) -> int:
         print("REFUSED: active lease not found")
         return 2
     try:
-        lifecycle.append_coordination_event(
+        append_local_event(
             "ROLE_LEASE_RELEASED",
             str(old.get("actor") or "system"),
             {
@@ -355,8 +366,12 @@ def _local_release(args: argparse.Namespace) -> int:
                 "reason": args.reason,
             },
         )
+    except LocalEventMutationUncertainError as exc:
+        return _indeterminate("release", exc)
+
+    try:
         _reconcile_cache(old.get("pr"))
-    except RuntimeError as exc:
+    except MUTATION_UNCERTAINTY_ERRORS as exc:
         return _indeterminate("release", exc)
     print("LEASE RELEASED")
     return 0
@@ -447,13 +462,17 @@ def _local_transfer(args: argparse.Namespace) -> int:
         "reason": args.reason,
     }
     try:
-        lifecycle.append_coordination_event(
+        append_local_event(
             "ROLE_LEASE_TRANSFERRED",
             args.actor,
             payload,
         )
+    except LocalEventMutationUncertainError as exc:
+        return _indeterminate("transfer", exc)
+
+    try:
         after = lifecycle.coordination_view()
-    except RuntimeError as exc:
+    except MUTATION_UNCERTAINTY_ERRORS as exc:
         return _indeterminate("transfer", exc)
     winner = next(
         (
@@ -469,7 +488,7 @@ def _local_transfer(args: argparse.Namespace) -> int:
 
     try:
         _reconcile_cache(old.get("pr"))
-    except RuntimeError as exc:
+    except MUTATION_UNCERTAINTY_ERRORS as exc:
         return _indeterminate("transfer", exc)
     print(
         f"LEASE FAILOVER {old.get('actor')} -> {args.actor}; "
@@ -496,7 +515,7 @@ def _durable_lease_base_stop(lease: dict[str, Any]) -> tuple[bool, str | None]:
 
 
 def _fail_closed_command(operation: str):
-    """Translate pre-mutation RuntimeError failures into deterministic refusal."""
+    """Translate pre-mutation failures without obscuring mutation uncertainty."""
 
     def decorate(func):
         def guarded(args):
@@ -507,6 +526,9 @@ def _fail_closed_command(operation: str):
                     f"REFUSED: {operation} cannot use coordination safely: {exc}"
                 )
                 return 2
+            except OSError as exc:
+                print(f"ERROR: {operation} failed before mutation: {exc}")
+                return 1
 
         return guarded
 
@@ -530,7 +552,7 @@ def _run_durable_core_command(
     _bind_core(tracked_post_event)
     try:
         result = func(args)
-    except RuntimeError as exc:
+    except MUTATION_UNCERTAINTY_ERRORS as exc:
         if mutation_attempted:
             return _indeterminate(operation, exc)
         raise
@@ -543,7 +565,7 @@ def _run_durable_core_command(
         return result
     try:
         _reconcile_cache(reconcile_pr)
-    except RuntimeError as exc:
+    except MUTATION_UNCERTAINTY_ERRORS as exc:
         return _indeterminate(operation, exc)
     return 0
 
@@ -566,7 +588,8 @@ def renew(args: argparse.Namespace) -> int:
         )
         return 2
 
-    if ledger_enabled():
+    durable = ledger_enabled()
+    if durable:
         stopped, stop_error = _durable_lease_base_stop(lease)
         if stop_error:
             print(
@@ -584,7 +607,7 @@ def renew(args: argparse.Namespace) -> int:
         or lease.get("start_head")
         or ""
     )
-    if ledger_enabled():
+    if durable:
         pr = lease.get("pr")
         if not isinstance(pr, int):
             print("REFUSED: durable lease has no PR number")
@@ -604,13 +627,28 @@ def renew(args: argparse.Namespace) -> int:
 
     actor = str(lease.get("actor") or "")
     try:
-        lifecycle.append_coordination_event(
-            lifecycle.RENEW_EVENT,
-            actor,
-            lifecycle.renewal_payload(lease, args.new_head),
-        )
+        if durable:
+            lifecycle.append_coordination_event(
+                lifecycle.RENEW_EVENT,
+                actor,
+                lifecycle.renewal_payload(lease, args.new_head),
+            )
+        else:
+            append_local_event(
+                lifecycle.RENEW_EVENT,
+                actor,
+                lifecycle.renewal_payload(lease, args.new_head),
+            )
+    except LocalEventMutationUncertainError as exc:
+        return _indeterminate("renew", exc)
+    except MUTATION_UNCERTAINTY_ERRORS as exc:
+        if durable:
+            return _indeterminate("renew", exc)
+        raise
+
+    try:
         after = lifecycle.coordination_view()
-    except RuntimeError as exc:
+    except MUTATION_UNCERTAINTY_ERRORS as exc:
         return _indeterminate("renew", exc)
     renewed = next(
         (
@@ -629,7 +667,7 @@ def renew(args: argparse.Namespace) -> int:
 
     try:
         _reconcile_cache(lease.get("pr"))
-    except RuntimeError as exc:
+    except MUTATION_UNCERTAINTY_ERRORS as exc:
         return _indeterminate("renew", exc)
     print(
         f"LEASE RENEWED {args.lease_id}; expires_at={renewed.get('expires_at')}"
@@ -652,16 +690,36 @@ def reap(args: argparse.Namespace) -> int:
         print("NO EXPIRED LEASES TO REAP")
         return 0
 
+    durable = ledger_enabled()
+    mutation_succeeded = False
+    for lease in expired:
+        try:
+            payload = lifecycle.reap_payload(lease, args.reason)
+            if durable:
+                lifecycle.append_coordination_event(
+                    lifecycle.REAP_EVENT,
+                    args.actor,
+                    payload,
+                    now=now,
+                )
+            else:
+                append_local_event(
+                    lifecycle.REAP_EVENT,
+                    args.actor,
+                    payload,
+                    now=now,
+                )
+            mutation_succeeded = True
+        except LocalEventMutationUncertainError as exc:
+            return _indeterminate("reap", exc)
+        except MUTATION_UNCERTAINTY_ERRORS as exc:
+            if durable or mutation_succeeded:
+                return _indeterminate("reap", exc)
+            raise
+
     try:
-        for lease in expired:
-            lifecycle.append_coordination_event(
-                lifecycle.REAP_EVENT,
-                args.actor,
-                lifecycle.reap_payload(lease, args.reason),
-                now=now,
-            )
         after = lifecycle.coordination_view(now=now)
-    except RuntimeError as exc:
+    except MUTATION_UNCERTAINTY_ERRORS as exc:
         return _indeterminate("reap", exc)
     remaining = {
         str(item.get("id"))
@@ -675,7 +733,7 @@ def reap(args: argparse.Namespace) -> int:
         )
     try:
         _reconcile_cache(None)
-    except RuntimeError as exc:
+    except MUTATION_UNCERTAINTY_ERRORS as exc:
         return _indeterminate("reap", exc)
     print(f"LEASES REAPED {len(expired)}")
     return 0

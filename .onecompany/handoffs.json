@@ -1,0 +1,38 @@
+{
+  "$schema": "./schemas/handoffs.schema.json",
+  "schema_version": "1.0",
+  "enabled": false,
+  "mode": "staged_only",
+  "activation": {
+    "requires_b1_protected_main": true,
+    "requires_ledger_replay_proof": true,
+    "b1_protected_main_proven": false,
+    "ledger_replay_proven": false,
+    "evidence_refs": []
+  },
+  "wake_hints": [
+    "WORK_READY",
+    "LEASE_CHANGED",
+    "PR_CHANGED",
+    "CI_CHANGED",
+    "REVIEW_CHANGED",
+    "MERGE_CHANGED",
+    "RECONCILE"
+  ],
+  "publisher_policy": {
+    "publisher_identity_and_event_type_both_required": true,
+    "automation_publishers": {}
+  },
+  "safety": {
+    "events_are_wake_hints_only": true,
+    "must_reconcile_authoritative_state": true,
+    "hint_payload_can_create_authority": false,
+    "proposal_only_until_activation": true,
+    "never_create_duplicate_writer": true,
+    "emergency_stop_is_sovereign": true,
+    "human_code_owner_remains_human": true,
+    "zero_extra_spend_required": true,
+    "pull_request_target_forbidden": true,
+    "candidate_cache_is_authority": false
+  }
+}

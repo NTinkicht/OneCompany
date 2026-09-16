@@ -6,7 +6,9 @@ import argparse
 import copy
 import hashlib
 import json
+import os
 import re
+import stat
 import sys
 from pathlib import Path
 from typing import Any
@@ -27,6 +29,18 @@ VALIDATION_METHODS = {
     "deterministic_reproduction",
     "independent_review",
     "repeated_evidence",
+}
+MANIFEST_KEYS = {
+    "schema",
+    "authority",
+    "authority_effects",
+    "canonical_root",
+    "states",
+    "default_injected_state",
+    "max_injected_lessons",
+    "external_index",
+    "promotion",
+    "privacy",
 }
 ALLOWED_KEYS = {
     "schema",
@@ -63,10 +77,26 @@ class KnowledgeError(ValueError):
 
 
 def _read_json(path: Path) -> Any:
+    """Read one regular JSON file without following a final-component symlink."""
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    if nofollow == 0:
+        raise KnowledgeError("secure no-follow knowledge reads are unsupported")
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        fd = os.open(str(path), os.O_RDONLY | nofollow)
+    except OSError as exc:
+        raise KnowledgeError(f"cannot open knowledge JSON {path}: {exc}") from exc
+    try:
+        metadata = os.fstat(fd)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise KnowledgeError(f"knowledge JSON must be a regular file: {path}")
+        with os.fdopen(fd, "r", encoding="utf-8") as handle:
+            fd = -1
+            return json.load(handle)
     except (OSError, json.JSONDecodeError) as exc:
         raise KnowledgeError(f"cannot read knowledge JSON {path}: {exc}") from exc
+    finally:
+        if fd >= 0:
+            os.close(fd)
 
 
 def _nonempty_string(value: Any, field: str) -> str:
@@ -85,18 +115,76 @@ def _string_list(value: Any, field: str) -> list[str]:
     return value
 
 
+def _exact_object(value: Any, keys: set[str], field: str) -> dict[str, Any]:
+    if not isinstance(value, dict) or set(value) != keys:
+        raise KnowledgeError(f"{field} has unsupported or missing fields")
+    return value
+
+
 def load_manifest(root: Path = KNOWLEDGE_ROOT) -> dict[str, Any]:
+    """Load the fixed advisory manifest and reject secret-like or extra fields."""
     manifest = _read_json(root / "manifest.json")
-    if not isinstance(manifest, dict) or manifest.get("schema") != MANIFEST_SCHEMA:
+    if not isinstance(manifest, dict):
+        raise KnowledgeError("knowledge manifest must be an object")
+    qualification._reject_sensitive_keys(manifest, "knowledge_manifest")
+    qualification._reject_sensitive_values(manifest, "knowledge_manifest")
+    unknown = sorted(set(manifest) - MANIFEST_KEYS)
+    missing = sorted(MANIFEST_KEYS - set(manifest))
+    if unknown or missing:
+        raise KnowledgeError(
+            "knowledge manifest fields mismatch: "
+            + f"unknown={','.join(unknown) or '-'} missing={','.join(missing) or '-'}"
+        )
+    if manifest.get("schema") != MANIFEST_SCHEMA:
         raise KnowledgeError("unsupported knowledge manifest schema")
     if manifest.get("authority") != AUTHORITY or manifest.get("authority_effects") != []:
         raise KnowledgeError("knowledge manifest must remain advisory_only with no authority effects")
-    if manifest.get("promotion", {}).get("automatic") is not False:
-        raise KnowledgeError("knowledge promotion must not be automatic")
-    if manifest.get("promotion", {}).get("knowledge_can_create_hard_gate") is not False:
-        raise KnowledgeError("knowledge must not create hard gates")
+    if manifest.get("canonical_root") != ".onecompany/knowledge":
+        raise KnowledgeError("knowledge manifest canonical_root is invalid")
+    if manifest.get("states") != list(STATES):
+        raise KnowledgeError("knowledge manifest lifecycle states are invalid")
+    if manifest.get("default_injected_state") != "current":
+        raise KnowledgeError("only current knowledge may be injected by default")
+
+    external = _exact_object(
+        manifest.get("external_index"),
+        {"required", "authoritative", "rebuildable"},
+        "external_index",
+    )
+    if external != {"required": False, "authoritative": False, "rebuildable": True}:
+        raise KnowledgeError("external knowledge indexes must remain optional and derived")
+
+    promotion = _exact_object(
+        manifest.get("promotion"),
+        {"automatic", "requires_validation_evidence", "knowledge_can_create_hard_gate"},
+        "promotion",
+    )
+    if promotion != {
+        "automatic": False,
+        "requires_validation_evidence": True,
+        "knowledge_can_create_hard_gate": False,
+    }:
+        raise KnowledgeError("knowledge promotion policy must remain explicit and advisory")
+
+    privacy = _exact_object(
+        manifest.get("privacy"),
+        {
+            "store_credentials",
+            "store_private_prompts",
+            "store_raw_tool_transcripts",
+            "store_hidden_reasoning",
+        },
+        "privacy",
+    )
+    if any(privacy.values()):
+        raise KnowledgeError("knowledge privacy policy cannot enable sensitive storage")
+
     max_lessons = manifest.get("max_injected_lessons")
-    if not isinstance(max_lessons, int) or isinstance(max_lessons, bool) or not 1 <= max_lessons <= MAX_CONTEXT:
+    if (
+        not isinstance(max_lessons, int)
+        or isinstance(max_lessons, bool)
+        or not 1 <= max_lessons <= MAX_CONTEXT
+    ):
         raise KnowledgeError("knowledge context bound is invalid")
     return manifest
 
@@ -200,22 +288,273 @@ def validate_entry(entry: Any, *, expected_status: str | None = None) -> dict[st
     return entry
 
 
+def _path_present(path: Path) -> bool:
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        return False
+    if stat.S_ISLNK(metadata.st_mode):
+        raise KnowledgeError(f"knowledge path must not be a symlink: {path}")
+    return True
+
+
+def _open_parent(path: Path) -> int:
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    directory = getattr(os, "O_DIRECTORY", 0)
+    if nofollow == 0 or directory == 0:
+        raise KnowledgeError("secure descriptor-relative knowledge I/O is unsupported")
+    try:
+        return os.open(str(path.parent), os.O_RDONLY | directory | nofollow)
+    except OSError as exc:
+        raise KnowledgeError(f"cannot open knowledge parent safely: {path.parent}: {exc}") from exc
+
+
+def _safe_unlink(path: Path) -> None:
+    parent_fd = _open_parent(path)
+    try:
+        try:
+            metadata = os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return
+        if stat.S_ISLNK(metadata.st_mode):
+            raise KnowledgeError(f"refusing to unlink symlinked knowledge path: {path}")
+        os.unlink(path.name, dir_fd=parent_fd)
+    except OSError as exc:
+        raise KnowledgeError(f"cannot unlink knowledge path safely: {path}: {exc}") from exc
+    finally:
+        os.close(parent_fd)
+
+
+def _replace_between(source: Path, destination: Path) -> None:
+    source_fd = _open_parent(source)
+    destination_fd = _open_parent(destination)
+    try:
+        try:
+            os.replace(
+                source.name,
+                destination.name,
+                src_dir_fd=source_fd,
+                dst_dir_fd=destination_fd,
+            )
+        except (OSError, TypeError, NotImplementedError) as exc:
+            raise KnowledgeError(
+                f"cannot move knowledge entry safely: {source} -> {destination}: {exc}"
+            ) from exc
+    finally:
+        os.close(destination_fd)
+        os.close(source_fd)
+
+
+def _write_entry(path: Path, entry: dict[str, Any]) -> None:
+    """Create one knowledge file exclusively through a no-follow directory descriptor."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    parent_fd = _open_parent(path)
+    fd: int | None = None
+    identity: tuple[int, int] | None = None
+    data = (json.dumps(entry, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    try:
+        try:
+            fd = os.open(
+                path.name,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | nofollow,
+                0o600,
+                dir_fd=parent_fd,
+            )
+        except FileExistsError as exc:
+            raise KnowledgeError(f"knowledge destination already exists: {path}") from exc
+        except OSError as exc:
+            raise KnowledgeError(f"cannot create knowledge entry safely: {path}: {exc}") from exc
+
+        metadata = os.fstat(fd)
+        identity = (metadata.st_dev, metadata.st_ino)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            raise KnowledgeError("new knowledge entry is not a singly linked regular file")
+        offset = 0
+        while offset < len(data):
+            written = os.write(fd, data[offset:])
+            if written <= 0:
+                raise OSError("knowledge write made no progress")
+            offset += written
+        os.fsync(fd)
+        final = os.fstat(fd)
+        directory_entry = os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)
+        if (
+            not stat.S_ISREG(final.st_mode)
+            or final.st_nlink != 1
+            or directory_entry.st_nlink != 1
+            or (final.st_dev, final.st_ino) != (directory_entry.st_dev, directory_entry.st_ino)
+        ):
+            raise KnowledgeError("knowledge entry identity/link validation failed after write")
+    except Exception:
+        if identity is not None:
+            try:
+                current = os.stat(path.name, dir_fd=parent_fd, follow_symlinks=False)
+                if (current.st_dev, current.st_ino) == identity:
+                    os.unlink(path.name, dir_fd=parent_fd)
+            except OSError:
+                pass
+        raise
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        os.close(parent_fd)
+
+
+def _transaction_parts(path: Path, suffix: str) -> tuple[str, str, str]:
+    name = path.name.removesuffix(suffix)
+    try:
+        entry_id, source_status, destination_status = name.rsplit("--", 2)
+    except ValueError as exc:
+        raise KnowledgeError(f"malformed knowledge transition file: {path.name}") from exc
+    if not ID_RE.fullmatch(entry_id) or source_status not in STATES or destination_status not in STATES:
+        raise KnowledgeError(f"malformed knowledge transition identity: {path.name}")
+    return entry_id, source_status, destination_status
+
+
+def _recover_transitions(root: Path) -> None:
+    """Converge interrupted lifecycle transitions without creating duplicate canonical IDs."""
+    tx_root = root / ".transactions"
+    if not tx_root.exists():
+        return
+    if tx_root.is_symlink() or not tx_root.is_dir():
+        raise KnowledgeError("knowledge transaction root is unsafe")
+
+    for next_path in sorted(tx_root.glob("*.next.json")):
+        entry_id, source_status, destination_status = _transaction_parts(next_path, ".next.json")
+        prefix = f"{entry_id}--{source_status}--{destination_status}"
+        staged = tx_root / f"{prefix}.source.json"
+        source = root / source_status / f"{entry_id}.json"
+        destination = root / destination_status / f"{entry_id}.json"
+        source_present = _path_present(source)
+        destination_present = _path_present(destination)
+        staged_present = _path_present(staged)
+
+        if source_present and destination_present:
+            raise KnowledgeError(f"duplicate canonical knowledge id during recovery: {entry_id}")
+        if destination_present:
+            if staged_present:
+                _safe_unlink(staged)
+            _safe_unlink(next_path)
+            continue
+        if staged_present:
+            if source_present:
+                raise KnowledgeError(f"knowledge transition has both source and staged source: {entry_id}")
+            value = validate_entry(_read_json(next_path), expected_status=destination_status)
+            _write_entry(destination, value)
+            _safe_unlink(next_path)
+            _safe_unlink(staged)
+            continue
+        if source_present:
+            _safe_unlink(next_path)
+            continue
+        raise KnowledgeError(f"unrecoverable knowledge transition: {entry_id}")
+
+    for staged in sorted(tx_root.glob("*.source.json")):
+        entry_id, source_status, destination_status = _transaction_parts(staged, ".source.json")
+        prefix = f"{entry_id}--{source_status}--{destination_status}"
+        next_path = tx_root / f"{prefix}.next.json"
+        if _path_present(next_path):
+            continue
+        source = root / source_status / f"{entry_id}.json"
+        destination = root / destination_status / f"{entry_id}.json"
+        source_present = _path_present(source)
+        destination_present = _path_present(destination)
+        if source_present and destination_present:
+            raise KnowledgeError(f"duplicate canonical knowledge id during cleanup: {entry_id}")
+        if destination_present:
+            _safe_unlink(staged)
+        elif not source_present:
+            _replace_between(staged, source)
+        else:
+            raise KnowledgeError(f"knowledge transition cleanup is ambiguous: {entry_id}")
+
+
+def _transition_entry(source: Path, destination: Path, value: dict[str, Any], root: Path) -> None:
+    """Move an entry between lifecycle states with staged recovery and rollback."""
+    _recover_transitions(root)
+    if source.parent.name not in STATES or destination.parent.name not in STATES:
+        raise KnowledgeError("knowledge lifecycle transition must stay within canonical states")
+    if not _path_present(source):
+        raise KnowledgeError("knowledge transition source is missing")
+    if _path_present(destination):
+        raise KnowledgeError("knowledge transition destination already exists")
+
+    entry_id = str(value.get("id"))
+    prefix = f"{entry_id}--{source.parent.name}--{destination.parent.name}"
+    tx_root = root / ".transactions"
+    tx_root.mkdir(parents=True, exist_ok=True)
+    next_path = tx_root / f"{prefix}.next.json"
+    staged = tx_root / f"{prefix}.source.json"
+    if _path_present(next_path) or _path_present(staged):
+        raise KnowledgeError("knowledge transition already has pending recovery state")
+
+    _write_entry(next_path, value)
+    try:
+        _replace_between(source, staged)
+    except Exception:
+        _safe_unlink(next_path)
+        raise
+
+    try:
+        _write_entry(destination, value)
+    except Exception:
+        try:
+            _replace_between(staged, source)
+        finally:
+            _safe_unlink(next_path)
+        raise
+
+    try:
+        _safe_unlink(next_path)
+        _safe_unlink(staged)
+    except Exception as exc:
+        rollback_errors: list[str] = []
+        try:
+            if _path_present(destination):
+                _safe_unlink(destination)
+        except Exception as rollback_exc:
+            rollback_errors.append(str(rollback_exc))
+        try:
+            if _path_present(staged) and not _path_present(source):
+                _replace_between(staged, source)
+        except Exception as rollback_exc:
+            rollback_errors.append(str(rollback_exc))
+        try:
+            if _path_present(next_path):
+                _safe_unlink(next_path)
+        except Exception as rollback_exc:
+            rollback_errors.append(str(rollback_exc))
+        if rollback_errors:
+            raise KnowledgeError(
+                "knowledge transition cleanup failed and rollback is incomplete: "
+                + "; ".join(rollback_errors)
+            ) from exc
+        raise KnowledgeError("knowledge transition cleanup failed; source was restored") from exc
+
+
 def load_entries(
     root: Path = KNOWLEDGE_ROOT,
     *,
     statuses: tuple[str, ...] = STATES,
 ) -> list[dict[str, Any]]:
     load_manifest(root)
+    _recover_transitions(root)
     entries: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for status in statuses:
-        if status not in STATES:
-            raise KnowledgeError(f"unsupported knowledge status {status}")
-        directory = root / status
+    for status_name in statuses:
+        if status_name not in STATES:
+            raise KnowledgeError(f"unsupported knowledge status {status_name}")
+        directory = root / status_name
         if not directory.exists():
             continue
+        if directory.is_symlink() or not directory.is_dir():
+            raise KnowledgeError(f"knowledge state directory is unsafe: {status_name}")
         for path in sorted(directory.glob("*.json")):
-            entry = validate_entry(_read_json(path), expected_status=status)
+            entry = validate_entry(_read_json(path), expected_status=status_name)
             if entry["id"] in seen:
                 raise KnowledgeError(f"duplicate knowledge id {entry['id']}")
             seen.add(str(entry["id"]))
@@ -410,18 +749,14 @@ def preflight(
 
 
 def _find_entry_path(entry_id: str, root: Path) -> Path:
+    _recover_transitions(root)
     if not ID_RE.fullmatch(entry_id):
         raise KnowledgeError("invalid knowledge id")
-    matches = [root / state / f"{entry_id}.json" for state in STATES]
-    existing = [path for path in matches if path.exists()]
+    matches = [root / state_name / f"{entry_id}.json" for state_name in STATES]
+    existing = [path for path in matches if _path_present(path)]
     if len(existing) != 1:
         raise KnowledgeError(f"knowledge id must resolve to exactly one entry: {entry_id}")
     return existing[0]
-
-
-def _write_entry(path: Path, entry: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(entry, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def main() -> int:
@@ -479,10 +814,7 @@ def main() -> int:
             )
             if args.write:
                 destination = KNOWLEDGE_ROOT / "current" / f"{args.id}.json"
-                if destination.exists():
-                    raise KnowledgeError("current destination already exists")
-                _write_entry(destination, value)
-                source.unlink()
+                _transition_entry(source, destination, value, KNOWLEDGE_ROOT)
         else:
             source = _find_entry_path(args.id, KNOWLEDGE_ROOT)
             entry = validate_entry(_read_json(source))
@@ -493,10 +825,7 @@ def main() -> int:
             )
             if args.write:
                 destination = KNOWLEDGE_ROOT / "archived" / f"{args.id}.json"
-                if destination.exists():
-                    raise KnowledgeError("archive destination already exists")
-                _write_entry(destination, value)
-                source.unlink()
+                _transition_entry(source, destination, value, KNOWLEDGE_ROOT)
         print(json.dumps(value, indent=2, sort_keys=True))
         return 0
     except (KnowledgeError, qualification.QualificationInputError) as exc:

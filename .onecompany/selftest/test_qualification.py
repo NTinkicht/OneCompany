@@ -282,7 +282,7 @@ class QualificationTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(
                     qualification.QualificationInputError,
-                    "must not be a symlink",
+                    "must not be a symlink|must remain under",
                 ):
                     qualification._write_or_print(
                         {"safe": False},

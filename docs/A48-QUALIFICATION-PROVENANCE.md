@@ -48,15 +48,15 @@ A harness produces `onecompany-qualification-result-v1` with only these top-leve
 
 - `schema`;
 - `scenario_id` and `scenario_sha256`;
-- `fixture` - repository, exact 40-character base commit, fixture ID;
-- `executor` - actor, mechanism, model label, harness version;
+- `fixture` - normalized repository identifier, exact 40-character base commit, normalized fixture ID;
+- `executor` - normalized actor, mechanism, model label, and harness version identifiers;
 - `condition`;
 - `attempt` and `retry`;
 - timezone-aware `started_at` and `ended_at`;
-- `actions` - normalized observable action labels;
-- `decisions` - normalized observable decision labels;
+- `actions` - labels drawn only from the scenario's reviewed `forbidden_actions` catalog;
+- `decisions` - labels drawn only from the scenario's reviewed `required_decisions` catalog;
 - `evidence_refs`;
-- `usage` - token values only when reliably available, plus source/completeness.
+- `usage` - token values only when reliably available, plus normalized source/completeness.
 
 Unknown top-level fields fail closed. This deliberately prevents a result from smuggling fields such as `readiness_grant`, `lease_grant`, or `merge_authority` into the provenance surface.
 
@@ -64,13 +64,13 @@ Unknown top-level fields fail closed. This deliberately prevents a result from s
 
 Qualification provenance must not contain:
 
-- credentials or secrets;
+- credentials or secrets in either field names or values;
 - raw/private prompts;
 - raw tool transcripts;
 - chain-of-thought or hidden reasoning;
 - unrestricted local filesystem paths.
 
-Evidence references must use repository/Git/fixture/HTTPS references rather than local paths.
+Evidence references must use normalized repository/Git/fixture references or HTTPS URLs. HTTPS evidence rejects embedded user information, fragments, malformed hosts/ports, and secret-like query parameters such as tokens, credentials, passwords, API keys, signatures, or authentication values.
 
 ## Deterministic scoring
 
@@ -79,7 +79,9 @@ Run:
 ```bash
 python onecompany.py qualify catalog
 python onecompany.py qualify catalog --json
-python onecompany.py qualify evaluate --result result.json --output result.provenance.json
+python onecompany.py qualify evaluate \
+  --result result.json \
+  --output .onecompany-evidence/qualification/result.provenance.json
 ```
 
 The evaluator checks:
@@ -87,10 +89,10 @@ The evaluator checks:
 1. catalog/schema/authority invariants;
 2. exact scenario hash and condition;
 3. reproducible fixture identity;
-4. minimal executor and timing metadata;
-5. privacy-safe evidence references;
-6. forbidden observable actions;
-7. required safety decisions.
+4. normalized executor and timing metadata;
+5. privacy-safe, structured evidence references;
+6. catalog-backed observable action labels;
+7. catalog-backed required safety decisions.
 
 Exit codes:
 
@@ -101,6 +103,8 @@ Exit codes:
 A `PASS` remains advisory evidence only.
 
 ## Provenance output
+
+Without `--output`, provenance is written to stdout. File output is restricted to the dedicated `.onecompany-evidence/qualification/` artifact tree. Paths outside that tree - including `.onecompany/config.json` and other control-plane files - are rejected. Existing output files are not overwritten unless `--overwrite` is supplied explicitly.
 
 The scorer emits `onecompany-qualification-provenance-v1` containing:
 

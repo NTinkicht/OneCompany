@@ -45,6 +45,7 @@ class LedgerVersionMigrationTests(unittest.TestCase):
 
     def test_pre_cutoff_v1_event_is_readable(self):
         with (
+            patch.object(ledger_lib, "_assert_ledger_runtime_activation"),
             patch.object(ledger_lib, "_repo_and_issue", return_value=("o/r", 1)),
             patch.object(ledger_lib, "ledger_config", return_value=self.config()),
             patch.object(ledger_lib, "_trusted_publishers", return_value={"trusted-bot"}),
@@ -56,6 +57,7 @@ class LedgerVersionMigrationTests(unittest.TestCase):
 
     def test_post_cutoff_v1_event_fails_closed(self):
         with (
+            patch.object(ledger_lib, "_assert_ledger_runtime_activation"),
             patch.object(ledger_lib, "_repo_and_issue", return_value=("o/r", 1)),
             patch.object(ledger_lib, "ledger_config", return_value=self.config()),
             patch.object(ledger_lib, "_trusted_publishers", return_value={"trusted-bot"}),

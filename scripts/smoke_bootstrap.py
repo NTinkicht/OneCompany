@@ -84,6 +84,10 @@ def main() -> int:
             )
             queue = json.loads((target / ".onecompany" / "queue.json").read_text())
             state = json.loads((target / ".onecompany" / "state.json").read_text())
+            ledger = json.loads((target / ".onecompany" / "ledger.json").read_text())
+            supervision = json.loads(
+                (target / ".onecompany" / "supervision.json").read_text()
+            )
             portfolio = json.loads(
                 (target / ".onecompany" / "portfolio.json").read_text()
             )
@@ -122,6 +126,37 @@ def main() -> int:
             require(
                 config.get("safety", {}).get("emergency_stop") is False,
                 "fresh company must not start in emergency stop",
+            )
+            require(
+                ledger.get("enabled") is False,
+                "fresh company inherited source durable-ledger activation",
+            )
+            require(
+                ledger.get("issue_number") is None,
+                "fresh company inherited source Team Room issue number",
+            )
+            require(
+                ledger.get("trusted_publisher_logins") == [],
+                "fresh company inherited source trusted ledger publishers",
+            )
+            require(
+                supervision.get("enabled") is False
+                and supervision.get("mode") == "observe_only",
+                "fresh company inherited active supervision",
+            )
+            require(
+                supervision.get("coordination", {}).get("team_room_issue_number") is None,
+                "fresh company inherited source supervision Team Room binding",
+            )
+            require(
+                supervision.get("github_actions", {}).get("may_post_team_room") is False
+                and supervision.get("github_actions", {}).get("may_failover") is False
+                and supervision.get("github_actions", {}).get("may_merge") is False,
+                "fresh company inherited autonomous supervisor authority",
+            )
+            require(
+                supervision.get("chatgpt_tasks", {}).get("may_mutate") is False,
+                "fresh company inherited scheduled mutation authority",
             )
             require(queue.get("work_units") == [], "fresh target queue must start empty")
             require(

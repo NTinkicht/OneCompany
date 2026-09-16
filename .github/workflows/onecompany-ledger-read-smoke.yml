@@ -1,0 +1,274 @@
+name: OneCompany Ledger Read Smoke
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - .github/workflows/onecompany-ledger-read-smoke.yml
+      - .github/workflows/onecompany-validate.yml
+      - .onecompany/ledger.json
+      - .onecompany/supervision.json
+      - scripts/bootstrap.py
+      - scripts/smoke_bootstrap.py
+      - scripts/dispatch.py
+      - scripts/lease.py
+      - scripts/local_event_mutation.py
+      - scripts/ledger.py
+      - scripts/ledger_lib.py
+      - scripts/ledger_validate.py
+      - .onecompany/selftest/test_a3b_activation.py
+      - .onecompany/selftest/test_b1_ledger_activation.py
+      - .onecompany/selftest/test_lease_command_fail_closed.py
+      - .onecompany/selftest/test_local_event_mutation.py
+      - docs/B1-DURABLE-LEDGER-ACTIVATION.md
+  push:
+    branches:
+      - main
+      - epic-0.6-b1-durable-ledger-activation
+    paths:
+      - .github/workflows/onecompany-ledger-read-smoke.yml
+      - .github/workflows/onecompany-validate.yml
+      - .onecompany/ledger.json
+      - .onecompany/supervision.json
+      - scripts/bootstrap.py
+      - scripts/smoke_bootstrap.py
+      - scripts/dispatch.py
+      - scripts/lease.py
+      - scripts/local_event_mutation.py
+      - scripts/ledger.py
+      - scripts/ledger_lib.py
+      - scripts/ledger_validate.py
+      - .onecompany/selftest/test_a3b_activation.py
+      - .onecompany/selftest/test_b1_ledger_activation.py
+      - .onecompany/selftest/test_lease_command_fail_closed.py
+      - .onecompany/selftest/test_local_event_mutation.py
+      - docs/B1-DURABLE-LEDGER-ACTIVATION.md
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: read
+
+jobs:
+  replay-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout reviewed repository state
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate activated ledger configuration
+        run: python scripts/ledger_validate.py
+
+      - name: Prove candidate checkout cannot activate protected ledger authority
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, str(Path.cwd() / "scripts"))
+          import ledger_lib
+
+          on_main = os.environ.get("GITHUB_REF_NAME") == "main"
+          try:
+              enabled = ledger_lib.ledger_enabled()
+          except RuntimeError as exc:
+              if on_main:
+                  raise
+              print(f"candidate ledger activation correctly refused: {exc}")
+          else:
+              if on_main:
+                  if enabled is not True:
+                      raise SystemExit("protected main must activate the configured ledger")
+              elif enabled:
+                  raise SystemExit("feature checkout unexpectedly acquired durable-ledger authority")
+          PY
+
+      - name: Fetch one immutable Team Room snapshot
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api --paginate --slurp \
+            "repos/${GITHUB_REPOSITORY}/issues/45/comments?per_page=100" \
+            > "${RUNNER_TEMP}/team-room-comments.json"
+
+      - name: Replay the same immutable snapshot before and after deleting local cache
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          root = Path.cwd()
+          sys.path.insert(0, str(root / "scripts"))
+          import ledger_lib
+
+          temp = Path(os.environ["RUNNER_TEMP"])
+          ledger = json.loads((root / ".onecompany" / "ledger.json").read_text(encoding="utf-8"))
+          raw = json.loads((temp / "team-room-comments.json").read_text(encoding="utf-8"))
+          trusted = set(ledger.get("trusted_publisher_logins", []))
+          accepted_types = set(ledger.get("accepted_event_types", []))
+
+          pages = raw if isinstance(raw, list) else [raw]
+          comments = []
+          for page in pages:
+              if isinstance(page, list):
+                  comments.extend(item for item in page if isinstance(item, dict))
+              elif isinstance(page, dict):
+                  comments.append(page)
+
+          events = []
+          for comment in comments:
+              login = ((comment.get("user") or {}).get("login"))
+              if login not in trusted:
+                  continue
+              body = comment.get("body") or ""
+              if ledger_lib.MARKER not in body:
+                  continue
+              match = ledger_lib.EVENT_RE.search(body)
+              if not match:
+                  raise SystemExit(f"malformed trusted ledger event in comment {comment.get('id')}")
+              if (
+                  comment.get("updated_at")
+                  and comment.get("created_at")
+                  and comment.get("updated_at") != comment.get("created_at")
+              ):
+                  raise SystemExit(f"trusted ledger event was edited after append in comment {comment.get('id')}")
+              event = json.loads(match.group(1))
+              if not ledger_lib._event_version_allowed(ledger, event.get("version"), comment.get("id")):
+                  raise SystemExit(f"unsupported trusted ledger event version in comment {comment.get('id')}")
+              if event.get("type") not in accepted_types:
+                  raise SystemExit(f"unsupported trusted ledger event type in comment {comment.get('id')}")
+              if not isinstance(event.get("event_id"), str) or not event.get("event_id"):
+                  raise SystemExit(f"trusted ledger event missing event_id in comment {comment.get('id')}")
+              if not isinstance(event.get("actor"), str) or not event.get("actor"):
+                  raise SystemExit(f"trusted ledger event missing actor in comment {comment.get('id')}")
+              if not isinstance(event.get("payload"), dict):
+                  raise SystemExit(f"trusted ledger event payload must be object in comment {comment.get('id')}")
+              event["github_comment_id"] = comment.get("id")
+              event["github_comment_url"] = comment.get("html_url")
+              event["github_publisher"] = login
+              event["github_created_at"] = comment.get("created_at")
+              events.append(event)
+
+          events.sort(
+              key=lambda item: (
+                  item.get("github_created_at") or "",
+                  int(item.get("github_comment_id") or 0),
+              )
+          )
+          snapshot_path = temp / "trusted-events.json"
+          snapshot_path.write_text(json.dumps(events, sort_keys=True), encoding="utf-8")
+
+          before_events = json.loads(snapshot_path.read_text(encoding="utf-8"))
+          before = ledger_lib.derive(
+              before_events,
+              enforce_actor_policy=False,
+              verify_admission_provenance=False,
+          )
+          (root / ".onecompany" / "state.json").unlink(missing_ok=True)
+          after_events = json.loads(snapshot_path.read_text(encoding="utf-8"))
+          after = ledger_lib.derive(
+              after_events,
+              enforce_actor_policy=False,
+              verify_admission_provenance=False,
+          )
+
+          if before != after:
+              raise SystemExit("canonical ledger replay changed after local cache deletion")
+
+          proof_event_id = "b1-human-publisher-proof-20260915"
+          proof = next(
+              (
+                  event
+                  for event in events
+                  if event.get("event_id") == proof_event_id
+              ),
+              None,
+          )
+          if proof is None:
+              raise SystemExit("B1 publisher proof event is missing from immutable Team Room snapshot")
+          if proof.get("github_publisher") != "NTinkicht":
+              raise SystemExit("B1 publisher proof did not resolve to NTinkicht")
+          if proof.get("type") != "SUPERVISION_CHECK":
+              raise SystemExit("B1 publisher proof has unexpected event type")
+          if (proof.get("payload") or {}).get("authority") != "none":
+              raise SystemExit("B1 identity proof must not carry coordination authority")
+
+          baseline_events = [
+              event for event in before_events if event.get("event_id") != proof_event_id
+          ]
+          baseline = ledger_lib.derive(
+              baseline_events,
+              enforce_actor_policy=False,
+              verify_admission_provenance=False,
+          )
+          authority_fields = (
+              "active_leases",
+              "material_authors",
+              "material_authors_by_pr",
+              "current_gate",
+              "gates_by_pr",
+              "merged_work_units",
+              "verified_merged_work_units",
+              "current_actor_eligibility",
+          )
+          changed_authority = [
+              field for field in authority_fields if baseline.get(field) != before.get(field)
+          ]
+          if changed_authority:
+              raise SystemExit(
+                  "B1 publisher proof unexpectedly changed authority fields: "
+                  + ",".join(changed_authority)
+              )
+
+          print(
+              json.dumps(
+                  {
+                      "team_room_issue": 45,
+                      "publisher": proof.get("github_publisher"),
+                      "proof_comment_id": proof.get("github_comment_id"),
+                      "trusted_event_count": len(events),
+                      "immutable_snapshot_replay": True,
+                      "cache_independent_replay": True,
+                      "proof_authority_delta": [],
+                  },
+                  sort_keys=True,
+              )
+          )
+          PY
+
+      - name: Verify protected-main runtime replay after promotion
+        if: github.ref_name == 'main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python onecompany.py ledger read --events > "${RUNNER_TEMP}/protected-main-runtime.json"
+
+      - name: Publish B1 replay evidence summary
+        if: always()
+        run: |
+          {
+            echo '## OneCompany B1 durable-ledger replay proof'
+            echo
+            echo '- Team Room: `#45`'
+            echo '- Trusted publisher configured: `NTinkicht` only'
+            echo '- Workflow permissions: `contents: read`, `issues: read`'
+            echo "- Exact checkout head: \`${{ github.event.pull_request.head.sha || github.sha }}\`"
+            echo '- Remote comments fetched once into an immutable snapshot: `yes`'
+            echo '- Local `state.json` deleted between derivations: `yes`'
+            echo '- Proof event compared against a proof-free authority baseline: `yes`'
+            echo '- Feature checkouts cannot activate durable-ledger authority.'
+            echo '- This smoke cannot publish ledger events or mutate repository content.'
+          } >> "${GITHUB_STEP_SUMMARY}"

@@ -32,7 +32,7 @@
     "scheduled_task_project_files_are_not_assumed_available": true
   },
   "coordination": {
-    "team_room_issue_number": null,
+    "team_room_issue_number": 45,
     "post_only_actionable_states": true,
     "deduplicate_same_state": true
   },

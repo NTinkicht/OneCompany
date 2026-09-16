@@ -168,6 +168,32 @@ def initialize_control_plane(
     config["project"]["repository"] = repository
     config["project"]["default_branch"] = default_branch
     write_json(config_path, config)
+
+    # Durable coordination is installation-specific authority. Never inherit the
+    # source repository's Team Room or trusted publisher identities into a fresh
+    # company. A new deployment must explicitly activate its own ledger later.
+    ledger_path = target / ".onecompany" / "ledger.json"
+    ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    ledger["enabled"] = False
+    ledger["issue_number"] = None
+    ledger["trusted_publisher_logins"] = []
+    write_json(ledger_path, ledger)
+
+    supervision_path = target / ".onecompany" / "supervision.json"
+    supervision = json.loads(supervision_path.read_text(encoding="utf-8"))
+    supervision["enabled"] = False
+    supervision["mode"] = "observe_only"
+    supervision.setdefault("coordination", {})["team_room_issue_number"] = None
+    github_actions = supervision.setdefault("github_actions", {})
+    github_actions["enabled"] = False
+    github_actions["may_post_team_room"] = False
+    github_actions["may_failover"] = False
+    github_actions["may_merge"] = False
+    chatgpt_tasks = supervision.setdefault("chatgpt_tasks", {})
+    chatgpt_tasks["enabled"] = False
+    chatgpt_tasks["may_mutate"] = False
+    write_json(supervision_path, supervision)
+
     write_json(
         target / ".onecompany" / "queue.json",
         {
@@ -272,8 +298,9 @@ def main() -> int:
         f"code owner: {code_owner}; root principal: {root_principal}"
     )
     print(
-        "Portfolio/requirements/acceptance-criteria/risk-register/queue/state were reset; "
-        "source work history was not copied. Unattended paths remain disabled."
+        "Portfolio/requirements/acceptance-criteria/risk-register/queue/state and durable "
+        "coordination bindings were reset; source work history was not copied. "
+        "Unattended paths remain disabled."
     )
     print(
         "Run `python onecompany.py audit-github` after pushing to verify the selected "

@@ -704,8 +704,9 @@ def _atomic_replace_output(parent_fd: int, filename: str, text: str) -> None:
             raise QualificationInputError(
                 "qualification replacement file failed inode validation"
             )
-        _write_open_fd(fd, text)
+        write_fd = fd
         fd = None
+        _write_open_fd(write_fd, text)
         try:
             os.rename(
                 temp_name,

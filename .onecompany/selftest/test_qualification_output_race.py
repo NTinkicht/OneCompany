@@ -103,25 +103,25 @@ class QualificationOutputRaceTests(unittest.TestCase):
             artifact_root = repo_root / ".onecompany-evidence" / "qualification"
             target = artifact_root / "run" / "config.json"
             swapped = artifact_root / "run-original"
-            real_open_file = qualification._open_secure_output_file
+            real_atomic_replace = qualification._atomic_replace_output
             race_triggered = False
 
-            def racing_open_file(parent_fd, filename, *, overwrite):
+            def racing_atomic_replace(parent_fd, filename, text):
                 nonlocal race_triggered
                 if not race_triggered:
                     race_triggered = True
                     run_dir = artifact_root / "run"
                     run_dir.rename(swapped)
                     run_dir.symlink_to(control_dir, target_is_directory=True)
-                return real_open_file(parent_fd, filename, overwrite=overwrite)
+                return real_atomic_replace(parent_fd, filename, text)
 
             with (
                 patch.object(qualification, "ROOT", repo_root),
                 patch.object(qualification, "OUTPUT_ROOT", artifact_root),
                 patch.object(
                     qualification,
-                    "_open_secure_output_file",
-                    side_effect=racing_open_file,
+                    "_atomic_replace_output",
+                    side_effect=racing_atomic_replace,
                 ),
             ):
                 qualification._write_or_print(
@@ -137,7 +137,7 @@ class QualificationOutputRaceTests(unittest.TestCase):
                 (swapped / "config.json").read_text(encoding="utf-8"),
             )
 
-    def test_existing_hard_link_is_rejected_before_truncation(self):
+    def test_existing_hard_link_is_rejected_before_overwrite(self):
         with tempfile.TemporaryDirectory() as directory:
             repo_root = Path(directory)
             control = repo_root / ".onecompany" / "config.json"
@@ -162,6 +162,45 @@ class QualificationOutputRaceTests(unittest.TestCase):
                         overwrite=True,
                     )
             self.assertEqual(control.read_text(encoding="utf-8"), "protected\n")
+
+    def test_late_hard_link_after_validation_is_replaced_not_truncated(self):
+        with tempfile.TemporaryDirectory() as directory:
+            repo_root = Path(directory)
+            control = repo_root / ".onecompany" / "config.json"
+            control.parent.mkdir(parents=True)
+            control.write_text("protected\n", encoding="utf-8")
+            artifact_root = repo_root / ".onecompany-evidence" / "qualification"
+            artifact_root.mkdir(parents=True)
+            target = artifact_root / "result.json"
+            real_validate = qualification._validate_existing_output_entry
+            injected = False
+
+            def validate_then_link(parent_fd, filename):
+                nonlocal injected
+                real_validate(parent_fd, filename)
+                if not injected:
+                    injected = True
+                    os.link(control, target)
+
+            with (
+                patch.object(qualification, "ROOT", repo_root),
+                patch.object(qualification, "OUTPUT_ROOT", artifact_root),
+                patch.object(
+                    qualification,
+                    "_validate_existing_output_entry",
+                    side_effect=validate_then_link,
+                ),
+            ):
+                qualification._write_or_print(
+                    {"safe": True},
+                    target,
+                    overwrite=True,
+                )
+
+            self.assertTrue(injected)
+            self.assertEqual(control.read_text(encoding="utf-8"), "protected\n")
+            self.assertIn('"safe": true', target.read_text(encoding="utf-8"))
+            self.assertNotEqual(os.stat(control).st_ino, os.stat(target).st_ino)
 
 
 if __name__ == "__main__":

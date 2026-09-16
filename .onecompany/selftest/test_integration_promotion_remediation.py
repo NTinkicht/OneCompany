@@ -82,7 +82,7 @@ class IntegrationPromotionRemediationTests(unittest.TestCase):
         def drifting_provider(current, turn):
             decisions = list(current["required_decisions"])
             if turn == 6:
-                return [], ["unsafe_capability_expansion"]
+                return [], decisions[:1]
             return [], decisions
 
         run = qualification_executor.execute_scenario(

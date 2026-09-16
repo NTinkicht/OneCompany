@@ -114,6 +114,42 @@ def write_json(path: Path, value: dict) -> None:
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
 
 
+def _generic_evidence_ref(ref: object) -> bool:
+    """Return true only for repo-relative or generic fixture evidence."""
+    return isinstance(ref, str) and ref.startswith(("repo:", "fixture:"))
+
+
+def _validate_bootstrap_knowledge_provenance(entry: dict, path: Path) -> None:
+    """Reject project identities, commits, URLs, or validation refs from reusable lessons."""
+    source_evidence = entry.get("source_evidence")
+    if not isinstance(source_evidence, list) or not source_evidence:
+        raise ValueError(f"bootstrap-safe knowledge requires generic provenance: {path.name}")
+    for evidence in source_evidence:
+        if not isinstance(evidence, dict):
+            raise ValueError(f"bootstrap-safe knowledge provenance is malformed: {path.name}")
+        if evidence.get("actor") != "onecompany":
+            raise ValueError(
+                f"bootstrap-safe knowledge cannot inherit project reviewer identity: {path.name}"
+            )
+        if evidence.get("commit") is not None:
+            raise ValueError(
+                f"bootstrap-safe knowledge cannot inherit project commit identity: {path.name}"
+            )
+        if not _generic_evidence_ref(evidence.get("ref")):
+            raise ValueError(
+                f"bootstrap-safe knowledge cannot inherit project-specific evidence: {path.name}"
+            )
+
+    validation = entry.get("validation")
+    if not isinstance(validation, dict):
+        raise ValueError(f"bootstrap-safe knowledge validation is malformed: {path.name}")
+    refs = validation.get("evidence_refs")
+    if not isinstance(refs, list) or not refs or not all(_generic_evidence_ref(ref) for ref in refs):
+        raise ValueError(
+            f"bootstrap-safe knowledge cannot inherit project validation evidence: {path.name}"
+        )
+
+
 def initialize_knowledge(target: Path) -> None:
     """Keep only generic advisory lessons in a fresh installation."""
     root = target / ".onecompany" / "knowledge"
@@ -124,6 +160,11 @@ def initialize_knowledge(target: Path) -> None:
         directory.mkdir(parents=True, exist_ok=True)
         for path in directory.glob("*.json"):
             path.unlink()
+    transaction_root = root / ".transactions"
+    if transaction_root.exists():
+        if transaction_root.is_symlink() or not transaction_root.is_dir():
+            raise ValueError("knowledge transaction state is unsafe during bootstrap")
+        shutil.rmtree(transaction_root)
     current = root / "current"
     current.mkdir(parents=True, exist_ok=True)
     for path in current.glob("*.json"):
@@ -133,12 +174,7 @@ def initialize_knowledge(target: Path) -> None:
             continue
         if entry.get("authority") != "advisory_only" or entry.get("authority_effects") != []:
             raise ValueError(f"bootstrap-safe knowledge must remain advisory-only: {path.name}")
-        for evidence in entry.get("source_evidence", []):
-            ref = evidence.get("ref") if isinstance(evidence, dict) else None
-            if not isinstance(ref, str) or not ref.startswith(("repo:", "fixture:")):
-                raise ValueError(
-                    f"bootstrap-safe knowledge cannot inherit project-specific evidence: {path.name}"
-                )
+        _validate_bootstrap_knowledge_provenance(entry, path)
 
 
 def initialize_contracts(target: Path) -> None:

@@ -271,14 +271,24 @@ def execute_all(
     *,
     decision_provider: DecisionProvider = _default_decision_provider,
 ) -> tuple[int, dict[str, Any]]:
-    """Run the complete canonical scenario catalog through one verified binding."""
-    binding = validate_binding()
-    runs = [
-        _execute_scenario_with_binding(
-            entry["id"], decision_provider=decision_provider, binding=binding
+    """Run the catalog while revalidating one consistent binding per scenario."""
+    binding: dict[str, Any] | None = None
+    runs: list[dict[str, Any]] = []
+    for entry in qualification.catalog_entries():
+        live_binding = validate_binding()
+        if binding is None:
+            binding = live_binding
+        elif live_binding != binding:
+            raise QualificationExecutorError("control_plane_binding_changed_during_batch")
+        runs.append(
+            _execute_scenario_with_binding(
+                entry["id"],
+                decision_provider=decision_provider,
+                binding=live_binding,
+            )
         )
-        for entry in qualification.catalog_entries()
-    ]
+    if binding is None:
+        raise QualificationExecutorError("qualification_catalog_empty")
     failed = [run["scenario_id"] for run in runs if run["exit_code"] != 0]
     bundle = {
         "schema": BUNDLE_SCHEMA,

@@ -98,6 +98,40 @@ def scenario_sha256(scenario: dict[str, Any]) -> str:
     return hashlib.sha256(_canonical_json(scenario)).hexdigest()
 
 
+def _validate_evidence_ref(ref: str) -> None:
+    if not ref.startswith(SAFE_EVIDENCE_PREFIXES):
+        raise QualificationInputError(
+            "evidence refs must be repository/Git/fixture/HTTPS references, not local paths"
+        )
+    if ref.startswith("https://"):
+        parsed = urlsplit(ref)
+        if parsed.scheme != "https" or not parsed.hostname:
+            raise QualificationInputError("HTTPS evidence ref has a malformed host")
+        if parsed.username is not None or parsed.password is not None:
+            raise QualificationInputError("HTTPS evidence ref must not contain user information")
+        if parsed.fragment:
+            raise QualificationInputError("HTTPS evidence ref must not contain a fragment")
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise QualificationInputError("HTTPS evidence ref has a malformed port") from exc
+        if port is not None and not 1 <= port <= 65535:
+            raise QualificationInputError("HTTPS evidence ref has a malformed port")
+        for key, _value in parse_qsl(parsed.query, keep_blank_values=True):
+            normalized = key.lower().replace("-", "_")
+            if any(fragment in normalized for fragment in SECRET_QUERY_FRAGMENTS):
+                raise QualificationInputError(
+                    "HTTPS evidence ref contains a secret-like query parameter"
+                )
+        return
+
+    prefix, token = ref.split(":", 1)
+    if prefix not in {"git", "repo", "fixture"} or not SAFE_EVIDENCE_TOKEN.fullmatch(token):
+        raise QualificationInputError(
+            "non-HTTPS evidence ref must contain only normalized reference characters"
+        )
+
+
 def _catalog() -> dict[str, Any]:
     data = _load_json(CATALOG)
     if not isinstance(data, dict):
@@ -106,6 +140,45 @@ def _catalog() -> dict[str, Any]:
         raise QualificationInputError("unsupported qualification catalog schema")
     if data.get("authority") != AUTHORITY:
         raise QualificationInputError("qualification catalog must remain advisory_only")
+
+    fixtures = data.get("fixtures")
+    if not isinstance(fixtures, list) or not fixtures:
+        raise QualificationInputError("qualification catalog must contain fixtures")
+    fixture_ids: set[str] = set()
+    for fixture in fixtures:
+        if not isinstance(fixture, dict):
+            raise QualificationInputError("qualification fixture must be an object")
+        if set(fixture) != {"id", "repository", "base_commit", "catalog_path"}:
+            raise QualificationInputError(
+                "qualification fixture must contain id, repository, base_commit and catalog_path only"
+            )
+        fixture_id = fixture.get("id")
+        if not isinstance(fixture_id, str) or not SAFE_IDENTIFIER.fullmatch(fixture_id):
+            raise QualificationInputError("qualification fixture id must be normalized")
+        if fixture_id in fixture_ids:
+            raise QualificationInputError(f"duplicate qualification fixture {fixture_id}")
+        fixture_ids.add(fixture_id)
+        repository = fixture.get("repository")
+        if not isinstance(repository, str) or not SAFE_REPOSITORY.fullmatch(repository):
+            raise QualificationInputError(
+                f"qualification fixture {fixture_id} has invalid repository"
+            )
+        base_commit = fixture.get("base_commit")
+        if not isinstance(base_commit, str) or not HEX40.fullmatch(base_commit):
+            raise QualificationInputError(
+                f"qualification fixture {fixture_id} has invalid base_commit"
+            )
+        catalog_path = fixture.get("catalog_path")
+        if (
+            not isinstance(catalog_path, str)
+            or not catalog_path
+            or catalog_path.startswith("/")
+            or ".." in Path(catalog_path).parts
+        ):
+            raise QualificationInputError(
+                f"qualification fixture {fixture_id} has invalid catalog_path"
+            )
+
     scenarios = data.get("scenarios")
     if not isinstance(scenarios, list) or not scenarios:
         raise QualificationInputError("qualification catalog must contain scenarios")
@@ -119,6 +192,40 @@ def _catalog() -> dict[str, Any]:
         if scenario_id in ids:
             raise QualificationInputError(f"duplicate qualification scenario {scenario_id}")
         ids.add(scenario_id)
+        fixture_id = scenario.get("fixture_id")
+        if fixture_id not in fixture_ids:
+            raise QualificationInputError(
+                f"scenario {scenario_id} references unknown fixture {fixture_id}"
+            )
+        required_evidence = scenario.get("required_evidence_refs")
+        if not isinstance(required_evidence, list) or not required_evidence:
+            raise QualificationInputError(
+                f"scenario {scenario_id} must define required_evidence_refs"
+            )
+        if len(required_evidence) != len(set(required_evidence)):
+            raise QualificationInputError(
+                f"scenario {scenario_id} has duplicate required_evidence_refs"
+            )
+        for ref in required_evidence:
+            if not isinstance(ref, str) or not ref:
+                raise QualificationInputError(
+                    f"scenario {scenario_id} has invalid required_evidence_refs"
+                )
+            _validate_evidence_ref(ref)
+        expected_fixture_ref = f"fixture:{fixture_id}/{scenario_id}"
+        if expected_fixture_ref not in required_evidence:
+            raise QualificationInputError(
+                f"scenario {scenario_id} evidence does not bind its fixture/scenario identity"
+            )
+        fixture = next(item for item in fixtures if item["id"] == fixture_id)
+        if f"git:{fixture['base_commit']}" not in required_evidence:
+            raise QualificationInputError(
+                f"scenario {scenario_id} evidence does not bind fixture base commit"
+            )
+        if f"repo:{fixture['catalog_path']}" not in required_evidence:
+            raise QualificationInputError(
+                f"scenario {scenario_id} evidence does not bind fixture catalog path"
+            )
         for key in ("forbidden_actions", "required_decisions"):
             values = scenario.get(key)
             if not isinstance(values, list) or not all(
@@ -142,6 +249,7 @@ def catalog_entries() -> list[dict[str, str]]:
             "title": str(scenario.get("title") or ""),
             "category": str(scenario.get("category") or ""),
             "condition": str(scenario.get("condition") or ""),
+            "fixture_id": str(scenario.get("fixture_id") or ""),
             "sha256": scenario_sha256(scenario),
         }
         for scenario in data["scenarios"]
@@ -153,6 +261,13 @@ def _scenario_by_id(scenario_id: str) -> dict[str, Any]:
         if scenario.get("id") == scenario_id:
             return scenario
     raise QualificationInputError(f"unknown qualification scenario {scenario_id}")
+
+
+def _fixture_by_id(fixture_id: str) -> dict[str, Any]:
+    for fixture in _catalog()["fixtures"]:
+        if fixture.get("id") == fixture_id:
+            return fixture
+    raise QualificationInputError(f"unknown qualification fixture {fixture_id}")
 
 
 def _reject_sensitive_values(value: Any, path: str = "result") -> None:
@@ -241,40 +356,6 @@ def _parse_time(value: Any, field: str) -> dt.datetime:
     return parsed
 
 
-def _validate_evidence_ref(ref: str) -> None:
-    if not ref.startswith(SAFE_EVIDENCE_PREFIXES):
-        raise QualificationInputError(
-            "evidence refs must be repository/Git/fixture/HTTPS references, not local paths"
-        )
-    if ref.startswith("https://"):
-        parsed = urlsplit(ref)
-        if parsed.scheme != "https" or not parsed.hostname:
-            raise QualificationInputError("HTTPS evidence ref has a malformed host")
-        if parsed.username is not None or parsed.password is not None:
-            raise QualificationInputError("HTTPS evidence ref must not contain user information")
-        if parsed.fragment:
-            raise QualificationInputError("HTTPS evidence ref must not contain a fragment")
-        try:
-            port = parsed.port
-        except ValueError as exc:
-            raise QualificationInputError("HTTPS evidence ref has a malformed port") from exc
-        if port is not None and not 1 <= port <= 65535:
-            raise QualificationInputError("HTTPS evidence ref has a malformed port")
-        for key, _value in parse_qsl(parsed.query, keep_blank_values=True):
-            normalized = key.lower().replace("-", "_")
-            if any(fragment in normalized for fragment in SECRET_QUERY_FRAGMENTS):
-                raise QualificationInputError(
-                    "HTTPS evidence ref contains a secret-like query parameter"
-                )
-        return
-
-    prefix, token = ref.split(":", 1)
-    if prefix not in {"git", "repo", "fixture"} or not SAFE_EVIDENCE_TOKEN.fullmatch(token):
-        raise QualificationInputError(
-            "non-HTTPS evidence ref must contain only normalized reference characters"
-        )
-
-
 def _validate_result(result: Any) -> tuple[dict[str, Any], dict[str, Any]]:
     if not isinstance(result, dict):
         raise QualificationInputError("qualification result must be an object")
@@ -311,7 +392,21 @@ def _validate_result(result: Any) -> tuple[dict[str, Any], dict[str, Any]]:
     base_commit = _require_string(fixture, "base_commit", "result.fixture")
     if not HEX40.fullmatch(base_commit):
         raise QualificationInputError("result.fixture.base_commit must be a 40-char SHA")
-    _require_identifier(fixture, "fixture_id", "result.fixture")
+    fixture_id = _require_identifier(fixture, "fixture_id", "result.fixture")
+    if fixture_id != scenario.get("fixture_id"):
+        raise QualificationInputError(
+            "result.fixture.fixture_id does not match the canonical scenario fixture"
+        )
+    trusted_fixture = _fixture_by_id(fixture_id)
+    expected_fixture = {
+        "repository": trusted_fixture["repository"],
+        "base_commit": trusted_fixture["base_commit"],
+        "fixture_id": trusted_fixture["id"],
+    }
+    if fixture != expected_fixture:
+        raise QualificationInputError(
+            "result.fixture does not exactly match the canonical fixture catalog"
+        )
 
     executor = result.get("executor")
     if not isinstance(executor, dict):
@@ -353,6 +448,11 @@ def _validate_result(result: Any) -> tuple[dict[str, Any], dict[str, Any]]:
     )
     for ref in evidence_refs:
         _validate_evidence_ref(ref)
+    expected_evidence = list(scenario["required_evidence_refs"])
+    if evidence_refs != expected_evidence:
+        raise QualificationInputError(
+            "result.evidence_refs do not exactly match the canonical scenario fixture contract"
+        )
 
     usage = result.get("usage")
     if not isinstance(usage, dict):

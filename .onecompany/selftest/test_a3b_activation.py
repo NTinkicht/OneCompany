@@ -94,6 +94,27 @@ class A3bActivationTests(unittest.TestCase):
         self.assertIn("capability_not_verified", result["reasons"])
         self.assertIn("no_configured_execution_mechanism", result["reasons"])
 
+    def test_ledger_activation_failure_preserves_capacity_blocked_contract(self):
+        with (
+            patch.object(dispatch, "emergency_stop_active", return_value=False),
+            patch.object(
+                dispatch,
+                "ledger_enabled",
+                side_effect=RuntimeError("protected-tip-mismatch"),
+            ),
+        ):
+            result = dispatch.resolve_dispatch(
+                "onecompany-local",
+                "implementation",
+                unattended=True,
+                lease_id="lease-not-used",
+            )
+        self.assertEqual(result["status"], "CAPACITY_BLOCKED")
+        self.assertIn(
+            "ledger_unavailable:protected-tip-mismatch",
+            result["reasons"],
+        )
+
     def test_entrypoint_registers_only_reviewed_a3b_mechanisms(self):
         self.assertIs(
             dispatch_execute_entry.ADAPTERS["onecompany-actions-readonly"],

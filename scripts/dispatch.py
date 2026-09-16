@@ -68,8 +68,15 @@ def resolve_dispatch(
             reasons.append("unattended_readiness_not_verified")
 
     if unattended and capability in {"implementation", "ci_remediation"}:
-        if not ledger_enabled():
-            reasons.append("durable_ledger_required_for_unattended_write")
+        try:
+            durable_ledger_enabled = ledger_enabled()
+        except Exception as exc:
+            reasons.append(f"ledger_unavailable:{exc}")
+            durable_ledger_enabled = False
+
+        if not durable_ledger_enabled:
+            if not any(reason.startswith("ledger_unavailable:") for reason in reasons):
+                reasons.append("durable_ledger_required_for_unattended_write")
         elif not lease_id:
             reasons.append("active_lease_id_required_for_unattended_write")
         else:

@@ -1,9 +1,9 @@
 {
   "$schema": "./schemas/ledger.schema.json",
   "schema_version": "1.3",
-  "enabled": false,
-  "issue_number": null,
-  "trusted_publisher_logins": [],
+  "enabled": true,
+  "issue_number": 45,
+  "trusted_publisher_logins": ["NTinkicht"],
   "required_for_autonomous_merge": true,
   "required_for_continuous_autonomy": true,
   "event_format_version": 2,

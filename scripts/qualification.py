@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 import re
+import stat
 import sys
 from pathlib import Path
 from typing import Any
@@ -519,35 +520,130 @@ def evaluate(result: Any) -> tuple[int, dict[str, Any]]:
     return (0 if verdict == "PASS" else 1), provenance
 
 
-def _reject_symlinked_output_root() -> None:
-    """Reject symlinks in the repository-owned artifact-root path."""
+def _secure_output_parts(output: Path) -> tuple[str, ...]:
+    """Return a lexical repo-relative output path confined to OUTPUT_ROOT."""
     try:
-        relative = OUTPUT_ROOT.relative_to(ROOT)
+        root_relative = OUTPUT_ROOT.relative_to(ROOT)
     except ValueError as exc:
         raise QualificationInputError(
             "qualification output root must remain inside the repository"
         ) from exc
-    current = ROOT
-    for part in relative.parts:
-        current = current / part
-        if current.is_symlink():
-            raise QualificationInputError(
-                "qualification output root must not contain symlink components"
-            )
 
-
-def _resolve_output(output: Path) -> Path:
-    _reject_symlinked_output_root()
-    root = OUTPUT_ROOT.resolve(strict=False)
     if output.is_absolute():
-        candidate = output.resolve(strict=False)
+        try:
+            relative = output.relative_to(ROOT)
+        except ValueError as exc:
+            raise QualificationInputError(
+                "qualification output must remain under .onecompany-evidence/qualification"
+            ) from exc
     else:
-        candidate = (ROOT / output).resolve(strict=False)
-    if candidate == root or root not in candidate.parents:
+        relative = output
+
+    parts = tuple(relative.parts)
+    root_parts = tuple(root_relative.parts)
+    if (
+        not parts
+        or any(part in {"", ".", ".."} for part in parts)
+        or len(parts) <= len(root_parts)
+        or parts[: len(root_parts)] != root_parts
+    ):
         raise QualificationInputError(
             "qualification output must remain under .onecompany-evidence/qualification"
         )
-    return candidate
+    return parts
+
+
+def _secure_directory_flags() -> int:
+    """Return fail-closed flags for directory-descriptor traversal."""
+    if (
+        not hasattr(os, "O_DIRECTORY")
+        or not hasattr(os, "O_NOFOLLOW")
+        or os.open not in os.supports_dir_fd
+        or os.mkdir not in os.supports_dir_fd
+    ):
+        raise QualificationInputError(
+            "secure qualification file output is unsupported on this platform; use stdout"
+        )
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    return flags
+
+
+def _open_secure_output_parent(parts: tuple[str, ...]) -> tuple[int, str]:
+    """Open every output ancestor by descriptor without following symlinks."""
+    directory_flags = _secure_directory_flags()
+    try:
+        repo_anchor = ROOT.resolve(strict=True)
+        current_fd = os.open(repo_anchor, directory_flags)
+    except OSError as exc:
+        raise QualificationInputError(
+            f"cannot open repository root for secure qualification output: {exc}"
+        ) from exc
+
+    try:
+        for part in parts[:-1]:
+            try:
+                next_fd = os.open(part, directory_flags, dir_fd=current_fd)
+            except FileNotFoundError:
+                try:
+                    os.mkdir(part, 0o700, dir_fd=current_fd)
+                    next_fd = os.open(part, directory_flags, dir_fd=current_fd)
+                except OSError as exc:
+                    raise QualificationInputError(
+                        f"cannot create secure qualification output directory {part}: {exc}"
+                    ) from exc
+            except OSError as exc:
+                raise QualificationInputError(
+                    f"qualification output path contains an unsafe directory component {part}: {exc}"
+                ) from exc
+            os.close(current_fd)
+            current_fd = next_fd
+        return current_fd, parts[-1]
+    except Exception:
+        os.close(current_fd)
+        raise
+
+
+def _open_secure_output_file(
+    parent_fd: int,
+    filename: str,
+    *,
+    overwrite: bool,
+) -> int:
+    """Open the final artifact without following links or truncating before validation."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW
+    if hasattr(os, "O_CLOEXEC"):
+        flags |= os.O_CLOEXEC
+    if not overwrite:
+        flags |= os.O_EXCL
+    try:
+        fd = os.open(filename, flags, 0o600, dir_fd=parent_fd)
+    except FileExistsError as exc:
+        raise QualificationInputError(
+            "qualification output already exists; pass --overwrite to replace it"
+        ) from exc
+    except OSError as exc:
+        raise QualificationInputError(
+            f"cannot open qualification output safely: {exc}"
+        ) from exc
+
+    try:
+        metadata = os.fstat(fd)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise QualificationInputError(
+                "qualification output must be a regular file"
+            )
+        if metadata.st_nlink != 1:
+            raise QualificationInputError(
+                "qualification output must not have multiple hard links"
+            )
+        if overwrite:
+            os.ftruncate(fd, 0)
+        return fd
+    except Exception:
+        os.close(fd)
+        raise
 
 
 def _write_or_print(
@@ -560,36 +656,13 @@ def _write_or_print(
     if output is None:
         print(text, end="")
         return
-    target = _resolve_output(output)
-    target.parent.mkdir(parents=True, exist_ok=True)
-    _reject_symlinked_output_root()
-    resolved_parent = target.parent.resolve()
-    root = OUTPUT_ROOT.resolve(strict=False)
-    if resolved_parent != root and root not in resolved_parent.parents:
-        raise QualificationInputError(
-            "qualification output parent escaped the artifact directory"
-        )
-    if target.is_symlink():
-        raise QualificationInputError(
-            "qualification output file must not be a symlink"
-        )
-    if target.exists() and not overwrite:
-        raise QualificationInputError(
-            "qualification output already exists; pass --overwrite to replace it"
-        )
 
-    flags = os.O_WRONLY | os.O_CREAT
-    flags |= os.O_TRUNC if overwrite else os.O_EXCL
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
+    parts = _secure_output_parts(output)
+    parent_fd, filename = _open_secure_output_parent(parts)
     try:
-        fd = os.open(target, flags, 0o600)
-    except FileExistsError as exc:
-        raise QualificationInputError(
-            "qualification output already exists; pass --overwrite to replace it"
-        ) from exc
-    except OSError as exc:
-        raise QualificationInputError(f"cannot open qualification output safely: {exc}") from exc
+        fd = _open_secure_output_file(parent_fd, filename, overwrite=overwrite)
+    finally:
+        os.close(parent_fd)
 
     try:
         with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as handle:

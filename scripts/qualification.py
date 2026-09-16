@@ -667,6 +667,11 @@ def _write_open_fd(fd: int, text: str) -> None:
         raise QualificationInputError(f"cannot write qualification output: {exc}") from exc
 
 
+def _same_inode(left: os.stat_result, right: os.stat_result) -> bool:
+    """Return whether two stat snapshots identify the same filesystem inode."""
+    return left.st_dev == right.st_dev and left.st_ino == right.st_ino
+
+
 def _atomic_replace_output(parent_fd: int, filename: str, text: str) -> None:
     """Replace an artifact entry atomically without mutating the prior inode."""
     if os.rename not in os.supports_dir_fd or os.unlink not in os.supports_dir_fd:
@@ -681,6 +686,7 @@ def _atomic_replace_output(parent_fd: int, filename: str, text: str) -> None:
 
     temp_name: str | None = None
     fd: int | None = None
+    validation_fd: int | None = None
     for _attempt in range(8):
         candidate = f".{filename}.tmp-{secrets.token_hex(16)}"
         try:
@@ -704,9 +710,34 @@ def _atomic_replace_output(parent_fd: int, filename: str, text: str) -> None:
             raise QualificationInputError(
                 "qualification replacement file failed inode validation"
             )
+        try:
+            validation_fd = os.dup(fd)
+        except OSError as exc:
+            raise QualificationInputError(
+                f"cannot retain qualification replacement identity: {exc}"
+            ) from exc
+
         write_fd = fd
         fd = None
         _write_open_fd(write_fd, text)
+
+        before_rename = os.fstat(validation_fd)
+        try:
+            temp_entry = os.stat(temp_name, dir_fd=parent_fd, follow_symlinks=False)
+        except (OSError, TypeError, NotImplementedError) as exc:
+            raise QualificationInputError(
+                f"cannot revalidate qualification replacement before publish: {exc}"
+            ) from exc
+        if (
+            not stat.S_ISREG(before_rename.st_mode)
+            or before_rename.st_nlink != 1
+            or not _same_inode(before_rename, temp_entry)
+            or temp_entry.st_nlink != 1
+        ):
+            raise QualificationInputError(
+                "qualification replacement file became multiply linked or changed before publish"
+            )
+
         try:
             os.rename(
                 temp_name,
@@ -718,10 +749,41 @@ def _atomic_replace_output(parent_fd: int, filename: str, text: str) -> None:
             raise QualificationInputError(
                 f"cannot atomically replace qualification output: {exc}"
             ) from exc
+
+        after_rename = os.fstat(validation_fd)
+        try:
+            final_entry = os.stat(filename, dir_fd=parent_fd, follow_symlinks=False)
+        except (OSError, TypeError, NotImplementedError) as exc:
+            raise QualificationInputError(
+                f"cannot verify published qualification output: {exc}"
+            ) from exc
+        publication_safe = (
+            stat.S_ISREG(after_rename.st_mode)
+            and after_rename.st_nlink == 1
+            and final_entry.st_nlink == 1
+            and _same_inode(after_rename, final_entry)
+        )
+        if not publication_safe:
+            if _same_inode(after_rename, final_entry):
+                try:
+                    os.unlink(filename, dir_fd=parent_fd)
+                except OSError:
+                    pass
+            raise QualificationInputError(
+                "published qualification output failed final inode/link validation"
+            )
         temp_name = None
     finally:
         if fd is not None:
-            os.close(fd)
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        if validation_fd is not None:
+            try:
+                os.close(validation_fd)
+            except OSError:
+                pass
         if temp_name is not None:
             try:
                 os.unlink(temp_name, dir_fd=parent_fd)

@@ -76,6 +76,40 @@ class IntegrationPromotionRemediationTests(unittest.TestCase):
                 binding=stale,
             )
 
+    def test_batch_revalidates_binding_before_each_scenario(self):
+        binding = qualification_executor.validate_binding()
+        changed = copy.deepcopy(binding)
+        changed["actor"] = "chatgpt"
+        catalog = [{"id": "Q-BUDGET-001"}, {"id": "Q-LEASE-001"}]
+        first_run = {
+            "scenario_id": "Q-BUDGET-001",
+            "condition": "one_shot",
+            "turns_executed": 1,
+            "exit_code": 0,
+            "provenance": {},
+        }
+        with mock.patch.object(
+            qualification_executor.qualification,
+            "catalog_entries",
+            return_value=catalog,
+        ), mock.patch.object(
+            qualification_executor,
+            "validate_binding",
+            side_effect=[binding, changed],
+        ) as validate, mock.patch.object(
+            qualification_executor,
+            "_execute_scenario_with_binding",
+            return_value=first_run,
+        ) as execute:
+            with self.assertRaisesRegex(
+                qualification_executor.QualificationExecutorError,
+                "control_plane_binding_changed_during_batch",
+            ):
+                qualification_executor.execute_all()
+
+        self.assertEqual(validate.call_count, 2)
+        self.assertEqual(execute.call_count, 1)
+
     def test_intermediate_decision_drift_cannot_be_erased_by_later_recovery(self):
         scenario = qualification._scenario_by_id("Q-CAPABILITY-001")
 

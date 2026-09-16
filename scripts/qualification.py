@@ -672,6 +672,91 @@ def _same_inode(left: os.stat_result, right: os.stat_result) -> bool:
     return left.st_dev == right.st_dev and left.st_ino == right.st_ino
 
 
+def _write_new_output(parent_fd: int, filename: str, text: str) -> None:
+    """Create, write and revalidate a new artifact before accepting publication."""
+    if os.unlink not in os.supports_dir_fd:
+        raise QualificationInputError(
+            "secure qualification creation is unsupported on this platform; use stdout"
+        )
+
+    fd: int | None = _open_secure_output_file(parent_fd, filename)
+    validation_fd: int | None = None
+    try:
+        try:
+            validation_fd = os.dup(fd)
+        except OSError as exc:
+            raise QualificationInputError(
+                f"cannot retain qualification output identity: {exc}"
+            ) from exc
+
+        before_write = os.fstat(validation_fd)
+        try:
+            initial_entry = os.stat(filename, dir_fd=parent_fd, follow_symlinks=False)
+        except (OSError, TypeError, NotImplementedError) as exc:
+            raise QualificationInputError(
+                f"cannot revalidate qualification output before write: {exc}"
+            ) from exc
+        if (
+            not stat.S_ISREG(before_write.st_mode)
+            or before_write.st_nlink != 1
+            or initial_entry.st_nlink != 1
+            or not _same_inode(before_write, initial_entry)
+        ):
+            raise QualificationInputError(
+                "qualification output became multiply linked or changed before write"
+            )
+
+        write_fd = fd
+        fd = None
+        _write_open_fd(write_fd, text)
+
+        after_write = os.fstat(validation_fd)
+        try:
+            final_entry = os.stat(filename, dir_fd=parent_fd, follow_symlinks=False)
+        except (OSError, TypeError, NotImplementedError) as exc:
+            raise QualificationInputError(
+                f"cannot verify published qualification output: {exc}"
+            ) from exc
+        publication_safe = (
+            stat.S_ISREG(after_write.st_mode)
+            and after_write.st_nlink == 1
+            and final_entry.st_nlink == 1
+            and _same_inode(after_write, final_entry)
+        )
+        if not publication_safe:
+            if _same_inode(after_write, final_entry):
+                try:
+                    os.unlink(filename, dir_fd=parent_fd)
+                except OSError:
+                    pass
+            raise QualificationInputError(
+                "published qualification output failed final inode/link validation"
+            )
+    finally:
+        if fd is not None:
+            try:
+                metadata = os.fstat(fd)
+                try:
+                    entry = os.stat(filename, dir_fd=parent_fd, follow_symlinks=False)
+                except (OSError, TypeError, NotImplementedError):
+                    entry = None
+                if entry is not None and _same_inode(metadata, entry):
+                    try:
+                        os.unlink(filename, dir_fd=parent_fd)
+                    except OSError:
+                        pass
+            finally:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+        if validation_fd is not None:
+            try:
+                os.close(validation_fd)
+            except OSError:
+                pass
+
+
 def _atomic_replace_output(parent_fd: int, filename: str, text: str) -> None:
     """Replace an artifact entry atomically without mutating the prior inode."""
     if os.rename not in os.supports_dir_fd or os.unlink not in os.supports_dir_fd:
@@ -810,8 +895,7 @@ def _write_or_print(
         if overwrite:
             _atomic_replace_output(parent_fd, filename, text)
         else:
-            fd = _open_secure_output_file(parent_fd, filename)
-            _write_open_fd(fd, text)
+            _write_new_output(parent_fd, filename, text)
     finally:
         os.close(parent_fd)
 

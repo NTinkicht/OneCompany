@@ -114,6 +114,33 @@ def write_json(path: Path, value: dict) -> None:
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
 
 
+def initialize_knowledge(target: Path) -> None:
+    """Keep only generic advisory lessons in a fresh installation."""
+    root = target / ".onecompany" / "knowledge"
+    if not root.exists():
+        return
+    for state in ("candidate", "archived"):
+        directory = root / state
+        directory.mkdir(parents=True, exist_ok=True)
+        for path in directory.glob("*.json"):
+            path.unlink()
+    current = root / "current"
+    current.mkdir(parents=True, exist_ok=True)
+    for path in current.glob("*.json"):
+        entry = json.loads(path.read_text(encoding="utf-8"))
+        if entry.get("bootstrap_safe") is not True:
+            path.unlink()
+            continue
+        if entry.get("authority") != "advisory_only" or entry.get("authority_effects") != []:
+            raise ValueError(f"bootstrap-safe knowledge must remain advisory-only: {path.name}")
+        for evidence in entry.get("source_evidence", []):
+            ref = evidence.get("ref") if isinstance(evidence, dict) else None
+            if not isinstance(ref, str) or not ref.startswith(("repo:", "fixture:")):
+                raise ValueError(
+                    f"bootstrap-safe knowledge cannot inherit project-specific evidence: {path.name}"
+                )
+
+
 def initialize_contracts(target: Path) -> None:
     source_dir = ROOT / ".onecompany" / "templates" / "contracts"
     for source_name, target_name in CONTRACTS.items():
@@ -229,6 +256,7 @@ def initialize_control_plane(
         },
     )
     write_json(target / ".onecompany" / "state.json", INITIAL_STATE)
+    initialize_knowledge(target)
 
 
 def main() -> int:
@@ -298,9 +326,9 @@ def main() -> int:
         f"code owner: {code_owner}; root principal: {root_principal}"
     )
     print(
-        "Portfolio/requirements/acceptance-criteria/risk-register/queue/state and durable "
-        "coordination bindings were reset; source work history was not copied. "
-        "Unattended paths remain disabled."
+        "Portfolio/requirements/acceptance-criteria/risk-register/queue/state, durable "
+        "coordination bindings, and project-specific learning history were reset. "
+        "Only bootstrap-safe generic advisory lessons were retained; unattended paths remain disabled."
     )
     print(
         "Run `python onecompany.py audit-github` after pushing to verify the selected "

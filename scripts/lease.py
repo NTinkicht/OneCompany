@@ -105,11 +105,11 @@ def authoritative(_state: dict | None = None) -> tuple[list[dict], list[dict]]:
     )
 
 
-def _bind_core() -> None:
+def _bind_core(post_event_fn=None) -> None:
     core.derive = derive
     core.ledger_enabled = ledger_enabled
     core.list_events = list_events
-    core.post_event = post_event
+    core.post_event = post_event if post_event_fn is None else post_event_fn
     core.trusted_pr_base = trusted_pr_base
     core.trusted_admission_context = trusted_admission_context
     core._durable_dependency_check = _durable_dependency_check
@@ -196,6 +196,15 @@ def _reconcile_cache(pr: int | None = None) -> dict[str, Any]:
 
 def sync_cache(_state: dict | None = None, pr: int | None = None) -> None:
     _reconcile_cache(pr)
+
+
+def _indeterminate(operation: str, exc: Exception | str) -> int:
+    """Report mutation uncertainty without inviting an unsafe automatic retry."""
+    print(
+        f"INDETERMINATE: {operation} mutation may have succeeded; "
+        f"reconcile before retry: {exc}"
+    )
+    return 3
 
 
 def _local_acquire(args: argparse.Namespace) -> int:
@@ -286,12 +295,15 @@ def _local_acquire(args: argparse.Namespace) -> int:
         candidate,
         work_map=work_map,
     )
-    lifecycle.append_coordination_event(
-        "ROLE_LEASE_ASSIGNED",
-        args.actor,
-        lease_payload(lease),
-    )
-    after = lifecycle.coordination_view()
+    try:
+        lifecycle.append_coordination_event(
+            "ROLE_LEASE_ASSIGNED",
+            args.actor,
+            lease_payload(lease),
+        )
+        after = lifecycle.coordination_view()
+    except RuntimeError as exc:
+        return _indeterminate("acquire", exc)
     winner = next(
         (
             item
@@ -304,7 +316,10 @@ def _local_acquire(args: argparse.Namespace) -> int:
         print("REFUSED: lease lost canonical admission race")
         return 2
 
-    _reconcile_cache(args.pr)
+    try:
+        _reconcile_cache(args.pr)
+    except RuntimeError as exc:
+        return _indeterminate("acquire", exc)
     limit = int(
         planning.get("parallel_execution", {}).get(
             "max_concurrent_implementation_streams",
@@ -330,16 +345,19 @@ def _local_release(args: argparse.Namespace) -> int:
     if old is None:
         print("REFUSED: active lease not found")
         return 2
-    lifecycle.append_coordination_event(
-        "ROLE_LEASE_RELEASED",
-        str(old.get("actor") or "system"),
-        {
-            "lease_id": args.lease_id,
-            "pr": old.get("pr"),
-            "reason": args.reason,
-        },
-    )
-    _reconcile_cache(old.get("pr"))
+    try:
+        lifecycle.append_coordination_event(
+            "ROLE_LEASE_RELEASED",
+            str(old.get("actor") or "system"),
+            {
+                "lease_id": args.lease_id,
+                "pr": old.get("pr"),
+                "reason": args.reason,
+            },
+        )
+        _reconcile_cache(old.get("pr"))
+    except RuntimeError as exc:
+        return _indeterminate("release", exc)
     print("LEASE RELEASED")
     return 0
 
@@ -428,12 +446,15 @@ def _local_transfer(args: argparse.Namespace) -> int:
         "old_actor": old.get("actor"),
         "reason": args.reason,
     }
-    lifecycle.append_coordination_event(
-        "ROLE_LEASE_TRANSFERRED",
-        args.actor,
-        payload,
-    )
-    after = lifecycle.coordination_view()
+    try:
+        lifecycle.append_coordination_event(
+            "ROLE_LEASE_TRANSFERRED",
+            args.actor,
+            payload,
+        )
+        after = lifecycle.coordination_view()
+    except RuntimeError as exc:
+        return _indeterminate("transfer", exc)
     winner = next(
         (
             entry
@@ -446,7 +467,10 @@ def _local_transfer(args: argparse.Namespace) -> int:
         print("REFUSED: transfer did not become canonical")
         return 2
 
-    _reconcile_cache(old.get("pr"))
+    try:
+        _reconcile_cache(old.get("pr"))
+    except RuntimeError as exc:
+        return _indeterminate("transfer", exc)
     print(
         f"LEASE FAILOVER {old.get('actor')} -> {args.actor}; "
         f"WU={old.get('work_unit')} branch={old.get('branch')} pr={old.get('pr')}; "
@@ -472,7 +496,7 @@ def _durable_lease_base_stop(lease: dict[str, Any]) -> tuple[bool, str | None]:
 
 
 def _fail_closed_command(operation: str):
-    """Translate coordination RuntimeError failures into deterministic CLI refusal."""
+    """Translate pre-mutation RuntimeError failures into deterministic refusal."""
 
     def decorate(func):
         def guarded(args):
@@ -487,6 +511,41 @@ def _fail_closed_command(operation: str):
         return guarded
 
     return decorate
+
+
+def _run_durable_core_command(
+    operation: str,
+    func,
+    args: argparse.Namespace,
+    reconcile_pr: int | None,
+) -> int:
+    """Track durable publication so post-mutation failures cannot look retry-safe."""
+    mutation_attempted = False
+
+    def tracked_post_event(*event_args, **event_kwargs):
+        nonlocal mutation_attempted
+        mutation_attempted = True
+        return post_event(*event_args, **event_kwargs)
+
+    _bind_core(tracked_post_event)
+    try:
+        result = func(args)
+    except RuntimeError as exc:
+        if mutation_attempted:
+            return _indeterminate(operation, exc)
+        raise
+    if result != 0:
+        if mutation_attempted:
+            return _indeterminate(
+                operation,
+                f"durable mutation was attempted but core returned exit {result}",
+            )
+        return result
+    try:
+        _reconcile_cache(reconcile_pr)
+    except RuntimeError as exc:
+        return _indeterminate(operation, exc)
+    return 0
 
 
 @_fail_closed_command("renew")
@@ -544,12 +603,15 @@ def renew(args: argparse.Namespace) -> int:
         return 2
 
     actor = str(lease.get("actor") or "")
-    lifecycle.append_coordination_event(
-        lifecycle.RENEW_EVENT,
-        actor,
-        lifecycle.renewal_payload(lease, args.new_head),
-    )
-    after = lifecycle.coordination_view()
+    try:
+        lifecycle.append_coordination_event(
+            lifecycle.RENEW_EVENT,
+            actor,
+            lifecycle.renewal_payload(lease, args.new_head),
+        )
+        after = lifecycle.coordination_view()
+    except RuntimeError as exc:
+        return _indeterminate("renew", exc)
     renewed = next(
         (
             item
@@ -565,7 +627,10 @@ def renew(args: argparse.Namespace) -> int:
         print("REFUSED: renewal did not become canonical")
         return 2
 
-    _reconcile_cache(lease.get("pr"))
+    try:
+        _reconcile_cache(lease.get("pr"))
+    except RuntimeError as exc:
+        return _indeterminate("renew", exc)
     print(
         f"LEASE RENEWED {args.lease_id}; expires_at={renewed.get('expires_at')}"
     )
@@ -587,25 +652,31 @@ def reap(args: argparse.Namespace) -> int:
         print("NO EXPIRED LEASES TO REAP")
         return 0
 
-    for lease in expired:
-        lifecycle.append_coordination_event(
-            lifecycle.REAP_EVENT,
-            args.actor,
-            lifecycle.reap_payload(lease, args.reason),
-            now=now,
-        )
-    after = lifecycle.coordination_view(now=now)
+    try:
+        for lease in expired:
+            lifecycle.append_coordination_event(
+                lifecycle.REAP_EVENT,
+                args.actor,
+                lifecycle.reap_payload(lease, args.reason),
+                now=now,
+            )
+        after = lifecycle.coordination_view(now=now)
+    except RuntimeError as exc:
+        return _indeterminate("reap", exc)
     remaining = {
         str(item.get("id"))
         for item in after.get("expired_leases", [])
         if not args.lease_id or item.get("id") == args.lease_id
     }
-    _reconcile_cache(None)
     if remaining:
-        print(
-            f"REFUSED: reap did not become canonical for {sorted(remaining)}"
+        return _indeterminate(
+            "reap",
+            f"reap did not become canonical for {sorted(remaining)}",
         )
-        return 2
+    try:
+        _reconcile_cache(None)
+    except RuntimeError as exc:
+        return _indeterminate("reap", exc)
     print(f"LEASES REAPED {len(expired)}")
     return 0
 
@@ -613,33 +684,27 @@ def reap(args: argparse.Namespace) -> int:
 @_fail_closed_command("acquire")
 def acquire(args: argparse.Namespace) -> int:
     if ledger_enabled():
-        _bind_core()
-        result = core.acquire(args)
-        if result == 0:
-            _reconcile_cache(args.pr)
-        return result
+        return _run_durable_core_command(
+            "acquire", core.acquire, args, args.pr
+        )
     return _local_acquire(args)
 
 
 @_fail_closed_command("release")
 def release(args: argparse.Namespace) -> int:
     if ledger_enabled():
-        _bind_core()
-        result = core.release(args)
-        if result == 0:
-            _reconcile_cache(None)
-        return result
+        return _run_durable_core_command(
+            "release", core.release, args, None
+        )
     return _local_release(args)
 
 
 @_fail_closed_command("transfer")
 def transfer(args: argparse.Namespace) -> int:
     if ledger_enabled():
-        _bind_core()
-        result = core.transfer(args)
-        if result == 0:
-            _reconcile_cache(None)
-        return result
+        return _run_durable_core_command(
+            "transfer", core.transfer, args, None
+        )
     return _local_transfer(args)
 
 

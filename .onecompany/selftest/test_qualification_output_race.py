@@ -103,22 +103,26 @@ class QualificationOutputRaceTests(unittest.TestCase):
             artifact_root = repo_root / ".onecompany-evidence" / "qualification"
             target = artifact_root / "run" / "config.json"
             swapped = artifact_root / "run-original"
-            real_open = qualification.os.open
+            real_open_file = qualification._open_secure_output_file
             race_triggered = False
 
-            def racing_open(path, flags, mode=0o777, *, dir_fd=None):
+            def racing_open_file(parent_fd, filename, *, overwrite):
                 nonlocal race_triggered
-                if path == "config.json" and dir_fd is not None and not race_triggered:
+                if not race_triggered:
                     race_triggered = True
                     run_dir = artifact_root / "run"
                     run_dir.rename(swapped)
                     run_dir.symlink_to(control_dir, target_is_directory=True)
-                return real_open(path, flags, mode, dir_fd=dir_fd)
+                return real_open_file(parent_fd, filename, overwrite=overwrite)
 
             with (
                 patch.object(qualification, "ROOT", repo_root),
                 patch.object(qualification, "OUTPUT_ROOT", artifact_root),
-                patch.object(qualification.os, "open", side_effect=racing_open),
+                patch.object(
+                    qualification,
+                    "_open_secure_output_file",
+                    side_effect=racing_open_file,
+                ),
             ):
                 qualification._write_or_print(
                     {"safe": True},

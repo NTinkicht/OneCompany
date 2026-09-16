@@ -10,15 +10,20 @@ import re
 import sys
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl, urlsplit
 
-from onecompany_lib import CONTROL
+from onecompany_lib import CONTROL, ROOT
 
 CATALOG = CONTROL / "qualification" / "scenarios.json"
+OUTPUT_ROOT = ROOT / ".onecompany-evidence" / "qualification"
 RESULT_SCHEMA = "onecompany-qualification-result-v1"
 PROVENANCE_SCHEMA = "onecompany-qualification-provenance-v1"
 CATALOG_SCHEMA = "onecompany-qualification-scenarios-v1"
 AUTHORITY = "advisory_only"
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
+SAFE_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:@/+\-]{0,127}$")
+SAFE_REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
+SAFE_EVIDENCE_TOKEN = re.compile(r"^[A-Za-z0-9._:@/+\-]{1,512}$")
 SAFE_EVIDENCE_PREFIXES = ("https://", "git:", "repo:", "fixture:")
 PROHIBITED_KEY_FRAGMENTS = (
     "credential",
@@ -29,6 +34,27 @@ PROHIBITED_KEY_FRAGMENTS = (
     "hidden_reasoning",
     "filesystem_path",
     "absolute_path",
+)
+SECRET_QUERY_FRAGMENTS = (
+    "token",
+    "secret",
+    "password",
+    "passwd",
+    "credential",
+    "api_key",
+    "apikey",
+    "signature",
+    "access_key",
+    "auth",
+)
+SENSITIVE_VALUE_PATTERNS = (
+    re.compile(r"(?i)\b(?:bearer|basic)\s+[A-Za-z0-9._~+/=-]{12,}"),
+    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{20,}\b"),
+    re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}\b"),
+    re.compile(r"\bsk-[A-Za-z0-9_-]{16,}\b"),
+    re.compile(
+        r"(?i)(?:api[_-]?key|access[_-]?token|password|secret)\s*[:=]\s*\S+"
+    ),
 )
 ALLOWED_RESULT_KEYS = {
     "schema",
@@ -101,6 +127,10 @@ def _catalog() -> dict[str, Any]:
                 raise QualificationInputError(
                     f"scenario {scenario_id} has invalid {key}"
                 )
+            if not all(SAFE_IDENTIFIER.fullmatch(value) for value in values):
+                raise QualificationInputError(
+                    f"scenario {scenario_id} has non-normalized {key}"
+                )
     return data
 
 
@@ -125,6 +155,20 @@ def _scenario_by_id(scenario_id: str) -> dict[str, Any]:
     raise QualificationInputError(f"unknown qualification scenario {scenario_id}")
 
 
+def _reject_sensitive_values(value: Any, path: str = "result") -> None:
+    if isinstance(value, str):
+        if any(pattern.search(value) for pattern in SENSITIVE_VALUE_PATTERNS):
+            raise QualificationInputError(
+                f"privacy-sensitive provenance value is forbidden: {path}"
+            )
+    elif isinstance(value, dict):
+        for key, nested in value.items():
+            _reject_sensitive_values(nested, f"{path}.{key}")
+    elif isinstance(value, list):
+        for index, nested in enumerate(value):
+            _reject_sensitive_values(nested, f"{path}[{index}]")
+
+
 def _reject_sensitive_keys(value: Any, path: str = "result") -> None:
     if isinstance(value, dict):
         for key, nested in value.items():
@@ -146,6 +190,15 @@ def _require_string(mapping: dict[str, Any], key: str, context: str) -> str:
     return value
 
 
+def _require_identifier(mapping: dict[str, Any], key: str, context: str) -> str:
+    value = _require_string(mapping, key, context)
+    if not SAFE_IDENTIFIER.fullmatch(value):
+        raise QualificationInputError(
+            f"{context}.{key} must be a normalized identifier"
+        )
+    return value
+
+
 def _string_list(value: Any, field: str, *, nonempty: bool = False) -> list[str]:
     if not isinstance(value, list) or not all(
         isinstance(item, str) and item for item in value
@@ -156,6 +209,24 @@ def _string_list(value: Any, field: str, *, nonempty: bool = False) -> list[str]
     if len(value) != len(set(value)):
         raise QualificationInputError(f"{field} must not contain duplicates")
     return value
+
+
+def _catalog_labels(
+    value: Any,
+    field: str,
+    allowed: list[str],
+) -> list[str]:
+    labels = _string_list(value, field)
+    allowed_set = set(allowed)
+    unsupported = sorted(set(labels) - allowed_set)
+    if unsupported:
+        raise QualificationInputError(
+            f"{field} contains labels outside the canonical scenario catalog: "
+            + ",".join(unsupported)
+        )
+    if not all(SAFE_IDENTIFIER.fullmatch(label) for label in labels):
+        raise QualificationInputError(f"{field} contains a non-normalized label")
+    return labels
 
 
 def _parse_time(value: Any, field: str) -> dt.datetime:
@@ -170,10 +241,45 @@ def _parse_time(value: Any, field: str) -> dt.datetime:
     return parsed
 
 
+def _validate_evidence_ref(ref: str) -> None:
+    if not ref.startswith(SAFE_EVIDENCE_PREFIXES):
+        raise QualificationInputError(
+            "evidence refs must be repository/Git/fixture/HTTPS references, not local paths"
+        )
+    if ref.startswith("https://"):
+        parsed = urlsplit(ref)
+        if parsed.scheme != "https" or not parsed.hostname:
+            raise QualificationInputError("HTTPS evidence ref has a malformed host")
+        if parsed.username is not None or parsed.password is not None:
+            raise QualificationInputError("HTTPS evidence ref must not contain user information")
+        if parsed.fragment:
+            raise QualificationInputError("HTTPS evidence ref must not contain a fragment")
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise QualificationInputError("HTTPS evidence ref has a malformed port") from exc
+        if port is not None and not 1 <= port <= 65535:
+            raise QualificationInputError("HTTPS evidence ref has a malformed port")
+        for key, _value in parse_qsl(parsed.query, keep_blank_values=True):
+            normalized = key.lower().replace("-", "_")
+            if any(fragment in normalized for fragment in SECRET_QUERY_FRAGMENTS):
+                raise QualificationInputError(
+                    "HTTPS evidence ref contains a secret-like query parameter"
+                )
+        return
+
+    prefix, token = ref.split(":", 1)
+    if prefix not in {"git", "repo", "fixture"} or not SAFE_EVIDENCE_TOKEN.fullmatch(token):
+        raise QualificationInputError(
+            "non-HTTPS evidence ref must contain only normalized reference characters"
+        )
+
+
 def _validate_result(result: Any) -> tuple[dict[str, Any], dict[str, Any]]:
     if not isinstance(result, dict):
         raise QualificationInputError("qualification result must be an object")
     _reject_sensitive_keys(result)
+    _reject_sensitive_values(result)
     unknown = sorted(set(result) - ALLOWED_RESULT_KEYS)
     if unknown:
         raise QualificationInputError(
@@ -197,11 +303,15 @@ def _validate_result(result: Any) -> tuple[dict[str, Any], dict[str, Any]]:
         raise QualificationInputError(
             "result.fixture must contain repository, base_commit and fixture_id only"
         )
-    _require_string(fixture, "repository", "result.fixture")
+    repository = _require_string(fixture, "repository", "result.fixture")
+    if not SAFE_REPOSITORY.fullmatch(repository):
+        raise QualificationInputError(
+            "result.fixture.repository must be a normalized owner/repository identifier"
+        )
     base_commit = _require_string(fixture, "base_commit", "result.fixture")
     if not HEX40.fullmatch(base_commit):
         raise QualificationInputError("result.fixture.base_commit must be a 40-char SHA")
-    _require_string(fixture, "fixture_id", "result.fixture")
+    _require_identifier(fixture, "fixture_id", "result.fixture")
 
     executor = result.get("executor")
     if not isinstance(executor, dict):
@@ -212,7 +322,7 @@ def _validate_result(result: Any) -> tuple[dict[str, Any], dict[str, Any]]:
             "result.executor must contain actor, mechanism, model_label and harness_version only"
         )
     for key in sorted(expected_executor_keys):
-        _require_string(executor, key, "result.executor")
+        _require_identifier(executor, key, "result.executor")
 
     attempt = result.get("attempt")
     retry = result.get("retry")
@@ -226,18 +336,23 @@ def _validate_result(result: Any) -> tuple[dict[str, Any], dict[str, Any]]:
     if ended < started:
         raise QualificationInputError("result.ended_at cannot precede started_at")
 
-    _string_list(result.get("actions"), "result.actions")
-    _string_list(result.get("decisions"), "result.decisions")
+    _catalog_labels(
+        result.get("actions"),
+        "result.actions",
+        list(scenario["forbidden_actions"]),
+    )
+    _catalog_labels(
+        result.get("decisions"),
+        "result.decisions",
+        list(scenario["required_decisions"]),
+    )
     evidence_refs = _string_list(
         result.get("evidence_refs"),
         "result.evidence_refs",
         nonempty=True,
     )
     for ref in evidence_refs:
-        if not ref.startswith(SAFE_EVIDENCE_PREFIXES):
-            raise QualificationInputError(
-                "evidence refs must be repository/Git/fixture/HTTPS references, not local paths"
-            )
+        _validate_evidence_ref(ref)
 
     usage = result.get("usage")
     if not isinstance(usage, dict):
@@ -246,7 +361,7 @@ def _validate_result(result: Any) -> tuple[dict[str, Any], dict[str, Any]]:
         raise QualificationInputError(
             "result.usage must contain input_tokens, output_tokens, source and complete only"
         )
-    _require_string(usage, "source", "result.usage")
+    _require_identifier(usage, "source", "result.usage")
     if not isinstance(usage.get("complete"), bool):
         raise QualificationInputError("result.usage.complete must be boolean")
     for key in ("input_tokens", "output_tokens"):
@@ -303,13 +418,53 @@ def evaluate(result: Any) -> tuple[int, dict[str, Any]]:
     return (0 if verdict == "PASS" else 1), provenance
 
 
-def _write_or_print(value: Any, output: Path | None) -> None:
+def _resolve_output(output: Path) -> Path:
+    root = OUTPUT_ROOT.resolve()
+    if output.is_absolute():
+        candidate = output.resolve(strict=False)
+    else:
+        candidate = (ROOT / output).resolve(strict=False)
+    if candidate == root or root not in candidate.parents:
+        raise QualificationInputError(
+            "qualification output must remain under .onecompany-evidence/qualification"
+        )
+    return candidate
+
+
+def _write_or_print(
+    value: Any,
+    output: Path | None,
+    *,
+    overwrite: bool = False,
+) -> None:
     text = json.dumps(value, indent=2, sort_keys=True) + "\n"
     if output is None:
         print(text, end="")
         return
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(text, encoding="utf-8")
+    target = _resolve_output(output)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    # Re-resolve after directory creation so an existing symlinked parent cannot
+    # redirect the write outside the dedicated artifact tree.
+    resolved_parent = target.parent.resolve()
+    root = OUTPUT_ROOT.resolve()
+    if resolved_parent != root and root not in resolved_parent.parents:
+        raise QualificationInputError(
+            "qualification output parent escaped the artifact directory"
+        )
+    if target.exists() and not overwrite:
+        raise QualificationInputError(
+            "qualification output already exists; pass --overwrite to replace it"
+        )
+    mode = "w" if overwrite else "x"
+    try:
+        with target.open(mode, encoding="utf-8", newline="\n") as handle:
+            handle.write(text)
+    except FileExistsError as exc:
+        raise QualificationInputError(
+            "qualification output already exists; pass --overwrite to replace it"
+        ) from exc
+    except OSError as exc:
+        raise QualificationInputError(f"cannot write qualification output: {exc}") from exc
 
 
 def main() -> int:
@@ -320,6 +475,7 @@ def main() -> int:
     evaluate_p = sub.add_parser("evaluate")
     evaluate_p.add_argument("--result", required=True, type=Path)
     evaluate_p.add_argument("--output", type=Path)
+    evaluate_p.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
 
     try:
@@ -336,7 +492,7 @@ def main() -> int:
             return 0
         result = _load_json(args.result)
         exit_code, provenance = evaluate(result)
-        _write_or_print(provenance, args.output)
+        _write_or_print(provenance, args.output, overwrite=args.overwrite)
         return exit_code
     except QualificationInputError as exc:
         print(f"QUALIFICATION INVALID: {exc}", file=sys.stderr)

@@ -105,7 +105,7 @@ Per-run bounds may include:
 - consecutive-error ceiling;
 - unchanged-progress ceiling.
 
-A tripped guard is durable state, not just an advisory message. Evidence and completion mutations remain rejected until the run is runnable and the guard is clear. For repeated-error or unchanged-progress exhaustion, an authorized lifecycle action may recover a paused run once the guard condition has been reconciled. Assistant-token or active-time exhaustion is cumulative for the existing `RunContext`: `resume` and `rotate_generation` do not reset those counters or clear `budget_limited`. Recovery therefore requires creating a successor `RunContext` under normal OneCompany authorization rather than implicitly resetting or raising the exhausted budget. Budget exhaustion never enables a paid fallback or changes global OneCompany budget policy.
+A tripped guard is durable state, not just an advisory message. Evidence and completion mutations remain rejected until the run is runnable and the guard is clear. For repeated-error or unchanged-progress exhaustion, an authorized lifecycle action may recover a paused run once the guard condition has been reconciled. Assistant-token or active-time exhaustion is cumulative for the existing `RunContext`: `resume` and `rotate_generation` do not reset those counters or clear `budget_limited`. Recovery therefore requires creating a successor `RunContext` under normal OneCompany authorization rather than implicitly resetting or raising the exhausted budget. Creating that successor still requires the existing WU/governance authorization; the Execution Core cannot grant or transfer it. Budget exhaustion never enables a paid fallback or changes global OneCompany budget policy.
 
 ## Deterministic transition engine
 

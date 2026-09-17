@@ -14,33 +14,74 @@ on:
     - cron: '17 * * * *'
   workflow_dispatch:
 
+# Default to read-only. Jobs that execute trusted default-branch code may opt
+# into the single write permission they need.
 permissions:
   contents: read
   actions: read
   pull-requests: read
-  issues: write
+  issues: read
 
 concurrency:
   group: onecompany-handoff-supervision-${{ github.repository }}
   cancel-in-progress: false
 
 jobs:
-  reconcile:
+  pr-smoke:
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+      issues: read
     runs-on: ubuntu-latest
     steps:
-      # actions/checkout v7.0.1 — immutable pin.
+      # PR-head code is exercised only with a read-only token and cannot publish
+      # coordination state or Team Room comments.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
-          # Pull-request runs may exercise candidate code with fork-restricted permissions.
-          # Privileged workflow_run/review/scheduled/manual events must execute trusted code.
-          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.event_name == 'push' && github.sha || github.event.repository.default_branch }}
+          ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
           persist-credentials: false
-      # actions/setup-python v7.0.0 — immutable pin.
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.12'
-      - name: Validate B2/B3 activation boundary
+      - name: Validate candidate B2/B3 activation boundary
+        run: |
+          python scripts/handoff_validate.py
+          python scripts/supervision_validate.py
+      - name: Exercise candidate wake mapping without durable authority
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OC_EVENT_ACTION: ${{ github.event.action || '' }}
+          OC_DELIVERY_ID: ${{ github.run_id }}:${{ github.run_attempt }}
+        run: |
+          python scripts/handoff_runtime.py \
+            --event-name "${GITHUB_EVENT_NAME}" \
+            --event-action "${OC_EVENT_ACTION}" \
+            --event-path "${GITHUB_EVENT_PATH}" \
+            --delivery-id "${OC_DELIVERY_ID}" \
+            --integration-smoke
+
+  reconcile:
+    if: github.event_name != 'pull_request'
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+      issues: write
+    runs-on: ubuntu-latest
+    steps:
+      # Privileged reconciliation always executes trusted repository code.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event_name == 'push' && github.sha || github.event.repository.default_branch }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Validate trusted B2/B3 activation boundary
         run: |
           python scripts/handoff_validate.py
           python scripts/supervision_validate.py
@@ -53,9 +94,8 @@ jobs:
           set -euo pipefail
           args=()
           case "${GITHUB_EVENT_NAME}" in
-            pull_request|pull_request_review)
-              # Candidate code may prove wake/dedup behavior but may not derive
-              # durable coordination authority away from protected main.
+            pull_request_review)
+              # Review events wake trusted code but remain non-authoritative at L1.
               args+=(--integration-smoke)
               ;;
             schedule|push|workflow_run|workflow_dispatch)

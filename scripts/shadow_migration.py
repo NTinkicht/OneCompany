@@ -50,6 +50,9 @@ def _valid_snapshot(snapshot: dict[str, Any]) -> bool:
 
 def analyze_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     findings: list[dict[str, str]] = []
+    if manifest.get("schema_version") != "1.0":
+        findings.append(_finding("SCHEMA_VERSION_UNSUPPORTED", "shadow migration manifest schema_version must equal '1.0'"))
+
     project = manifest.get("project") if isinstance(manifest.get("project"), dict) else {}
     snapshot = manifest.get("snapshot") if isinstance(manifest.get("snapshot"), dict) else {}
     live = manifest.get("live") if isinstance(manifest.get("live"), dict) else {}
@@ -73,6 +76,12 @@ def analyze_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     for key in REQUIRED_LIVE_FIELDS:
         value = live.get(key)
         valid = isinstance(value, (str, int)) and not isinstance(value, bool) and value != ""
+        if key == "pr_head":
+            valid = (
+                isinstance(value, str)
+                and len(value) == 40
+                and all(ch in "0123456789abcdefABCDEF" for ch in value)
+            )
         if not valid:
             missing_live.append(key)
     if missing_live:

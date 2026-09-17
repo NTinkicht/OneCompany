@@ -6,6 +6,8 @@ import argparse
 import json
 import sys
 
+import knowledge
+import qualification
 from lease_lifecycle import coordination_view
 from onecompany_lib import CONTROL, load_json
 from planning_lib import by_id, critical_path, priority_score, rank_work, select_parallel_set
@@ -18,6 +20,35 @@ def active_leases() -> tuple[list[dict], set[str]]:
         [item for item in view.get("active_leases", []) if item.get("role") == "implementation"],
         set(view.get("verified_merged_work_units", view.get("merged_work_units", []))),
     )
+
+
+def learning_preflight(work_item: dict) -> dict:
+    """Return bounded advisory lessons automatically for a selected Work Unit."""
+    tags = [
+        str(work_item.get("work_kind") or "").lower(),
+        str(work_item.get("risk_class") or "").lower(),
+    ]
+    tags.extend(str(ref).lower() for ref in work_item.get("planning_refs", []))
+    tags = [tag for tag in tags if tag]
+    try:
+        return knowledge.preflight(
+            query=str(work_item.get("title") or ""),
+            tags=tags,
+            files=[str(path) for path in work_item.get("write_scope", [])],
+            risk=str(work_item.get("risk_class") or "").lower() or None,
+        )
+    except (knowledge.KnowledgeError, qualification.QualificationInputError) as exc:
+        return {
+            "schema": "onecompany-learning-preflight-v1",
+            "authority": knowledge.AUTHORITY,
+            "authority_effects": [],
+            "hard_gate_created": False,
+            "questions": [],
+            "lesson_ids": [],
+            "checks": [],
+            "regression_tests": [],
+            "diagnostic": f"advisory knowledge unavailable: {exc}",
+        }
 
 
 def main() -> int:
@@ -80,7 +111,16 @@ def main() -> int:
     if args.command == "parallel":
         leases, done = active_leases()
         result = select_parallel_set(work, planning, leases, done, args.include_proposed)
-        result["selected"] = [{"id": item.get("id"), "score": round(priority_score(item, planning), 4), "write_scope": item.get("write_scope", []), "resource_locks": item.get("resource_locks", [])} for item in result["selected"]]
+        result["selected"] = [
+            {
+                "id": item.get("id"),
+                "score": round(priority_score(item, planning), 4),
+                "write_scope": item.get("write_scope", []),
+                "resource_locks": item.get("resource_locks", []),
+                "learning_preflight": learning_preflight(item),
+            }
+            for item in result["selected"]
+        ]
         result["ranked"] = [{"id": item.get("id"), "score": round(priority_score(item, planning), 4)} for item in result["ranked"]]
         print(json.dumps(result, indent=2))
         return 0
@@ -97,6 +137,7 @@ def main() -> int:
         if work_item:
             payload["priority_score"] = round(priority_score(work_item, planning), 4)
             payload["critical_path"] = identifier in set(critical_path(work).get("path", []))
+            payload["learning_preflight"] = learning_preflight(work_item)
         if not entity and not requirement and not work_item:
             payload["error"] = "unknown id"
             print(json.dumps(payload, indent=2)); return 2

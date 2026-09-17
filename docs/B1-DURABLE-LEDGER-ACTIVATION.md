@@ -85,12 +85,13 @@ issues: read
 The workflow:
 
 1. validates the activated ledger configuration;
-2. reads/replays live Team Room #45 using `python onecompany.py ledger read --events`;
+2. fetches one immutable snapshot of live Team Room #45 through the GitHub API and replays it with `ledger_lib.derive`;
 3. requires the publisher-proof event to resolve to GitHub login `NTinkicht`;
 4. verifies the identity-proof event created no active lease or gate authority;
 5. deletes local `.onecompany/state.json` inside the ephemeral runner;
-6. replays the live ledger again;
-7. requires the derived canonical view before/after cache deletion to be identical.
+6. derives the canonical view again from the same immutable ledger snapshot;
+7. requires the derived canonical view before/after cache deletion to be identical;
+8. on protected `main` only, additionally runs `python onecompany.py ledger read --events` as a runtime replay check.
 
 The smoke has no issue-write or repository-write permission and cannot append ledger events.
 

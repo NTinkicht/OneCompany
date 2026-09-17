@@ -7,8 +7,10 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -112,6 +114,219 @@ def copy_item(source: Path, target: Path, force: bool) -> None:
 
 def write_json(path: Path, value: dict) -> None:
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
+
+
+def _generic_evidence_ref(ref: object) -> bool:
+    """Return true only for repo-relative or generic fixture evidence."""
+    return isinstance(ref, str) and ref.startswith(("repo:", "fixture:"))
+
+
+def _validate_bootstrap_knowledge_provenance(entry: dict, path: Path) -> None:
+    """Reject project identities, commits, URLs, or validation refs from reusable lessons."""
+    source_evidence = entry.get("source_evidence")
+    if not isinstance(source_evidence, list) or not source_evidence:
+        raise ValueError(f"bootstrap-safe knowledge requires generic provenance: {path.name}")
+    for evidence in source_evidence:
+        if not isinstance(evidence, dict):
+            raise ValueError(f"bootstrap-safe knowledge provenance is malformed: {path.name}")
+        if evidence.get("actor") != "onecompany":
+            raise ValueError(
+                f"bootstrap-safe knowledge cannot inherit project reviewer identity: {path.name}"
+            )
+        if evidence.get("commit") is not None:
+            raise ValueError(
+                f"bootstrap-safe knowledge cannot inherit project commit identity: {path.name}"
+            )
+        if not _generic_evidence_ref(evidence.get("ref")):
+            raise ValueError(
+                f"bootstrap-safe knowledge cannot inherit project-specific evidence: {path.name}"
+            )
+
+    validation = entry.get("validation")
+    if not isinstance(validation, dict):
+        raise ValueError(f"bootstrap-safe knowledge validation is malformed: {path.name}")
+    refs = validation.get("evidence_refs")
+    if not isinstance(refs, list) or not refs or not all(_generic_evidence_ref(ref) for ref in refs):
+        raise ValueError(
+            f"bootstrap-safe knowledge cannot inherit project validation evidence: {path.name}"
+        )
+
+
+def _secure_directory_flags() -> int:
+    """Return fail-closed flags for descriptor-bound bootstrap cleanup."""
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    directory = getattr(os, "O_DIRECTORY", 0)
+    if nofollow == 0 or directory == 0:
+        raise ValueError("secure descriptor-bound knowledge cleanup is unsupported")
+    return os.O_RDONLY | nofollow | directory
+
+
+def _open_root_directory(path: Path) -> int:
+    """Open a knowledge root without following or racing a replacement symlink."""
+    flags = _secure_directory_flags()
+    try:
+        before = os.lstat(path)
+        fd = os.open(str(path), flags)
+    except FileNotFoundError:
+        raise
+    except OSError as exc:
+        raise ValueError(f"knowledge root is unsafe during bootstrap: {exc}") from exc
+    try:
+        opened = os.fstat(fd)
+        if not stat.S_ISDIR(before.st_mode) or not stat.S_ISDIR(opened.st_mode):
+            raise ValueError("knowledge root must be a directory during bootstrap")
+        if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
+            raise ValueError("knowledge root changed during bootstrap cleanup")
+        return fd
+    except Exception:
+        os.close(fd)
+        raise
+
+
+def _open_directory_at(parent_fd: int, name: str, *, create: bool) -> int:
+    """Open one child directory relative to a trusted parent and verify its identity."""
+    flags = _secure_directory_flags()
+    try:
+        fd = os.open(name, flags, dir_fd=parent_fd)
+    except FileNotFoundError:
+        if not create:
+            raise
+        try:
+            os.mkdir(name, mode=0o755, dir_fd=parent_fd)
+        except FileExistsError:
+            pass
+        try:
+            fd = os.open(name, flags, dir_fd=parent_fd)
+        except OSError as exc:
+            raise ValueError(f"knowledge directory {name} is unsafe during bootstrap: {exc}") from exc
+    except OSError as exc:
+        raise ValueError(f"knowledge directory {name} is unsafe during bootstrap: {exc}") from exc
+    try:
+        linked = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
+        opened = os.fstat(fd)
+        if not stat.S_ISDIR(linked.st_mode) or not stat.S_ISDIR(opened.st_mode):
+            raise ValueError(f"knowledge directory {name} must remain a directory")
+        if (linked.st_dev, linked.st_ino) != (opened.st_dev, opened.st_ino):
+            raise ValueError(f"knowledge directory {name} changed during bootstrap cleanup")
+        return fd
+    except Exception:
+        os.close(fd)
+        raise
+
+
+def _read_json_at(directory_fd: int, name: str) -> dict:
+    """Read one regular JSON entry relative to an already verified directory."""
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    try:
+        fd = os.open(name, os.O_RDONLY | nofollow, dir_fd=directory_fd)
+    except OSError as exc:
+        raise ValueError(f"knowledge entry {name} is unsafe during bootstrap: {exc}") from exc
+    try:
+        metadata = os.fstat(fd)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError(f"knowledge entry {name} must be a regular file")
+        with os.fdopen(fd, "r", encoding="utf-8") as handle:
+            fd = -1
+            value = json.load(handle)
+        if not isinstance(value, dict):
+            raise ValueError(f"knowledge entry {name} must be a JSON object")
+        return value
+    except json.JSONDecodeError:
+        raise
+    except OSError as exc:
+        raise ValueError(f"cannot read knowledge entry {name}: {exc}") from exc
+    finally:
+        if fd >= 0:
+            os.close(fd)
+
+
+def _unlink_json_entries(directory_fd: int) -> None:
+    """Delete JSON directory entries without ever following their targets."""
+    try:
+        names = os.listdir(directory_fd)
+    except OSError as exc:
+        raise ValueError(f"cannot enumerate knowledge directory: {exc}") from exc
+    for name in names:
+        if not name.endswith(".json"):
+            continue
+        try:
+            metadata = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
+            if stat.S_ISDIR(metadata.st_mode):
+                raise ValueError(f"knowledge JSON entry cannot be a directory: {name}")
+            os.unlink(name, dir_fd=directory_fd)
+        except OSError as exc:
+            raise ValueError(f"cannot safely remove knowledge entry {name}: {exc}") from exc
+
+
+def _remove_tree_at(parent_fd: int, name: str) -> None:
+    """Recursively remove one directory tree through no-follow relative descriptors."""
+    directory_fd = _open_directory_at(parent_fd, name, create=False)
+    try:
+        for child in os.listdir(directory_fd):
+            metadata = os.stat(child, dir_fd=directory_fd, follow_symlinks=False)
+            if stat.S_ISDIR(metadata.st_mode):
+                _remove_tree_at(directory_fd, child)
+            else:
+                os.unlink(child, dir_fd=directory_fd)
+    except OSError as exc:
+        raise ValueError(f"cannot safely clear knowledge transaction state: {exc}") from exc
+    finally:
+        os.close(directory_fd)
+    try:
+        os.rmdir(name, dir_fd=parent_fd)
+    except OSError as exc:
+        raise ValueError(f"cannot safely remove knowledge transaction directory: {exc}") from exc
+
+
+def initialize_knowledge(target: Path) -> None:
+    """Keep only generic advisory lessons in a fresh installation."""
+    root = target / ".onecompany" / "knowledge"
+    try:
+        root_fd = _open_root_directory(root)
+    except FileNotFoundError:
+        return
+    try:
+        for state_name in ("candidate", "archived"):
+            directory_fd = _open_directory_at(root_fd, state_name, create=True)
+            try:
+                _unlink_json_entries(directory_fd)
+            finally:
+                os.close(directory_fd)
+
+        try:
+            transaction_metadata = os.stat(
+                ".transactions", dir_fd=root_fd, follow_symlinks=False
+            )
+        except FileNotFoundError:
+            transaction_metadata = None
+        if transaction_metadata is not None:
+            if not stat.S_ISDIR(transaction_metadata.st_mode):
+                raise ValueError("knowledge transaction state is unsafe during bootstrap")
+            _remove_tree_at(root_fd, ".transactions")
+
+        current_fd = _open_directory_at(root_fd, "current", create=True)
+        try:
+            for name in os.listdir(current_fd):
+                if not name.endswith(".json"):
+                    continue
+                entry = _read_json_at(current_fd, name)
+                if entry.get("bootstrap_safe") is not True:
+                    try:
+                        os.unlink(name, dir_fd=current_fd)
+                    except OSError as exc:
+                        raise ValueError(
+                            f"cannot safely remove project-specific knowledge {name}: {exc}"
+                        ) from exc
+                    continue
+                if entry.get("authority") != "advisory_only" or entry.get("authority_effects") != []:
+                    raise ValueError(
+                        f"bootstrap-safe knowledge must remain advisory-only: {name}"
+                    )
+                _validate_bootstrap_knowledge_provenance(entry, Path(name))
+        finally:
+            os.close(current_fd)
+    finally:
+        os.close(root_fd)
 
 
 def initialize_contracts(target: Path) -> None:
@@ -229,6 +444,7 @@ def initialize_control_plane(
         },
     )
     write_json(target / ".onecompany" / "state.json", INITIAL_STATE)
+    initialize_knowledge(target)
 
 
 def main() -> int:
@@ -298,9 +514,9 @@ def main() -> int:
         f"code owner: {code_owner}; root principal: {root_principal}"
     )
     print(
-        "Portfolio/requirements/acceptance-criteria/risk-register/queue/state and durable "
-        "coordination bindings were reset; source work history was not copied. "
-        "Unattended paths remain disabled."
+        "Portfolio/requirements/acceptance-criteria/risk-register/queue/state, durable "
+        "coordination bindings, and project-specific learning history were reset. "
+        "Only bootstrap-safe generic advisory lessons were retained; unattended paths remain disabled."
     )
     print(
         "Run `python onecompany.py audit-github` after pushing to verify the selected "

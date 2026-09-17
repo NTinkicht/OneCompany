@@ -13,6 +13,7 @@ COMMANDS = {
     "simulate": ["simulate.py"], "simulate-ledger": ["simulate_ledger.py"], "simulate-supervision": ["simulate_supervision.py"], "simulate-parallel": ["simulate_parallelism.py"], "hardening-audit": ["hardening_audit.py"],
     "readiness": ["readiness.py"], "audit-github": ["github_audit.py"], "next-work": ["next_work.py"], "plan": ["planner.py"], "route": ["router.py"], "dispatch": ["dispatch.py"], "execute-dispatch": ["dispatch_execute_entry.py"],
     "ledger": ["ledger.py"], "lease": ["lease.py"], "gate": ["gate.py"], "merge": ["merge.py"], "reconcile": ["reconcile.py"], "supervise": ["supervise.py"], "handoff": ["handoff.py"],
+    "execution": ["execution.py"],
     "bootstrap": ["bootstrap.py"], "init": ["init_project.py"],
     "assurance": ["assurance_gate.py"], "trace": ["assurance.py", "trace"], "risk": ["assurance.py", "risk"], "evidence": ["assurance.py", "evidence"],
     "verify-evidence": ["evidence_verify.py"], "attest": ["trusted_assurance.py"],

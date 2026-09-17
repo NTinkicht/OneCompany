@@ -32,6 +32,7 @@ class ShadowMigrationTests(unittest.TestCase):
 
     def test_clean_reviewed_snapshot_can_be_reported_ready_for_separate_cutover(self):
         manifest = {
+            "schema_version": "1.0",
             "project": {"repository": "example/app", "default_branch": "main"},
             "snapshot": {
                 "observed_at": "2026-09-17T00:00:00Z",
@@ -75,6 +76,17 @@ class ShadowMigrationTests(unittest.TestCase):
         self.assertTrue(report["mutation_ready"])
         self.assertEqual(report["blocker_codes"], [])
         self.assertFalse(report["target_mutated"])
+
+        manifest["live"]["pr_head"] = "x"
+        malformed_head = shadow_migration.analyze_manifest(manifest)
+        self.assertFalse(malformed_head["mutation_ready"])
+        self.assertIn("LIVE_STREAM_IDENTITY_INCOMPLETE", malformed_head["blocker_codes"])
+
+        manifest["live"]["pr_head"] = "b" * 40
+        manifest["schema_version"] = "2.0"
+        unsupported_schema = shadow_migration.analyze_manifest(manifest)
+        self.assertFalse(unsupported_schema["mutation_ready"])
+        self.assertIn("SCHEMA_VERSION_UNSUPPORTED", unsupported_schema["blocker_codes"])
 
     def test_analysis_does_not_modify_manifest_file(self):
         manifest = {

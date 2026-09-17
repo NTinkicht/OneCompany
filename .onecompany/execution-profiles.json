@@ -1,0 +1,70 @@
+{
+  "$schema": "./schemas/execution-profiles.schema.json",
+  "schema_version": "1.0",
+  "profiles": [
+    {
+      "actor_id": "human-owner",
+      "roles": ["architecture", "planning", "implementation", "review", "research"],
+      "tiers": {"architecture": "heavy", "planning": "heavy", "implementation": "heavy", "review": "heavy", "research": "heavy"},
+      "preferred_complexity": ["standard", "heavy"],
+      "cost_class": "HUMAN",
+      "context_strength": "high"
+    },
+    {
+      "actor_id": "chatgpt",
+      "roles": ["architecture", "planning", "implementation", "review", "research"],
+      "tiers": {"architecture": "heavy", "planning": "heavy", "implementation": "heavy", "review": "heavy", "research": "heavy"},
+      "preferred_complexity": ["standard", "heavy"],
+      "cost_class": "INCLUDED_SUBSCRIPTION",
+      "context_strength": "high"
+    },
+    {
+      "actor_id": "codex",
+      "roles": ["planning", "implementation", "review"],
+      "tiers": {"planning": "standard", "implementation": "heavy", "review": "standard"},
+      "preferred_complexity": ["standard", "heavy"],
+      "cost_class": "INCLUDED_SUBSCRIPTION",
+      "context_strength": "high"
+    },
+    {
+      "actor_id": "claude",
+      "roles": ["architecture", "planning", "implementation", "review", "research"],
+      "tiers": {"architecture": "heavy", "planning": "heavy", "implementation": "heavy", "review": "heavy", "research": "heavy"},
+      "preferred_complexity": ["standard", "heavy"],
+      "cost_class": "INCLUDED_SUBSCRIPTION",
+      "context_strength": "high"
+    },
+    {
+      "actor_id": "github-copilot",
+      "roles": ["implementation", "review"],
+      "tiers": {"implementation": "standard", "review": "standard"},
+      "preferred_complexity": ["light", "standard"],
+      "cost_class": "INCLUDED_SUBSCRIPTION",
+      "context_strength": "standard"
+    },
+    {
+      "actor_id": "gemini-cli",
+      "roles": ["implementation", "review", "research"],
+      "tiers": {"implementation": "standard", "review": "standard", "research": "standard"},
+      "preferred_complexity": ["light", "standard"],
+      "cost_class": "FREE_ALLOWANCE",
+      "context_strength": "standard"
+    },
+    {
+      "actor_id": "mistral-vibe",
+      "roles": ["implementation", "review", "research"],
+      "tiers": {"implementation": "standard", "review": "standard", "research": "standard"},
+      "preferred_complexity": ["light", "standard"],
+      "cost_class": "INCLUDED_SUBSCRIPTION",
+      "context_strength": "standard"
+    },
+    {
+      "actor_id": "onecompany-local",
+      "roles": ["repository_intelligence"],
+      "tiers": {"repository_intelligence": "light"},
+      "preferred_complexity": ["light"],
+      "cost_class": "FREE_ALLOWANCE",
+      "context_strength": "light"
+    }
+  ]
+}

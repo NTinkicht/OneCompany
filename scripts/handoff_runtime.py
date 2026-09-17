@@ -67,8 +67,16 @@ def wake_id(delivery_id: str, event_name: str, action: str | None, subject: str)
 
 
 def run_supervision(*, post_team_room: bool = False) -> dict[str, Any]:
-    base = [sys.executable, str(SUPERVISE)]
-    result = subprocess.run(base, cwd=str(ROOT), text=True, capture_output=True, check=False)
+    command = [sys.executable, str(SUPERVISE)]
+    if post_team_room:
+        command.append("--post-team-room")
+    result = subprocess.run(
+        command,
+        cwd=str(ROOT),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
     if result.returncode != 0:
         raise RuntimeError(result.stderr.strip() or result.stdout.strip() or "supervision failed")
     try:
@@ -77,16 +85,6 @@ def run_supervision(*, post_team_room: bool = False) -> dict[str, Any]:
         raise RuntimeError("supervision did not return JSON") from exc
     if not isinstance(snapshot, dict):
         raise RuntimeError("supervision snapshot must be an object")
-    if post_team_room:
-        posted = subprocess.run(
-            [*base, "--post-team-room"],
-            cwd=str(ROOT),
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        if posted.returncode != 0:
-            raise RuntimeError(posted.stderr.strip() or posted.stdout.strip() or "Team Room post failed")
     return snapshot
 
 

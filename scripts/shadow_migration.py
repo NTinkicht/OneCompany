@@ -84,11 +84,14 @@ def analyze_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     state_wu, state_pr = legacy_state.get("work_unit"), legacy_state.get("current_pr")
     queue_wu = legacy_queue.get("work_unit")
     drift_parts: list[str] = []
-    if live_wu and state_wu and live_wu != state_wu:
+    for label, value in (("legacy.state.work_unit", state_wu), ("legacy.work_queue.work_unit", queue_wu)):
+        if not isinstance(value, (str, int)) or isinstance(value, bool) or value == "":
+            findings.append(_finding("LEGACY_CACHE_INCOMPLETE", f"{label} is missing or malformed"))
+    if live_wu is not None and state_wu is not None and live_wu != state_wu:
         drift_parts.append(f"state work_unit={state_wu} vs live={live_wu}")
     if live_pr is not None and state_pr != live_pr:
         drift_parts.append(f"state current_pr={state_pr} vs live={live_pr}")
-    if live_wu and queue_wu and live_wu != queue_wu:
+    if live_wu is not None and queue_wu is not None and live_wu != queue_wu:
         drift_parts.append(f"work_queue work_unit={queue_wu} vs live={live_wu}")
     if drift_parts:
         findings.append(_finding("LIVE_CACHE_DRIFT", "; ".join(drift_parts)))
@@ -107,22 +110,44 @@ def analyze_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         findings.append(_finding("DEFAULT_BRANCH_UNPROTECTED", "verified default branch is not protected"))
 
     writer_map: dict[str, list[str]] = defaultdict(list)
-    incumbents = manifest.get("incumbent_writers") if isinstance(manifest.get("incumbent_writers"), list) else []
+    incumbents_raw = manifest.get("incumbent_writers")
+    incumbents = incumbents_raw if isinstance(incumbents_raw, list) else []
+    inventory_complete = manifest.get("incumbent_writer_inventory_complete") is True
+    if not inventory_complete:
+        findings.append(_finding("INCUMBENT_WRITER_INVENTORY_INCOMPLETE", "incumbent writer inventory must be explicitly reviewed complete"))
+    if not isinstance(incumbents_raw, list):
+        findings.append(_finding("INCUMBENT_WRITER_INVENTORY_MALFORMED", "incumbent_writers must be a list"))
+    elif not incumbents and manifest.get("no_active_mutation_writers_verified") is not True:
+        findings.append(_finding("INCUMBENT_WRITER_INVENTORY_EMPTY", "empty incumbent inventory requires verified no-active-mutation-writers evidence"))
     declared_owners: dict[str, set[str]] = defaultdict(set)
+    malformed_writer = False
     for writer in incumbents:
         if not isinstance(writer, dict):
+            malformed_writer = True
             continue
         name = writer.get("name")
         capabilities = writer.get("capabilities")
-        if isinstance(name, str) and name and isinstance(capabilities, list) and writer.get("reviewed") is True:
+        valid_record = (
+            isinstance(name, str)
+            and bool(name.strip())
+            and isinstance(capabilities, list)
+            and all(isinstance(capability, str) and capability.strip() for capability in capabilities)
+            and isinstance(writer.get("active"), bool)
+            and isinstance(writer.get("mutation_capable"), bool)
+            and isinstance(writer.get("reviewed"), bool)
+        )
+        if not valid_record:
+            malformed_writer = True
+            continue
+        if writer.get("reviewed") is True:
             for capability in capabilities:
-                if isinstance(capability, str) and capability:
-                    declared_owners[capability].add(name)
-        if writer.get("active") is not True or writer.get("mutation_capable") is not True or not isinstance(name, str) or not name or not isinstance(capabilities, list):
+                declared_owners[capability].add(name)
+        if writer.get("active") is not True or writer.get("mutation_capable") is not True:
             continue
         for capability in capabilities:
-            if isinstance(capability, str) and capability:
-                writer_map[capability].append(name)
+            writer_map[capability].append(name)
+    if malformed_writer:
+        findings.append(_finding("INCUMBENT_WRITER_INVENTORY_MALFORMED", "every incumbent writer record must have reviewed scalar identity, boolean status, and valid capabilities"))
     for capability, names in sorted(writer_map.items()):
         unique = sorted(set(names))
         if len(unique) > 1:

@@ -24,8 +24,8 @@ class ExecutionCreateArtifactGuardTests(unittest.TestCase):
             acceptance_criterion=[("AC1", "lineage is preserved")],
             max_tokens=None,
             max_active_seconds=None,
-            max_errors=None,
-            max_unchanged=None,
+            max_errors=3,
+            max_unchanged=3,
             run_id="run-new",
         )
 

@@ -35,6 +35,8 @@ class ShadowMigrationTests(unittest.TestCase):
                 "observed_at": "2026-09-17T00:00:00Z",
                 "main_sha": "a" * 40,
                 "source": "verified-live",
+                "stale": False,
+                "derived": False,
             },
             "live": {"work_unit": "WU1", "pr": 10, "pr_head": "b" * 40},
             "legacy": {
@@ -49,11 +51,22 @@ class ShadowMigrationTests(unittest.TestCase):
                     "name": "legacy-event-owner",
                     "active": True,
                     "mutation_capable": True,
+                    "reviewed": True,
                     "capabilities": ["event_handoff"],
                 }
             ],
             "cutover": {"owner_by_capability": {"event_handoff": "legacy-event-owner"}},
             "proposed_onecompany": {"mode": "shadow", "mutation_capable": False},
+            "cutover_evidence": {
+                "active_stream_status": "confirmed",
+                "surface_classifications_reviewed": True,
+                "rollback_verified": True,
+                "human_decisions_resolved": True,
+                "zero_extra_spend": True,
+                "autonomy_level": "L1",
+                "staging_branch": "epic-0.6-integration",
+                "fresh_c2_reconciliation": True,
+            },
         }
         report = shadow_migration.analyze_manifest(manifest)
         self.assertTrue(report["mutation_ready"])

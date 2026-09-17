@@ -1,0 +1,127 @@
+{
+  "schema_version": "1.0",
+  "project": {
+    "repository": "NTinkicht/Tabibi",
+    "default_branch": "main"
+  },
+  "snapshot": {
+    "observed_at": "2026-09-17T13:54:00Z",
+    "main_sha": "58711da234ba6a9cc91497e068049ed1f61d47bf",
+    "source": "github-live-read-only"
+  },
+  "live": {
+    "work_unit": "WU76",
+    "pr": 291,
+    "pr_head": "3fe9d043bf9657ec5cb0006e3afbc3f57c552f10"
+  },
+  "legacy": {
+    "state": {
+      "work_unit": "WU66",
+      "current_pr": null,
+      "active_actors": [
+        "chatgpt",
+        "codex",
+        "claude",
+        "copilot",
+        "gemini-cli",
+        "mistral-vibe"
+      ]
+    },
+    "work_queue": {
+      "work_unit": "WU66"
+    },
+    "registry": {
+      "active_actors": [
+        "chatgpt",
+        "codex",
+        "claude",
+        "copilot",
+        "gemini-cli",
+        "mistral-vibe"
+      ]
+    },
+    "protocol": {
+      "active_actors": [
+        "chatgpt",
+        "codex",
+        "claude",
+        "copilot"
+      ]
+    }
+  },
+  "branch_protection": {
+    "verified": false,
+    "protected": false,
+    "source": "github-branch-endpoint-read-only"
+  },
+  "incumbent_writers": [
+    {
+      "name": "external-scheduled-supervision",
+      "active": true,
+      "mutation_capable": true,
+      "capabilities": [
+        "scheduling",
+        "event_handoff",
+        "lease_failover",
+        "merge_execution"
+      ]
+    },
+    {
+      "name": "tabibi-event-handoff-dispatcher",
+      "active": true,
+      "mutation_capable": true,
+      "capabilities": [
+        "event_handoff"
+      ]
+    },
+    {
+      "name": "tabibi-heartbeat-supervision",
+      "active": true,
+      "mutation_capable": true,
+      "capabilities": [
+        "scheduling"
+      ]
+    }
+  ],
+  "cutover": {
+    "owner_by_capability": {}
+  },
+  "proposed_onecompany": {
+    "mode": "shadow",
+    "mutation_capable": false
+  },
+  "surfaces": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "classification": "preserve"
+    },
+    {
+      "path": ".github/workflows/event-handoff-dispatcher.yml",
+      "classification": "map/supersede-later"
+    },
+    {
+      "path": ".github/workflows/gemini-cli-wake.yml",
+      "classification": "map/preserve"
+    },
+    {
+      "path": ".github/workflows/mistral-vibe-wake.yml",
+      "classification": "map/preserve"
+    },
+    {
+      "path": "coordination/STATE.json",
+      "classification": "map"
+    },
+    {
+      "path": "coordination/WORK_QUEUE.md",
+      "classification": "map"
+    },
+    {
+      "path": "coordination/ACTOR_REGISTRY.json",
+      "classification": "map"
+    },
+    {
+      "path": "coordination/AUTONOMY_PROTOCOL.md",
+      "classification": "preserve/reconcile"
+    }
+  ]
+}

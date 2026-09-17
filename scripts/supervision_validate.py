@@ -84,6 +84,11 @@ def main() -> int:
     chatgpt = supervision.get("chatgpt_tasks", {})
 
     if enabled:
+        if level < 3:
+            if gh.get("may_failover") is not False:
+                errors.append("supervision below L3 must not grant automatic failover")
+            if gh.get("may_merge") is not False:
+                errors.append("supervision below L3 must not grant automatic merge")
         if level == 1:
             if mode != "notify":
                 errors.append("L1 B3 supervision must remain notify-only")
@@ -91,10 +96,6 @@ def main() -> int:
                 errors.append("L1 B3 requires GitHub Actions reconciliation enabled")
             if gh.get("may_post_team_room") is not True:
                 errors.append("L1 B3 should expose actionable liveness signals in Team Room")
-            if gh.get("may_failover") is not False:
-                errors.append("L1 B3 must not grant automatic failover")
-            if gh.get("may_merge") is not False:
-                errors.append("L1 B3 must not grant automatic merge")
     else:
         # Fresh/bootstrap installations deliberately retain the safe pre-activation
         # state. Activation is repository-specific and must never be inherited.

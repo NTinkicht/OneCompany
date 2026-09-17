@@ -99,7 +99,7 @@ def cmd_create(args: argparse.Namespace) -> int:
     store = store_for(args)
     with store.lock(args.wu):
         store.recover_pending(args.wu, lock_held=True)
-        if store.state_path(args.wu).exists() and not args.replace:
+        if store.state_path(args.wu).exists():
             raise FileExistsError(
                 f"execution state already exists for {args.wu}"
             )
@@ -594,7 +594,6 @@ def build_parser() -> argparse.ArgumentParser:
     create.add_argument("--max-active-seconds", type=float)
     create.add_argument("--max-errors", type=int, default=3)
     create.add_argument("--max-unchanged", type=int, default=3)
-    create.add_argument("--replace", action="store_true")
     create.set_defaults(func=cmd_create)
 
     show = sub.add_parser("show")

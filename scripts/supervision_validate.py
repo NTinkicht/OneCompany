@@ -15,7 +15,9 @@ def main() -> int:
     config = load_json(CONTROL / "config.json")
     budget = load_json(CONTROL / "budget.json")
 
-    if supervision.get("mode") not in {"observe_only", "notify", "orchestrate"}:
+    enabled = supervision.get("enabled") is True
+    mode = supervision.get("mode")
+    if mode not in {"observe_only", "notify", "orchestrate"}:
         errors.append("supervision.mode must be observe_only, notify or orchestrate")
 
     continuous = supervision.get("continuous_operation", {})
@@ -75,23 +77,41 @@ def main() -> int:
         errors.append("automatic merge minimum autonomy must be L3 or higher")
     if next_min < 4:
         errors.append("automatic next-work minimum autonomy must be L4 or higher")
-    if supervision.get("enabled") and supervision.get("mode") == "orchestrate" and level < 3:
+    if enabled and mode == "orchestrate" and level < 3:
         errors.append("orchestrating supervision requires autonomy L3+")
 
     gh = supervision.get("github_actions", {})
-    if supervision.get("enabled") is not True:
-        errors.append("B3 active supervision must be enabled")
-    if level == 1:
-        if supervision.get("mode") != "notify":
-            errors.append("L1 B3 supervision must remain notify-only")
-        if gh.get("enabled") is not True:
-            errors.append("L1 B3 requires GitHub Actions reconciliation enabled")
-        if gh.get("may_post_team_room") is not True:
-            errors.append("L1 B3 should expose actionable liveness signals in Team Room")
+    chatgpt = supervision.get("chatgpt_tasks", {})
+
+    if enabled:
+        if level == 1:
+            if mode != "notify":
+                errors.append("L1 B3 supervision must remain notify-only")
+            if gh.get("enabled") is not True:
+                errors.append("L1 B3 requires GitHub Actions reconciliation enabled")
+            if gh.get("may_post_team_room") is not True:
+                errors.append("L1 B3 should expose actionable liveness signals in Team Room")
+            if gh.get("may_failover") is not False:
+                errors.append("L1 B3 must not grant automatic failover")
+            if gh.get("may_merge") is not False:
+                errors.append("L1 B3 must not grant automatic merge")
+    else:
+        # Fresh/bootstrap installations deliberately retain the safe pre-activation
+        # state. Activation is repository-specific and must never be inherited.
+        if mode != "observe_only":
+            errors.append("disabled supervision must remain observe-only")
+        if gh.get("enabled") is not False:
+            errors.append("disabled supervision cannot enable GitHub Actions supervision")
+        if gh.get("may_post_team_room") is not False:
+            errors.append("disabled supervision cannot post Team Room signals")
         if gh.get("may_failover") is not False:
-            errors.append("L1 B3 must not grant automatic failover")
+            errors.append("disabled supervision cannot fail over work")
         if gh.get("may_merge") is not False:
-            errors.append("L1 B3 must not grant automatic merge")
+            errors.append("disabled supervision cannot merge")
+        if chatgpt.get("enabled") is not False:
+            errors.append("disabled supervision cannot enable ChatGPT scheduled tasks")
+        if chatgpt.get("may_mutate") is not False:
+            errors.append("disabled supervision cannot grant ChatGPT mutation authority")
 
     if gh.get("enabled") and continuous.get("target_effective_cadence_minutes", 60) < 60:
         if not budget.get("ci", {}).get("allow_high_frequency_scheduled_watchdogs"):
@@ -103,7 +123,6 @@ def main() -> int:
     if gh.get("enabled") and not workflow.exists():
         errors.append("active GitHub Actions supervision requires onecompany-handoff-supervision.yml")
 
-    chatgpt = supervision.get("chatgpt_tasks", {})
     offsets = chatgpt.get("offset_minutes", [])
     if not isinstance(offsets, list) or not offsets:
         errors.append("supervision.chatgpt_tasks.offset_minutes must be a non-empty list")
@@ -111,7 +130,7 @@ def main() -> int:
         errors.append("ChatGPT supervisor offsets must be integer minutes 0..59")
     elif len(offsets) != len(set(offsets)):
         errors.append("ChatGPT supervisor offsets must be unique")
-    if chatgpt.get("may_mutate") and supervision.get("mode") != "orchestrate":
+    if chatgpt.get("may_mutate") and mode != "orchestrate":
         errors.append("ChatGPT scheduled tasks may mutate only in orchestrate mode")
 
     issue = supervision.get("coordination", {}).get("team_room_issue_number")
@@ -125,7 +144,8 @@ def main() -> int:
             print(f"ERROR: {error}")
         print(f"OneCompany supervision validation FAILED ({len(errors)} error(s), {len(warnings)} warning(s)).")
         return 1
-    print(f"OneCompany supervision validation PASS ({len(warnings)} warning(s)).")
+    state = "active" if enabled else "safe-inactive"
+    print(f"OneCompany supervision validation PASS ({state}; {len(warnings)} warning(s)).")
     return 0
 
 

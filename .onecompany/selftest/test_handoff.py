@@ -4,6 +4,7 @@ import copy
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "scripts"
@@ -171,6 +172,17 @@ class HandoffTests(unittest.TestCase):
         first = handoff_runtime.wake_id("delivery", "pull_request", "synchronize", "pr:61")
         second = handoff_runtime.wake_id("delivery", "pull_request", "synchronize", "pr:61")
         self.assertEqual(first, second)
+
+    def test_runtime_supervision_posts_with_one_invocation(self):
+        """Use one live supervision snapshot when Team Room posting is enabled."""
+        with patch.object(handoff_runtime.subprocess, "run") as run:
+            run.return_value.returncode = 0
+            run.return_value.stdout = '{"action":"RECONCILE"}'
+            run.return_value.stderr = ""
+            snapshot = handoff_runtime.run_supervision(post_team_room=True)
+        self.assertEqual(snapshot, {"action": "RECONCILE"})
+        run.assert_called_once()
+        self.assertIn("--post-team-room", run.call_args.args[0])
 
 
 if __name__ == "__main__":

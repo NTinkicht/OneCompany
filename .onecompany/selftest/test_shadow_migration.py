@@ -48,6 +48,7 @@ class ShadowMigrationTests(unittest.TestCase):
                 "protocol": {"active_actors": ["chatgpt", "claude"]},
             },
             "branch_protection": {"verified": True, "protected": True},
+            "incumbent_writer_inventory_complete": True,
             "incumbent_writers": [
                 {
                     "name": "legacy-event-owner",

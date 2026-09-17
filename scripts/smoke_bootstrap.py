@@ -183,6 +183,10 @@ def main() -> int:
                 "bootstrap overwrote product examples",
             )
             require(
+                not (target / "source-evidence" / "tabibi").exists(),
+                "fresh company inherited source-only Tabibi migration evidence",
+            )
+            require(
                 (target / ".onecompany" / "selftest" / "test_planning.py").exists(),
                 "framework self-tests not installed",
             )

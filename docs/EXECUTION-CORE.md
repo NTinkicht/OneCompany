@@ -44,7 +44,9 @@ Every execution is addressed by:
 wu_id + run_id + generation
 ```
 
-All state-changing operations compare the caller's `RunKey` to the current one. Revising the objective or deliberately failing over rotates the generation. A late worker response from an older generation is rejected with `StaleGenerationError`.
+Every existing-state mutation must carry all three values. Core APIs compare the supplied `RunKey` to the current one, and the public CLI requires `--run-id` plus `--generation` for all state-changing commands after `create`.
+
+Revising the objective or deliberately failing over rotates the generation. A late worker response from an older generation is rejected with `StaleGenerationError`; the CLI does not silently substitute the latest generation.
 
 This prevents an obsolete worker from mutating a newer execution after reconciliation or failover.
 
@@ -54,18 +56,19 @@ This prevents an obsolete worker from mutating a newer execution after reconcili
 
 `ObjectiveTracker` owns objective changes and rotates the generation on revision.
 
-`TaskBoard` tracks tactical work. Task state is not completion evidence by itself.
+`TaskBoard` tracks tactical work. Task state is not completion evidence by itself. A `complete` run is terminal: tasks cannot be changed and terminal state cannot be reopened through `block` or `budget_limit`.
 
-`EvidenceRegistry` stores authoritative and non-authoritative evidence plus bounded `decision`, `evidence`, and `dead_end` lessons. Lessons are capped so execution context cannot grow without bound.
+`EvidenceRegistry` stores authoritative and non-authoritative evidence plus bounded `decision`, `evidence`, and `dead_end` lessons. Evidence mutations are rejected while the run is non-runnable or a resource/stall guard is tripped.
 
 ## Evidence-driven completion
 
-A worker completion claim moves an active run to `completion_pending`. `CompletionGate` then requires:
+A worker completion claim moves an active, guard-clear run to `completion_pending`. `CompletionGate` then requires:
 
 - every acceptance criterion to have at least one authoritative evidence reference;
 - every tracked task to be complete;
 - no blocked tasks;
-- no blocked execution state.
+- a runnable lifecycle state;
+- a clear resource/stall guard.
 
 A worker's own statement is not authoritative evidence.
 
@@ -91,7 +94,7 @@ The evaluator cannot force `met` when deterministic evidence requirements are mi
 
 Repeated heartbeats, comments, rereads, Todo reordering, or identical failing retries do not alter this fingerprint. Repeated unchanged fingerprints trip the configured stall limit.
 
-`ExecutionSupervisor` responds with safe recommendations such as `RECONCILE_OR_FAILOVER`; it does not transfer the implementation lease itself.
+When a configured resource/stall limit trips, the state-changing CLI persists a non-runnable state before returning. Token/time exhaustion becomes `budget_limited`; repeated-error or unchanged-progress exhaustion becomes `paused`. `ExecutionSupervisor` then emits the appropriate recommendation, such as `RECONCILE_OR_FAILOVER`, but it still cannot transfer the canonical WU lease.
 
 ## Resource guard
 
@@ -102,7 +105,7 @@ Per-run bounds may include:
 - consecutive-error ceiling;
 - unchanged-progress ceiling.
 
-Budget exhaustion pauses/degrades execution. It never enables a paid fallback or changes global OneCompany budget policy.
+A tripped guard is durable state, not just an advisory message. Evidence and completion mutations remain rejected until an authorized lifecycle action and/or new generation makes the run runnable and the guard is clear. Budget exhaustion never enables a paid fallback or changes global OneCompany budget policy.
 
 ## Deterministic transition engine
 
@@ -117,9 +120,20 @@ Supported state-control commands are:
 - `budget_limit`;
 - `rotate_generation`.
 
-## Execution journal
+`complete` is terminal. `block`, `budget_limit`, task mutations, and generation rotation cannot reopen or mutate a completed run.
 
-`ExecutionJournal` writes append-only JSONL records. Each record contains:
+## Serialized state mutation and execution journal
+
+Each work unit has one OS-level exclusive lock shared by:
+
+- the CLI create existence check;
+- every existing-state read-modify-write cycle;
+- recovery;
+- journal sequence/hash assignment.
+
+The lock is held from the initial state read through mutation and `persist_event`, preventing concurrent commands from overwriting each other.
+
+`ExecutionJournal` writes append-only JSONL records. Each new record contains:
 
 - a monotonic sequence;
 - event type;
@@ -128,11 +142,28 @@ Supported state-control commands are:
 - previous record hash;
 - complete state hash;
 - event timestamp;
+- transaction operation ID;
 - record hash.
 
 Verification fails closed if sequence or hash-chain integrity is broken.
 
-`ExecutionStore` atomically writes the current RunContext and appends journal evidence. Runtime files live under `.onecompany/runtime/execution/`, which is intentionally ignored by Git.
+`ExecutionStore` keeps atomic current-state persistence separate from the journal while using a durable write-ahead pending marker to bridge the two files:
+
+```text
+per-WU lock
+   |
+write pending operation
+   |
+atomic state replace
+   |
+journal append + fsync
+   |
+remove pending marker
+```
+
+If a process stops after the pending marker or state write, the next locked `load`, mutation, or journal verification finishes the pending operation. If the journal record was already committed, recovery recognizes its operation ID and only reconciles state/marker cleanup. After recovery, `load` verifies that the state hash exactly matches the latest journal record; unjournaled state is rejected.
+
+Runtime files live under `.onecompany/runtime/execution/`, which is intentionally ignored by Git.
 
 ## Worker profiles
 
@@ -166,22 +197,44 @@ The entry point is:
 python onecompany.py execution ...
 ```
 
-Examples:
+`create` establishes the first `run_id` and `generation`. Its JSON output contains the current key. Copy those exact values into subsequent state-changing commands.
+
+Example:
 
 ```bash
 python onecompany.py execution create \
   --wu WU-42 \
+  --run-id RUN-42 \
   --objective "Implement bounded retry policy" \
   --acceptance-criterion AC1="unit tests pass" \
   --acceptance-criterion AC2="retry remains bounded"
 
-python onecompany.py execution task-add --wu WU-42 --task-id T1 --description "Implement policy"
-python onecompany.py execution evidence-add --wu WU-42 --evidence-id E1 --kind test --reference test_retry_policy --acceptance-criteria AC1,AC2 --authoritative
-python onecompany.py execution progress --wu WU-42 --head HEAD_SHA --unmet-ac AC2 --test unit=passing --evidence-id E1
-python onecompany.py execution claim --wu WU-42 --claim "Implementation objective is complete"
-python onecompany.py execution evaluate --wu WU-42 --verdict met --confidence 1.0 --notes "Evidence verified" --cited-evidence E1
+python onecompany.py execution task-add \
+  --wu WU-42 --run-id RUN-42 --generation 1 \
+  --task-id T1 --description "Implement policy"
+
+python onecompany.py execution evidence-add \
+  --wu WU-42 --run-id RUN-42 --generation 1 \
+  --evidence-id E1 --kind test --reference test_retry_policy \
+  --acceptance-criteria AC1,AC2 --authoritative
+
+python onecompany.py execution progress \
+  --wu WU-42 --run-id RUN-42 --generation 1 \
+  --head HEAD_SHA --unmet-ac AC2 --test unit=passing --evidence-id E1
+
+python onecompany.py execution claim \
+  --wu WU-42 --run-id RUN-42 --generation 1 \
+  --claim "Implementation objective is complete"
+
+python onecompany.py execution evaluate \
+  --wu WU-42 --run-id RUN-42 --generation 1 \
+  --verdict met --confidence 1.0 --notes "Evidence verified" \
+  --cited-evidence E1
+
 python onecompany.py execution journal-verify --wu WU-42
 ```
+
+If an `edit` or `rotate_generation` command succeeds, use the **new generation returned in the command output** for every later mutation. A worker holding the previous generation will be rejected.
 
 ## Independent implementation note
 

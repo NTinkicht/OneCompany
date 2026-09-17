@@ -171,6 +171,10 @@ Acceptance includes:
 - safe external-runtime invocation;
 - bounded durable lessons.
 
+## Review remediation
+
+The CodeRabbit integrity review on the initial Epic 0.7 head identified six issues across terminal-state enforcement, journal concurrency, crash recovery, read-modify-write serialization, public CLI generation fencing, and durable resource-guard enforcement. The integration branch now contains explicit fixes and adversarial regression coverage for all six classes. Promotion requires the remediation head itself to pass fresh CI and re-review; an earlier green run is not reusable evidence.
+
 ## Promotion gate
 
 Before promotion to `main`:

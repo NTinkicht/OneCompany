@@ -1,8 +1,8 @@
 {
   "$schema": "./schemas/supervision.schema.json",
   "schema_version": "1.0",
-  "enabled": false,
-  "mode": "observe_only",
+  "enabled": true,
+  "mode": "notify",
   "continuous_operation": {
     "event_driven_first": true,
     "scheduled_reconciliation": true,
@@ -11,10 +11,10 @@
     "target_effective_cadence_minutes": 60
   },
   "github_actions": {
-    "enabled": false,
+    "enabled": true,
     "default_cron": "17 * * * *",
     "responsive_cron_example": "2,17,32,47 * * * *",
-    "may_post_team_room": false,
+    "may_post_team_room": true,
     "may_failover": false,
     "may_merge": false
   },
@@ -35,6 +35,15 @@
     "team_room_issue_number": 45,
     "post_only_actionable_states": true,
     "deduplicate_same_state": true
+  },
+  "liveness_policy": {
+    "stale_suspicion_never_grants_failover": true,
+    "progress_required_for_renewal": true,
+    "reconcile_before_failover": true,
+    "deduplicate_supervisor_replicas": true,
+    "autonomy_gate_before_mutation": true,
+    "read_only_actions_allowed_at_l1": true,
+    "write_failover_minimum_autonomy_level": "L3"
   },
   "safety": {
     "scheduler_is_supervisor_not_implementer": true,

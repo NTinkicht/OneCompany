@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Wake OneCompany from GitHub events and reconcile authoritative state safely.
 
-GitHub event payloads are wake hints only. This runtime uses them solely to choose
-a reconciliation class and diagnostic subject; all consequential state is rebuilt
-by ``supervise.py`` from live GitHub plus durable coordination truth.
+GitHub event payloads are wake hints only. Candidate/integration checkouts can
+prove wake mapping and deduplication, but durable authority is reconstructed only
+from the protected default-branch tip.
 """
 from __future__ import annotations
 
@@ -25,7 +25,6 @@ POST_SAFE_EVENTS = {"schedule", "push", "workflow_run", "workflow_dispatch"}
 
 
 def load_event(path: str | None) -> dict[str, Any]:
-    """Load an event only as an untrusted wake hint."""
     if not path:
         return {}
     try:
@@ -36,22 +35,16 @@ def load_event(path: str | None) -> dict[str, Any]:
 
 
 def event_kind(event_name: str, action: str | None, payload: dict[str, Any]) -> str:
-    """Map a platform wake signal to a reconciliation kind without granting authority."""
     if event_name == "pull_request_review":
         return "REVIEW_CHANGED"
     if event_name == "workflow_run":
         return "CI_CHANGED"
     if event_name == "pull_request":
-        if action == "closed":
-            return "MERGE_CHANGED"
-        return "PR_CHANGED"
-    if event_name in {"push", "schedule", "workflow_dispatch", "repository_dispatch"}:
-        return "RECONCILE"
+        return "MERGE_CHANGED" if action == "closed" else "PR_CHANGED"
     return "RECONCILE"
 
 
 def event_subject(event_name: str, payload: dict[str, Any]) -> str:
-    """Derive a diagnostic subject only; this value is never authority."""
     pr = payload.get("pull_request")
     if isinstance(pr, dict) and isinstance(pr.get("number"), int):
         return f"pr:{pr['number']}"
@@ -65,7 +58,6 @@ def event_subject(event_name: str, payload: dict[str, Any]) -> str:
 
 
 def wake_id(delivery_id: str, event_name: str, action: str | None, subject: str) -> str:
-    """Create deterministic wake identity for replica/delivery deduplication evidence."""
     material = json.dumps(
         {"delivery": delivery_id, "event": event_name, "action": action, "subject": subject},
         sort_keys=True,
@@ -75,7 +67,6 @@ def wake_id(delivery_id: str, event_name: str, action: str | None, subject: str)
 
 
 def run_supervision(*, post_team_room: bool = False) -> dict[str, Any]:
-    """Reconcile from live/durable authority; optionally post a non-authoritative signal."""
     base = [sys.executable, str(SUPERVISE)]
     result = subprocess.run(base, cwd=str(ROOT), text=True, capture_output=True, check=False)
     if result.returncode != 0:
@@ -86,7 +77,6 @@ def run_supervision(*, post_team_room: bool = False) -> dict[str, Any]:
         raise RuntimeError("supervision did not return JSON") from exc
     if not isinstance(snapshot, dict):
         raise RuntimeError("supervision snapshot must be an object")
-
     if post_team_room:
         posted = subprocess.run(
             [*base, "--post-team-room"],
@@ -107,8 +97,8 @@ def reconcile_event(
     delivery_id: str,
     *,
     post_team_room: bool = False,
+    integration_smoke: bool = False,
 ) -> dict[str, Any]:
-    """Reconcile one wake signal while keeping L1 mutation authority disabled."""
     policy = handoff.load_policy()
     supervision = load_json(CONTROL / "supervision.json")
     if not handoff.activation_ready(policy):
@@ -118,21 +108,40 @@ def reconcile_event(
 
     kind = event_kind(event_name, action, payload)
     subject = event_subject(event_name, payload)
+    wake = {
+        "id": wake_id(delivery_id, event_name, action, subject),
+        "event_name": event_name,
+        "event_action": action,
+        "kind": kind,
+        "subject": subject,
+        "payload_used_as_authority": False,
+    }
+    if integration_smoke:
+        return {
+            "schema": "onecompany-event-reconciliation-v1",
+            "authority": "none",
+            "authority_effects": [],
+            "wake": wake,
+            "activation_state": "INTEGRATION_SMOKE",
+            "trusted_default_branch_reconciliation_performed": False,
+            "reason": "candidate checkout cannot derive durable authority",
+            "autonomy_level": "L1",
+            "mutation_authorized": False,
+            "automatic_failover_authorized": False,
+            "automatic_merge_authorized": False,
+            "human_sovereignty_preserved": True,
+            "zero_extra_spend_required": True,
+        }
+
     safe_post = post_team_room and event_name in POST_SAFE_EVENTS
     snapshot = run_supervision(post_team_room=safe_post)
     return {
         "schema": "onecompany-event-reconciliation-v1",
         "authority": "none",
         "authority_effects": [],
-        "wake": {
-            "id": wake_id(delivery_id, event_name, action, subject),
-            "event_name": event_name,
-            "event_action": action,
-            "kind": kind,
-            "subject": subject,
-            "payload_used_as_authority": False,
-        },
+        "wake": wake,
         "activation_state": "ACTIVE",
+        "trusted_default_branch_reconciliation_performed": True,
         "supervision": snapshot,
         "autonomy_level": "L1",
         "mutation_authorized": False,
@@ -150,6 +159,7 @@ def main() -> int:
     parser.add_argument("--event-path", default=os.environ.get("GITHUB_EVENT_PATH"))
     parser.add_argument("--delivery-id", default=os.environ.get("GITHUB_RUN_ID", "manual"))
     parser.add_argument("--post-team-room", action="store_true")
+    parser.add_argument("--integration-smoke", action="store_true")
     args = parser.parse_args()
     try:
         payload = load_event(args.event_path)
@@ -159,6 +169,7 @@ def main() -> int:
             payload,
             args.delivery_id,
             post_team_room=args.post_team_room,
+            integration_smoke=args.integration_smoke,
         )
         print(json.dumps(output, indent=2, sort_keys=True))
         return 0

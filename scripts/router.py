@@ -130,7 +130,7 @@ def main() -> int:
 
     try:
         profile_order = execution_profile_order(args.execution_role, args.complexity, budget)
-    except (ValueError, KeyError) as exc:
+    except (ValueError, KeyError, TypeError, OSError) as exc:
         print(json.dumps({
             "status": "BLOCKED_INVALID_EXECUTION_PROFILE_REQUEST",
             "error": str(exc),

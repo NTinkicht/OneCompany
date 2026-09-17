@@ -17,7 +17,9 @@ SPEC.loader.exec_module(shadow_migration)
 
 class ShadowMigrationTests(unittest.TestCase):
     def test_tabibi_fixture_fails_closed_without_mutation_readiness(self):
-        fixture = ROOT / ".onecompany" / "reference" / "migrations" / "tabibi-c1-shadow.json"
+        fixture = ROOT / "source-evidence" / "tabibi" / "c1-shadow.json"
+        if not fixture.exists():
+            self.skipTest("source-only Tabibi fixture is intentionally absent from installed copies")
         report = shadow_migration.analyze_manifest(shadow_migration.load_manifest(fixture))
         self.assertFalse(report["mutation_ready"])
         self.assertTrue(report["shadow_only"])

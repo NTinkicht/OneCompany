@@ -1011,14 +1011,21 @@ class ExecutionStore:
 
     @staticmethod
     def safe_name(wu_id: str) -> str:
-        """Convert a work-unit identifier to a safe local filename."""
-        normalized = "".join(
-            ch if ch.isalnum() or ch in {"-", "_", "."} else "_"
-            for ch in wu_id
-        )
-        if not normalized or normalized in {".", ".."}:
-            raise ValueError("invalid work-unit id")
-        return normalized
+        """Return a collision-free local name by rejecting unsafe identifiers."""
+        if (
+            not wu_id
+            or not wu_id[0].isascii()
+            or not wu_id[0].isalnum()
+            or any(
+                not ch.isascii()
+                or (not ch.isalnum() and ch not in {"-", "_", "."})
+                for ch in wu_id
+            )
+        ):
+            raise ValueError(
+                "work-unit id must match [A-Za-z0-9][A-Za-z0-9._-]*"
+            )
+        return wu_id
 
     def state_path(self, wu_id: str) -> Path:
         """Return the atomic current-state path for one work unit."""

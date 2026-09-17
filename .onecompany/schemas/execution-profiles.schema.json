@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://onecompany.dev/schemas/execution-profiles.schema.json",
+  "title": "OneCompany Execution Profiles",
+  "type": "object",
+  "required": ["schema_version", "profiles"],
+  "properties": {
+    "$schema": {"type": "string"},
+    "schema_version": {"type": "string"},
+    "profiles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["actor_id", "roles", "tiers", "preferred_complexity", "cost_class"],
+        "properties": {
+          "actor_id": {"type": "string", "minLength": 1},
+          "roles": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "uniqueItems": true},
+          "tiers": {
+            "type": "object",
+            "additionalProperties": {"enum": ["light", "standard", "heavy"]}
+          },
+          "preferred_complexity": {
+            "type": "array",
+            "items": {"enum": ["light", "standard", "heavy"]},
+            "minItems": 1,
+            "uniqueItems": true
+          },
+          "cost_class": {"type": "string", "minLength": 1},
+          "context_strength": {"enum": ["light", "standard", "high"]}
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

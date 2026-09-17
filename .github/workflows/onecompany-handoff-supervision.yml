@@ -49,13 +49,20 @@ jobs:
           OC_DELIVERY_ID: ${{ github.run_id }}:${{ github.run_attempt }}
         run: |
           set -euo pipefail
-          post_args=()
+          args=()
           case "${GITHUB_EVENT_NAME}" in
-            schedule|push|workflow_run|workflow_dispatch) post_args+=(--post-team-room) ;;
+            pull_request|pull_request_review)
+              # Candidate code may prove wake/dedup behavior but may not derive
+              # durable coordination authority away from protected main.
+              args+=(--integration-smoke)
+              ;;
+            schedule|push|workflow_run|workflow_dispatch)
+              args+=(--post-team-room)
+              ;;
           esac
           python scripts/handoff_runtime.py \
             --event-name "${GITHUB_EVENT_NAME}" \
             --event-action "${OC_EVENT_ACTION}" \
             --event-path "${GITHUB_EVENT_PATH}" \
             --delivery-id "${OC_DELIVERY_ID}" \
-            "${post_args[@]}"
+            "${args[@]}"

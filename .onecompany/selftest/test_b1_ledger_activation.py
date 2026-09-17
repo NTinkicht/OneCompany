@@ -37,7 +37,7 @@ def top_level_permissions(path: Path) -> dict[str, str]:
 
 
 class B1LedgerActivationTests(unittest.TestCase):
-    """Regress the repo-specific B1 activation without broadening authority."""
+    """Regress B1 authority while allowing later B2/B3 liveness activation."""
 
     def setUp(self):
         if os.environ.get("ONECOMPANY_OFFLINE_UNIT_FIXTURE") == "1":
@@ -47,9 +47,7 @@ class B1LedgerActivationTests(unittest.TestCase):
         if repository != "NTinkicht/OneCompany":
             self.skipTest("B1 activation evidence is specific to the OneCompany source repository")
         self.ledger = json.loads((CONTROL / "ledger.json").read_text(encoding="utf-8"))
-        self.supervision = json.loads(
-            (CONTROL / "supervision.json").read_text(encoding="utf-8")
-        )
+        self.supervision = json.loads((CONTROL / "supervision.json").read_text(encoding="utf-8"))
 
     def test_team_room_is_activated_with_minimal_verified_publisher_set(self):
         self.assertTrue(self.ledger["enabled"])
@@ -67,26 +65,22 @@ class B1LedgerActivationTests(unittest.TestCase):
         self.assertNotIn("chatgpt-codex-connector[bot]", trusted)
         self.assertNotIn("dependabot[bot]", trusted)
 
-    def test_supervision_remains_observe_only_and_cannot_publish(self):
-        self.assertFalse(self.supervision["enabled"])
-        self.assertEqual(self.supervision["mode"], "observe_only")
-        self.assertEqual(
-            self.supervision["coordination"]["team_room_issue_number"], 45
-        )
-        self.assertFalse(self.supervision["github_actions"]["enabled"])
-        self.assertFalse(self.supervision["github_actions"]["may_post_team_room"])
+    def test_later_supervision_activation_does_not_expand_b1_authority(self):
+        self.assertTrue(self.supervision["enabled"])
+        self.assertEqual(self.supervision["mode"], "notify")
+        self.assertEqual(self.supervision["coordination"]["team_room_issue_number"], 45)
+        self.assertTrue(self.supervision["github_actions"]["enabled"])
+        self.assertTrue(self.supervision["github_actions"]["may_post_team_room"])
         self.assertFalse(self.supervision["github_actions"]["may_failover"])
         self.assertFalse(self.supervision["github_actions"]["may_merge"])
         self.assertFalse(self.supervision["chatgpt_tasks"]["may_mutate"])
+        self.assertEqual(self.ledger["trusted_publisher_logins"], ["NTinkicht"])
 
     def test_read_smoke_is_read_only_and_uses_one_immutable_snapshot(self):
         workflow = ROOT / ".github" / "workflows" / "onecompany-ledger-read-smoke.yml"
         self.assertTrue(workflow.exists())
         text = workflow.read_text(encoding="utf-8")
-        self.assertEqual(
-            top_level_permissions(workflow),
-            {"contents": "read", "issues": "read"},
-        )
+        self.assertEqual(top_level_permissions(workflow), {"contents": "read", "issues": "read"})
         self.assertIn("persist-credentials: false", text)
         self.assertIn(".unlink(missing_ok=True)", text)
         self.assertEqual(text.count("issues/45/comments?per_page=100"), 1)
@@ -98,10 +92,7 @@ class B1LedgerActivationTests(unittest.TestCase):
 
     def test_validation_workflow_has_exact_read_only_permissions(self):
         workflow = ROOT / ".github" / "workflows" / "onecompany-validate.yml"
-        self.assertEqual(
-            top_level_permissions(workflow),
-            {"contents": "read", "issues": "read"},
-        )
+        self.assertEqual(top_level_permissions(workflow), {"contents": "read", "issues": "read"})
         text = workflow.read_text(encoding="utf-8")
         self.assertNotIn("write-all", text)
         self.assertNotRegex(text, r"(?m)^\s{2,}[A-Za-z0-9_-]+:\s*write\s*$")
@@ -123,15 +114,11 @@ class B1LedgerActivationTests(unittest.TestCase):
             patch.object(ledger_lib, "_default_branch_tip", return_value=("main", head)) as tip,
         ):
             ledger_lib._assert_ledger_runtime_activation()
-
         tip.assert_called_once_with("NTinkicht/OneCompany")
 
     def test_runtime_activation_guard_rejects_feature_or_stale_checkout(self):
         protected_tip = "f" * 40
-        for label, checkout in (
-            ("feature-ref", "e" * 40),
-            ("older-main", "d" * 40),
-        ):
+        for label, checkout in (("feature-ref", "e" * 40), ("older-main", "d" * 40)):
             with self.subTest(label=label):
                 def fake_run(command, cwd=None):
                     del cwd
@@ -144,24 +131,14 @@ class B1LedgerActivationTests(unittest.TestCase):
                 with (
                     patch.object(ledger_lib, "run", side_effect=fake_run),
                     patch.object(ledger_lib, "_repository", return_value="NTinkicht/OneCompany"),
-                    patch.object(
-                        ledger_lib,
-                        "_default_branch_tip",
-                        return_value=("main", protected_tip),
-                    ),
+                    patch.object(ledger_lib, "_default_branch_tip", return_value=("main", protected_tip)),
                 ):
-                    with self.assertRaisesRegex(
-                        RuntimeError, "current protected default-branch tip"
-                    ):
+                    with self.assertRaisesRegex(RuntimeError, "current protected default-branch tip"):
                         ledger_lib._assert_ledger_runtime_activation()
 
     def test_runtime_activation_guard_rejects_dirty_policy_before_network(self):
         with (
-            patch.object(
-                ledger_lib,
-                "run",
-                return_value=SimpleNamespace(returncode=1, stdout="", stderr=""),
-            ),
+            patch.object(ledger_lib, "run", return_value=SimpleNamespace(returncode=1, stdout="", stderr="")),
             patch.object(ledger_lib, "_repository") as repository,
         ):
             with self.assertRaisesRegex(RuntimeError, "clean ledger/config policy"):

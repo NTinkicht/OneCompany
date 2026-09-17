@@ -18,6 +18,7 @@ def main() -> int:
     liveness = supervision.get("liveness_policy", {})
     github = supervision.get("github_actions", {})
     chatgpt = supervision.get("chatgpt_tasks", {})
+    enabled = supervision.get("enabled") is True
     results = []
 
     results.append(check("scheduler is supervisor, not implementer", safety.get("scheduler_is_supervisor_not_implementer") is True))
@@ -27,8 +28,6 @@ def main() -> int:
     results.append(check("scheduled replicas cannot override budget", safety.get("never_override_budget_policy") is True))
     results.append(check("scheduled replicas cannot override human-only decisions", safety.get("never_override_human_only_decisions") is True))
 
-    results.append(check("B3 supervision is active", supervision.get("enabled") is True))
-    results.append(check("L1 supervision remains notify-only", supervision.get("mode") == "notify"))
     results.append(check("event-driven wake remains primary", supervision.get("continuous_operation", {}).get("event_driven_first") is True))
     results.append(check("scheduled reconciliation remains redundancy", supervision.get("continuous_operation", {}).get("scheduled_reconciliation") is True))
     results.append(check("stale suspicion never grants failover", liveness.get("stale_suspicion_never_grants_failover") is True))
@@ -44,14 +43,23 @@ def main() -> int:
         gaps = [ordered[i + 1] - ordered[i] for i in range(3)] + [ordered[0] + 60 - ordered[-1]]
         results.append(check("four hourly supervisors approximate 15-minute cadence", max(gaps) <= 16 and min(gaps) >= 14))
 
-    results.append(check("GitHub reconciliation is enabled", github.get("enabled") is True))
-    results.append(check("GitHub supervisor may emit bounded Team Room signals", github.get("may_post_team_room") is True))
+    if enabled:
+        results.append(check("active L1 supervision is notify-only", supervision.get("mode") == "notify"))
+        results.append(check("active L1 GitHub reconciliation is enabled", github.get("enabled") is True))
+        results.append(check("active L1 supervisor may emit bounded Team Room signals", github.get("may_post_team_room") is True))
+    else:
+        results.append(check("fresh supervision remains observe-only", supervision.get("mode") == "observe_only"))
+        results.append(check("fresh GitHub reconciliation remains disabled", github.get("enabled") is False))
+        results.append(check("fresh supervisor cannot post Team Room signals", github.get("may_post_team_room") is False))
+        results.append(check("fresh ChatGPT scheduled tasks remain disabled", chatgpt.get("enabled") is False))
+
     results.append(check("GitHub supervisor has no failover authority at L1", github.get("may_failover") is False))
     results.append(check("GitHub supervisor has no merge authority at L1", github.get("may_merge") is False))
     results.append(check("ChatGPT scheduled supervisors have no mutation authority", chatgpt.get("may_mutate") is False))
 
     failed = len([value for value in results if not value])
-    print(f"\nSupervision simulation: {len(results)-failed} passed, {failed} failed")
+    state = "active" if enabled else "safe-inactive"
+    print(f"\nSupervision simulation ({state}): {len(results)-failed} passed, {failed} failed")
     return 1 if failed else 0
 
 

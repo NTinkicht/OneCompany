@@ -1,14 +1,19 @@
 {
   "$schema": "./schemas/handoffs.schema.json",
   "schema_version": "1.0",
-  "enabled": false,
-  "mode": "staged_only",
+  "enabled": true,
+  "mode": "active",
   "activation": {
     "requires_b1_protected_main": true,
     "requires_ledger_replay_proof": true,
-    "b1_protected_main_proven": false,
-    "ledger_replay_proven": false,
-    "evidence_refs": []
+    "b1_protected_main_proven": true,
+    "ledger_replay_proven": true,
+    "evidence_refs": [
+      "github:main@8a563b92d67df233a8a52684fe7a5047de486f79",
+      "github:pr#61:merged@8a563b92d67df233a8a52684fe7a5047de486f79",
+      "github-actions:OneCompany-Validate#481:success:35224916884@8a563b92d67df233a8a52684fe7a5047de486f79",
+      "github-actions:Ledger-Read-Smoke#25:success:35224916911@8a563b92d67df233a8a52684fe7a5047de486f79"
+    ]
   },
   "wake_hints": [
     "WORK_READY",
@@ -22,6 +27,16 @@
   "publisher_policy": {
     "publisher_identity_and_event_type_both_required": true,
     "automation_publishers": {}
+  },
+  "runtime": {
+    "event_reconciliation_enabled": true,
+    "current_autonomy_level": "L1",
+    "l1_behavior": "reconcile_and_notify_only",
+    "mutation_requires_preexisting_authority": true,
+    "read_only_unattended_dispatch_allowed": true,
+    "write_dispatch_requires_canonical_lease": true,
+    "automatic_failover_allowed": false,
+    "automatic_merge_allowed": false
   },
   "safety": {
     "events_are_wake_hints_only": true,

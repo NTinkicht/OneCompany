@@ -1,0 +1,68 @@
+name: OneCompany Handoff Supervision
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, closed]
+  pull_request_review:
+    types: [submitted, dismissed]
+  workflow_run:
+    workflows: ["OneCompany Validate", "OneCompany Ledger Read Smoke"]
+    types: [completed]
+  push:
+    branches: [main]
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+  issues: write
+
+concurrency:
+  group: onecompany-handoff-supervision-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    steps:
+      # actions/checkout v7.0.1 — immutable pin.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      # actions/setup-python v7.0.0 — immutable pin.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Validate B2/B3 activation boundary
+        run: |
+          python scripts/handoff_validate.py
+          python scripts/supervision_validate.py
+      - name: Reconcile event against live GitHub and durable coordination
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OC_EVENT_ACTION: ${{ github.event.action || '' }}
+          OC_DELIVERY_ID: ${{ github.run_id }}:${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          args=()
+          case "${GITHUB_EVENT_NAME}" in
+            pull_request|pull_request_review)
+              # Candidate code may prove wake/dedup behavior but may not derive
+              # durable coordination authority away from protected main.
+              args+=(--integration-smoke)
+              ;;
+            schedule|push|workflow_run|workflow_dispatch)
+              args+=(--post-team-room)
+              ;;
+          esac
+          python scripts/handoff_runtime.py \
+            --event-name "${GITHUB_EVENT_NAME}" \
+            --event-action "${OC_EVENT_ACTION}" \
+            --event-path "${GITHUB_EVENT_PATH}" \
+            --delivery-id "${OC_DELIVERY_ID}" \
+            "${args[@]}"

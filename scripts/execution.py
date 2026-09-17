@@ -98,10 +98,14 @@ def cmd_create(args: argparse.Namespace) -> int:
     )
     store = store_for(args)
     with store.lock(args.wu):
-        store.recover_pending(args.wu, lock_held=True)
-        if store.state_path(args.wu).exists():
+        existing_paths = (
+            store.state_path(args.wu),
+            store.journal_path(args.wu),
+            store.pending_path(args.wu),
+        )
+        if any(path.exists() for path in existing_paths):
             raise FileExistsError(
-                f"execution state already exists for {args.wu}"
+                f"execution artifacts already exist for {args.wu}"
             )
         store.persist_event(
             context,
@@ -132,6 +136,10 @@ def cmd_edit(args: argparse.Namespace) -> int:
         context,
         supplied_key,
     ):
+        if args.objective is None and not args.acceptance_criterion:
+            raise ValueError(
+                "edit requires --objective or --acceptance-criterion"
+            )
         criteria = (
             dict(args.acceptance_criterion)
             if args.acceptance_criterion

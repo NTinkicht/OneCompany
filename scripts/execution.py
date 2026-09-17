@@ -81,15 +81,6 @@ def locked_context(
         yield store, context, supplied_key
 
 
-def enforce_guard(
-    context: RunContext, supplied_key: RunKey
-) -> tuple[bool, str | None]:
-    """Persistently convert a tripped guard into a non-runnable state."""
-    decision = ResourceGuard.check(context)
-    if not decision.allowed:
-        ResourceGuard.enforce(context, supplied_key, decision)
-    return decision.allowed, decision.reason
-
 
 def cmd_create(args: argparse.Namespace) -> int:
     """Create generation one while serializing the existence check."""
@@ -281,7 +272,7 @@ def cmd_usage(args: argparse.Namespace) -> int:
         supplied_key,
     ):
         decision = ResourceGuard.record_usage(
-            context,
+           context,
             supplied_key,
             assistant_tokens=args.assistant_tokens,
             active_seconds=args.active_seconds,

@@ -106,6 +106,18 @@ class CutoverReadinessTests(unittest.TestCase):
         self.assertEqual(report["authority_effects"], [])
         self.assertEqual(report["blocker_codes"], [])
 
+    def test_verified_empty_incumbent_inventory_can_be_ready(self):
+        manifest = clean_manifest()
+        manifest["incumbent_writers"] = []
+        manifest["no_active_mutation_writers_verified"] = True
+        manifest["cutover"]["owner_by_capability"] = {}
+        manifest["cutover"]["owner_by_capability_after_cutover"] = {}
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertTrue(report["shadow_mutation_ready"])
+        self.assertTrue(report["cutover_ready"])
+        self.assertEqual(report["mutation_capabilities"], [])
+        self.assertNotIn("POST_CUTOVER_OWNERSHIP_UNRESOLVED", report["blocker_codes"])
+
     def test_human_unapproved_manifest_stays_blocked(self):
         report = cutover_readiness.analyze_cutover(clean_manifest(human_approved=False))
         self.assertFalse(report["cutover_ready"])

@@ -163,8 +163,16 @@ def analyze_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
             findings.append(_finding("DUAL_WRITER_RISK", f"capability {capability!r} has multiple active mutation-capable incumbents: {unique}"))
 
     ownership = cutover.get("owner_by_capability")
-    if not isinstance(ownership, dict) or not ownership:
-        findings.append(_finding("CUTOVER_OWNERSHIP_UNRESOLVED", "cutover.owner_by_capability must explicitly assign one reviewed owner per mutation capability"))
+    verified_empty_inventory = (
+        isinstance(incumbents_raw, list)
+        and not incumbents
+        and inventory_complete
+        and manifest.get("no_active_mutation_writers_verified") is True
+    )
+    if not isinstance(ownership, dict):
+        findings.append(_finding("CUTOVER_OWNERSHIP_UNRESOLVED", "cutover.owner_by_capability must be an object assigning one reviewed owner per mutation capability"))
+    elif not ownership and not verified_empty_inventory:
+        findings.append(_finding("CUTOVER_OWNERSHIP_UNRESOLVED", "cutover.owner_by_capability must explicitly assign one reviewed owner per mutation capability; an empty map is allowed only for a verified empty incumbent-writer inventory"))
     else:
         for capability in sorted(writer_map):
             owner = ownership.get(capability)

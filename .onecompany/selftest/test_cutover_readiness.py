@@ -89,6 +89,16 @@ def clean_manifest(*, human_approved: bool = True) -> dict:
                     if human_approved
                     else None
                 ),
+                "approved_at": (
+                    "2026-09-18T01:02:00Z"
+                    if human_approved
+                    else None
+                ),
+                "approved_reconciliation_evidence_ref": (
+                    "github:reconciliation-run-1"
+                    if human_approved
+                    else None
+                ),
                 "approved_snapshot_sha": "a" * 40,
                 "approved_pr_head": "b" * 40,
             },
@@ -97,6 +107,8 @@ def clean_manifest(*, human_approved: bool = True) -> dict:
             "mode": "shadow",
             "mutation_capable": False,
             "writer_identity": "onecompany",
+            "writer_reviewed": True,
+            "writer_evidence_ref": "github:onecompany-writer-review",
         },
         "cutover_evidence": {
             "active_stream_status": "confirmed",
@@ -131,6 +143,30 @@ class CutoverReadinessTests(unittest.TestCase):
             report["blocker_codes"],
         )
 
+    def test_human_approval_must_follow_reconciliation(self):
+        manifest = clean_manifest()
+        manifest["cutover"]["human_gate"]["approved_at"] = (
+            "2026-09-18T00:58:00Z"
+        )
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn(
+            "HUMAN_CUTOVER_APPROVAL_MISSING",
+            report["blocker_codes"],
+        )
+
+    def test_human_approval_must_bind_reconciliation_evidence(self):
+        manifest = clean_manifest()
+        manifest["cutover"]["human_gate"][
+            "approved_reconciliation_evidence_ref"
+        ] = "github:some-other-reconciliation"
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn(
+            "HUMAN_CUTOVER_APPROVAL_MISSING",
+            report["blocker_codes"],
+        )
+
     def test_active_incumbent_mutator_blocks_cutover(self):
         manifest = clean_manifest()
         manifest["incumbent_writers"][0]["active"] = True
@@ -138,6 +174,16 @@ class CutoverReadinessTests(unittest.TestCase):
         self.assertFalse(report["cutover_ready"])
         self.assertIn(
             "INCUMBENT_MUTATORS_STILL_ACTIVE",
+            report["blocker_codes"],
+        )
+
+    def test_unreviewed_incumbent_mutator_blocks_cutover(self):
+        manifest = clean_manifest()
+        manifest["incumbent_writers"][0]["reviewed"] = False
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn(
+            "INCUMBENT_MUTATOR_UNREVIEWED",
             report["blocker_codes"],
         )
 
@@ -220,6 +266,16 @@ class CutoverReadinessTests(unittest.TestCase):
         self.assertFalse(report["cutover_ready"])
         self.assertIn(
             "POST_CUTOVER_OWNERSHIP_UNRESOLVED",
+            report["blocker_codes"],
+        )
+
+    def test_proposed_writer_requires_reviewed_evidence(self):
+        manifest = clean_manifest()
+        manifest["proposed_onecompany"]["writer_reviewed"] = False
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn(
+            "PROPOSED_WRITER_UNREVIEWED",
             report["blocker_codes"],
         )
 

@@ -129,32 +129,44 @@ def analyze_cutover(manifest: dict[str, Any]) -> dict[str, Any]:
         )
 
     reconciled_after_quiescence = cutover.get("reconciled_after_quiescence") is True
+    reconciliation_completed_at = _timestamp(
+        cutover.get("reconciliation_completed_at")
+    )
+    reconciliation_evidence_ref = cutover.get(
+        "reconciliation_evidence_ref"
+    )
     reconciliation_bound = (
         _sha(main_sha)
         and cutover.get("reconciliation_snapshot_sha") == main_sha
         and _sha(pr_head)
         and cutover.get("reconciliation_pr_head") == pr_head
     )
+    expected_quiescence_count = sum(
+        1
+        for writer in incumbents
+        if isinstance(writer, dict)
+        and writer.get("mutation_capable") is True
+    )
     chronology_ok = (
         snapshot_time is not None
-        and all(snapshot_time >= item for item in quiescence_times)
+        and reconciliation_completed_at is not None
+        and _nonempty(reconciliation_evidence_ref)
+        and all(
+            reconciliation_completed_at >= item
+            for item in quiescence_times
+        )
+        and snapshot_time >= reconciliation_completed_at
     )
     if not (
         reconciled_after_quiescence
         and reconciliation_bound
         and chronology_ok
-        and len(quiescence_times)
-        == sum(
-            1
-            for writer in incumbents
-            if isinstance(writer, dict)
-            and writer.get("mutation_capable") is True
-        )
+        and len(quiescence_times) == expected_quiescence_count
     ):
         findings.append(
             _finding(
                 "POST_QUIESCENCE_RECONCILIATION_REQUIRED",
-                "fresh reconciliation must be bound to the exact snapshot/head and observed after every incumbent quiescence",
+                "fresh timestamped reconciliation evidence must be bound to the exact snapshot/head and complete after every incumbent quiescence",
             )
         )
 

@@ -143,14 +143,18 @@ def analyze_cutover(manifest: dict[str, Any]) -> dict[str, Any]:
 
     human = cutover.get("human_gate")
     human = human if isinstance(human, dict) else {}
+    principal_evidence = human.get("principal_evidence")
+    principal_evidence = principal_evidence if isinstance(principal_evidence, dict) else {}
     approved_at = _timestamp(human.get("approved_at"))
     human_ok = (
         human.get("required") is True
         and human.get("approved") is True
         and human.get("approver_type") == "human"
         and _nonempty(human.get("approver_identity"))
-        and human.get("identity_verified") is True
-        and _nonempty(human.get("identity_evidence_ref"))
+        and principal_evidence.get("identity") == human.get("approver_identity")
+        and principal_evidence.get("principal_type") == "human"
+        and principal_evidence.get("verified") is True
+        and _nonempty(principal_evidence.get("evidence_ref"))
         and _nonempty(human.get("approval_ref"))
         and approved_at is not None
         and reconciliation_completed_at is not None
@@ -164,7 +168,7 @@ def analyze_cutover(manifest: dict[str, Any]) -> dict[str, Any]:
         and human.get("approved_pr_head") == pr_head
     )
     if not human_ok:
-        findings.append(_finding("HUMAN_CUTOVER_APPROVAL_MISSING", "cutover requires verified human-principal approval after reconciliation and the observed snapshot, bound to identity evidence, reconciliation evidence, and the exact reconciled snapshot/PR head"))
+        findings.append(_finding("HUMAN_CUTOVER_APPROVAL_MISSING", "cutover requires approval by a structurally verified human principal whose evidence identifies the declared approver, after reconciliation and the observed snapshot, bound to reconciliation evidence and the exact reconciled snapshot/PR head"))
 
     blockers = [item for item in findings if item["severity"] == "blocker"]
     ready = len(blockers) == 0

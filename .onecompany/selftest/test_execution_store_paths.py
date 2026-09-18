@@ -23,6 +23,32 @@ class ExecutionStorePathTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "work-unit id must match"):
                 store.state_path("WU/A")
 
+    def test_windows_reserved_device_names_are_rejected(self):
+        """Runtime artifact names must stay regular files on Windows."""
+        with tempfile.TemporaryDirectory() as temp:
+            store = ExecutionStore(Path(temp))
+            for wu_id in (
+                "NUL",
+                "nul",
+                "CON.txt",
+                "PRN.log",
+                "AUX.",
+                "COM1",
+                "COM9.events",
+                "LPT1",
+                "LPT9.pending",
+            ):
+                with self.subTest(wu_id=wu_id):
+                    with self.assertRaisesRegex(
+                        ValueError, "Windows-reserved device basename"
+                    ):
+                        store.state_path(wu_id)
+
+            self.assertEqual(store.state_path("COM10").name, "COM10.json")
+            self.assertEqual(
+                store.state_path("CONSOLE").name, "CONSOLE.json"
+            )
+
     def test_distinct_safe_identifiers_have_distinct_artifact_paths(self):
         """Allowed identifiers remain one-to-one with their local filenames."""
         with tempfile.TemporaryDirectory() as temp:

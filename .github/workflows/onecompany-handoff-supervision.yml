@@ -28,7 +28,7 @@ concurrency:
 
 jobs:
   pr-smoke:
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'pull_request_review'
     permissions:
       contents: read
       actions: read
@@ -36,8 +36,8 @@ jobs:
       issues: read
     runs-on: ubuntu-latest
     steps:
-      # PR-head code is exercised only with a read-only token and cannot publish
-      # coordination state or Team Room comments.
+      # Candidate code, including review-event wakes, is exercised only with a
+      # read-only token and cannot publish coordination state or Team Room comments.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           ref: ${{ github.event.pull_request.head.sha }}
@@ -64,7 +64,9 @@ jobs:
             --integration-smoke
 
   reconcile:
-    if: github.event_name != 'pull_request'
+    # Privileged reconciliation is only meaningful once the runtime is present
+    # on the trusted default branch. PR/review events remain read-only above.
+    if: github.event_name == 'schedule' || github.event_name == 'push' || github.event_name == 'workflow_run' || github.event_name == 'workflow_dispatch'
     permissions:
       contents: read
       actions: read
@@ -94,10 +96,6 @@ jobs:
           set -euo pipefail
           args=()
           case "${GITHUB_EVENT_NAME}" in
-            pull_request_review)
-              # Review events wake trusted code but remain non-authoritative at L1.
-              args+=(--integration-smoke)
-              ;;
             schedule|push|workflow_run|workflow_dispatch)
               args+=(--post-team-room)
               ;;

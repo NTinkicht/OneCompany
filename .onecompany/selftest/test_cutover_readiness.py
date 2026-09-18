@@ -68,6 +68,8 @@ def clean_manifest(*, human_approved: bool = True) -> dict:
                 "evidence_ref": "github:stream-quiesced",
             },
             "reconciled_after_quiescence": True,
+            "reconciliation_completed_at": "2026-09-18T00:59:00Z",
+            "reconciliation_evidence_ref": "github:reconciliation-run-1",
             "reconciliation_snapshot_sha": "a" * 40,
             "reconciliation_pr_head": "b" * 40,
             "owner_by_capability_after_cutover": {
@@ -166,6 +168,30 @@ class CutoverReadinessTests(unittest.TestCase):
     def test_reconciliation_must_bind_exact_snapshot_and_pr_head(self):
         manifest = clean_manifest()
         manifest["cutover"]["reconciliation_pr_head"] = "c" * 40
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn(
+            "POST_QUIESCENCE_RECONCILIATION_REQUIRED",
+            report["blocker_codes"],
+        )
+
+    def test_reconciliation_completion_must_follow_quiescence(self):
+        manifest = clean_manifest()
+        manifest["cutover"]["reconciliation_completed_at"] = (
+            "2026-09-18T00:50:00Z"
+        )
+        # Snapshot remains later than quiescence. The gate must still fail
+        # because the reconciliation itself completed too early.
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn(
+            "POST_QUIESCENCE_RECONCILIATION_REQUIRED",
+            report["blocker_codes"],
+        )
+
+    def test_reconciliation_requires_evidence_reference(self):
+        manifest = clean_manifest()
+        manifest["cutover"].pop("reconciliation_evidence_ref")
         report = cutover_readiness.analyze_cutover(manifest)
         self.assertFalse(report["cutover_ready"])
         self.assertIn(

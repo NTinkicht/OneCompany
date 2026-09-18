@@ -41,6 +41,20 @@ def _sha(value: Any) -> bool:
     return isinstance(value, str) and len(value) == 40 and all(ch in "0123456789abcdefABCDEF" for ch in value)
 
 
+def _observation_bound(section: dict[str, Any], snapshot: dict[str, Any]) -> bool:
+    """Bind zero-activity/absence evidence to one exact observation event."""
+    boundary_ref = snapshot.get("observation_boundary_ref")
+    return (
+        _sha(snapshot.get("main_sha"))
+        and section.get("snapshot_sha") == snapshot.get("main_sha")
+        and _nonempty(snapshot.get("observed_at"))
+        and section.get("observed_at") == snapshot.get("observed_at")
+        and _nonempty(boundary_ref)
+        and section.get("observation_boundary_ref") == boundary_ref
+        and section.get("evidence_ref") == boundary_ref
+    )
+
+
 def _finding(code: str, message: str, *, severity: str = "blocker") -> dict[str, str]:
     return {"code": code, "severity": severity, "message": message}
 
@@ -70,8 +84,8 @@ def analyze_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         if missing: findings.append(_finding("LIVE_STREAM_IDENTITY_INCOMPLETE", "live stream evidence is missing or malformed: " + ", ".join(sorted(missing))))
     elif stream_mode == "idle":
         idle = live.get("idle") if isinstance(live.get("idle"), dict) else {}
-        valid_idle = idle.get("verified") is True and type(idle.get("open_pr_count")) is int and idle.get("open_pr_count") == 0 and type(idle.get("active_work_unit_count")) is int and idle.get("active_work_unit_count") == 0 and _nonempty(idle.get("evidence_ref")) and _sha(snapshot.get("main_sha")) and idle.get("snapshot_sha") == snapshot.get("main_sha")
-        if not valid_idle: findings.append(_finding("IDLE_STREAM_EVIDENCE_INCOMPLETE", "live.mode='idle' requires verified zero-work evidence bound to the exact snapshot"))
+        valid_idle = idle.get("verified") is True and type(idle.get("open_pr_count")) is int and idle.get("open_pr_count") == 0 and type(idle.get("active_work_unit_count")) is int and idle.get("active_work_unit_count") == 0 and _observation_bound(idle, snapshot)
+        if not valid_idle: findings.append(_finding("IDLE_STREAM_EVIDENCE_INCOMPLETE", "live.mode='idle' requires verified zero-work evidence bound to the exact observation boundary"))
         conflicts = [k for k in REQUIRED_LIVE_FIELDS if live.get(k) not in (None, "")]
         if conflicts: findings.append(_finding("IDLE_STREAM_STATE_CONFLICT", "live.mode='idle' conflicts with active-stream identity"))
     else: findings.append(_finding("LIVE_STREAM_MODE_INVALID", "live.mode must be 'active' or 'idle'"))
@@ -86,7 +100,7 @@ def analyze_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         elif ra != pa: findings.append(_finding("ACTOR_PROTOCOL_DRIFT", "registry/protocol active actors disagree"))
     elif legacy_mode == "absent":
         absence = legacy.get("control_plane_absence") if isinstance(legacy.get("control_plane_absence"), dict) else {}
-        if not (absence.get("verified") is True and _nonempty(absence.get("evidence_ref")) and _sha(snapshot.get("main_sha")) and absence.get("snapshot_sha") == snapshot.get("main_sha")): findings.append(_finding("LEGACY_CONTROL_PLANE_ABSENCE_UNVERIFIED", "legacy.mode='absent' requires verified absence evidence bound to exact snapshot"))
+        if not (absence.get("verified") is True and _observation_bound(absence, snapshot)): findings.append(_finding("LEGACY_CONTROL_PLANE_ABSENCE_UNVERIFIED", "legacy.mode='absent' requires verified absence evidence bound to the exact observation boundary"))
         conflict = any(key in legacy and legacy.get(key) not in (None, {}) for key in ("state", "work_queue"))
         for key in ("registry", "protocol"):
             if key in legacy:

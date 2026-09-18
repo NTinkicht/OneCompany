@@ -59,7 +59,9 @@ def analyze_cutover(manifest: dict[str, Any]) -> dict[str, Any]:
 
     snapshot_time = _timestamp(snapshot.get("observed_at"))
     main_sha = snapshot.get("main_sha")
+    stream_mode = live.get("mode", "active")
     pr_head = live.get("pr_head")
+    observation_boundary_ref = snapshot.get("observation_boundary_ref")
 
     incumbents_raw = manifest.get("incumbent_writers")
     incumbents = incumbents_raw if isinstance(incumbents_raw, list) else []
@@ -116,7 +118,23 @@ def analyze_cutover(manifest: dict[str, Any]) -> dict[str, Any]:
     reconciled_after_quiescence = cutover.get("reconciled_after_quiescence") is True
     reconciliation_completed_at = _timestamp(cutover.get("reconciliation_completed_at"))
     reconciliation_evidence_ref = cutover.get("reconciliation_evidence_ref")
-    reconciliation_bound = _sha(main_sha) and cutover.get("reconciliation_snapshot_sha") == main_sha and _sha(pr_head) and cutover.get("reconciliation_pr_head") == pr_head
+    base_reconciliation_bound = _sha(main_sha) and cutover.get("reconciliation_snapshot_sha") == main_sha
+    if stream_mode == "active":
+        reconciliation_bound = (
+            base_reconciliation_bound
+            and _sha(pr_head)
+            and cutover.get("reconciliation_pr_head") == pr_head
+        )
+    elif stream_mode == "idle":
+        reconciliation_bound = (
+            base_reconciliation_bound
+            and _nonempty(observation_boundary_ref)
+            and cutover.get("reconciliation_observed_at") == snapshot.get("observed_at")
+            and cutover.get("reconciliation_observation_boundary_ref") == observation_boundary_ref
+            and cutover.get("reconciliation_pr_head") in (None, "")
+        )
+    else:
+        reconciliation_bound = False
     expected_quiescence_count = sum(1 for writer in incumbents if isinstance(writer, dict) and writer.get("mutation_capable") is True)
     chronology_ok = (
         snapshot_time is not None
@@ -128,7 +146,7 @@ def analyze_cutover(manifest: dict[str, Any]) -> dict[str, Any]:
         and snapshot_time >= reconciliation_completed_at
     )
     if not (reconciled_after_quiescence and reconciliation_bound and chronology_ok and len(quiescence_times) == expected_quiescence_count):
-        findings.append(_finding("POST_QUIESCENCE_RECONCILIATION_REQUIRED", "fresh timestamped reconciliation evidence must be bound to the exact snapshot/head and complete after every incumbent and active-stream quiescence boundary"))
+        findings.append(_finding("POST_QUIESCENCE_RECONCILIATION_REQUIRED", "fresh timestamped reconciliation evidence must be bound to the exact snapshot and stream identity (PR head for active targets; observation boundary for verified-idle targets) and complete after every incumbent and stream quiescence boundary"))
 
     writer_identity = proposed.get("writer_identity")
     if not _nonempty(writer_identity):
@@ -174,18 +192,30 @@ def analyze_cutover(manifest: dict[str, Any]) -> dict[str, Any]:
         and human.get("approved_reconciliation_evidence_ref") == reconciliation_evidence_ref
         and _sha(main_sha)
         and human.get("approved_snapshot_sha") == main_sha
-        and _sha(pr_head)
-        and human.get("approved_pr_head") == pr_head
+        and (
+            (
+                stream_mode == "active"
+                and _sha(pr_head)
+                and human.get("approved_pr_head") == pr_head
+            )
+            or (
+                stream_mode == "idle"
+                and _nonempty(observation_boundary_ref)
+                and human.get("approved_observed_at") == snapshot.get("observed_at")
+                and human.get("approved_observation_boundary_ref") == observation_boundary_ref
+                and human.get("approved_pr_head") in (None, "")
+            )
+        )
     )
     if not human_ok:
-        findings.append(_finding("HUMAN_CUTOVER_APPROVAL_MISSING", "cutover requires approval by a structurally verified human principal whose evidence identifies the declared approver, after reconciliation and the observed snapshot, bound to reconciliation evidence and the exact reconciled snapshot/PR head"))
+        findings.append(_finding("HUMAN_CUTOVER_APPROVAL_MISSING", "cutover requires approval by a structurally verified human principal after reconciliation and the observed snapshot, bound to reconciliation evidence and the exact stream identity (PR head for active targets; observation boundary for verified-idle targets)"))
 
     blockers = [item for item in findings if item["severity"] == "blocker"]
     ready = len(blockers) == 0
     return {
         "schema_version": "1.0", "repository": shadow.get("repository"), "default_branch": shadow.get("default_branch"),
         "shadow_mutation_ready": shadow["mutation_ready"], "shadow_blocker_codes": shadow["blocker_codes"], "cutover_ready": ready,
-        "target_mutated": False, "mutation_authorized": False, "authority_effects": [], "mutation_capabilities": sorted(mutation_capabilities),
+        "target_mutated": False, "mutation_authorized": False, "authority_effects": [], "stream_mode": stream_mode, "mutation_capabilities": sorted(mutation_capabilities),
         "findings": findings, "blocker_codes": sorted({item["code"] for item in blockers}),
         "next_action": "open a separately reviewed target-specific cutover change; this readiness gate grants no mutation authority" if ready else "resolve blockers and reconcile again; keep the target repository unchanged",
     }

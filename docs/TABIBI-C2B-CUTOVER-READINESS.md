@@ -39,10 +39,10 @@ The rehearsal additionally requires all of the following:
    Each reviewed incumbent record must have `active: false`, a `quiesced_at` timestamp, and a `quiescence_evidence_ref`.
 
 2. **The product stream is at a timestamped zero-writer handoff boundary.**
-   `cutover.active_stream` must report `status: "quiesced"`, `active_writer_count: 0`, cite evidence, and include a valid `quiesced_at` timestamp.
+   `cutover.active_stream` must report `status: "quiesced"`, an integer (not boolean) `active_writer_count: 0`, cite evidence, and include a timezone-aware `quiesced_at` timestamp.
 
 3. **Reconciliation happened after quiescence.**
-   The exact snapshot SHA and live PR head must be rebound after the final incumbent and product-stream quiescence event. The manifest must carry a dedicated `reconciliation_completed_at` timestamp and `reconciliation_evidence_ref`; ordering must prove both `all incumbent.quiesced_at <= reconciliation_completed_at` and `active_stream.quiesced_at <= reconciliation_completed_at <= snapshot.observed_at`. A later snapshot cannot disguise an earlier stale reconciliation.
+   The exact snapshot SHA and live PR head must be rebound after the final incumbent and product-stream quiescence event. All chronology timestamps must be timezone-aware. The manifest must carry a dedicated `reconciliation_completed_at` timestamp and `reconciliation_evidence_ref`; ordering must prove both `all incumbent.quiesced_at <= reconciliation_completed_at` and `active_stream.quiesced_at <= reconciliation_completed_at <= snapshot.observed_at`. A later snapshot cannot disguise an earlier stale reconciliation.
 
 4. **Post-cutover ownership is single and explicit.**
    Every mutation-capable incumbent record must itself be reviewed. Every reviewed mutation capability must map exactly once to a proposed OneCompany writer identity that carries reviewed identity/capability evidence. Ambiguous, partial, unreviewed, or legacy ownership fails closed.

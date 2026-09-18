@@ -45,13 +45,13 @@ The rehearsal additionally requires all of the following:
    The exact snapshot SHA and live PR head must be rebound after the final incumbent quiescence event. The manifest must carry a dedicated `reconciliation_completed_at` timestamp and `reconciliation_evidence_ref`; ordering must prove `all quiesced_at <= reconciliation_completed_at <= snapshot.observed_at`. A later snapshot cannot disguise an earlier stale reconciliation.
 
 4. **Post-cutover ownership is single and explicit.**
-   Every reviewed mutation capability must map exactly once to the proposed OneCompany writer identity. Ambiguous, partial, or legacy ownership fails closed.
+   Every mutation-capable incumbent record must itself be reviewed. Every reviewed mutation capability must map exactly once to a proposed OneCompany writer identity that carries reviewed identity/capability evidence. Ambiguous, partial, unreviewed, or legacy ownership fails closed.
 
 5. **Rollback is ordered and human-controlled.**
    Rollback must disable OneCompany first, restore legacy mutation authority only through a human decision, preserve reviewed ordering, and cite the reviewed rollback evidence.
 
-6. **The human cutover decision is exact-state bound.**
-   The approval must be explicit and bind the exact reconciled snapshot SHA and PR head. A prior approval for another head cannot be reused.
+6. **The human cutover decision is exact-state and reconciliation-evidence bound.**
+   The approval must be explicit, timestamped after the post-quiescence reconciliation, reference that exact reconciliation evidence record, and bind the exact reconciled snapshot SHA and PR head. A prior approval for the same code SHA but an older operational state cannot be reused.
 
 ## No-dual-writer rule
 

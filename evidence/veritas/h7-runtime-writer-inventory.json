@@ -1,0 +1,31 @@
+{
+  "schema_version": "onecompany.veritas.h7.v1",
+  "target": "NTinkicht/veritas-atlas",
+  "target_sha": "e19a0780ec8d5237d923f6d1cdb3a4af24346c95",
+  "gate": "H7",
+  "status": "blocked",
+  "authority": "read-only-evidence",
+  "writer_inventory": {
+    "repository_deployment_config": {"status": "observed_absent_at_target_sha", "clears_external_writers": false},
+    "render": {"status": "unknown", "reason": "explicit workspace selection and refreshed evidence required"},
+    "neon": {"status": "observed_absent_in_connected_scope", "clears_other_accounts": false},
+    "github_deployments_environments_hooks": {"status": "unknown", "reason": "administrative evidence not yet complete"},
+    "other_hosting": {"status": "unknown", "providers": ["vercel", "azure", "aws", "gcp", "other"]},
+    "database_migration_automation": {"status": "unknown"},
+    "scheduled_external_scripts": {"status": "unknown"},
+    "human_operator_writers": {"status": "unknown"}
+  },
+  "fail_closed": true,
+  "cleared": false,
+  "constraints": {
+    "companyos_install": false,
+    "target_mutation": false,
+    "deployment": false,
+    "database_mutation": false,
+    "lease_dispatch_authority": false,
+    "merge_authority": false,
+    "budget_expansion": false,
+    "autonomy_promotion": false
+  },
+  "clearance_rule": "H7 may clear only after reviewed evidence identifies every deployment/runtime writer or explicitly proves absence within every reviewed provider/account scope. Unknown scope remains blocked."
+}

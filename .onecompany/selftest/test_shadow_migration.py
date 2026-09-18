@@ -160,12 +160,29 @@ class ShadowMigrationTests(unittest.TestCase):
         self.assertFalse(report["mutation_ready"])
         self.assertIn("IDLE_STREAM_EVIDENCE_INCOMPLETE", report["blocker_codes"])
 
+    def test_idle_mode_rejects_populated_active_stream_identity(self):
+        manifest = verified_idle_manifest()
+        manifest["live"]["pr"] = 99
+        manifest["live"]["pr_head"] = "b" * 40
+        manifest["live"]["work_unit"] = "WU-FAKE"
+        report = shadow_migration.analyze_manifest(manifest)
+        self.assertFalse(report["mutation_ready"])
+        self.assertIn("IDLE_STREAM_STATE_CONFLICT", report["blocker_codes"])
+
     def test_absent_legacy_control_plane_requires_verified_evidence(self):
         manifest = verified_idle_manifest()
         manifest["legacy"]["control_plane_absence"]["verified"] = False
         report = shadow_migration.analyze_manifest(manifest)
         self.assertFalse(report["mutation_ready"])
         self.assertIn("LEGACY_CONTROL_PLANE_ABSENCE_UNVERIFIED", report["blocker_codes"])
+
+    def test_absent_legacy_control_plane_rejects_state_or_queue_conflict(self):
+        manifest = verified_idle_manifest()
+        manifest["legacy"]["state"] = {"work_unit": "WU-STALE"}
+        manifest["legacy"]["work_queue"] = {"work_unit": "WU-STALE"}
+        report = shadow_migration.analyze_manifest(manifest)
+        self.assertFalse(report["mutation_ready"])
+        self.assertIn("LEGACY_CONTROL_PLANE_ABSENCE_CONFLICT", report["blocker_codes"])
 
     def test_absent_legacy_control_plane_rejects_actor_roster_conflict(self):
         manifest = verified_idle_manifest()

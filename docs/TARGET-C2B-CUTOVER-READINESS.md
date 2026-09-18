@@ -37,8 +37,8 @@ C2b readiness is layered on top of C2a shadow readiness. If the C2a report is bl
 
 The rehearsal additionally requires all of the following:
 
-1. **All mutation-capable incumbent writers are quiesced.**
-   Each reviewed incumbent record must have `active: false`, a `quiesced_at` timestamp, and a `quiescence_evidence_ref`. A target believed to have no incumbent mutators must prove inventory completeness rather than silently assuming an empty set.
+1. **All mutation-capable incumbent writers are explicit and quiesced.**
+   Each mutation-capable incumbent must declare at least one explicit capability, and each reviewed incumbent record must have `active: false`, a `quiesced_at` timestamp, and a `quiescence_evidence_ref`. A capabilityless mutation writer fails closed because ownership cannot be proven. A target believed to have no incumbent mutators must prove inventory completeness rather than silently assuming an empty set.
 
 2. **The product stream is at a timestamped zero-writer handoff boundary.**
    `cutover.active_stream` must report `status: "quiesced"`, an integer (not boolean) `active_writer_count: 0`, cite evidence, and include a timezone-aware `quiesced_at` timestamp.

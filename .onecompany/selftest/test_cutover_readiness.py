@@ -234,6 +234,20 @@ class CutoverReadinessTests(unittest.TestCase):
         self.assertFalse(report["cutover_ready"])
         self.assertIn("HUMAN_CUTOVER_APPROVAL_MISSING", report["blocker_codes"])
 
+    def test_verified_idle_rejects_empty_reconciliation_pr_head_field(self):
+        manifest = clean_idle_manifest()
+        manifest["cutover"]["reconciliation_pr_head"] = ""
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn("POST_QUIESCENCE_RECONCILIATION_REQUIRED", report["blocker_codes"])
+
+    def test_verified_idle_rejects_empty_approved_pr_head_field(self):
+        manifest = clean_idle_manifest()
+        manifest["cutover"]["human_gate"]["approved_pr_head"] = ""
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn("HUMAN_CUTOVER_APPROVAL_MISSING", report["blocker_codes"])
+
     def test_verified_idle_rejects_synthetic_pr_head(self):
         manifest = clean_idle_manifest()
         manifest["live"]["pr_head"] = "b" * 40

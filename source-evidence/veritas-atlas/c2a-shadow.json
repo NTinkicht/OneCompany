@@ -5,9 +5,9 @@
     "default_branch": "main"
   },
   "snapshot": {
-    "observed_at": "2026-09-18",
+    "observed_at": "2026-09-18T12:57:19Z",
     "main_sha": "e19a0780ec8d5237d923f6d1cdb3a4af24346c95",
-    "source": "github-live-read-only; OneCompany#76 comment 5730358819",
+    "source": "github-live-read-only; C1 evidence merged at a1d431e1a8dc0bf6268b1022645c3ebf97eb5df2; OneCompany#76 comment 5730358819",
     "stale": false,
     "derived": false
   },

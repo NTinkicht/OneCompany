@@ -15,6 +15,54 @@ shadow_migration = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(shadow_migration)
 
 
+def verified_idle_manifest() -> dict:
+    return {
+        "schema_version": "1.0",
+        "project": {"repository": "example/idle-app", "default_branch": "main"},
+        "snapshot": {
+            "observed_at": "2026-09-18T12:00:00Z",
+            "main_sha": "a" * 40,
+            "source": "verified-live",
+            "stale": False,
+            "derived": False,
+        },
+        "live": {
+            "mode": "idle",
+            "idle": {
+                "verified": True,
+                "open_pr_count": 0,
+                "active_work_unit_count": 0,
+                "evidence_ref": "github:idle-stream-evidence",
+                "snapshot_sha": "a" * 40,
+            },
+        },
+        "legacy": {
+            "mode": "absent",
+            "control_plane_absence": {
+                "verified": True,
+                "evidence_ref": "github:no-legacy-control-plane",
+                "snapshot_sha": "a" * 40,
+            },
+        },
+        "branch_protection": {"verified": True, "protected": True},
+        "incumbent_writer_inventory_complete": True,
+        "incumbent_writers": [],
+        "no_active_mutation_writers_verified": True,
+        "cutover": {"owner_by_capability": {}},
+        "proposed_onecompany": {"mode": "shadow", "mutation_capable": False},
+        "cutover_evidence": {
+            "active_stream_status": "confirmed",
+            "surface_classifications_reviewed": True,
+            "rollback_verified": True,
+            "human_decisions_resolved": True,
+            "zero_extra_spend": True,
+            "autonomy_level": "L1",
+            "staging_branch": "epic-0.6-integration",
+            "fresh_c2_reconciliation": True,
+        },
+    }
+
+
 class ShadowMigrationTests(unittest.TestCase):
     def test_tabibi_fixture_fails_closed_without_mutation_readiness(self):
         fixture = ROOT / "source-evidence" / "tabibi" / "c1-shadow.json"
@@ -87,6 +135,69 @@ class ShadowMigrationTests(unittest.TestCase):
         unsupported_schema = shadow_migration.analyze_manifest(manifest)
         self.assertFalse(unsupported_schema["mutation_ready"])
         self.assertIn("SCHEMA_VERSION_UNSUPPORTED", unsupported_schema["blocker_codes"])
+
+    def test_verified_idle_target_needs_no_synthetic_live_stream_or_actor_roster(self):
+        manifest = verified_idle_manifest()
+        report = shadow_migration.analyze_manifest(manifest)
+        self.assertTrue(report["mutation_ready"])
+        self.assertEqual(report["stream_mode"], "idle")
+        self.assertEqual(report["legacy_mode"], "absent")
+        self.assertEqual(report["blocker_codes"], [])
+        self.assertNotIn("LIVE_STREAM_IDENTITY_INCOMPLETE", report["blocker_codes"])
+        self.assertNotIn("ACTOR_PROVENANCE_INCOMPLETE", report["blocker_codes"])
+
+    def test_idle_target_with_open_pull_request_fails_closed(self):
+        manifest = verified_idle_manifest()
+        manifest["live"]["idle"]["open_pr_count"] = 1
+        report = shadow_migration.analyze_manifest(manifest)
+        self.assertFalse(report["mutation_ready"])
+        self.assertIn("IDLE_STREAM_EVIDENCE_INCOMPLETE", report["blocker_codes"])
+
+    def test_idle_target_requires_exact_snapshot_binding(self):
+        manifest = verified_idle_manifest()
+        manifest["live"]["idle"]["snapshot_sha"] = "b" * 40
+        report = shadow_migration.analyze_manifest(manifest)
+        self.assertFalse(report["mutation_ready"])
+        self.assertIn("IDLE_STREAM_EVIDENCE_INCOMPLETE", report["blocker_codes"])
+
+    def test_absent_legacy_control_plane_requires_verified_evidence(self):
+        manifest = verified_idle_manifest()
+        manifest["legacy"]["control_plane_absence"]["verified"] = False
+        report = shadow_migration.analyze_manifest(manifest)
+        self.assertFalse(report["mutation_ready"])
+        self.assertIn("LEGACY_CONTROL_PLANE_ABSENCE_UNVERIFIED", report["blocker_codes"])
+
+    def test_absent_legacy_control_plane_rejects_actor_roster_conflict(self):
+        manifest = verified_idle_manifest()
+        manifest["legacy"]["registry"] = {"active_actors": ["bot"]}
+        report = shadow_migration.analyze_manifest(manifest)
+        self.assertFalse(report["mutation_ready"])
+        self.assertIn("LEGACY_CONTROL_PLANE_ABSENCE_CONFLICT", report["blocker_codes"])
+
+    def test_idle_target_with_active_mutation_writer_fails_closed(self):
+        manifest = verified_idle_manifest()
+        manifest["incumbent_writers"] = [{
+            "name": "external-writer",
+            "active": True,
+            "mutation_capable": True,
+            "reviewed": True,
+            "capabilities": ["deployment"],
+        }]
+        manifest["no_active_mutation_writers_verified"] = False
+        manifest["cutover"]["owner_by_capability"] = {"deployment": "external-writer"}
+        report = shadow_migration.analyze_manifest(manifest)
+        self.assertFalse(report["mutation_ready"])
+        self.assertIn("IDLE_STREAM_WRITER_CONFLICT", report["blocker_codes"])
+
+    def test_explicit_adoption_blockers_propagate(self):
+        manifest = verified_idle_manifest()
+        manifest["adoption_blockers"] = [{
+            "code": "NO_CI",
+            "message": "repository-native CI is not established",
+        }]
+        report = shadow_migration.analyze_manifest(manifest)
+        self.assertFalse(report["mutation_ready"])
+        self.assertIn("NO_CI", report["blocker_codes"])
 
     def test_analysis_does_not_modify_manifest_file(self):
         manifest = {

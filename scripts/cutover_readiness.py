@@ -129,7 +129,7 @@ def analyze_cutover(manifest: dict[str, Any]) -> dict[str, Any]:
     post_ownership = cutover.get("owner_by_capability_after_cutover")
     if not isinstance(post_ownership, dict):
         post_ownership = {}
-    ownership_ok = bool(mutation_capabilities) and set(post_ownership) == mutation_capabilities
+    ownership_ok = set(post_ownership) == mutation_capabilities
     if ownership_ok and _nonempty(writer_identity):
         ownership_ok = all(post_ownership.get(capability) == writer_identity for capability in mutation_capabilities)
     if not ownership_ok:

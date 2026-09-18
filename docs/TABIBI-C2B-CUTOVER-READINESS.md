@@ -42,7 +42,7 @@ The rehearsal additionally requires all of the following:
    `cutover.active_stream` must report `status: "quiesced"`, `active_writer_count: 0`, and cite evidence.
 
 3. **Reconciliation happened after quiescence.**
-   The exact snapshot SHA and live PR head must be rebound after the final incumbent quiescence event. A stale pre-quiescence snapshot cannot pass.
+   The exact snapshot SHA and live PR head must be rebound after the final incumbent quiescence event. The manifest must carry a dedicated `reconciliation_completed_at` timestamp and `reconciliation_evidence_ref`; ordering must prove `all quiesced_at <= reconciliation_completed_at <= snapshot.observed_at`. A later snapshot cannot disguise an earlier stale reconciliation.
 
 4. **Post-cutover ownership is single and explicit.**
    Every reviewed mutation capability must map exactly once to the proposed OneCompany writer identity. Ambiguous, partial, or legacy ownership fails closed.

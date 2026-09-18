@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "target": "NTinkicht/veritas-atlas",
+  "parent_issue": 80,
+  "authority": {
+    "target_mutated": false,
+    "mutation_authorized": false,
+    "companyos_cutover_authorized": false,
+    "human_final_gate_required": true
+  },
+  "gates": {
+    "H1_repository_promotion_safety": "blocked",
+    "H2_repository_native_ci": "blocked",
+    "H3_backend_health_contract": "blocked",
+    "H4_backend_automated_tests": "blocked",
+    "H5_frontend_topology_cleanup": "blocked",
+    "H6_production_auth_secrets_boundary": "blocked",
+    "H7_deployment_runtime_writer_inventory": "blocked",
+    "H8_rollback_release_evidence": "blocked"
+  },
+  "readiness": "blocked",
+  "rule": "No gate may transition from blocked without reviewed target-specific evidence bound to an exact target state. Unknown or stale evidence fails closed. This artifact grants no mutation, lease, deployment, merge, budget, or autonomy authority."
+}

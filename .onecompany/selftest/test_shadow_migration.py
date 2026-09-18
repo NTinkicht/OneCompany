@@ -23,6 +23,7 @@ def verified_idle_manifest() -> dict:
             "observed_at": "2026-09-18T12:00:00Z",
             "main_sha": "a" * 40,
             "source": "verified-live",
+            "observation_boundary_ref": "github:observation-boundary-1",
             "stale": False,
             "derived": False,
         },
@@ -32,16 +33,20 @@ def verified_idle_manifest() -> dict:
                 "verified": True,
                 "open_pr_count": 0,
                 "active_work_unit_count": 0,
-                "evidence_ref": "github:idle-stream-evidence",
+                "evidence_ref": "github:observation-boundary-1",
                 "snapshot_sha": "a" * 40,
+                "observed_at": "2026-09-18T12:00:00Z",
+                "observation_boundary_ref": "github:observation-boundary-1",
             },
         },
         "legacy": {
             "mode": "absent",
             "control_plane_absence": {
                 "verified": True,
-                "evidence_ref": "github:no-legacy-control-plane",
+                "evidence_ref": "github:observation-boundary-1",
                 "snapshot_sha": "a" * 40,
+                "observed_at": "2026-09-18T12:00:00Z",
+                "observation_boundary_ref": "github:observation-boundary-1",
             },
         },
         "branch_protection": {"verified": True, "protected": True},
@@ -122,6 +127,27 @@ class ShadowMigrationTests(unittest.TestCase):
         manifest = verified_idle_manifest(); manifest["live"]["idle"]["snapshot_sha"] = "b" * 40
         report = shadow_migration.analyze_manifest(manifest)
         self.assertFalse(report["mutation_ready"]); self.assertIn("IDLE_STREAM_EVIDENCE_INCOMPLETE", report["blocker_codes"])
+
+    def test_idle_target_rejects_replayed_observation_boundary(self):
+        manifest = verified_idle_manifest()
+        manifest["live"]["idle"]["observed_at"] = "2026-09-18T11:59:59Z"
+        report = shadow_migration.analyze_manifest(manifest)
+        self.assertFalse(report["mutation_ready"])
+        self.assertIn("IDLE_STREAM_EVIDENCE_INCOMPLETE", report["blocker_codes"])
+
+    def test_idle_target_rejects_mismatched_observation_evidence_ref(self):
+        manifest = verified_idle_manifest()
+        manifest["live"]["idle"]["evidence_ref"] = "github:older-observation"
+        report = shadow_migration.analyze_manifest(manifest)
+        self.assertFalse(report["mutation_ready"])
+        self.assertIn("IDLE_STREAM_EVIDENCE_INCOMPLETE", report["blocker_codes"])
+
+    def test_absent_legacy_rejects_replayed_observation_boundary(self):
+        manifest = verified_idle_manifest()
+        manifest["legacy"]["control_plane_absence"]["observation_boundary_ref"] = "github:older-observation"
+        report = shadow_migration.analyze_manifest(manifest)
+        self.assertFalse(report["mutation_ready"])
+        self.assertIn("LEGACY_CONTROL_PLANE_ABSENCE_UNVERIFIED", report["blocker_codes"])
 
     def test_idle_mode_rejects_populated_active_stream_identity(self):
         manifest = verified_idle_manifest(); manifest["live"].update({"pr": 99, "pr_head": "b" * 40, "work_unit": "WU-FAKE"})

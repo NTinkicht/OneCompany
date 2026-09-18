@@ -70,6 +70,7 @@ def analyze_cutover(manifest: dict[str, Any]) -> dict[str, Any]:
     incumbents = incumbents_raw if isinstance(incumbents_raw, list) else []
     mutation_capabilities: set[str] = set()
     active_mutators: list[str] = []
+    unreviewed_mutators: list[str] = []
     quiescence_missing: list[str] = []
     quiescence_times: list[datetime] = []
 
@@ -86,6 +87,9 @@ def analyze_cutover(manifest: dict[str, Any]) -> dict[str, Any]:
                 if isinstance(item, str) and item.strip()
             )
 
+        if writer.get("reviewed") is not True:
+            unreviewed_mutators.append(label)
+
         if writer.get("active") is not False:
             active_mutators.append(label)
 
@@ -95,6 +99,15 @@ def analyze_cutover(manifest: dict[str, Any]) -> dict[str, Any]:
             quiescence_missing.append(label)
         else:
             quiescence_times.append(quiesced_at)
+
+    if unreviewed_mutators:
+        findings.append(
+            _finding(
+                "INCUMBENT_MUTATOR_UNREVIEWED",
+                "mutation-capable incumbent records must be individually reviewed: "
+                + ", ".join(sorted(unreviewed_mutators)),
+            )
+        )
 
     if active_mutators:
         findings.append(
@@ -178,6 +191,16 @@ def analyze_cutover(manifest: dict[str, Any]) -> dict[str, Any]:
                 "proposed_onecompany.writer_identity is required for cutover ownership",
             )
         )
+    if (
+        proposed.get("writer_reviewed") is not True
+        or not _nonempty(proposed.get("writer_evidence_ref"))
+    ):
+        findings.append(
+            _finding(
+                "PROPOSED_WRITER_UNREVIEWED",
+                "proposed OneCompany writer requires reviewed identity/capability evidence",
+            )
+        )
 
     post_ownership = cutover.get("owner_by_capability_after_cutover")
     if not isinstance(post_ownership, dict):
@@ -214,10 +237,16 @@ def analyze_cutover(manifest: dict[str, Any]) -> dict[str, Any]:
 
     human = cutover.get("human_gate")
     human = human if isinstance(human, dict) else {}
+    approved_at = _timestamp(human.get("approved_at"))
     human_ok = (
         human.get("required") is True
         and human.get("approved") is True
         and _nonempty(human.get("approval_ref"))
+        and approved_at is not None
+        and reconciliation_completed_at is not None
+        and approved_at >= reconciliation_completed_at
+        and human.get("approved_reconciliation_evidence_ref")
+        == reconciliation_evidence_ref
         and _sha(main_sha)
         and human.get("approved_snapshot_sha") == main_sha
         and _sha(pr_head)
@@ -227,7 +256,7 @@ def analyze_cutover(manifest: dict[str, Any]) -> dict[str, Any]:
         findings.append(
             _finding(
                 "HUMAN_CUTOVER_APPROVAL_MISSING",
-                "cutover requires explicit human approval bound to the exact reconciled snapshot and PR head",
+                "cutover requires explicit human approval after reconciliation, bound to its evidence and the exact reconciled snapshot/PR head",
             )
         )
 

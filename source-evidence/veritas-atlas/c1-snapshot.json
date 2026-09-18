@@ -124,7 +124,7 @@
   },
   "readiness": {
     "c1_read_only": true,
-    "c2a_shadow_ready": false,
+    "c2a_shadow_ready": true,
     "c2b_cutover_ready": false,
     "target_mutation_authorized": false,
     "blockers": [
@@ -137,6 +137,8 @@
       "MUTATION_WRITER_INVENTORY_UNVERIFIED",
       "DEPLOYMENT_RUNTIME_OWNERSHIP_UNVERIFIED",
       "PRODUCTION_AUTH_SECRET_BOUNDARY_UNVERIFIED"
-    ]
+    ],
+    "c2a_shadow_planning_allowed": true,
+    "c2a_target_mutation_ready": false
   }
 }

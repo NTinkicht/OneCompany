@@ -66,6 +66,7 @@ def clean_manifest(*, human_approved: bool = True) -> dict:
                 "status": "quiesced",
                 "active_writer_count": 0,
                 "evidence_ref": "github:stream-quiesced",
+                "quiesced_at": "2026-09-18T00:57:00Z",
             },
             "reconciled_after_quiescence": True,
             "reconciliation_completed_at": "2026-09-18T00:59:00Z",
@@ -250,6 +251,28 @@ class CutoverReadinessTests(unittest.TestCase):
         manifest["cutover"]["active_stream"][
             "active_writer_count"
         ] = 1
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn(
+            "ACTIVE_STREAM_NOT_QUIESCENT",
+            report["blocker_codes"],
+        )
+
+    def test_stream_quiescence_must_precede_reconciliation(self):
+        manifest = clean_manifest()
+        manifest["cutover"]["active_stream"]["quiesced_at"] = (
+            "2026-09-18T01:01:00Z"
+        )
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn(
+            "POST_QUIESCENCE_RECONCILIATION_REQUIRED",
+            report["blocker_codes"],
+        )
+
+    def test_active_stream_requires_quiescence_timestamp(self):
+        manifest = clean_manifest()
+        manifest["cutover"]["active_stream"].pop("quiesced_at")
         report = cutover_readiness.analyze_cutover(manifest)
         self.assertFalse(report["cutover_ready"])
         self.assertIn(

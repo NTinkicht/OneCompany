@@ -5,11 +5,12 @@
     "default_branch": "main"
   },
   "snapshot": {
-    "observed_at": "2026-09-18T12:54:00Z",
+    "observed_at": "2026-09-18T14:43:52Z",
     "main_sha": "e19a0780ec8d5237d923f6d1cdb3a4af24346c95",
-    "source": "source-evidence/veritas-atlas/c1-snapshot.json",
+    "source": "github-live-read-only; shared observation boundary github:NTinkicht/OneCompany#76:comment-5731658616",
     "stale": false,
-    "derived": false
+    "derived": false,
+    "observation_boundary_ref": "github:NTinkicht/OneCompany#76:comment-5731658616"
   },
   "live": {
     "mode": "idle",
@@ -18,7 +19,9 @@
       "open_pr_count": 0,
       "active_work_unit_count": 0,
       "snapshot_sha": "e19a0780ec8d5237d923f6d1cdb3a4af24346c95",
-      "evidence_ref": "source-evidence/veritas-atlas/c1-snapshot.json"
+      "evidence_ref": "github:NTinkicht/OneCompany#76:comment-5731658616",
+      "observed_at": "2026-09-18T14:43:52Z",
+      "observation_boundary_ref": "github:NTinkicht/OneCompany#76:comment-5731658616"
     }
   },
   "legacy": {
@@ -26,10 +29,16 @@
     "control_plane_absence": {
       "verified": true,
       "snapshot_sha": "e19a0780ec8d5237d923f6d1cdb3a4af24346c95",
-      "evidence_ref": "source-evidence/veritas-atlas/c1-snapshot.json"
+      "evidence_ref": "github:NTinkicht/OneCompany#76:comment-5731658616",
+      "observed_at": "2026-09-18T14:43:52Z",
+      "observation_boundary_ref": "github:NTinkicht/OneCompany#76:comment-5731658616"
     },
-    "registry": {"active_actors": []},
-    "protocol": {"active_actors": []}
+    "registry": {
+      "active_actors": []
+    },
+    "protocol": {
+      "active_actors": []
+    }
   },
   "branch_protection": {
     "verified": true,

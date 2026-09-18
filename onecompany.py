@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parent
 COMMANDS = {
     "onboard": ["onboard.py"],
     "shadow-migration": ["shadow_migration.py"],
+    "cutover-readiness": ["cutover_readiness.py"],
     "doctor": ["doctor.py"], "status": ["status.py"], "check": ["check.py"], "validate": ["validate_all.py"], "schema-validate": ["schema_validate.py"],
     "simulate": ["simulate.py"], "simulate-ledger": ["simulate_ledger.py"], "simulate-supervision": ["simulate_supervision.py"], "simulate-parallel": ["simulate_parallelism.py"], "hardening-audit": ["hardening_audit.py"],
     "readiness": ["readiness.py"], "audit-github": ["github_audit.py"], "next-work": ["next_work.py"], "plan": ["planner.py"], "route": ["router.py"], "dispatch": ["dispatch.py"], "execute-dispatch": ["dispatch_execute_entry.py"],
@@ -29,9 +30,10 @@ def usage() -> int:
     print("\nStart here:")
     print("  onboard           assess a new/existing repository; read-only unless --apply")
     print("  shadow-migration  analyze an external migration snapshot without target mutation")
+    print("  cutover-readiness prove quiescent C2b readiness without target mutation")
     print("\nCommands:")
     for command in COMMANDS:
-        if command not in {"onboard", "shadow-migration"}: print(f"  {command}")
+        if command not in {"onboard", "shadow-migration", "cutover-readiness"}: print(f"  {command}")
     return 2
 
 

@@ -29,6 +29,18 @@ def _actor_set(value: Any) -> set[str]:
     return {item for item in value if isinstance(item, str) and item.strip()}
 
 
+def _nonempty(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _sha(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 40
+        and all(ch in "0123456789abcdefABCDEF" for ch in value)
+    )
+
+
 def _finding(code: str, message: str, *, severity: str = "blocker") -> dict[str, str]:
     return {"code": code, "severity": severity, "message": message}
 
@@ -72,46 +84,86 @@ def analyze_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     if not _valid_snapshot(snapshot):
         findings.append(_finding("SNAPSHOT_PROVENANCE_INCOMPLETE", "snapshot requires valid timestamp, SHA, source, stale=false, and derived=false"))
 
-    missing_live = []
-    for key in REQUIRED_LIVE_FIELDS:
-        value = live.get(key)
-        valid = isinstance(value, (str, int)) and not isinstance(value, bool) and value != ""
-        if key == "pr_head":
-            valid = (
-                isinstance(value, str)
-                and len(value) == 40
-                and all(ch in "0123456789abcdefABCDEF" for ch in value)
-            )
-        if not valid:
-            missing_live.append(key)
-    if missing_live:
-        findings.append(_finding("LIVE_STREAM_IDENTITY_INCOMPLETE", "live stream evidence is missing or malformed: " + ", ".join(sorted(missing_live))))
+    stream_mode = live.get("mode", "active")
+    if stream_mode == "active":
+        missing_live = []
+        for key in REQUIRED_LIVE_FIELDS:
+            value = live.get(key)
+            valid = isinstance(value, (str, int)) and not isinstance(value, bool) and value != ""
+            if key == "pr_head":
+                valid = _sha(value)
+            if not valid:
+                missing_live.append(key)
+        if missing_live:
+            findings.append(_finding("LIVE_STREAM_IDENTITY_INCOMPLETE", "live stream evidence is missing or malformed: " + ", ".join(sorted(missing_live))))
+    elif stream_mode == "idle":
+        idle = live.get("idle") if isinstance(live.get("idle"), dict) else {}
+        zero_open_prs = isinstance(idle.get("open_pr_count"), int) and not isinstance(idle.get("open_pr_count"), bool) and idle.get("open_pr_count") == 0
+        zero_active_wus = isinstance(idle.get("active_work_unit_count"), int) and not isinstance(idle.get("active_work_unit_count"), bool) and idle.get("active_work_unit_count") == 0
+        idle_bound = _sha(snapshot.get("main_sha")) and idle.get("snapshot_sha") == snapshot.get("main_sha")
+        if not (
+            idle.get("verified") is True
+            and zero_open_prs
+            and zero_active_wus
+            and _nonempty(idle.get("evidence_ref"))
+            and idle_bound
+        ):
+            findings.append(_finding(
+                "IDLE_STREAM_EVIDENCE_INCOMPLETE",
+                "live.mode='idle' requires verified evidence, integer open_pr_count=0, integer active_work_unit_count=0, evidence_ref, and exact snapshot_sha binding",
+            ))
+    else:
+        findings.append(_finding("LIVE_STREAM_MODE_INVALID", "live.mode must be 'active' or 'idle'"))
 
-    legacy_state = legacy.get("state") if isinstance(legacy.get("state"), dict) else {}
-    legacy_queue = legacy.get("work_queue") if isinstance(legacy.get("work_queue"), dict) else {}
-    live_wu, live_pr = live.get("work_unit"), live.get("pr")
-    state_wu, state_pr = legacy_state.get("work_unit"), legacy_state.get("current_pr")
-    queue_wu = legacy_queue.get("work_unit")
-    drift_parts: list[str] = []
-    for label, value in (("legacy.state.work_unit", state_wu), ("legacy.work_queue.work_unit", queue_wu)):
-        if not isinstance(value, (str, int)) or isinstance(value, bool) or value == "":
-            findings.append(_finding("LEGACY_CACHE_INCOMPLETE", f"{label} is missing or malformed"))
-    if live_wu is not None and state_wu is not None and live_wu != state_wu:
-        drift_parts.append(f"state work_unit={state_wu} vs live={live_wu}")
-    if live_pr is not None and state_pr != live_pr:
-        drift_parts.append(f"state current_pr={state_pr} vs live={live_pr}")
-    if live_wu is not None and queue_wu is not None and live_wu != queue_wu:
-        drift_parts.append(f"work_queue work_unit={queue_wu} vs live={live_wu}")
-    if drift_parts:
-        findings.append(_finding("LIVE_CACHE_DRIFT", "; ".join(drift_parts)))
+    legacy_mode = legacy.get("mode", "active")
+    if legacy_mode == "active":
+        legacy_state = legacy.get("state") if isinstance(legacy.get("state"), dict) else {}
+        legacy_queue = legacy.get("work_queue") if isinstance(legacy.get("work_queue"), dict) else {}
+        live_wu, live_pr = live.get("work_unit"), live.get("pr")
+        state_wu, state_pr = legacy_state.get("work_unit"), legacy_state.get("current_pr")
+        queue_wu = legacy_queue.get("work_unit")
+        drift_parts: list[str] = []
+        if stream_mode == "active":
+            for label, value in (("legacy.state.work_unit", state_wu), ("legacy.work_queue.work_unit", queue_wu)):
+                if not isinstance(value, (str, int)) or isinstance(value, bool) or value == "":
+                    findings.append(_finding("LEGACY_CACHE_INCOMPLETE", f"{label} is missing or malformed"))
+            if live_wu is not None and state_wu is not None and live_wu != state_wu:
+                drift_parts.append(f"state work_unit={state_wu} vs live={live_wu}")
+            if live_pr is not None and state_pr != live_pr:
+                drift_parts.append(f"state current_pr={state_pr} vs live={live_pr}")
+            if live_wu is not None and queue_wu is not None and live_wu != queue_wu:
+                drift_parts.append(f"work_queue work_unit={queue_wu} vs live={live_wu}")
+            if drift_parts:
+                findings.append(_finding("LIVE_CACHE_DRIFT", "; ".join(drift_parts)))
 
-    registry = legacy.get("registry") if isinstance(legacy.get("registry"), dict) else {}
-    protocol = legacy.get("protocol") if isinstance(legacy.get("protocol"), dict) else {}
-    registry_actors, protocol_actors = _actor_set(registry.get("active_actors")), _actor_set(protocol.get("active_actors"))
-    if not registry_actors or not protocol_actors:
-        findings.append(_finding("ACTOR_PROVENANCE_INCOMPLETE", "both registry and protocol active-actor sets are required"))
-    elif registry_actors != protocol_actors:
-        findings.append(_finding("ACTOR_PROTOCOL_DRIFT", f"registry/protocol active actors disagree: registry={sorted(registry_actors)} protocol={sorted(protocol_actors)}"))
+        registry = legacy.get("registry") if isinstance(legacy.get("registry"), dict) else {}
+        protocol = legacy.get("protocol") if isinstance(legacy.get("protocol"), dict) else {}
+        registry_actors, protocol_actors = _actor_set(registry.get("active_actors")), _actor_set(protocol.get("active_actors"))
+        if not registry_actors or not protocol_actors:
+            findings.append(_finding("ACTOR_PROVENANCE_INCOMPLETE", "both registry and protocol active-actor sets are required when legacy.mode='active'"))
+        elif registry_actors != protocol_actors:
+            findings.append(_finding("ACTOR_PROTOCOL_DRIFT", f"registry/protocol active actors disagree: registry={sorted(registry_actors)} protocol={sorted(protocol_actors)}"))
+    elif legacy_mode == "absent":
+        absence = legacy.get("control_plane_absence") if isinstance(legacy.get("control_plane_absence"), dict) else {}
+        absence_bound = _sha(snapshot.get("main_sha")) and absence.get("snapshot_sha") == snapshot.get("main_sha")
+        registry = legacy.get("registry") if isinstance(legacy.get("registry"), dict) else {}
+        protocol = legacy.get("protocol") if isinstance(legacy.get("protocol"), dict) else {}
+        if not (
+            absence.get("verified") is True
+            and _nonempty(absence.get("evidence_ref"))
+            and absence_bound
+        ):
+            findings.append(_finding(
+                "LEGACY_CONTROL_PLANE_ABSENCE_UNVERIFIED",
+                "legacy.mode='absent' requires verified absence evidence, evidence_ref, and exact snapshot_sha binding",
+            ))
+        if _actor_set(registry.get("active_actors")) or _actor_set(protocol.get("active_actors")):
+            findings.append(_finding(
+                "LEGACY_CONTROL_PLANE_ABSENCE_CONFLICT",
+                "legacy.mode='absent' conflicts with a non-empty registry/protocol actor roster",
+            ))
+    else:
+        findings.append(_finding("LEGACY_CONTROL_PLANE_MODE_INVALID", "legacy.mode must be 'active' or 'absent'"))
 
     if branch_protection.get("verified") is not True:
         findings.append(_finding("BRANCH_PROTECTION_UNVERIFIED", "default-branch protection evidence is not administration-verified"))
@@ -168,6 +220,21 @@ def analyze_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         if len(unique) > 1:
             findings.append(_finding("DUAL_WRITER_RISK", f"capability {capability!r} has multiple active mutation-capable incumbents: {unique}"))
 
+    if stream_mode == "idle":
+        idle_active_mutators = sorted({
+            writer.get("name")
+            for writer in incumbents
+            if isinstance(writer, dict)
+            and writer.get("active") is True
+            and writer.get("mutation_capable") is True
+            and _nonempty(writer.get("name"))
+        })
+        if idle_active_mutators:
+            findings.append(_finding(
+                "IDLE_STREAM_WRITER_CONFLICT",
+                "live.mode='idle' conflicts with active mutation-capable incumbents: " + ", ".join(idle_active_mutators),
+            ))
+
     ownership = cutover.get("owner_by_capability")
     verified_empty_inventory = (
         isinstance(incumbents_raw, list)
@@ -190,6 +257,17 @@ def analyze_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     if proposed.get("mutation_capable") is not False:
         findings.append(_finding("SHADOW_MUTATION_FORBIDDEN", "C2a proposed OneCompany projection must be explicitly non-mutating"))
 
+    adoption_blockers = manifest.get("adoption_blockers")
+    if adoption_blockers is not None:
+        if not isinstance(adoption_blockers, list):
+            findings.append(_finding("ADOPTION_BLOCKERS_MALFORMED", "adoption_blockers must be a list when present"))
+        else:
+            for index, blocker in enumerate(adoption_blockers):
+                if not isinstance(blocker, dict) or not _nonempty(blocker.get("code")) or not _nonempty(blocker.get("message")):
+                    findings.append(_finding("ADOPTION_BLOCKERS_MALFORMED", f"adoption_blockers[{index}] requires non-empty code and message"))
+                    continue
+                findings.append(_finding(blocker["code"].strip(), blocker["message"].strip()))
+
     expected = {
         "active_stream_status": "confirmed",
         "surface_classifications_reviewed": True,
@@ -207,7 +285,8 @@ def analyze_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     blockers = [item for item in findings if item["severity"] == "blocker"]
     return {
         "schema_version": "1.0", "repository": repository, "default_branch": default_branch,
-        "snapshot": snapshot, "shadow_only": True, "target_mutated": False,
+        "snapshot": snapshot, "stream_mode": stream_mode, "legacy_mode": legacy_mode,
+        "shadow_only": True, "target_mutated": False,
         "mutation_ready": len(blockers) == 0, "findings": findings,
         "blocker_codes": sorted({item["code"] for item in blockers}),
         "writer_capabilities": {key: sorted(set(value)) for key, value in sorted(writer_map.items())},

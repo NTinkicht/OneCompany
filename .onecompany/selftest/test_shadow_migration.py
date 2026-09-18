@@ -199,6 +199,20 @@ class ShadowMigrationTests(unittest.TestCase):
         self.assertFalse(report["mutation_ready"])
         self.assertIn("NO_CI", report["blocker_codes"])
 
+    def test_veritas_idle_fixture_preserves_c1_blockers_without_fake_live_state(self):
+        fixture = ROOT / "source-evidence" / "veritas-atlas" / "c2a-shadow.json"
+        report = shadow_migration.analyze_manifest(shadow_migration.load_manifest(fixture))
+        self.assertFalse(report["mutation_ready"])
+        self.assertTrue(report["shadow_only"])
+        self.assertFalse(report["target_mutated"])
+        self.assertEqual(report["stream_mode"], "idle")
+        self.assertEqual(report["legacy_mode"], "absent")
+        self.assertNotIn("LIVE_STREAM_IDENTITY_INCOMPLETE", report["blocker_codes"])
+        self.assertNotIn("ACTOR_PROVENANCE_INCOMPLETE", report["blocker_codes"])
+        self.assertIn("DEFAULT_BRANCH_UNPROTECTED", report["blocker_codes"])
+        self.assertIn("MUTATION_WRITER_INVENTORY_UNVERIFIED", report["blocker_codes"])
+        self.assertIn("NO_REPOSITORY_CI_WORKFLOW", report["blocker_codes"])
+
     def test_analysis_does_not_modify_manifest_file(self):
         manifest = {
             "project": {"repository": "example/app", "default_branch": "main"},

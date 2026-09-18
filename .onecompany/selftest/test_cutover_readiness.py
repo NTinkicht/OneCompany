@@ -156,6 +156,18 @@ class CutoverReadinessTests(unittest.TestCase):
             report["blocker_codes"],
         )
 
+    def test_timezone_less_human_approval_is_rejected(self):
+        manifest = clean_manifest()
+        manifest["cutover"]["human_gate"]["approved_at"] = (
+            "2026-09-18T01:02:00"
+        )
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn(
+            "HUMAN_CUTOVER_APPROVAL_MISSING",
+            report["blocker_codes"],
+        )
+
     def test_human_approval_must_bind_reconciliation_evidence(self):
         manifest = clean_manifest()
         manifest["cutover"]["human_gate"][
@@ -212,6 +224,30 @@ class CutoverReadinessTests(unittest.TestCase):
             report["blocker_codes"],
         )
 
+    def test_timezone_less_quiescence_timestamp_is_rejected(self):
+        manifest = clean_manifest()
+        manifest["incumbent_writers"][0]["quiesced_at"] = (
+            "2026-09-18T00:55:00"
+        )
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn(
+            "QUIESCENCE_EVIDENCE_INCOMPLETE",
+            report["blocker_codes"],
+        )
+
+    def test_timezone_less_reconciliation_timestamp_is_rejected(self):
+        manifest = clean_manifest()
+        manifest["cutover"]["reconciliation_completed_at"] = (
+            "2026-09-18T00:59:00"
+        )
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn(
+            "POST_QUIESCENCE_RECONCILIATION_REQUIRED",
+            report["blocker_codes"],
+        )
+
     def test_reconciliation_must_bind_exact_snapshot_and_pr_head(self):
         manifest = clean_manifest()
         manifest["cutover"]["reconciliation_pr_head"] = "c" * 40
@@ -251,6 +287,18 @@ class CutoverReadinessTests(unittest.TestCase):
         manifest["cutover"]["active_stream"][
             "active_writer_count"
         ] = 1
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn(
+            "ACTIVE_STREAM_NOT_QUIESCENT",
+            report["blocker_codes"],
+        )
+
+    def test_boolean_false_is_not_a_zero_writer_count(self):
+        manifest = clean_manifest()
+        manifest["cutover"]["active_stream"][
+            "active_writer_count"
+        ] = False
         report = cutover_readiness.analyze_cutover(manifest)
         self.assertFalse(report["cutover_ready"])
         self.assertIn(

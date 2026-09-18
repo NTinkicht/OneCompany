@@ -172,6 +172,18 @@ class CutoverReadinessTests(unittest.TestCase):
         self.assertFalse(report["cutover_ready"])
         self.assertIn("HUMAN_CUTOVER_APPROVAL_MISSING", report["blocker_codes"])
 
+    def test_mutation_capable_incumbent_requires_explicit_capabilities(self):
+        manifest = clean_manifest()
+        manifest["incumbent_writers"][0]["capabilities"] = []
+        manifest["cutover"]["owner_by_capability"] = {}
+        manifest["cutover"]["owner_by_capability_after_cutover"] = {}
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["shadow_mutation_ready"])
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn("INCUMBENT_WRITER_CAPABILITIES_INCOMPLETE", report["shadow_blocker_codes"])
+        self.assertIn("INCUMBENT_MUTATOR_CAPABILITIES_INCOMPLETE", report["blocker_codes"])
+        self.assertIn("SHADOW_READINESS_REQUIRED", report["blocker_codes"])
+
     def test_active_incumbent_mutator_blocks_cutover(self):
         manifest = clean_manifest(); manifest["incumbent_writers"][0]["active"] = True
         report = cutover_readiness.analyze_cutover(manifest)

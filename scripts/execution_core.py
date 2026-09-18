@@ -1011,7 +1011,7 @@ class ExecutionStore:
 
     @staticmethod
     def safe_name(wu_id: str) -> str:
-        """Return a collision-free local name by rejecting unsafe identifiers."""
+        """Return a collision-free, cross-platform-safe local work-unit name."""
         if (
             not wu_id
             or not wu_id[0].isascii()
@@ -1024,6 +1024,20 @@ class ExecutionStore:
         ):
             raise ValueError(
                 "work-unit id must match [A-Za-z0-9][A-Za-z0-9._-]*"
+            )
+
+        # Win32 treats legacy device basenames as reserved even when an
+        # extension follows (for example NUL.json or COM1.events.jsonl).
+        # Reject them here so every execution artifact remains a regular file
+        # on all supported platforms.
+        trimmed = wu_id.rstrip(" .")
+        device_basename = trimmed.split(".", 1)[0].upper()
+        reserved = {"CON", "PRN", "AUX", "NUL"}
+        reserved.update(f"COM{index}" for index in range(1, 10))
+        reserved.update(f"LPT{index}" for index in range(1, 10))
+        if device_basename in reserved:
+            raise ValueError(
+                "work-unit id uses a Windows-reserved device basename"
             )
         return wu_id
 

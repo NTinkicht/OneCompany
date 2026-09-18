@@ -112,6 +112,16 @@ def analyze_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
                 "IDLE_STREAM_EVIDENCE_INCOMPLETE",
                 "live.mode='idle' requires verified evidence, integer open_pr_count=0, integer active_work_unit_count=0, evidence_ref, and exact snapshot_sha binding",
             ))
+        conflicting_live_fields = [
+            key
+            for key in REQUIRED_LIVE_FIELDS
+            if live.get(key) not in (None, "")
+        ]
+        if conflicting_live_fields:
+            findings.append(_finding(
+                "IDLE_STREAM_STATE_CONFLICT",
+                "live.mode='idle' conflicts with populated active-stream identity fields: " + ", ".join(sorted(conflicting_live_fields)),
+            ))
     else:
         findings.append(_finding("LIVE_STREAM_MODE_INVALID", "live.mode must be 'active' or 'idle'"))
 
@@ -157,10 +167,17 @@ def analyze_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
                 "LEGACY_CONTROL_PLANE_ABSENCE_UNVERIFIED",
                 "legacy.mode='absent' requires verified absence evidence, evidence_ref, and exact snapshot_sha binding",
             ))
-        if _actor_set(registry.get("active_actors")) or _actor_set(protocol.get("active_actors")):
+        legacy_state = legacy.get("state") if isinstance(legacy.get("state"), dict) else {}
+        legacy_queue = legacy.get("work_queue") if isinstance(legacy.get("work_queue"), dict) else {}
+        if (
+            legacy_state
+            or legacy_queue
+            or _actor_set(registry.get("active_actors"))
+            or _actor_set(protocol.get("active_actors"))
+        ):
             findings.append(_finding(
                 "LEGACY_CONTROL_PLANE_ABSENCE_CONFLICT",
-                "legacy.mode='absent' conflicts with a non-empty registry/protocol actor roster",
+                "legacy.mode='absent' conflicts with legacy state, work-queue, or actor-roster data",
             ))
     else:
         findings.append(_finding("LEGACY_CONTROL_PLANE_MODE_INVALID", "legacy.mode must be 'active' or 'absent'"))

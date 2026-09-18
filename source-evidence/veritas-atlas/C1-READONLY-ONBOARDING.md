@@ -183,9 +183,12 @@ C1 carries the following blockers forward:
 These blockers mean:
 
 - C1 may complete as a read-only evidence stage;
-- C2a may begin as **shadow planning only**;
+- C2a is **ready to begin as shadow planning only** because that stage is non-mutating;
+- C2a must continue to report the target as **not mutation-ready** until its own blockers are resolved;
 - no Veritas target mutation is authorized;
 - no C2b cutover-ready state may be claimed yet.
+
+The companion JSON uses `c2a_shadow_ready: true` only to mean that the non-mutating C2a analysis stage may start. It separately keeps `c2a_target_mutation_ready: false` and `target_mutation_authorized: false`. These meanings must not be conflated.
 
 ## Provenance rule
 

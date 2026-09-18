@@ -7,6 +7,10 @@
     "mutation_authorized": false,
     "companyos_cutover_authorized": false,
     "human_final_gate_required": true,
+    "human_sovereignty_required": true,
+    "advisory_not_authority": true,
+    "emergency_stop_fail_closed": true,
+    "budget_expansion_authorized": false,
     "gate_transition_authority": "OneCompany",
     "required_transition_evidence": {
       "authority_reference": "required",
@@ -26,5 +30,5 @@
     "H8_rollback_release_evidence": "blocked"
   },
   "readiness": "blocked",
-  "rule": "No H1-H8 gate or readiness may transition from blocked unless OneCompany explicitly authorizes that transition through a trusted OneCompany authority reference, authority identifier, reviewer identity, and reviewed target-specific evidence bound to the exact target state. Evidence reviewed or authorized only by a non-OneCompany authority cannot clear a gate or readiness. Unknown, incomplete, untrusted, or stale authority/evidence fails closed. This artifact grants no mutation, lease, deployment, merge, budget, or autonomy authority."
+  "rule": "No H1-H8 gate or readiness may transition from blocked unless OneCompany explicitly authorizes that transition through a trusted OneCompany authority reference, authority identifier, reviewer identity, and reviewed target-specific evidence bound to the exact target state. Evidence reviewed or authorized only by a non-OneCompany authority cannot clear a gate or readiness. Unknown, incomplete, untrusted, stale, emergency-stopped, or budget-expanding authority/evidence fails closed. Human sovereignty remains mandatory and machine/reviewer output is advisory rather than authority. This artifact grants no mutation, lease, deployment, merge, budget, or autonomy authority."
 }

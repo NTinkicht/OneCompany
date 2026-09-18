@@ -1,0 +1,245 @@
+from __future__ import annotations
+
+import importlib.util
+import json
+import sys
+import tempfile
+import unittest
+from copy import deepcopy
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+SCRIPTS = ROOT / "scripts"
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
+
+SPEC = importlib.util.spec_from_file_location(
+    "cutover_readiness", SCRIPTS / "cutover_readiness.py"
+)
+assert SPEC and SPEC.loader
+cutover_readiness = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(cutover_readiness)
+
+
+def clean_manifest(*, human_approved: bool = True) -> dict:
+    return {
+        "schema_version": "1.0",
+        "project": {"repository": "example/app", "default_branch": "main"},
+        "snapshot": {
+            "observed_at": "2026-09-18T01:00:00Z",
+            "main_sha": "a" * 40,
+            "source": "verified-live",
+            "stale": False,
+            "derived": False,
+        },
+        "live": {
+            "work_unit": "WU1",
+            "pr": 10,
+            "pr_head": "b" * 40,
+        },
+        "legacy": {
+            "state": {"work_unit": "WU1", "current_pr": 10},
+            "work_queue": {"work_unit": "WU1"},
+            "registry": {"active_actors": ["chatgpt", "claude"]},
+            "protocol": {"active_actors": ["chatgpt", "claude"]},
+        },
+        "branch_protection": {"verified": True, "protected": True},
+        "incumbent_writer_inventory_complete": True,
+        "incumbent_writers": [
+            {
+                "name": "legacy-event-owner",
+                "active": False,
+                "mutation_capable": True,
+                "reviewed": True,
+                "capabilities": ["event_handoff"],
+                "quiesced_at": "2026-09-18T00:55:00Z",
+                "quiescence_evidence_ref": "github:legacy-supervisor-disabled",
+            }
+        ],
+        "cutover": {
+            # C2a ownership still describes the reviewed incumbent while
+            # OneCompany remains shadow-only.
+            "owner_by_capability": {
+                "event_handoff": "legacy-event-owner"
+            },
+            "active_stream": {
+                "status": "quiesced",
+                "active_writer_count": 0,
+                "evidence_ref": "github:stream-quiesced",
+            },
+            "reconciled_after_quiescence": True,
+            "reconciliation_snapshot_sha": "a" * 40,
+            "reconciliation_pr_head": "b" * 40,
+            "owner_by_capability_after_cutover": {
+                "event_handoff": "onecompany"
+            },
+            "rollback": {
+                "onecompany_disable_first": True,
+                "legacy_restore_requires_human": True,
+                "restore_order_reviewed": True,
+                "evidence_ref": "docs:rollback-plan",
+            },
+            "human_gate": {
+                "required": True,
+                "approved": human_approved,
+                "approval_ref": (
+                    "github:human-decision-1"
+                    if human_approved
+                    else None
+                ),
+                "approved_snapshot_sha": "a" * 40,
+                "approved_pr_head": "b" * 40,
+            },
+        },
+        "proposed_onecompany": {
+            "mode": "shadow",
+            "mutation_capable": False,
+            "writer_identity": "onecompany",
+        },
+        "cutover_evidence": {
+            "active_stream_status": "confirmed",
+            "surface_classifications_reviewed": True,
+            "rollback_verified": True,
+            "human_decisions_resolved": True,
+            "zero_extra_spend": True,
+            "autonomy_level": "L1",
+            "staging_branch": "epic-0.6-integration",
+            "fresh_c2_reconciliation": True,
+        },
+    }
+
+
+class CutoverReadinessTests(unittest.TestCase):
+    def test_clean_reviewed_manifest_is_ready_but_never_authorized(self):
+        report = cutover_readiness.analyze_cutover(clean_manifest())
+        self.assertTrue(report["shadow_mutation_ready"])
+        self.assertTrue(report["cutover_ready"])
+        self.assertFalse(report["target_mutated"])
+        self.assertFalse(report["mutation_authorized"])
+        self.assertEqual(report["authority_effects"], [])
+        self.assertEqual(report["blocker_codes"], [])
+
+    def test_human_unapproved_manifest_stays_blocked(self):
+        report = cutover_readiness.analyze_cutover(
+            clean_manifest(human_approved=False)
+        )
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn(
+            "HUMAN_CUTOVER_APPROVAL_MISSING",
+            report["blocker_codes"],
+        )
+
+    def test_active_incumbent_mutator_blocks_cutover(self):
+        manifest = clean_manifest()
+        manifest["incumbent_writers"][0]["active"] = True
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn(
+            "INCUMBENT_MUTATORS_STILL_ACTIVE",
+            report["blocker_codes"],
+        )
+
+    def test_missing_quiescence_evidence_blocks_cutover(self):
+        manifest = clean_manifest()
+        manifest["incumbent_writers"][0].pop(
+            "quiescence_evidence_ref"
+        )
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn(
+            "QUIESCENCE_EVIDENCE_INCOMPLETE",
+            report["blocker_codes"],
+        )
+
+    def test_snapshot_must_follow_all_quiescence_events(self):
+        manifest = clean_manifest()
+        manifest["incumbent_writers"][0]["quiesced_at"] = (
+            "2026-09-18T01:05:00Z"
+        )
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn(
+            "POST_QUIESCENCE_RECONCILIATION_REQUIRED",
+            report["blocker_codes"],
+        )
+
+    def test_reconciliation_must_bind_exact_snapshot_and_pr_head(self):
+        manifest = clean_manifest()
+        manifest["cutover"]["reconciliation_pr_head"] = "c" * 40
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn(
+            "POST_QUIESCENCE_RECONCILIATION_REQUIRED",
+            report["blocker_codes"],
+        )
+
+    def test_active_stream_requires_zero_writer_boundary(self):
+        manifest = clean_manifest()
+        manifest["cutover"]["active_stream"][
+            "active_writer_count"
+        ] = 1
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn(
+            "ACTIVE_STREAM_NOT_QUIESCENT",
+            report["blocker_codes"],
+        )
+
+    def test_post_cutover_ownership_must_be_exact_and_single(self):
+        manifest = clean_manifest()
+        manifest["cutover"][
+            "owner_by_capability_after_cutover"
+        ] = {"event_handoff": "legacy-event-owner"}
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn(
+            "POST_CUTOVER_OWNERSHIP_UNRESOLVED",
+            report["blocker_codes"],
+        )
+
+    def test_rollback_plan_is_mandatory(self):
+        manifest = clean_manifest()
+        manifest["cutover"]["rollback"]["onecompany_disable_first"] = False
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn(
+            "ROLLBACK_PLAN_INCOMPLETE",
+            report["blocker_codes"],
+        )
+
+    def test_c2a_blockers_propagate_fail_closed(self):
+        fixture = (
+            ROOT / "source-evidence" / "tabibi" / "c1-shadow.json"
+        )
+        if not fixture.exists():
+            self.skipTest(
+                "source-only Tabibi fixture is intentionally absent"
+            )
+        report = cutover_readiness.analyze_cutover(
+            cutover_readiness.load_manifest(fixture)
+        )
+        self.assertFalse(report["shadow_mutation_ready"])
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn(
+            "SHADOW_READINESS_REQUIRED",
+            report["blocker_codes"],
+        )
+        self.assertFalse(report["target_mutated"])
+        self.assertFalse(report["mutation_authorized"])
+
+    def test_analysis_does_not_modify_manifest_file(self):
+        manifest = clean_manifest()
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "manifest.json"
+            original = json.dumps(manifest, indent=2) + "\n"
+            path.write_text(original, encoding="utf-8")
+            loaded = cutover_readiness.load_manifest(path)
+            cutover_readiness.analyze_cutover(deepcopy(loaded))
+            self.assertEqual(
+                path.read_text(encoding="utf-8"),
+                original,
+            )
+
+
+if __name__ == "__main__":
+    unittest.main()

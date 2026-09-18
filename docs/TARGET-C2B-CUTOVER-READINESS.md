@@ -43,8 +43,8 @@ The rehearsal additionally requires all of the following:
 2. **The product stream is at a timestamped zero-writer handoff boundary.**
    `cutover.active_stream` must report `status: "quiesced"`, an integer (not boolean) `active_writer_count: 0`, cite evidence, and include a timezone-aware `quiesced_at` timestamp.
 
-3. **Reconciliation happened after quiescence.**
-   The exact snapshot SHA and live PR head must be rebound after the final incumbent and product-stream quiescence event. All chronology timestamps must be timezone-aware. The manifest must carry a dedicated `reconciliation_completed_at` timestamp and `reconciliation_evidence_ref`; ordering must prove both `all incumbent.quiesced_at <= reconciliation_completed_at` and `active_stream.quiesced_at <= reconciliation_completed_at <= snapshot.observed_at`.
+3. **Reconciliation happened after quiescence and is bound to the exact stream identity.**
+   All chronology timestamps must be timezone-aware and the exact snapshot SHA must be rebound after the final incumbent and stream quiescence event. For an active target, reconciliation must bind the exact live PR head. For a verified-idle target, no PR head is fabricated: reconciliation must instead bind the exact snapshot `observed_at` and shared `observation_boundary_ref`, and `reconciliation_pr_head` must be absent. The manifest must carry a dedicated `reconciliation_completed_at` timestamp and `reconciliation_evidence_ref`; ordering must prove both `all incumbent.quiesced_at <= reconciliation_completed_at` and `active_stream.quiesced_at <= reconciliation_completed_at <= snapshot.observed_at`.
 
 4. **Post-cutover ownership is single and explicit.**
    Every mutation-capable incumbent record must itself be reviewed. Every reviewed mutation capability must map exactly once to a proposed OneCompany writer identity that carries reviewed identity/capability evidence. Ambiguous, partial, unreviewed, or legacy ownership fails closed.
@@ -53,7 +53,11 @@ The rehearsal additionally requires all of the following:
    Rollback must disable OneCompany first, restore legacy mutation authority only through a human decision, preserve reviewed ordering, and cite reviewed rollback evidence.
 
 6. **The human cutover decision is exact-state, principal-evidence, and reconciliation-evidence bound.**
-   The approval must be explicit and carry a structured `principal_evidence` object whose `identity` exactly matches the declared `approver_identity`, whose `principal_type` is `human`, whose `verified` flag is true, and whose `evidence_ref` is non-empty. It must be timestamped after the post-quiescence reconciliation and observed snapshot, reference that exact reconciliation evidence record, and bind the exact reconciled snapshot SHA and PR head. A bot/service account, mismatched principal, missing evidence object, or prior approval for an older operational state fails closed.
+   The approval must be explicit and carry a structured `principal_evidence` object whose `identity` exactly matches the declared `approver_identity`, whose `principal_type` is `human`, whose `verified` flag is true, and whose `evidence_ref` is non-empty. It must be timestamped after the post-quiescence reconciliation and observed snapshot and reference that exact reconciliation evidence record. Active targets bind approval to the exact snapshot SHA and PR head. Verified-idle targets bind approval to the exact snapshot SHA, `observed_at`, and shared `observation_boundary_ref`, with no synthetic approved PR head. A bot/service account, mismatched principal, missing evidence object, or prior approval for an older operational state fails closed.
+
+### Verified-idle targets
+
+A verified-idle target is not inferred from missing PR fields. C2a must already have independently proven `live.mode: "idle"` with zero open PRs/work and exact observation-boundary evidence. C2b then reuses that boundary for reconciliation and human approval. Populating a fake PR head to satisfy the cutover gate is forbidden and fails closed through the C2a stream-conflict checks.
 
 ## No-dual-writer rule
 

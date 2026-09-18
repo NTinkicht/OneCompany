@@ -129,15 +129,17 @@ def analyze_cutover(manifest: dict[str, Any]) -> dict[str, Any]:
 
     stream = cutover.get("active_stream")
     stream = stream if isinstance(stream, dict) else {}
+    stream_quiesced_at = _timestamp(stream.get("quiesced_at"))
     if (
         stream.get("status") != "quiesced"
         or stream.get("active_writer_count") != 0
         or not _nonempty(stream.get("evidence_ref"))
+        or stream_quiesced_at is None
     ):
         findings.append(
             _finding(
                 "ACTIVE_STREAM_NOT_QUIESCENT",
-                "cutover.active_stream must prove status=quiesced, active_writer_count=0, and evidence_ref",
+                "cutover.active_stream must prove status=quiesced, active_writer_count=0, evidence_ref, and quiesced_at",
             )
         )
 
@@ -164,10 +166,12 @@ def analyze_cutover(manifest: dict[str, Any]) -> dict[str, Any]:
         snapshot_time is not None
         and reconciliation_completed_at is not None
         and _nonempty(reconciliation_evidence_ref)
+        and stream_quiesced_at is not None
         and all(
             reconciliation_completed_at >= item
             for item in quiescence_times
         )
+        and reconciliation_completed_at >= stream_quiesced_at
         and snapshot_time >= reconciliation_completed_at
     )
     if not (
@@ -179,7 +183,7 @@ def analyze_cutover(manifest: dict[str, Any]) -> dict[str, Any]:
         findings.append(
             _finding(
                 "POST_QUIESCENCE_RECONCILIATION_REQUIRED",
-                "fresh timestamped reconciliation evidence must be bound to the exact snapshot/head and complete after every incumbent quiescence",
+                "fresh timestamped reconciliation evidence must be bound to the exact snapshot/head and complete after every incumbent and active-stream quiescence boundary",
             )
         )
 

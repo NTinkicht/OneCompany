@@ -5,11 +5,12 @@
     "default_branch": "main"
   },
   "snapshot": {
-    "observed_at": "2026-09-18T12:57:19Z",
+    "observed_at": "2026-09-18T14:43:52Z",
     "main_sha": "e19a0780ec8d5237d923f6d1cdb3a4af24346c95",
-    "source": "github-live-read-only; C1 evidence merged at a1d431e1a8dc0bf6268b1022645c3ebf97eb5df2; OneCompany#76 comment 5730358819",
+    "source": "github-live-read-only; shared observation boundary github:NTinkicht/OneCompany#76:comment-5731658616",
     "stale": false,
-    "derived": false
+    "derived": false,
+    "observation_boundary_ref": "github:NTinkicht/OneCompany#76:comment-5731658616"
   },
   "live": {
     "mode": "idle",
@@ -17,16 +18,20 @@
       "verified": true,
       "open_pr_count": 0,
       "active_work_unit_count": 0,
-      "evidence_ref": "github:NTinkicht/OneCompany#76:comment-5730358819",
-      "snapshot_sha": "e19a0780ec8d5237d923f6d1cdb3a4af24346c95"
+      "evidence_ref": "github:NTinkicht/OneCompany#76:comment-5731658616",
+      "snapshot_sha": "e19a0780ec8d5237d923f6d1cdb3a4af24346c95",
+      "observed_at": "2026-09-18T14:43:52Z",
+      "observation_boundary_ref": "github:NTinkicht/OneCompany#76:comment-5731658616"
     }
   },
   "legacy": {
     "mode": "absent",
     "control_plane_absence": {
       "verified": true,
-      "evidence_ref": "github:NTinkicht/OneCompany#74:comment-5730194020",
-      "snapshot_sha": "e19a0780ec8d5237d923f6d1cdb3a4af24346c95"
+      "evidence_ref": "github:NTinkicht/OneCompany#76:comment-5731658616",
+      "snapshot_sha": "e19a0780ec8d5237d923f6d1cdb3a4af24346c95",
+      "observed_at": "2026-09-18T14:43:52Z",
+      "observation_boundary_ref": "github:NTinkicht/OneCompany#76:comment-5731658616"
     }
   },
   "branch_protection": {

@@ -35,8 +35,10 @@ This keeps historical Tabibi behavior backward-compatible.
 - `verified: true`;
 - integer `open_pr_count: 0`;
 - integer `active_work_unit_count: 0`;
-- non-empty `evidence_ref`;
-- `snapshot_sha` exactly equals `snapshot.main_sha`.
+- `snapshot_sha` exactly equals `snapshot.main_sha`;
+- `observed_at` exactly equals `snapshot.observed_at`;
+- `observation_boundary_ref` exactly equals `snapshot.observation_boundary_ref`;
+- `evidence_ref` equals that same observation-boundary reference.
 
 An idle declaration also conflicts with any populated `work_unit`, `pr`, or `pr_head` field. Missing evidence is never interpreted as idle.
 
@@ -53,8 +55,10 @@ Missing `legacy.mode` remains backward-compatible with `active`. Existing regist
 `legacy.mode: "absent"` requires:
 
 - `control_plane_absence.verified: true`;
-- non-empty `evidence_ref`;
-- exact `snapshot_sha` binding.
+- exact `snapshot_sha` binding;
+- exact `observed_at` binding;
+- the same `observation_boundary_ref` as the snapshot;
+- `evidence_ref` equal to that shared observation-boundary reference.
 
 It fails closed if legacy state, work-queue data, or a non-empty registry/protocol actor roster is present.
 
@@ -74,7 +78,8 @@ The verified facts are narrow:
 
 - target main is bound to `e19a0780ec8d5237d923f6d1cdb3a4af24346c95`;
 - GitHub reported zero open PRs during the V-C2a read-only reconciliation;
-- the repository has no inherited OneCompany/legacy actor control plane in the C1 topology evidence;
+- idle-stream and legacy-control-plane-absence claims are rebound to the shared exact-state observation record `github:NTinkicht/OneCompany#76:comment-5731658616`;
+- the repository has no inherited OneCompany/legacy actor control plane in that same refreshed observation boundary;
 - default branch protection is verified absent.
 
 The following are **not** asserted:

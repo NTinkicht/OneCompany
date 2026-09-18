@@ -102,7 +102,7 @@ def dedup_and_post(repo: str, issue: int, action: str, head: str | None, detail:
     marker = f"<!-- onecompany-supervision:{action}:{head or 'none'} -->"
     recent = gh_json(["api", f"repos/{repo}/issues/{issue}/comments?per_page=50"])
     if any(marker in (item.get("body") or "") for item in recent):
-        print("SUPERVISION: duplicate Team Room marker suppressed")
+        print("SUPERVISION: duplicate Team Room marker suppressed", file=sys.stderr)
         return
     body = (
         f"{marker}\nSUPERVISION_CHECK\n\naction: {action}\nhead: {head or 'none'}\n"

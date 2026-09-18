@@ -7,6 +7,7 @@ import json
 import sys
 
 from capacity_lib import configured_dispatch_exists, implementation_availability
+from execution_core import WorkerProfile, WorkerTier, rank_worker_profiles
 from lease_lifecycle import coordination_view
 from onecompany_lib import CONTROL, load_json
 
@@ -50,6 +51,31 @@ def zero_spend_budget_allows(cost_class: str, budget: dict) -> bool:
     return cost_class in set(budget.get("cost_classes", {}).get("allowed", []))
 
 
+def execution_profile_order(
+    role: str | None,
+    complexity: str | None,
+    budget: dict,
+) -> dict[str, int]:
+    """Return an optional advisory actor order after hard router eligibility.
+
+    Execution metadata never creates eligibility. Callers must supply both role and
+    complexity or neither so an incomplete hint cannot silently affect routing.
+    """
+    if role is None and complexity is None:
+        return {}
+    if not role or not complexity:
+        raise ValueError("--execution-role and --complexity must be supplied together")
+    profile_doc = load_json(CONTROL / "execution-profiles.json")
+    profiles = [WorkerProfile.from_dict(item) for item in profile_doc.get("profiles", [])]
+    ranked = rank_worker_profiles(
+        profiles,
+        role=role,
+        complexity=WorkerTier(complexity),
+        allowed_cost_classes=set(budget.get("cost_classes", {}).get("allowed", [])),
+    )
+    return {profile.actor_id: index for index, profile in enumerate(ranked)}
+
+
 def failover_context(
     active: list[dict],
     replace_lease_id: str | None,
@@ -90,6 +116,8 @@ def main() -> int:
     parser.add_argument("--unattended", action="store_true", help="Require a verified configured unattended execution path")
     parser.add_argument("--replace-lease-id", help="Canonical active implementation lease being considered for failover")
     parser.add_argument("--failover-trigger", help="Explicit allowlisted reason for a same-stream failover proposal")
+    parser.add_argument("--execution-role", help="Optional execution role used only to rank actors that already passed hard eligibility")
+    parser.add_argument("--complexity", choices=[item.value for item in WorkerTier], help="Optional execution complexity; requires --execution-role")
     args = parser.parse_args()
 
     actors_doc = load_json(CONTROL / "actors.json")
@@ -99,6 +127,16 @@ def main() -> int:
     budget = load_json(CONTROL / "budget.json")
     readiness = {item.get("actor_id"): item for item in readiness_doc.get("actors", [])}
     required = set(args.capability)
+
+    try:
+        profile_order = execution_profile_order(args.execution_role, args.complexity, budget)
+    except (ValueError, KeyError, TypeError, OSError) as exc:
+        print(json.dumps({
+            "status": "BLOCKED_INVALID_EXECUTION_PROFILE_REQUEST",
+            "error": str(exc),
+            "eligible": [],
+        }, indent=2))
+        return 2
 
     try:
         global_view = coordination_view()
@@ -259,18 +297,28 @@ def main() -> int:
             "actor": actor_id,
             "preference_score": rank_total,
             "preference_ranks": ranks,
+            "execution_profile_rank": profile_order.get(actor_id) if profile_order else None,
             "cost_class": actor.get("cost_class"),
             "setup_state": status.get("setup_state") if status else None,
             "free_implementation_slots": free_implementation_slots,
             "unattended": args.unattended,
         })
 
-    eligible.sort(key=lambda item: (item["preference_score"], item["actor"]))
+    if profile_order:
+        eligible.sort(key=lambda item: (
+            item["execution_profile_rank"] if item["execution_profile_rank"] is not None else len(profile_order) + 1000,
+            item["preference_score"],
+            item["actor"],
+        ))
+    else:
+        eligible.sort(key=lambda item: (item["preference_score"], item["actor"]))
     payload = {
         "status": "ROUTE_READY" if eligible else "BLOCKED_NO_ELIGIBLE_ROUTE",
         "required": sorted(required),
         "pr": args.pr,
         "unattended_required": args.unattended,
+        "execution_role": args.execution_role,
+        "complexity": args.complexity,
         "material_authors_excluded": sorted(excluded) if args.for_independent_gate else [],
         "proposed_actor": eligible[0]["actor"] if eligible else None,
         "eligible": eligible,
@@ -285,7 +333,7 @@ def main() -> int:
             if source_lease is not None
             else None
         ),
-        "note": "Routing is a deterministic proposal after hard eligibility, zero-spend, capacity, dispatch and authorship filters. It never creates or transfers a lease.",
+        "note": "Routing is a deterministic proposal after hard eligibility, zero-spend, capacity, dispatch and authorship filters. Optional execution-profile metadata only ranks actors that already passed those controls; routing never creates or transfers a lease.",
     }
     print(json.dumps(payload, indent=2))
     return 0 if eligible else 2

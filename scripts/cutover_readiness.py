@@ -66,6 +66,7 @@ def analyze_cutover(manifest: dict[str, Any]) -> dict[str, Any]:
     mutation_capabilities: set[str] = set()
     active_mutators: list[str] = []
     unreviewed_mutators: list[str] = []
+    capability_missing: list[str] = []
     quiescence_missing: list[str] = []
     quiescence_times: list[datetime] = []
 
@@ -75,8 +76,15 @@ def analyze_cutover(manifest: dict[str, Any]) -> dict[str, Any]:
         name = writer.get("name")
         label = name.strip() if _nonempty(name) else f"writer[{index}]"
         capabilities = writer.get("capabilities")
-        if isinstance(capabilities, list):
-            mutation_capabilities.update(item.strip() for item in capabilities if isinstance(item, str) and item.strip())
+        valid_capabilities = [
+            item.strip()
+            for item in capabilities
+            if isinstance(capabilities, list) and isinstance(item, str) and item.strip()
+        ] if isinstance(capabilities, list) else []
+        if not valid_capabilities:
+            capability_missing.append(label)
+        else:
+            mutation_capabilities.update(valid_capabilities)
         if writer.get("reviewed") is not True:
             unreviewed_mutators.append(label)
         if writer.get("active") is not False:
@@ -88,6 +96,8 @@ def analyze_cutover(manifest: dict[str, Any]) -> dict[str, Any]:
         else:
             quiescence_times.append(quiesced_at)
 
+    if capability_missing:
+        findings.append(_finding("INCUMBENT_MUTATOR_CAPABILITIES_INCOMPLETE", "mutation-capable incumbents must declare at least one explicit capability: " + ", ".join(sorted(capability_missing))))
     if unreviewed_mutators:
         findings.append(_finding("INCUMBENT_MUTATOR_UNREVIEWED", "mutation-capable incumbent records must be individually reviewed: " + ", ".join(sorted(unreviewed_mutators))))
     if active_mutators:

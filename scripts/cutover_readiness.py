@@ -254,7 +254,7 @@ def analyze_cutover(manifest: dict[str, Any]) -> dict[str, Any]:
         and _nonempty(human.get("approval_ref"))
         and approved_at is not None
         and reconciliation_completed_at is not None
-        and approved_at >= reconciliation_completed_at
+        and approved_at > reconciliation_completed_at
         and human.get("approved_reconciliation_evidence_ref")
         == reconciliation_evidence_ref
         and _sha(main_sha)

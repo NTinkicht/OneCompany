@@ -1,0 +1,58 @@
+{
+  "schema_version": "1.0",
+  "project": {
+    "repository": "NTinkicht/veritas-atlas",
+    "default_branch": "main"
+  },
+  "snapshot": {
+    "observed_at": "2026-09-18T12:54:00Z",
+    "main_sha": "e19a0780ec8d5237d923f6d1cdb3a4af24346c95",
+    "source": "source-evidence/veritas-atlas/c1-snapshot.json",
+    "stale": false,
+    "derived": false
+  },
+  "live": {
+    "mode": "idle",
+    "idle": {
+      "verified": true,
+      "open_pr_count": 0,
+      "active_work_unit_count": 0,
+      "snapshot_sha": "e19a0780ec8d5237d923f6d1cdb3a4af24346c95",
+      "evidence_ref": "source-evidence/veritas-atlas/c1-snapshot.json"
+    }
+  },
+  "legacy": {
+    "mode": "absent",
+    "control_plane_absence": {
+      "verified": true,
+      "snapshot_sha": "e19a0780ec8d5237d923f6d1cdb3a4af24346c95",
+      "evidence_ref": "source-evidence/veritas-atlas/c1-snapshot.json"
+    },
+    "registry": {"active_actors": []},
+    "protocol": {"active_actors": []}
+  },
+  "branch_protection": {
+    "verified": true,
+    "protected": false
+  },
+  "incumbent_writer_inventory_complete": false,
+  "incumbent_writers": [],
+  "no_active_mutation_writers_verified": false,
+  "cutover": {
+    "target_mutated": false,
+    "authorized": false
+  },
+  "proposed_onecompany": {
+    "authority": "shadow-only"
+  },
+  "cutover_evidence": {
+    "active_stream_status": true,
+    "surface_classifications_reviewed": false,
+    "rollback_verified": false,
+    "human_decisions_resolved": false,
+    "zero_extra_spend": true,
+    "autonomy_level": "L1",
+    "staging_branch": "epic-0.6-integration",
+    "fresh_c2_reconciliation": false
+  }
+}

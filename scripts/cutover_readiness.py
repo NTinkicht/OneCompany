@@ -131,7 +131,7 @@ def analyze_cutover(manifest: dict[str, Any]) -> dict[str, Any]:
             and _nonempty(observation_boundary_ref)
             and cutover.get("reconciliation_observed_at") == snapshot.get("observed_at")
             and cutover.get("reconciliation_observation_boundary_ref") == observation_boundary_ref
-            and cutover.get("reconciliation_pr_head") in (None, "")
+            and "reconciliation_pr_head" not in cutover
         )
     else:
         reconciliation_bound = False
@@ -203,7 +203,7 @@ def analyze_cutover(manifest: dict[str, Any]) -> dict[str, Any]:
                 and _nonempty(observation_boundary_ref)
                 and human.get("approved_observed_at") == snapshot.get("observed_at")
                 and human.get("approved_observation_boundary_ref") == observation_boundary_ref
-                and human.get("approved_pr_head") in (None, "")
+                and "approved_pr_head" not in human
             )
         )
     )

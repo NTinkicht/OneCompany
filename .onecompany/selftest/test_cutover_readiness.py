@@ -71,8 +71,12 @@ def clean_manifest(*, human_approved: bool = True) -> dict:
                 "required": True, "approved": human_approved,
                 "approver_type": "human" if human_approved else None,
                 "approver_identity": "reviewer@example" if human_approved else None,
-                "identity_verified": human_approved,
-                "identity_evidence_ref": "github:verified-reviewer" if human_approved else None,
+                "principal_evidence": {
+                    "identity": "reviewer@example",
+                    "principal_type": "human",
+                    "verified": True,
+                    "evidence_ref": "github:verified-reviewer",
+                } if human_approved else None,
                 "approval_ref": "github:human-decision-1" if human_approved else None,
                 "approved_at": "2026-09-18T01:02:00Z" if human_approved else None,
                 "approved_reconciliation_evidence_ref": "github:reconciliation-run-1" if human_approved else None,
@@ -117,6 +121,27 @@ class CutoverReadinessTests(unittest.TestCase):
         self.assertTrue(report["cutover_ready"])
         self.assertEqual(report["mutation_capabilities"], [])
         self.assertNotIn("POST_CUTOVER_OWNERSHIP_UNRESOLVED", report["blocker_codes"])
+
+    def test_human_principal_evidence_identity_must_match(self):
+        manifest = clean_manifest()
+        manifest["cutover"]["human_gate"]["principal_evidence"]["identity"] = "someone-else@example"
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn("HUMAN_CUTOVER_APPROVAL_MISSING", report["blocker_codes"])
+
+    def test_human_principal_evidence_must_be_human(self):
+        manifest = clean_manifest()
+        manifest["cutover"]["human_gate"]["principal_evidence"]["principal_type"] = "service-account"
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn("HUMAN_CUTOVER_APPROVAL_MISSING", report["blocker_codes"])
+
+    def test_human_principal_evidence_is_required(self):
+        manifest = clean_manifest()
+        manifest["cutover"]["human_gate"].pop("principal_evidence")
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn("HUMAN_CUTOVER_APPROVAL_MISSING", report["blocker_codes"])
 
     def test_human_unapproved_manifest_stays_blocked(self):
         report = cutover_readiness.analyze_cutover(clean_manifest(human_approved=False))

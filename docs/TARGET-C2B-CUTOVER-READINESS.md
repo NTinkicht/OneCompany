@@ -52,8 +52,8 @@ The rehearsal additionally requires all of the following:
 5. **Rollback is ordered and human-controlled.**
    Rollback must disable OneCompany first, restore legacy mutation authority only through a human decision, preserve reviewed ordering, and cite reviewed rollback evidence.
 
-6. **The human cutover decision is exact-state and reconciliation-evidence bound.**
-   The approval must be explicit, timestamped after the post-quiescence reconciliation, reference that exact reconciliation evidence record, and bind the exact reconciled snapshot SHA and PR head. A prior approval for an older operational state cannot be reused.
+6. **The human cutover decision is exact-state, principal-evidence, and reconciliation-evidence bound.**
+   The approval must be explicit and carry a structured `principal_evidence` object whose `identity` exactly matches the declared `approver_identity`, whose `principal_type` is `human`, whose `verified` flag is true, and whose `evidence_ref` is non-empty. It must be timestamped after the post-quiescence reconciliation and observed snapshot, reference that exact reconciliation evidence record, and bind the exact reconciled snapshot SHA and PR head. A bot/service account, mismatched principal, missing evidence object, or prior approval for an older operational state fails closed.
 
 ## No-dual-writer rule
 

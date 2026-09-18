@@ -1,0 +1,144 @@
+{
+  "schema_version": "1.0",
+  "evidence_kind": "read_only_onboarding_snapshot",
+  "project": {
+    "repository": "NTinkicht/veritas-atlas",
+    "visibility": "private",
+    "default_branch": "main"
+  },
+  "observation": {
+    "date": "2026-09-18",
+    "provenance": [
+      "github:repository-metadata",
+      "github:branch/main",
+      "github:repository-tree/main",
+      "github:rulesets",
+      "github:open-pull-request-search",
+      "github:OneCompany#74:comment-5730194020"
+    ],
+    "derived": false,
+    "target_mutated": false
+  },
+  "repository_state": {
+    "main_sha": "e19a0780ec8d5237d923f6d1cdb3a4af24346c95",
+    "main_protected": false,
+    "rulesets": [],
+    "open_pull_requests": [],
+    "open_issue_count": 0,
+    "last_push_reported_at": "2026-04-12T13:07:05Z"
+  },
+  "topology": {
+    "backend": {
+      "runtime": ".NET 10 / ASP.NET Core",
+      "projects": [
+        "apps/api/VeritasAtlas.Api/VeritasAtlas.Api.csproj",
+        "apps/api/VeritasAtlas.Application/VeritasAtlas.Application.csproj",
+        "apps/api/VeritasAtlas.Domain/VeritasAtlas.Domain.csproj",
+        "apps/api/VeritasAtlas.Infrastructure/VeritasAtlas.Infrastructure.csproj"
+      ],
+      "persistence": "EF Core + Npgsql/PostgreSQL",
+      "migrations_present": true,
+      "dotnet_test_projects_observed": []
+    },
+    "frontend": {
+      "active_candidate": "apps/web/veritas-atlas-web",
+      "stack": "React 19 + TypeScript + Vite + TanStack React Query",
+      "secondary_tree": "frontend/",
+      "secondary_tree_status": "unresolved-current-vs-stale"
+    },
+    "repository_workflows": {
+      "github_workflow_files_observed": [],
+      "automated_exact_head_ci_verified": false
+    },
+    "evidence_history": {
+      "diagnostics_tree": "_diagnostics/",
+      "approximate_entries_observed": 348,
+      "authority": "historical-only"
+    }
+  },
+  "security_configuration_findings": [
+    {
+      "code": "DEV_JWT_FALLBACK_SECRET",
+      "severity": "blocker-before-production",
+      "path": "apps/api/VeritasAtlas.Api/Program.cs",
+      "detail": "Source contains a development fallback JWT signing secret."
+    },
+    {
+      "code": "DEV_USERS_FIXED_PASSWORD",
+      "severity": "blocker-before-production",
+      "path": "apps/api/VeritasAtlas.Api/Infrastructure/Auth/DevUserStore.cs",
+      "detail": "Development role identities use a shared fixed password."
+    },
+    {
+      "code": "DEV_DB_CONNECTION_DEFAULT",
+      "severity": "blocker-before-production",
+      "path": "apps/api/VeritasAtlas.Api/appsettings.json",
+      "detail": "Local PostgreSQL development credentials are checked into development configuration."
+    },
+    {
+      "code": "JWT_HTTPS_METADATA_DISABLED",
+      "severity": "review-required",
+      "path": "apps/api/VeritasAtlas.Api/Program.cs",
+      "detail": "JWT bearer RequireHttpsMetadata is false."
+    }
+  ],
+  "quality_findings": [
+    {
+      "code": "NO_REPOSITORY_CI_WORKFLOW",
+      "severity": "blocker",
+      "detail": "No .github/workflows files were observed on main; exact-head automated CI is not established."
+    },
+    {
+      "code": "DEFAULT_BRANCH_UNPROTECTED",
+      "severity": "blocker",
+      "detail": "GitHub reports main protected=false and no repository rulesets."
+    },
+    {
+      "code": "NO_DOTNET_TEST_PROJECT",
+      "severity": "blocker",
+      "detail": "No .NET test .csproj was observed."
+    },
+    {
+      "code": "HEALTH_CONTRACT_UNRESOLVED",
+      "severity": "blocker",
+      "detail": "Smoke/frontend clients call /health and /health/db, while observed Program.cs does not visibly map health checks and no health controller was found."
+    },
+    {
+      "code": "TOPOLOGY_DOCUMENTATION_DRIFT",
+      "severity": "blocker",
+      "detail": "Root README names directories not present in the observed tree; current topology must be derived from live files."
+    },
+    {
+      "code": "SECONDARY_FRONTEND_UNRESOLVED",
+      "severity": "blocker",
+      "detail": "Root frontend/ and apps/web/veritas-atlas-web coexist; canonical frontend ownership is not yet evidenced."
+    }
+  ],
+  "mutation_writer_inventory": {
+    "status": "unknown",
+    "verified_complete": false,
+    "repository_workflow_mutators_observed": [],
+    "external_automation_verified": false,
+    "deployment_mutators_verified": false,
+    "conclusion": "Do not infer an empty writer inventory from absence of repository workflow files."
+  },
+  "readiness": {
+    "c1_read_only": true,
+    "c2a_shadow_ready": true,
+    "c2b_cutover_ready": false,
+    "target_mutation_authorized": false,
+    "blockers": [
+      "DEFAULT_BRANCH_UNPROTECTED",
+      "NO_REPOSITORY_CI_WORKFLOW",
+      "NO_DOTNET_TEST_PROJECT",
+      "HEALTH_CONTRACT_UNRESOLVED",
+      "TOPOLOGY_DOCUMENTATION_DRIFT",
+      "SECONDARY_FRONTEND_UNRESOLVED",
+      "MUTATION_WRITER_INVENTORY_UNVERIFIED",
+      "DEPLOYMENT_RUNTIME_OWNERSHIP_UNVERIFIED",
+      "PRODUCTION_AUTH_SECRET_BOUNDARY_UNVERIFIED"
+    ],
+    "c2a_shadow_planning_allowed": true,
+    "c2a_target_mutation_ready": false
+  }
+}

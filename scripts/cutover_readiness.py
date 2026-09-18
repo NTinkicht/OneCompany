@@ -23,8 +23,8 @@ def _timestamp(value: Any) -> datetime | None:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
     except ValueError:
         return None
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=timezone.utc)
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        return None
     return parsed.astimezone(timezone.utc)
 
 
@@ -130,16 +130,22 @@ def analyze_cutover(manifest: dict[str, Any]) -> dict[str, Any]:
     stream = cutover.get("active_stream")
     stream = stream if isinstance(stream, dict) else {}
     stream_quiesced_at = _timestamp(stream.get("quiesced_at"))
+    active_writer_count = stream.get("active_writer_count")
+    zero_writer_count = (
+        isinstance(active_writer_count, int)
+        and not isinstance(active_writer_count, bool)
+        and active_writer_count == 0
+    )
     if (
         stream.get("status") != "quiesced"
-        or stream.get("active_writer_count") != 0
+        or not zero_writer_count
         or not _nonempty(stream.get("evidence_ref"))
         or stream_quiesced_at is None
     ):
         findings.append(
             _finding(
                 "ACTIVE_STREAM_NOT_QUIESCENT",
-                "cutover.active_stream must prove status=quiesced, active_writer_count=0, evidence_ref, and quiesced_at",
+                "cutover.active_stream must prove status=quiesced, integer active_writer_count=0, evidence_ref, and timezone-aware quiesced_at",
             )
         )
 

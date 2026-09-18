@@ -12,63 +12,28 @@ from typing import Any
 
 REQUIRED_LIVE_FIELDS = ("work_unit", "pr", "pr_head")
 REQUIRED_EVIDENCE = (
-    "active_stream_status",
-    "surface_classifications_reviewed",
-    "rollback_verified",
-    "human_decisions_resolved",
-    "zero_extra_spend",
-    "autonomy_level",
-    "staging_branch",
+    "active_stream_status", "surface_classifications_reviewed", "rollback_verified",
+    "human_decisions_resolved", "zero_extra_spend", "autonomy_level", "staging_branch",
     "fresh_c2_reconciliation",
 )
 
-
 def _actor_set(value: Any) -> set[str]:
-    if not isinstance(value, list):
-        return set()
+    if not isinstance(value, list): return set()
     return {item for item in value if isinstance(item, str) and item.strip()}
-
-
 def _valid_actor_list(value: Any) -> bool:
     return isinstance(value, list) and all(isinstance(item, str) and bool(item.strip()) for item in value)
-
-
-def _nonempty(value: Any) -> bool:
-    return isinstance(value, str) and bool(value.strip())
-
-
-def _sha(value: Any) -> bool:
-    return isinstance(value, str) and len(value) == 40 and all(ch in "0123456789abcdefABCDEF" for ch in value)
-
-
+def _nonempty(value: Any) -> bool: return isinstance(value, str) and bool(value.strip())
+def _sha(value: Any) -> bool: return isinstance(value, str) and len(value) == 40 and all(ch in "0123456789abcdefABCDEF" for ch in value)
 def _observation_bound(section: dict[str, Any], snapshot: dict[str, Any]) -> bool:
-    """Bind zero-activity/absence evidence to one exact observation event."""
     boundary_ref = snapshot.get("observation_boundary_ref")
-    return (
-        _sha(snapshot.get("main_sha"))
-        and section.get("snapshot_sha") == snapshot.get("main_sha")
-        and _nonempty(snapshot.get("observed_at"))
-        and section.get("observed_at") == snapshot.get("observed_at")
-        and _nonempty(boundary_ref)
-        and section.get("observation_boundary_ref") == boundary_ref
-        and section.get("evidence_ref") == boundary_ref
-    )
-
-
-def _finding(code: str, message: str, *, severity: str = "blocker") -> dict[str, str]:
-    return {"code": code, "severity": severity, "message": message}
-
-
+    return (_sha(snapshot.get("main_sha")) and section.get("snapshot_sha") == snapshot.get("main_sha") and _nonempty(snapshot.get("observed_at")) and section.get("observed_at") == snapshot.get("observed_at") and _nonempty(boundary_ref) and section.get("observation_boundary_ref") == boundary_ref and section.get("evidence_ref") == boundary_ref)
+def _finding(code: str, message: str, *, severity: str = "blocker") -> dict[str, str]: return {"code": code, "severity": severity, "message": message}
 def _valid_snapshot(snapshot: dict[str, Any]) -> bool:
     observed, main_sha, source = snapshot.get("observed_at"), snapshot.get("main_sha"), snapshot.get("source")
-    if not all(isinstance(value, str) and value.strip() for value in (observed, main_sha, source)) or not _sha(main_sha):
-        return False
-    try:
-        datetime.fromisoformat(observed.replace("Z", "+00:00"))
-    except ValueError:
-        return False
+    if not all(isinstance(value, str) and value.strip() for value in (observed, main_sha, source)) or not _sha(main_sha): return False
+    try: datetime.fromisoformat(observed.replace("Z", "+00:00"))
+    except ValueError: return False
     return snapshot.get("stale") is False and snapshot.get("derived") is False
-
 
 def analyze_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     findings: list[dict[str, str]] = []
@@ -86,7 +51,7 @@ def analyze_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         idle = live.get("idle") if isinstance(live.get("idle"), dict) else {}
         valid_idle = idle.get("verified") is True and type(idle.get("open_pr_count")) is int and idle.get("open_pr_count") == 0 and type(idle.get("active_work_unit_count")) is int and idle.get("active_work_unit_count") == 0 and _observation_bound(idle, snapshot)
         if not valid_idle: findings.append(_finding("IDLE_STREAM_EVIDENCE_INCOMPLETE", "live.mode='idle' requires verified zero-work evidence bound to the exact observation boundary"))
-        conflicts = [k for k in REQUIRED_LIVE_FIELDS if live.get(k) not in (None, "")]
+        conflicts = [k for k in REQUIRED_LIVE_FIELDS if k in live]
         if conflicts: findings.append(_finding("IDLE_STREAM_STATE_CONFLICT", "live.mode='idle' conflicts with active-stream identity"))
     else: findings.append(_finding("LIVE_STREAM_MODE_INVALID", "live.mode must be 'active' or 'idle'"))
     legacy_mode = legacy.get("mode", "active")
@@ -149,18 +114,15 @@ def analyze_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     codes = sorted({f["code"] for f in findings if f.get("severity") == "blocker"})
     return {"repository":repository,"snapshot_sha":snapshot.get("main_sha"),"stream_mode":stream_mode,"legacy_mode":legacy_mode,"shadow_only":proposed.get("mode")=="shadow" and proposed.get("mutation_capable") is False,"target_mutated":False,"mutation_ready":not codes,"blocker_codes":codes,"findings":findings}
 
-
 def load_manifest(path: Path) -> dict[str, Any]:
     data = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(data, dict): raise ValueError("manifest root must be an object")
     return data
 
-
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__); parser.add_argument("manifest", type=Path); args = parser.parse_args(argv)
-    try: report = analyze_manifest(load_manifest(args.manifest))
-    except (OSError, json.JSONDecodeError, ValueError) as exc: print(f"ERROR: {exc}", file=sys.stderr); return 2
-    print(json.dumps(report, indent=2, sort_keys=True)); return 0 if report["mutation_ready"] else 1
-
-
-if __name__ == "__main__": raise SystemExit(main())
+def main() -> int:
+    parser = argparse.ArgumentParser(); parser.add_argument("--manifest", required=True); parser.add_argument("--json", action="store_true"); args = parser.parse_args()
+    try: report = analyze_manifest(load_manifest(Path(args.manifest)))
+    except (OSError, ValueError, json.JSONDecodeError) as exc: print(f"ERROR: {exc}"); return 2
+    print(json.dumps(report, indent=2, sort_keys=True) if args.json else report)
+    return 0 if report["mutation_ready"] else 3
+if __name__ == "__main__": sys.exit(main())

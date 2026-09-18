@@ -100,7 +100,162 @@ def clean_manifest(*, human_approved: bool = True) -> dict:
     }
 
 
+
+
+def clean_idle_manifest(*, human_approved: bool = True) -> dict:
+    boundary_ref = "github:idle-observation-1"
+    observed_at = "2026-09-18T01:00:00Z"
+    return {
+        "schema_version": "1.0",
+        "project": {"repository": "example/idle-app", "default_branch": "main"},
+        "snapshot": {
+            "observed_at": observed_at,
+            "main_sha": "a" * 40,
+            "source": "verified-live",
+            "observation_boundary_ref": boundary_ref,
+            "stale": False,
+            "derived": False,
+        },
+        "live": {
+            "mode": "idle",
+            "idle": {
+                "verified": True,
+                "open_pr_count": 0,
+                "active_work_unit_count": 0,
+                "snapshot_sha": "a" * 40,
+                "observed_at": observed_at,
+                "observation_boundary_ref": boundary_ref,
+                "evidence_ref": boundary_ref,
+            },
+        },
+        "legacy": {
+            "mode": "absent",
+            "control_plane_absence": {
+                "verified": True,
+                "snapshot_sha": "a" * 40,
+                "observed_at": observed_at,
+                "observation_boundary_ref": boundary_ref,
+                "evidence_ref": boundary_ref,
+            },
+        },
+        "branch_protection": {"verified": True, "protected": True},
+        "incumbent_writer_inventory_complete": True,
+        "incumbent_writers": [],
+        "no_active_mutation_writers_verified": True,
+        "cutover": {
+            "owner_by_capability": {},
+            "active_stream": {
+                "status": "quiesced",
+                "active_writer_count": 0,
+                "evidence_ref": boundary_ref,
+                "quiesced_at": "2026-09-18T00:57:00Z",
+            },
+            "reconciled_after_quiescence": True,
+            "reconciliation_completed_at": "2026-09-18T00:59:00Z",
+            "reconciliation_evidence_ref": "github:idle-reconciliation-1",
+            "reconciliation_snapshot_sha": "a" * 40,
+            "reconciliation_observed_at": observed_at,
+            "reconciliation_observation_boundary_ref": boundary_ref,
+            "owner_by_capability_after_cutover": {},
+            "rollback": {
+                "onecompany_disable_first": True,
+                "legacy_restore_requires_human": True,
+                "restore_order_reviewed": True,
+                "evidence_ref": "docs:idle-rollback-plan",
+            },
+            "human_gate": {
+                "required": True,
+                "approved": human_approved,
+                "approver_type": "human" if human_approved else None,
+                "approver_identity": "reviewer@example" if human_approved else None,
+                "principal_evidence": {
+                    "identity": "reviewer@example",
+                    "principal_type": "human",
+                    "verified": True,
+                    "evidence_ref": "github:verified-reviewer",
+                } if human_approved else None,
+                "approval_ref": "github:idle-human-decision-1" if human_approved else None,
+                "approved_at": "2026-09-18T01:02:00Z" if human_approved else None,
+                "approved_reconciliation_evidence_ref": "github:idle-reconciliation-1" if human_approved else None,
+                "approved_snapshot_sha": "a" * 40,
+                "approved_observed_at": observed_at,
+                "approved_observation_boundary_ref": boundary_ref,
+            },
+        },
+        "proposed_onecompany": {
+            "mode": "shadow",
+            "mutation_capable": False,
+            "writer_identity": "onecompany",
+            "writer_reviewed": True,
+            "writer_evidence_ref": "github:onecompany-writer-review",
+        },
+        "cutover_evidence": {
+            "active_stream_status": "confirmed",
+            "surface_classifications_reviewed": True,
+            "rollback_verified": True,
+            "human_decisions_resolved": True,
+            "zero_extra_spend": True,
+            "autonomy_level": "L1",
+            "staging_branch": "epic-0.6-integration",
+            "fresh_c2_reconciliation": True,
+        },
+    }
+
+
 class CutoverReadinessTests(unittest.TestCase):
+    def test_verified_idle_manifest_can_be_ready_without_pr_head(self):
+        manifest = clean_idle_manifest()
+        self.assertNotIn("pr_head", manifest["live"])
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertTrue(report["shadow_mutation_ready"])
+        self.assertTrue(report["cutover_ready"])
+        self.assertEqual(report["stream_mode"], "idle")
+        self.assertFalse(report["target_mutated"])
+        self.assertFalse(report["mutation_authorized"])
+
+    def test_verified_idle_reconciliation_rejects_replayed_boundary(self):
+        manifest = clean_idle_manifest()
+        manifest["cutover"]["reconciliation_observation_boundary_ref"] = "github:older-observation"
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn("POST_QUIESCENCE_RECONCILIATION_REQUIRED", report["blocker_codes"])
+
+    def test_verified_idle_reconciliation_rejects_replayed_observed_at(self):
+        manifest = clean_idle_manifest()
+        manifest["cutover"]["reconciliation_observed_at"] = "2026-09-18T00:59:59Z"
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn("POST_QUIESCENCE_RECONCILIATION_REQUIRED", report["blocker_codes"])
+
+    def test_verified_idle_human_approval_must_bind_observation_boundary(self):
+        manifest = clean_idle_manifest()
+        manifest["cutover"]["human_gate"]["approved_observation_boundary_ref"] = "github:other-observation"
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn("HUMAN_CUTOVER_APPROVAL_MISSING", report["blocker_codes"])
+
+    def test_verified_idle_rejects_empty_reconciliation_pr_head_field(self):
+        manifest = clean_idle_manifest()
+        manifest["cutover"]["reconciliation_pr_head"] = ""
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn("POST_QUIESCENCE_RECONCILIATION_REQUIRED", report["blocker_codes"])
+
+    def test_verified_idle_rejects_empty_approved_pr_head_field(self):
+        manifest = clean_idle_manifest()
+        manifest["cutover"]["human_gate"]["approved_pr_head"] = ""
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn("HUMAN_CUTOVER_APPROVAL_MISSING", report["blocker_codes"])
+
+    def test_verified_idle_rejects_synthetic_pr_head(self):
+        manifest = clean_idle_manifest()
+        manifest["live"]["pr_head"] = "b" * 40
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["shadow_mutation_ready"])
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn("IDLE_STREAM_STATE_CONFLICT", report["shadow_blocker_codes"])
+
     def test_clean_reviewed_manifest_is_ready_but_never_authorized(self):
         report = cutover_readiness.analyze_cutover(clean_manifest())
         self.assertTrue(report["shadow_mutation_ready"])

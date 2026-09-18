@@ -156,6 +156,18 @@ class CutoverReadinessTests(unittest.TestCase):
             report["blocker_codes"],
         )
 
+    def test_human_approval_equal_to_reconciliation_is_rejected(self):
+        manifest = clean_manifest()
+        manifest["cutover"]["human_gate"]["approved_at"] = (
+            manifest["cutover"]["reconciliation_completed_at"]
+        )
+        report = cutover_readiness.analyze_cutover(manifest)
+        self.assertFalse(report["cutover_ready"])
+        self.assertIn(
+            "HUMAN_CUTOVER_APPROVAL_MISSING",
+            report["blocker_codes"],
+        )
+
     def test_timezone_less_human_approval_is_rejected(self):
         manifest = clean_manifest()
         manifest["cutover"]["human_gate"]["approved_at"] = (

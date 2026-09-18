@@ -148,6 +148,12 @@ def analyze_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
         if not valid_record:
             malformed_writer = True
             continue
+        if writer.get("mutation_capable") is True and not capabilities:
+            findings.append(_finding(
+                "INCUMBENT_WRITER_CAPABILITIES_INCOMPLETE",
+                f"mutation-capable incumbent {name!r} must declare at least one explicit capability",
+            ))
+            continue
         if writer.get("reviewed") is True:
             for capability in capabilities:
                 declared_owners[capability].add(name)

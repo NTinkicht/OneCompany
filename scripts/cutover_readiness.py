@@ -147,6 +147,10 @@ def analyze_cutover(manifest: dict[str, Any]) -> dict[str, Any]:
     human_ok = (
         human.get("required") is True
         and human.get("approved") is True
+        and human.get("approver_type") == "human"
+        and _nonempty(human.get("approver_identity"))
+        and human.get("identity_verified") is True
+        and _nonempty(human.get("identity_evidence_ref"))
         and _nonempty(human.get("approval_ref"))
         and approved_at is not None
         and reconciliation_completed_at is not None
@@ -160,7 +164,7 @@ def analyze_cutover(manifest: dict[str, Any]) -> dict[str, Any]:
         and human.get("approved_pr_head") == pr_head
     )
     if not human_ok:
-        findings.append(_finding("HUMAN_CUTOVER_APPROVAL_MISSING", "cutover requires explicit human approval after reconciliation and the observed snapshot, bound to its evidence and the exact reconciled snapshot/PR head"))
+        findings.append(_finding("HUMAN_CUTOVER_APPROVAL_MISSING", "cutover requires verified human-principal approval after reconciliation and the observed snapshot, bound to identity evidence, reconciliation evidence, and the exact reconciled snapshot/PR head"))
 
     blockers = [item for item in findings if item["severity"] == "blocker"]
     ready = len(blockers) == 0

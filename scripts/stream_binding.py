@@ -47,6 +47,8 @@ def binding_violations(
     pr: int | None,
     work_map: dict[str, dict[str, Any]],
     active_leases: list[dict[str, Any]],
+    *,
+    require_complete: bool = False,
 ) -> list[str]:
     """Reject attempts to rebind one WU or reuse another WU's branch/PR.
 
@@ -66,6 +68,16 @@ def binding_violations(
 
     expected_branch = candidate.get("branch")
     expected_pr = candidate.get("pr")
+    if require_complete and (
+        not isinstance(expected_branch, str) or not expected_branch.strip()
+    ):
+        violations.append(f"canonical_branch_missing:{work_unit}")
+    if require_complete and (
+        not isinstance(expected_pr, int)
+        or isinstance(expected_pr, bool)
+        or expected_pr <= 0
+    ):
+        violations.append(f"canonical_pr_missing:{work_unit}")
     if expected_branch is not None and expected_branch != branch:
         violations.append(
             f"canonical_branch_mismatch:{work_unit}:expected={expected_branch}"

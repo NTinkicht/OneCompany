@@ -203,7 +203,7 @@ def _verify_installation(entry: dict[str, Any], token: str) -> dict[str, str]:
         raise Refused("pilot_fixture_scope_invalid")
 
     fixture = _require_object(api.call("GET", f"/contents/{expected_path}?ref={head_sha}"), "fixture_content_unreadable")
-    if _decode_content(fixture) != fixture_body(repo, wu, expected_actor, base):
+    if _decode_content(fixture) != fixture_body(repo, wu, expected_actor, base).encode("utf-8"):
         raise Refused("pilot_fixture_content_invalid")
 
     run = _require_object(api.call("GET", f"/actions/runs/{run_id}"), "producer_run_invalid")

@@ -354,7 +354,8 @@ def acquire(args: argparse.Namespace) -> int:
             candidate = context["work_item"]
             work_map = context["work_map"]
             trusted_stream_errors = binding_violations(
-                args.wu, args.branch, args.pr, work_map, active
+                args.wu, args.branch, args.pr, work_map, active,
+                require_complete=True,
             )
             if trusted_stream_errors:
                 print(

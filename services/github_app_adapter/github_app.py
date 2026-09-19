@@ -165,6 +165,13 @@ class AppClient:
                 or "//" in path or len(path) > 160):
             raise AdapterRefused("document_path_not_allowlisted")
         token, _, _ = self._installation()
+        live_main = self._stage_call(
+            "main_head", "GET",
+            f"/repos/{self.settings.repository}/git/ref/heads/main", token,
+        )
+        live_main_sha = (live_main.get("object") or {}).get("sha") if isinstance(live_main, dict) else None
+        if live_main_sha != ref:
+            raise AdapterRefused("approved_main_head_sha_required")
         endpoint = (
             f"/repos/{self.settings.repository}/contents/"
             + urllib.parse.quote(path, safe="/") + "?ref=" + ref

@@ -16,6 +16,7 @@ if all(importlib.util.find_spec(name) is not None
        for name in ("starlette", "jwt", "mcp")):
     sys.path.insert(0, str(_DIR))
     from test_adapter import TestGrokAppAdapter  # noqa: F401
+    from test_oauth import TestGrokOAuth  # noqa: F401
 else:
     class TestGrokAdapterDependencies(unittest.TestCase):
         """Do not claim the optional third-party adapter suite ran in source CI."""

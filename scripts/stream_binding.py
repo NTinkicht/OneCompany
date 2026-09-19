@@ -9,6 +9,38 @@ from __future__ import annotations
 from typing import Any
 
 
+
+def duplicate_queue_binding_violations(work_units: list[dict[str, Any]]) -> list[str]:
+    """Detect two declared WUs claiming the same immutable stream identity.
+
+    This validates a queue snapshot; it does not replace live GitHub lookup or
+    durable atomic lease arbitration during unattended start.
+    """
+    pr_owner: dict[int, str] = {}
+    branch_owner: dict[str, str] = {}
+    problems: set[str] = set()
+    for item in work_units:
+        if not isinstance(item, dict):
+            continue
+        wu = item.get("id")
+        if not isinstance(wu, str) or not wu:
+            continue
+        branch = item.get("branch")
+        if isinstance(branch, str) and branch:
+            previous = branch_owner.setdefault(branch, wu)
+            if previous != wu:
+                problems.add(
+                    f"canonical branch {branch!r} shared by WUs {previous} and {wu}"
+                )
+        pr = item.get("pr")
+        if isinstance(pr, int) and not isinstance(pr, bool) and pr > 0:
+            previous = pr_owner.setdefault(pr, wu)
+            if previous != wu:
+                problems.add(
+                    f"canonical PR #{pr} shared by WUs {previous} and {wu}"
+                )
+    return sorted(problems)
+
 def binding_violations(
     work_unit: str,
     branch: str,

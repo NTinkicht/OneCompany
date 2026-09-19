@@ -63,3 +63,36 @@ def resolve_install_principals(
         normalize_code_owner(code_owner or login),
         normalize_platform_login(root_principal or login),
     )
+
+def rebind_codeowners_text(
+    source_text: str,
+    primary_owner: str,
+    reviewer_owner: str | None = None,
+) -> str:
+    """Never inherit source repository owners into a fresh target."""
+    primary = normalize_code_owner(primary_owner)
+    secondary = normalize_code_owner(reviewer_owner) if reviewer_owner else None
+    if secondary == primary:
+        raise ValueError("independent reviewer Code Owner must differ from primary owner")
+    owners = [primary] + ([secondary] if secondary else [])
+    lines: list[str] = []
+    patterns = 0
+    for line in source_text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            lines.append(line)
+            continue
+        fields = stripped.split()
+        if len(fields) < 2:
+            raise ValueError("CODEOWNERS template has an ownerless path entry")
+        lines.append(f"{fields[0]} {' '.join(owners)}")
+        patterns += 1
+    if patterns == 0:
+        raise ValueError("CODEOWNERS template has no protected paths")
+    result = "\n".join(lines) + ("\n" if source_text.endswith("\n") else "")
+    if secondary is None:
+        result = result.replace(
+            "# Keep at least two independent human owners so the author/last pusher cannot deadlock promotion.",
+            "# Add a separately authorized independent Code Owner before governed promotion.",
+        )
+    return result

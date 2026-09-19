@@ -15,7 +15,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from install_identity import resolve_install_principals
+from install_identity import resolve_install_principals, rebind_codeowners_text
 from onecompany_lib import ROOT
 
 COPY_PATHS = [
@@ -340,12 +340,11 @@ def initialize_contracts(target: Path) -> None:
         print(f"INIT project contract {target_name}")
 
 
-def configure_codeowners(target: Path, owner: str) -> None:
+def configure_codeowners(target: Path, owner: str, reviewer_owner: str | None = None) -> None:
     path = target / ".github" / "CODEOWNERS"
     if not path.exists():
         raise FileNotFoundError("bootstrap copy did not contain .github/CODEOWNERS")
-    text = path.read_text(encoding="utf-8")
-    text = re.sub(r"(?<!\S)@NTinkicht(?!\S)", owner, text)
+    text = rebind_codeowners_text(path.read_text(encoding="utf-8"), owner, reviewer_owner)
     path.write_text(text, encoding="utf-8")
 
 
@@ -461,6 +460,10 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--reviewer-code-owner",
+        help="Optional second explicit human Code Owner; never inherit source reviewers.",
+    )
+    parser.add_argument(
         "--root-principal",
         help=(
             "Concrete GitHub user receiving human-owner/root platform authority. "
@@ -499,7 +502,7 @@ def main() -> int:
             source = ROOT / relative
             if source.exists():
                 copy_item(source, target / relative, args.force)
-        configure_codeowners(target, code_owner)
+        configure_codeowners(target, code_owner, args.reviewer_code_owner)
         configure_root_identity(target, root_principal)
     except (FileExistsError, FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
         print(f"ERROR: {exc}")

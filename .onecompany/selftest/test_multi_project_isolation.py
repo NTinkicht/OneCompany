@@ -31,6 +31,7 @@ class IndependentInstallationsTests(unittest.TestCase):
                         "--project-name", name,
                         "--default-branch", "main",
                         "--code-owner", f"@{owner}",
+                        "--reviewer-code-owner", f"@{owner}-reviewer",
                         "--root-principal", owner,
                     ],
                     cwd=ROOT,
@@ -46,7 +47,14 @@ class IndependentInstallationsTests(unittest.TestCase):
                 root = [p for p in identity["principals"] if "root" in p.get("authorities", [])]
                 self.assertEqual(len(root), 1)
                 self.assertEqual(root[0]["login"], owner)
-                self.assertIn(f"@{owner}", (target / ".github/CODEOWNERS").read_text())
+                codeowners = (target / ".github/CODEOWNERS").read_text()
+                for line in codeowners.splitlines():
+                    if line.startswith("/"):
+                        self.assertEqual(
+                            line.split()[1:],
+                            [f"@{owner}", f"@{owner}-reviewer"],
+                            "source owners must never leak into a new target",
+                        )
                 self.assertFalse((target / "source-evidence").exists())
                 self.assertFalse((target / "evidence").exists())
                 self.assertFalse(json.loads((target / ".onecompany/ledger.json").read_text())["enabled"])

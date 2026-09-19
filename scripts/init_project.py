@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from install_identity import resolve_install_principals
+from install_identity import resolve_install_principals, rebind_codeowners_text
 from onecompany_lib import CONTROL, ROOT, load_json, save_json
 
 SOURCE_REPOSITORY = "NTinkicht/OneCompany"
@@ -46,12 +46,11 @@ def infer_default_branch() -> str:
     return symbolic.split("/", 1)[1] if symbolic and "/" in symbolic else "main"
 
 
-def configure_codeowners(owner: str) -> None:
+def configure_codeowners(owner: str, reviewer_owner: str | None = None) -> None:
     path = ROOT / ".github" / "CODEOWNERS"
     if not path.exists():
         raise FileNotFoundError("template copy does not contain .github/CODEOWNERS")
-    text = path.read_text(encoding="utf-8")
-    text = re.sub(r"(?<!\S)@NTinkicht(?!\S)", owner, text)
+    text = rebind_codeowners_text(path.read_text(encoding="utf-8"), owner, reviewer_owner)
     path.write_text(text, encoding="utf-8")
 
 
@@ -234,6 +233,10 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--reviewer-code-owner",
+        help="Optional second explicit human Code Owner; never inherit source reviewers.",
+    )
+    parser.add_argument(
         "--root-principal",
         help=(
             "Concrete GitHub user receiving human-owner/root platform authority. "
@@ -270,7 +273,7 @@ def main() -> int:
             code_owner=args.code_owner,
             root_principal=args.root_principal,
         )
-        configure_codeowners(code_owner)
+        configure_codeowners(code_owner, args.reviewer_code_owner)
         reset_control_plane(project_name, repository, default_branch, root_principal)
     except (ValueError, FileNotFoundError) as exc:
         print(f"REFUSED: {exc}")

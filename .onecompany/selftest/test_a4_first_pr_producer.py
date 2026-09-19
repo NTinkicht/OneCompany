@@ -207,6 +207,37 @@ class FirstPRProducerTests(unittest.TestCase):
                 ):
                     producer.produce(DeletedFork(REPO), **installation())
 
+    def test_malformed_api_shapes_refuse_without_traceback(self):
+        """No decoded null/list objects may escape as AttributeError/KeyError."""
+        cases = (
+            ("meta", "GET", "/", "public_disposable_runner_requirement_not_proven"),
+            ("base_data", "GET", "/git/ref/heads/main", "trusted_checkout_or_base_moved"),
+            ("base_ref", "GET", "/git/ref/heads/onecompany-a4-wu-a", "branch_ref_ambiguous"),
+            ("base_commit", "GET", "/git/commits/" + BASE, "base_tree_unavailable"),
+            ("blob", "POST", "/git/blobs", "claim_blob_uncertain_reconcile_before_retry"),
+            ("tree", "POST", "/git/trees", "claim_tree_uncertain_reconcile_before_retry"),
+            ("commit", "POST", "/git/commits", "claim_commit_uncertain_reconcile_before_retry"),
+            ("verify_commit", "GET", "/git/commits/" + CLAIM, "pre_existing_branch_not_exact_claim"),
+            ("record", "GET", "/contents/", "claim_fixture_missing_or_invalid"),
+            ("comparison", "GET", "/compare/", "claim_diff_outside_exact_fixture_scope"),
+        )
+        for which, method, endpoint, reason in cases:
+            with self.subTest(which=which):
+                class Malformed(FakeGitHub):
+                    def call(self, op, path, payload=None):
+                        if op == method and (path == endpoint or
+                                             (endpoint.endswith("/") and path.startswith(endpoint))):
+                            if which == "base_ref":
+                                # The first default-branch read must remain valid.
+                                if path == "/git/ref/heads/onecompany-a4-wu-a":
+                                    return {"object": None}
+                            if which == "base_commit":
+                                return {"tree": None}
+                            return None
+                        return super().call(op, path, payload)
+                with self.assertRaisesRegex(producer.Refused, reason):
+                    producer.produce(Malformed(REPO), **installation())
+
     def test_two_independent_installations_no_cross_authority(self):
         """Prove separate project identities and foreign replay refusal."""
         a = FakeGitHub("owner/disposable-a")

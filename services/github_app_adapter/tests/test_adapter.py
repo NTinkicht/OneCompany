@@ -159,6 +159,34 @@ class TestGrokAppAdapter(unittest.TestCase):
         self.assertEqual(result["changed_files"][0]["path"], "scripts/test.py")
         self.assertFalse(result["review_attestation"])
 
+    def test_deleted_fork_pr_head_is_sanitized(self):
+        class DeletedFork(FakeClient):
+            missing = "head"
+            def _call(self, method, path, token, payload=None):
+                if path == "/repos/owner/disposable/pulls/102":
+                    return {
+                        "number": 102, "state": "open",
+                        "head": {"sha": "a" * 40, "ref": "wu-test",
+                                 "repo": None if self.missing == "head" else
+                                 {"full_name": "owner/disposable"}},
+                        "base": {"sha": "b" * 40, "ref": "main",
+                                 "repo": None if self.missing == "base" else
+                                 {"full_name": "owner/disposable"}},
+                    }
+                return super()._call(method, path, token, payload)
+        for which in ("head", "base"):
+            with self.subTest(which=which):
+                client = DeletedFork(settings())
+                client.missing = which
+                with self.assertRaisesRegex(
+                    AdapterRefused, "pr_head_unavailable_or_foreign"
+                ):
+                    client.pull_request_head(102)
+                with self.assertRaisesRegex(
+                    AdapterRefused, "pr_head_or_repository_changed"
+                ):
+                    client.pull_request_snapshot(102, "a" * 40)
+
     def test_source_excerpt_requires_safe_path_and_pinned_sha(self):
         client = FakeClient(settings())
         for path in (".onecompany/ledger.json", "../secret.txt",

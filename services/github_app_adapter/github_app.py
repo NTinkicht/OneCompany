@@ -168,11 +168,11 @@ class AppClient:
         )
         if (not isinstance(item, dict) or item.get("number") != pr_number
                 or item.get("state") != "open"
-                or (item.get("head") or {}).get("repo", {}).get("full_name")
+                or ((item.get("head") or {}).get("repo") or {}).get("full_name")
                     != self.settings.repository
                 or not isinstance((item.get("head") or {}).get("sha"), str)
                 or not _SHA.fullmatch(item["head"]["sha"])
-                or (item.get("base") or {}).get("repo", {}).get("full_name")
+                or ((item.get("base") or {}).get("repo") or {}).get("full_name")
                     != self.settings.repository):
             raise AdapterRefused("pr_head_unavailable_or_foreign")
         return {

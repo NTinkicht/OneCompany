@@ -8,6 +8,7 @@ import sys
 
 from lease_lifecycle import coordination_view
 from ledger_lib import ledger_enabled
+from autonomy_guard import level_violations
 from onecompany_lib import CONTROL, emergency_stop_active, load_json
 
 WRITE_CAPABILITIES = {"implementation", "ci_remediation", "merge_execution"}
@@ -40,6 +41,13 @@ def resolve_dispatch(
 
     if emergency_stop_active() and (unattended or capability in WRITE_CAPABILITIES):
         reasons.append("emergency_stop_active")
+
+    if unattended and capability in WRITE_CAPABILITIES:
+        try:
+            config = load_json(CONTROL / "config.json")
+            reasons.extend(level_violations(config, capability, unattended=True))
+        except Exception:
+            reasons.append("autonomy_policy_unavailable")
 
     actor = actors.get(actor_id)
     ready = readiness.get(actor_id)

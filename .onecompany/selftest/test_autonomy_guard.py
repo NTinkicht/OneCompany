@@ -79,21 +79,76 @@ class UnattendedAutonomyBoundaryTests(unittest.TestCase):
             level_violations(policy("L99"), "implementation", unattended=True)
         )
 
-    def test_actual_dispatch_blocks_l1_unattended_implementation(self) -> None:
-        # The source product is L1: missing actor/lease capacity must not mask
-        # the additional explicit autonomy-boundary denial.
-        with patch.object(dispatch, "emergency_stop_active", return_value=False):
+    def test_actual_dispatch_reads_l1_from_protected_base_not_candidate(self) -> None:
+        # A candidate can propose L5; its own unmerged config must never
+        # authorize an unattended writer while the verified base is L1.
+        original_load = dispatch.load_json
+
+        def candidate_load(path: Path) -> dict:
+            if Path(path).name == "config.json":
+                return policy("L5")
+            return original_load(path)
+
+        canonical = {
+            "id": "synthetic-lease",
+            "role": "implementation",
+            "actor": "onecompany-local",
+            "work_unit": "WU-SYNTHETIC",
+            "pr": 12,
+            "admission_snapshot": {"trusted_ref": "a" * 40},
+        }
+        protected = {**policy("L1"), "safety": {"emergency_stop": False}}
+        with (
+            patch.object(dispatch, "emergency_stop_active", return_value=False),
+            patch.object(dispatch, "load_json", side_effect=candidate_load),
+            patch.object(dispatch, "ledger_enabled", return_value=True),
+            patch.object(
+                dispatch, "coordination_view",
+                return_value={"active_leases": [canonical]},
+            ),
+            patch.object(
+                dispatch.ledger_lib, "trusted_runtime_context",
+                return_value={"config": protected},
+            ) as trusted,
+        ):
             result = dispatch.resolve_dispatch(
                 "onecompany-local",
                 "implementation",
                 unattended=True,
-                lease_id="synthetic-non-authoritative-lease",
+                lease_id="synthetic-lease",
             )
         self.assertEqual(result["status"], "CAPACITY_BLOCKED")
         self.assertIn(
             "unattended_implementation_requires_approved_L2",
             result["reasons"],
         )
+        trusted.assert_called_once_with("a" * 40, 12)
+
+    def test_failed_protected_base_lookup_cannot_fallback_to_candidate(self) -> None:
+        canonical = {
+            "id": "synthetic-lease", "role": "implementation",
+            "actor": "onecompany-local", "work_unit": "WU-SYNTHETIC",
+            "pr": 12, "admission_snapshot": {"trusted_ref": "a" * 40},
+        }
+        with (
+            patch.object(dispatch, "emergency_stop_active", return_value=False),
+            patch.object(dispatch, "ledger_enabled", return_value=True),
+            patch.object(
+                dispatch, "coordination_view",
+                return_value={"active_leases": [canonical]},
+            ),
+            patch.object(
+                dispatch.ledger_lib, "trusted_runtime_context",
+                side_effect=RuntimeError("protected PR base moved"),
+            ),
+        ):
+            result = dispatch.resolve_dispatch(
+                "onecompany-local",
+                "implementation",
+                unattended=True,
+                lease_id="synthetic-lease",
+            )
+        self.assertIn("trusted_autonomy_policy_unavailable", result["reasons"])
 
 
 if __name__ == "__main__":

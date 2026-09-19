@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import json
 import hashlib
+import os
+import tempfile
+from contextlib import redirect_stderr
+from io import StringIO
 import sys
 import unittest
 from pathlib import Path
@@ -97,7 +101,7 @@ class PilotApi(FakeGitHub):
 def installed(api: PilotApi, wu: str) -> dict:
     """Create one test-only fixture and synthetic run-bound evidence record."""
     result = producer.produce(api, **installation(api.repository, wu))
-    api.record = {**result, "wu": wu, "run_id": api.run_id, "run_attempt": 1}
+    api.record = {**result, "run_id": api.run_id, "run_attempt": 1}
     return {
         "repository": api.repository, "wu": wu, "actor": "fixture-bot",
         "pr_number": result["pr"], "base_sha": BASE,
@@ -145,6 +149,26 @@ class A4QualificationEvidenceTests(unittest.TestCase):
             ),
         ):
             return qualifier.verify_pair(self.entries, "read-only-token")
+
+    def test_real_producer_evidence_key_and_cli_refusal(self):
+        """Do not inject synthetic wu; report malformed manifest as exit 2."""
+        self.assertEqual(self.first.record["work_unit"], "WU-A")
+        self.assertNotIn("wu", self.first.record)
+        self.assertEqual(self.verify()["result"], "TWO_REAL_ISOLATED_A4_PILOTS_VERIFIED")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "invalid-manifest.json"
+            path.write_text('{"pilots":[]}', encoding="utf-8")
+            errors = StringIO()
+            with (
+                patch.object(sys, "argv", ["a4_qualify.py", str(path)]),
+                patch.dict(os.environ, {"GH_TOKEN": "test-only-token"}),
+                redirect_stderr(errors),
+            ):
+                exit_code = qualifier.main()
+            self.assertEqual(exit_code, 2)
+            self.assertIn("A4_QUALIFY_REFUSED: manifest_requires_exactly_two_pilots",
+                          errors.getvalue())
+            self.assertNotIn("Traceback", errors.getvalue())
 
     def test_public_only_templates_and_pinned_verifier_blob(self):
         """Reject accidental drift of the vetted workflow or runner guard."""

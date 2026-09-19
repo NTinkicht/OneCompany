@@ -339,14 +339,24 @@ def produce(api: GitHub, *, config: dict, queue: dict, readiness: dict,
     if not isinstance(number, int) or isinstance(number, bool) or number <= 0:
         raise Refused("pr_creation_uncertain_reconcile_before_retry")
     live = api.call("GET", "/pulls/" + str(number))
+    if not isinstance(live, dict):
+        raise Refused("created_pr_exact_identity_drift")
+    live_head = live.get("head")
+    live_base = live.get("base")
+    if not isinstance(live_head, dict) or not isinstance(live_base, dict):
+        raise Refused("created_pr_exact_identity_drift")
+    head_repo = live_head.get("repo")
+    base_repo = live_base.get("repo")
+    if not isinstance(head_repo, dict) or not isinstance(base_repo, dict):
+        raise Refused("created_pr_exact_identity_drift")
     if (live.get("state") != "open"
         or live.get("draft") is True
-        or live.get("head", {}).get("sha") != head
-        or live.get("head", {}).get("ref") != branch
-        or live.get("head", {}).get("repo", {}).get("full_name") != repo
-        or live.get("base", {}).get("sha") != base
-        or live.get("base", {}).get("ref") != default
-        or live.get("base", {}).get("repo", {}).get("full_name") != repo):
+        or live_head.get("sha") != head
+        or live_head.get("ref") != branch
+        or head_repo.get("full_name") != repo
+        or live_base.get("sha") != base
+        or live_base.get("ref") != default
+        or base_repo.get("full_name") != repo):
         raise Refused("created_pr_exact_identity_drift")
     return {
         "status": "PR_CREATED_OR_RECONCILED",

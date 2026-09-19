@@ -228,7 +228,7 @@ def _verify_installation(entry: dict[str, Any], token: str) -> dict[str, str]:
     evidence = _job_evidence(_job_log(api, job_id))
     expected = {
         "repository": repo,
-        "wu": wu,
+        "work_unit": wu,
         "actor": expected_actor,
         "pr": number,
         "head": head_sha,
@@ -299,7 +299,7 @@ def main() -> int:
         pilots = manifest.get("pilots")
         verified = verify_pair(pilots, token)["installations"]
     except (OSError, UnicodeError, json.JSONDecodeError, Refused) as exc:
-        reason = exc.reason if isinstance(exc, Refused) else "manifest_invalid"
+        reason = str(exc) if isinstance(exc, Refused) else "manifest_invalid"
         print("A4_QUALIFY_REFUSED: " + reason, file=sys.stderr)
         return 2
     print(json.dumps({"status": "TWO_REAL_ISOLATED_A4_PILOTS_VERIFIED", "pilots": verified}, sort_keys=True))

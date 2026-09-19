@@ -183,6 +183,30 @@ class FirstPRProducerTests(unittest.TestCase):
         self.assertEqual(api.created_prs, 1)
         self.assertEqual(one["head"], CLAIM)
 
+    def test_deleted_fork_or_malformed_live_pr_refuses_cleanly(self):
+        """Treat null or invalid GitHub PR identity as a sanitized refusal."""
+        for which in ("head_repo", "base_repo", "head", "base", "response"):
+            with self.subTest(which=which):
+                class DeletedFork(FakeGitHub):
+                    def call(self, method, path, payload=None):
+                        answer = super().call(method, path, payload)
+                        if method == "GET" and path.startswith("/pulls/"):
+                            if which == "response":
+                                return None
+                            if which == "head":
+                                answer["head"] = None
+                            elif which == "base":
+                                answer["base"] = None
+                            elif which == "head_repo":
+                                answer["head"]["repo"] = None
+                            else:
+                                answer["base"]["repo"] = None
+                        return answer
+                with self.assertRaisesRegex(
+                    producer.Refused, "created_pr_exact_identity_drift"
+                ):
+                    producer.produce(DeletedFork(REPO), **installation())
+
     def test_two_independent_installations_no_cross_authority(self):
         """Prove separate project identities and foreign replay refusal."""
         a = FakeGitHub("owner/disposable-a")

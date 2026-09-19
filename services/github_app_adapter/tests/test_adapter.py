@@ -31,6 +31,8 @@ class FakeClient(AppClient):
             return {"id": 34}
         if path == "/repos/owner/disposable/installation":
             return {"id": 34}
+        if path == "/repos/owner/disposable/git/ref/heads/main":
+            return {"object": {"sha": "a" * 40}}
         if path.endswith("/access_tokens"):
             return {
                 "token": "z" * 40,
@@ -138,6 +140,8 @@ class TestGrokAppAdapter(unittest.TestCase):
                 with self.assertRaises(AdapterRefused):
                     client.read_document(path, ref)
         self.assertEqual(client.calls, [])
+        with self.assertRaisesRegex(AdapterRefused, "approved_main_head_sha_required"):
+            client.read_document("docs/START.md", "b" * 40)
         self.assertEqual(
             client.read_document("docs/START.md", "a" * 40)["content"],
             "# Hello\n",

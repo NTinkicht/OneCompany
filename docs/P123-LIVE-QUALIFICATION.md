@@ -140,6 +140,10 @@ The manifest is a *request to read live evidence*, not authority. Run:
 GH_TOKEN=<read-only-repository-token> python scripts/p123_qualify.py campaign.json
 ```
 
+The consolidated campaign CLI deliberately exits nonzero even after P1/P3
+evidence is observed, because P2's App-token-level write verification is still
+pending. Never use its report as a green promotion gate or merge authority.
+
 P3 verification checks the same PR and exact two-commit lineage, one fixture
 path, old failed and new successful workflow_dispatch plus GitHub Actions
 check-run identities, independently submitted APPROVED review pinned to the

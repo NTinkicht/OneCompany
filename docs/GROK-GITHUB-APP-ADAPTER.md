@@ -157,9 +157,9 @@ OAuth callback and unchanged connector credentials.
 
 ## PR snapshot and write qualification boundary (2026-09-20)
 
-The read-only PR snapshot fetches the current PR before and **again after**
-GitHub's moving `/pulls/{number}/files` response, failing closed if its head,
-base or relevant identity changes. Rename entries preserve `previous_path`.
+The read-only PR snapshot uses GitHub's **immutable three-dot base/head SHA
+comparison** for the file list (never moving `/pulls/{number}/files`) and
+rechecks PR identity before returning, failing closed if head/base changes. Rename entries preserve `previous_path`.
 Deleted/foreign fork repositories are sanitized refusals, not traceback data.
 The adapter never treats this read-only snapshot as independent final review.
 

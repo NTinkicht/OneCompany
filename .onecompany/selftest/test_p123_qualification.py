@@ -414,6 +414,17 @@ class NativeAuthorityTests(unittest.TestCase):
                 producer.Refused, "repair_lease_interrupted_during_job",
             ):
                 campaign._historical_repair_lease(**params)
+            # Both endpoint views may show the SAME lease_id after an
+            # interruption and re-assignment; event history must still refuse.
+            rebinding = {
+                **assignment, "event_id": "lease-origin-2",
+                "github_created_at": "2026-09-19T22:01:30Z",
+            }
+            events.return_value = [assignment, release, rebinding]
+            with self.assertRaisesRegex(
+                producer.Refused, "repair_lease_interrupted_during_job",
+            ):
+                campaign._historical_repair_lease(**params)
             events.return_value = [{
                 **assignment,
                 "github_created_at": "2026-09-19T22:01:00Z",

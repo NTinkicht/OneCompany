@@ -41,6 +41,7 @@ class ReadOnlyPilotApi:
         self.base = BASE
         self.private = False
         self.visibility = "public"
+        self.branch_sha = "b" * 40
         self.calls = []
         self.missing = None
         self.drift = None
@@ -76,6 +77,8 @@ class ReadOnlyPilotApi:
             }
         if path == "/git/ref/heads/main":
             return {"object": {"sha": self.base}}
+        if path == "/git/ref/heads/onecompany-a4-wu-c":
+            return {"object": {"sha": self.branch_sha}}
         if path.startswith("/contents/"):
             name, ref = path[len("/contents/"):].split("?ref=", 1)
             if ref != BASE or self.missing == name:
@@ -101,6 +104,7 @@ class ReadOnlyPilotApi:
                 "number": 7, "state": "open",
                 "head": {
                     "ref": producer.branch_for("WU-C"),
+                    "sha": "b" * 40,
                     "repo": {"full_name": self.repository},
                 },
                 "base": {
@@ -255,7 +259,8 @@ class PilotIntakeTests(unittest.TestCase):
                     )
 
     def test_l2_requires_ledger_and_real_route(self):
-        for which in ("ledger", "queue", "route", "pr"):
+        for which in ("ledger", "queue", "route", "pr",
+                      "ref", "foreign_pr_repo"):
             with self.subTest(which=which):
                 api = self.setup_targets()[REPOS[2]]
                 if which == "ledger":
@@ -266,12 +271,17 @@ class PilotIntakeTests(unittest.TestCase):
                     api.docs["dispatch"]["actors"][0][
                         "mechanisms"
                     ].pop()
+                elif which == "ref":
+                    api.branch_sha = "c" * 40
                 else:
                     original = api.call
                     def wrong(method, path, payload=None):
                         value = original(method, path, payload)
                         if path == "/pulls/7":
-                            value["state"] = "closed"
+                            if which == "pr":
+                                value["state"] = "closed"
+                            else:
+                                value["head"]["repo"] = None
                         return value
                     api.call = wrong
                 with self.assertRaises(producer.Refused):

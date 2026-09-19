@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import base64
+import datetime as dt
 import json
 import os
 import re
@@ -23,7 +24,15 @@ from a4_pr_producer import GitHub, Refused, REPO, SHA, branch_for, fixture_body
 from a4_qualify import (
     verify_pair, _positive_int, _require_object, _require_list, _job_log,
 )
-from l2_fixture_repair import CI_PATH, CI_BLOB, REPAIR_LINE
+from l2_fixture_repair import (
+    CI_PATH, CI_BLOB, REPAIR_LINE, REPAIR_PATH, REPAIR_JOB,
+    REPAIR_STEP, EVIDENCE_PREFIX,
+)
+
+# Installed disposable target must run exactly these reviewed base-trusted
+# files, not candidate-selected workflow/script bytes.
+REPAIR_WORKFLOW_BLOB = "3a5f18c5fa08c0a7ac79ccd04dc5da3de4b51aa2"
+REPAIR_SCRIPT_BLOB = "f87055ed804a5a512125f4ee4b5d512cee187b73"
 
 MARKER = "<!-- onecompany-ledger-v1 -->"
 EVENT = re.compile(
@@ -233,6 +242,177 @@ def _native_merged_event(repo: str, pr: int, wu: str, base: str,
         raise Refused("native_durable_merge_not_verified")
 
 
+def _utc_platform(value: Any) -> dt.datetime:
+    """Reject naive, malformed, or unanchored GitHub platform timestamps."""
+    if not isinstance(value, str) or not value:
+        raise Refused("repair_platform_timestamp_missing")
+    try:
+        parsed = dt.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        raise Refused("repair_platform_timestamp_invalid") from None
+    if parsed.tzinfo is None:
+        raise Refused("repair_platform_timestamp_unanchored")
+    return parsed.astimezone(dt.timezone.utc)
+
+
+def _historical_repair_lease(*, repo: str, number: int, wu: str,
+                             actor: str, branch: str, base: str,
+                             initial: str, lease_id: str,
+                             started: dt.datetime,
+                             completed: dt.datetime) -> None:
+    """Replay actual owner-published ledger at BOTH GitHub job timestamps.
+
+    A current or later MERGED event does not prove that a lease existed when
+    the worker started or when it pushed; historical replay uses ONLY events
+    published by each cutoff, including transfers, expiry, and reaping.
+    """
+    import ledger_lib
+    from lease_lifecycle import derive_lifecycle
+
+    try:
+        if ledger_lib._repository() != repo or not ledger_lib.ledger_enabled():
+            raise Refused("repair_native_ledger_unavailable")
+        events = ledger_lib.list_events()
+        stamped = []
+        for event in events:
+            if not isinstance(event, dict):
+                raise Refused("repair_native_ledger_malformed")
+            stamped.append((_utc_platform(event.get("github_created_at")), event))
+        for instant in (started, completed):
+            historical = [
+                event for when, event in stamped if when <= instant
+            ]
+            view = derive_lifecycle(
+                historical, number, now=instant, durable=True,
+            )
+            if (not isinstance(view, dict)
+                    or view.get("lifecycle_rejected_claims")
+                    or view.get("integrity_conflicts")
+                    or view.get("conflicts")
+                    or view.get("rejected_claims")):
+                raise Refused("repair_historical_ledger_rejected")
+            active = view.get("active_leases")
+            if not isinstance(active, list) or len(active) != 1:
+                raise Refused("repair_historical_lease_missing")
+            lease = active[0]
+            admission = (lease.get("admission_snapshot")
+                         if isinstance(lease, dict) else None)
+            if (not isinstance(admission, dict)
+                    or lease.get("id") != lease_id
+                    or lease.get("role") != "implementation"
+                    or lease.get("status") != "active"
+                    or lease.get("pr") != number
+                    or lease.get("work_unit") != wu
+                    or lease.get("actor") != actor
+                    or lease.get("branch") != branch
+                    or admission.get("trusted_ref") != base
+                    or initial not in {
+                        lease.get("start_head"), lease.get("last_progress_head")
+                    }):
+                raise Refused("repair_historical_lease_mismatch")
+    except Refused:
+        raise
+    except Exception:
+        raise Refused("repair_historical_ledger_unavailable") from None
+
+
+def _repair_run_evidence(api: GitHub, entry: dict, *, repo: str,
+                         number: int, wu: str, actor: str, base: str,
+                         initial: str, repaired: str,
+                         failed_id: int) -> dict:
+    """Verify platform-bound repair workflow/job/log plus historical lease."""
+    run_id = _positive_int(entry.get("repair_run_id"),
+                           "repair_run_id_required")
+    attempt = _positive_int(entry.get("repair_run_attempt"),
+                            "repair_run_attempt_required")
+    run = _require_object(
+        api.call("GET", f"/actions/runs/{run_id}"),
+        "repair_run_unavailable",
+    )
+    owner = _require_object(run.get("repository"),
+                            "repair_run_repository_unavailable")
+    if (run.get("event") != "workflow_dispatch"
+            or run.get("path") != REPAIR_PATH
+            or run.get("head_sha") != base
+            or run.get("status") != "completed"
+            or run.get("conclusion") != "success"
+            or run.get("run_attempt") != attempt
+            or owner.get("full_name") != repo):
+        raise Refused("repair_workflow_identity_mismatch")
+    for path, expected in (
+        (REPAIR_PATH, REPAIR_WORKFLOW_BLOB),
+        ("scripts/l2_fixture_repair.py", REPAIR_SCRIPT_BLOB),
+    ):
+        _, document = _content(api, path, base)
+        if document.get("sha") != expected:
+            raise Refused("repair_base_trusted_worker_drift")
+    listing = _require_object(api.call(
+        "GET", f"/actions/runs/{run_id}/jobs?per_page=100",
+    ), "repair_jobs_unavailable")
+    jobs = _require_list(listing.get("jobs"), "repair_jobs_unavailable")
+    if len(jobs) >= 100:
+        raise Refused("repair_jobs_truncated")
+    matching = [
+        job for job in jobs if isinstance(job, dict)
+        and job.get("name") == REPAIR_JOB
+        and job.get("status") == "completed"
+        and job.get("conclusion") == "success"
+        and job.get("run_id") == run_id
+        and job.get("run_attempt") == attempt
+    ]
+    if len(matching) != 1:
+        raise Refused("repair_job_identity_mismatch")
+    job = matching[0]
+    steps = _require_list(job.get("steps"), "repair_steps_unavailable")
+    if sum(
+        isinstance(step, dict)
+        and step.get("name") == REPAIR_STEP
+        and step.get("conclusion") == "success"
+        for step in steps
+    ) != 1:
+        raise Refused("repair_job_step_unverified")
+    started = _utc_platform(job.get("started_at"))
+    completed = _utc_platform(job.get("completed_at"))
+    if not started < completed:
+        raise Refused("repair_job_time_invalid")
+    job_id = _positive_int(job.get("id"), "repair_job_id_invalid")
+    lines = [
+        line.split(EVIDENCE_PREFIX, 1)[1].strip()
+        for line in _job_log(api, job_id).splitlines()
+        if EVIDENCE_PREFIX in line
+    ]
+    if len(lines) != 1:
+        raise Refused("repair_job_evidence_missing_or_ambiguous")
+    try:
+        evidence = json.loads(lines[0])
+    except ValueError:
+        raise Refused("repair_job_evidence_invalid") from None
+    if not isinstance(evidence, dict):
+        raise Refused("repair_job_evidence_invalid")
+    expected = {
+        "status": "L2_REPAIR_COMMITTED",
+        "repository": repo, "work_unit": wu, "actor": actor,
+        "pr": number, "initial": initial, "repaired": repaired,
+        "base": base, "failed_ci_run_id": failed_id,
+        "already_applied": False,
+        "run_id": run_id, "run_attempt": attempt,
+    }
+    if any(evidence.get(key) != value for key, value in expected.items()):
+        raise Refused("repair_job_evidence_identity_mismatch")
+    lease_id = evidence.get("lease_id")
+    if not isinstance(lease_id, str) or not lease_id:
+        raise Refused("repair_job_lease_id_missing")
+    _historical_repair_lease(
+        repo=repo, number=number, wu=wu, actor=actor,
+        branch=branch_for(wu), base=base, initial=initial,
+        lease_id=lease_id, started=started, completed=completed,
+    )
+    return {
+        "repair_run_id": run_id, "repair_job_id": job_id,
+        "repair_run_attempt": attempt, "lease_id": lease_id,
+    }
+
+
 def verify_l2(entry: dict[str, Any], token: str,
               factory: Callable[[str, str], GitHub] = GitHub) -> dict:
     """Observe an actual L2 pilot; never infer capability from manifest claims."""
@@ -333,6 +513,11 @@ def verify_l2(entry: dict[str, Any], token: str,
         raise Refused("l2_intentional_fixture_failure_not_proven")
     _check(api, initial, failed_id, "failure")
     _check(api, repaired, passed_id, "success")
+    repair_proof = _repair_run_evidence(
+        api, entry, repo=repo, number=number, wu=wu, actor=actor,
+        base=base, initial=initial, repaired=repaired,
+        failed_id=failed_id,
+    )
     reviews = _require_list(api.call(
         "GET", f"/pulls/{number}/reviews?per_page=100",
     ), "l2_reviews_invalid")
@@ -377,6 +562,7 @@ def verify_l2(entry: dict[str, Any], token: str,
         "repository": repo, "pr": number, "work_unit": wu,
         "initial_head": initial, "repaired_head": repaired,
         "failed_run_id": failed_id, "passed_run_id": passed_id,
+        **repair_proof,
         "independent_reviewer_login": reviewer,
         "independent_reviewer_actor": reviewer_identity["actor_id"],
         "merged_commit": merge_sha, "ledger_issue": issue,

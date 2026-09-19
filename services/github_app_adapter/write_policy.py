@@ -145,10 +145,12 @@ def verify_write_contract(
             or not isinstance(pr.get("base"), dict)
             or pr["head"].get("ref") != branch
             or pr["head"].get("sha") != request.expected_head_sha
-            or (pr["head"].get("repo") or {}).get("full_name") != repo
+            or not isinstance(pr["head"].get("repo"), dict)
+            or pr["head"]["repo"].get("full_name") != repo
             or pr["base"].get("ref") != default
             or pr["base"].get("sha") != main_sha
-            or (pr["base"].get("repo") or {}).get("full_name") != repo):
+            or not isinstance(pr["base"].get("repo"), dict)
+            or pr["base"]["repo"].get("full_name") != repo):
         raise WriteRefused("canonical_pr_head_or_base_changed")
     return {
         "repository": repo,

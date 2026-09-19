@@ -66,6 +66,7 @@ class ExactRefWriter:
                 or len(reply["token"]) < 20
                 or granted is None
                 or not isinstance(granted, dict)
+                or set(granted) != set(permissions)
                 or any(granted.get(k) != v for k, v in permissions.items())
                 or reply.get("repository_selection") != "selected"
                 or not isinstance(repos, list) or len(repos) != 1
@@ -120,7 +121,8 @@ class ExactRefWriter:
             f"/repos/{repo}/git/commits/{request.expected_head_sha}",
             token,
         )
-        parent_tree = (parent.get("tree") or {}).get("sha") if isinstance(parent, dict) else None
+        parent_object = parent.get("tree") if isinstance(parent, dict) else None
+        parent_tree = parent_object.get("sha") if isinstance(parent_object, dict) else None
         if not isinstance(parent_tree, str) or not _SHA.fullmatch(parent_tree):
             raise WriteRefused("writer_parent_tree_unverified")
         blob = self.client._stage_call(
@@ -193,8 +195,8 @@ class ExactRefWriter:
             f"/repos/{repo}/git/refs/heads/{urllib.parse.quote(branch, safe='')}",
             token, {"sha": candidate, "force": False},
         )
-        updated_sha = ((result.get("object") or {}).get("sha")
-                       if isinstance(result, dict) else None)
+        updated_object = result.get("object") if isinstance(result, dict) else None
+        updated_sha = updated_object.get("sha") if isinstance(updated_object, dict) else None
         if updated_sha != candidate:
             raise WriteRefused("writer_ref_indeterminate_reconcile_no_retry")
         pr = self._read_current_pr(request.pr_number, token)

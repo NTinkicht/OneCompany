@@ -81,7 +81,7 @@ class AppClient:
         except Exception as exc:
             raise AdapterRefused("github_app_key_invalid") from exc
 
-    def _installation(self) -> tuple[str, str]:
+    def _installation(self) -> tuple[str, str, int]:
         """Request read-only permissions for exactly one repository."""
         app_jwt = self._jwt()
         app = self._stage_call("app_metadata", "GET", "/app", app_jwt)
@@ -90,35 +90,20 @@ class AppClient:
         slug = app.get("slug")
         if not isinstance(slug, str) or not slug:
             raise AdapterRefused("github_app_slug_missing")
-        # Disambiguate a wrong Installation ID from an App not installed on
-        # this particular repository. Both can otherwise surface as 404 when
-        # POSTing an installation-token request.
-        # The repository lookup identifies the App installation for the
-        # exact approved repo even when an owner supplied a wrong numeric ID.
+        # Resolve the ACTUAL installation bound to the approved repository.
+        # The App JWT is the authority; no user-supplied installation ID
+        # may select a different account or repository.
         assigned = self._stage_call(
             "repository_installation_lookup", "GET",
             f"/repos/{self.settings.repository}/installation", app_jwt,
         )
-        if not isinstance(assigned, dict) or not isinstance(assigned.get("id"), int):
+        if not isinstance(assigned, dict) or not isinstance(assigned.get("id"), int) or assigned["id"] < 1:
             raise AdapterRefused("github_repository_installation_invalid")
-        if assigned["id"] != self.settings.installation_id:
-            # Installation IDs are non-secret configuration identifiers.
-            raise AdapterRefused(
-                "github_repository_installation_id_mismatch_"
-                f"actual_{assigned['id']}"
-            )
-        installation = self._stage_call(
-            "installation_lookup", "GET",
-            f"/app/installations/{self.settings.installation_id}", app_jwt,
-        )
-        if not isinstance(installation, dict) or (
-            installation.get("id") != self.settings.installation_id
-        ):
-            raise AdapterRefused("github_installation_id_mismatch")
+        installation_id = assigned["id"]
         repo_name = self.settings.repository.split("/", 1)[1]
         info = self._stage_call(
             "installation_token", "POST",
-            f"/app/installations/{self.settings.installation_id}/access_tokens",
+            f"/app/installations/{installation_id}/access_tokens",
             app_jwt,
             {"repositories": [repo_name],
              "permissions": {"contents": "read", "pull_requests": "read"}},
@@ -139,10 +124,10 @@ class AppClient:
             or repos[0].get("full_name") != self.settings.repository
         ):
             raise AdapterRefused("github_installation_scope_unverified")
-        return token, slug
+        return token, slug, installation_id
 
     def identity(self) -> dict:
-        token, slug = self._installation()
+        token, slug, installation_id = self._installation()
         repo = self._stage_call("repository", "GET", f"/repos/{self.settings.repository}", token)
         if not isinstance(repo, dict) or repo.get("full_name") != self.settings.repository:
             raise AdapterRefused("github_repository_identity_mismatch")
@@ -150,7 +135,7 @@ class AppClient:
             "logical_actor": self.settings.actor,
             "authenticated_principal": slug + "[bot]",
             "app_id": self.settings.app_id,
-            "installation_id": self.settings.installation_id,
+            "installation_id": installation_id,
             "repository": repo["full_name"],
             "mode": "read_only",
             "unattended_write_verified": False,
@@ -159,7 +144,7 @@ class AppClient:
         }
 
     def repository_status(self) -> dict:
-        token, slug = self._installation()
+        token, slug, installation_id = self._installation()
         repo = self._call("GET", f"/repos/{self.settings.repository}", token)
         if not isinstance(repo, dict) or repo.get("full_name") != self.settings.repository:
             raise AdapterRefused("github_repository_identity_mismatch")
@@ -179,7 +164,7 @@ class AppClient:
         if (not _FILE.fullmatch(path) or ".." in path
                 or "//" in path or len(path) > 160):
             raise AdapterRefused("document_path_not_allowlisted")
-        token, _ = self._installation()
+        token, _, _ = self._installation()
         endpoint = (
             f"/repos/{self.settings.repository}/contents/"
             + urllib.parse.quote(path, safe="/") + "?ref=" + ref

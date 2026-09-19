@@ -30,7 +30,12 @@ not a qualified always-on unattended worker.
 Owner explicitly chose to skip a separate disposable repository and use
 **NTinkicht/OneCompany directly** for this first identity check. Register/install
 the GitHub App with **Metadata:read**, **Contents:read**, and **Pull requests:read**
-on that repository; do not enable write permissions yet. The adapter's own
+on that repository; do not enable write permissions yet. If the adapter reports
+`github_repository_installation_lookup_github_http_status_404`, open
+GitHub > Settings > Developer settings > GitHub Apps > edit
+**OneCompany Grok Worker** > Install App > install/configure the
+`NTinkicht` account > Only select repositories > `OneCompany` > Save.
+No new PEM, Grok OAuth login, App ID or installation ID is needed. The adapter's own
 GitHub installation token request also explicitly downscopes these permissions
 to read-only and one repository, regardless of any broader App installation
 permissions. This is **not** a substitute for the two distinct live A4 pilots
@@ -44,15 +49,17 @@ Set the following variables in Render, not in the source code:
 | Key | Value |
 |---|---|
 | `GITHUB_APP_ID` | Numeric non-secret App ID |
-| `GITHUB_APP_INSTALLATION_ID` | Numeric non-secret Installation ID |
+| `GITHUB_APP_INSTALLATION_ID` | Optional legacy setting; ignored in favor of the App installation detected on the approved repository |
 | `GITHUB_APP_PRIVATE_KEY_FILE` | `/etc/secrets/github-app.pem` (default) |
 | `ONECOMPANY_APPROVED_REPOSITORY` | Exactly NTinkicht/OneCompany for the owner-approved read-only identity check |
 | `ONECOMPANY_CONNECTOR_BEARER` | A random secret of 32+ characters, owner-generated and kept in Render and Grok's authentication UI |
 | `ONECOMPANY_ADAPTER_ENABLED` | `true` only after every required setting is installed and checked |
 
-For App ID 5003121 and installation ID 163051959, OneCompany is the
-allowlisted repository. These identifiers are non-secret; do not record the
-private key or connector bearer in GitHub.
+For App ID 5003121, OneCompany is the allowlisted repository. The adapter
+**discovers the repository installation ID directly from GitHub**, so any old
+value in GITHUB_APP_INSTALLATION_ID is ignored. It does not permit choosing
+another installation through connector input. Do not record the private key
+or connector bearer in GitHub.
 
 The bearer authenticates *to the MCP adapter*, not to GitHub. The App PEM
 never leaves Render; short-lived installation tokens are limited to the

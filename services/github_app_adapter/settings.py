@@ -48,7 +48,7 @@ class Settings:
     def github_ready(self) -> bool:
         if not (
             self.auth_ready()
-            and self.app_id > 0 and self.installation_id > 0
+            and self.app_id > 0
             and bool(_REPO.fullmatch(self.repository))
             and ".." not in self.repository
         ):

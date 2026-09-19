@@ -20,7 +20,9 @@ from pathlib import Path
 from typing import Any, Callable
 
 from a4_pr_producer import GitHub, Refused, REPO, SHA, branch_for, fixture_body
-from a4_qualify import verify_pair, _positive_int, _require_object, _require_list
+from a4_qualify import (
+    verify_pair, _positive_int, _require_object, _require_list, _job_log,
+)
 from l2_fixture_repair import CI_PATH, CI_BLOB, REPAIR_LINE
 
 MARKER = "<!-- onecompany-ledger-v1 -->"
@@ -244,6 +246,33 @@ def verify_l2(entry: dict[str, Any], token: str,
         raise Refused("l2_ci_workflow_not_base_trusted")
     _run(api, failed_id, initial, "failure")
     _run(api, passed_id, repaired, "success")
+    jobs = _require_object(api.call(
+        "GET", f"/actions/runs/{failed_id}/jobs?per_page=100",
+    ), "l2_failed_jobs_invalid")
+    all_jobs = _require_list(jobs.get("jobs"), "l2_failed_jobs_invalid")
+    if len(all_jobs) >= 100:
+        raise Refused("l2_failed_jobs_truncated")
+    failed_jobs = [
+        job for job in all_jobs if isinstance(job, dict)
+        and job.get("name") == "validate-fixture"
+        and job.get("conclusion") == "failure"
+    ]
+    if len(failed_jobs) != 1:
+        raise Refused("l2_intentional_fixture_failure_not_proven")
+    failed_job = failed_jobs[0]
+    steps = _require_list(failed_job.get("steps"),
+                          "l2_failed_steps_invalid")
+    if not any(
+        isinstance(step, dict)
+        and step.get("name") == "Validate one bounded repaired fixture"
+        and step.get("conclusion") == "failure"
+        for step in steps
+    ):
+        raise Refused("l2_intentional_fixture_failure_not_proven")
+    job_id = _positive_int(failed_job.get("id"),
+                           "l2_failed_job_id_invalid")
+    if "fixture_ci_repair_not_complete" not in _job_log(api, job_id):
+        raise Refused("l2_intentional_fixture_failure_not_proven")
     _check(api, initial, failed_id, "failure")
     _check(api, repaired, passed_id, "success")
     reviews = _require_list(api.call(

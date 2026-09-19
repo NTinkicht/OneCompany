@@ -30,6 +30,8 @@ PRODUCER_STEP = "Reserve one branch and create or reconcile one fixture PR"
 TRUSTED_CI_WORKFLOW_PATH = ".github/workflows/onecompany-a4-fixture-validation.yml"
 TRUSTED_CI_WORKFLOW_BLOB = "8480f5c8bd94187efe3ccb1effa9def51d15addd"
 TRUSTED_CI_CHECK_NAME = "validate-fixture"
+MAX_JOB_LOG_BYTES = 2_000_000
+MAX_JOB_LOG_MEMBERS = 32
 
 
 class _SafeLogRedirect(urllib.request.HTTPRedirectHandler):
@@ -72,20 +74,38 @@ def _job_log(api: GitHub, job_id: int) -> str:
 
 
 def _decode_job_log(raw: bytes) -> str:
-    """Accept GitHub's job-log zip archive, or a raw UTF-8 log body."""
+    """Accept GitHub's job-log zip archive, or a raw UTF-8 log body.
+
+    Uncompressed member sizes are summed before and after extraction so a
+    small compressed archive cannot expand past MAX_JOB_LOG_BYTES.
+    """
     if raw.startswith(b"PK"):
         try:
             with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+                names = [name for name in archive.namelist() if not name.endswith("/")]
+                if not names:
+                    raise Refused("github_job_log_empty")
+                if len(names) > MAX_JOB_LOG_MEMBERS:
+                    raise Refused("github_job_log_too_large")
                 parts: list[str] = []
-                for name in archive.namelist():
-                    if name.endswith("/"):
-                        continue
-                    parts.append(archive.read(name).decode("utf-8"))
-        except (OSError, UnicodeError, zipfile.BadZipFile, RuntimeError) as exc:
+                total = 0
+                for name in names:
+                    info = archive.getinfo(name)
+                    declared = int(info.file_size)
+                    if declared < 0 or total + declared > MAX_JOB_LOG_BYTES:
+                        raise Refused("github_job_log_too_large")
+                    data = archive.read(name)
+                    if len(data) != declared or total + len(data) > MAX_JOB_LOG_BYTES:
+                        raise Refused("github_job_log_too_large")
+                    total += len(data)
+                    parts.append(data.decode("utf-8"))
+        except Refused:
+            raise
+        except (OSError, UnicodeError, zipfile.BadZipFile, RuntimeError, ValueError) as exc:
             raise Refused("github_job_log_not_utf8") from exc
-        if not parts:
-            raise Refused("github_job_log_empty")
         return "\n".join(parts)
+    if len(raw) > MAX_JOB_LOG_BYTES:
+        raise Refused("github_job_log_too_large")
     try:
         return raw.decode("utf-8")
     except UnicodeError as exc:

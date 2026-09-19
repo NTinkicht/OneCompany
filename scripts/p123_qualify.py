@@ -175,6 +175,64 @@ def _owner_merged_event(api: GitHub, base: str, *,
     return issue
 
 
+def _native_review(repo: str, pr: int, review_id: int,
+                   head: str, base: str) -> dict:
+    """Use base-trusted actor mapping and author exclusions from merge kernel."""
+    from platform_identity import (
+        pull_request_material_author_actor_ids, review_platform_identity,
+        require_authority,
+    )
+    actors, errors = pull_request_material_author_actor_ids(
+        repo, pr, head, base,
+    )
+    if actors is None or errors:
+        raise Refused("native_material_author_identity_unverified")
+    identity, errors = review_platform_identity(
+        repo, pr, review_id, head, base, allowed_states={"APPROVED"},
+    )
+    if identity is None or errors:
+        raise Refused("native_platform_reviewer_unverified")
+    eligible, reasons = require_authority(identity, "code_review", actors)
+    if not eligible or reasons:
+        raise Refused("native_independent_reviewer_unverified")
+    return identity
+
+
+def _native_merged_event(repo: str, pr: int, wu: str, base: str,
+                         head: str, merge_sha: str) -> None:
+    """Require canonical ledger admission + verified MERGED replay, not JSON."""
+    import ledger_lib
+    from lease_lifecycle import coordination_view
+
+    if ledger_lib._repository() != repo or not ledger_lib.ledger_enabled():
+        raise Refused("native_ledger_repository_or_activation_mismatch")
+    try:
+        events = ledger_lib.list_events()
+        matching = [
+            event for event in events
+            if event.get("type") == "MERGED"
+            and isinstance(event.get("payload"), dict)
+            and event["payload"].get("pr") == pr
+            and event["payload"].get("work_unit") == wu
+            and event["payload"].get("approved_base") == base
+            and event["payload"].get("approved_head") == head
+            and event["payload"].get("merge_sha") == merge_sha
+        ]
+        if len(matching) != 1:
+            raise Refused("native_durable_merged_event_missing")
+        context, error = ledger_lib._verify_merged_event(matching[0])
+        if context is None or error:
+            raise Refused("native_merged_event_failed_platform_proof")
+        view = coordination_view()
+    except Refused:
+        raise
+    except Exception:
+        raise Refused("native_merged_ledger_replay_unavailable") from None
+    if (not isinstance(view, dict)
+            or wu not in set(view.get("verified_merged_work_units", []))):
+        raise Refused("native_durable_merge_not_verified")
+
+
 def verify_l2(entry: dict[str, Any], token: str,
               factory: Callable[[str, str], GitHub] = GitHub) -> dict:
     """Observe an actual L2 pilot; never infer capability from manifest claims."""
@@ -302,11 +360,17 @@ def verify_l2(entry: dict[str, Any], token: str,
         authors.add(login)
     if reviewer in authors:
         raise Refused("self_review_not_independent")
+    reviewer_identity = _native_review(
+        repo, number, review_id, repaired, base,
+    )
+    if reviewer_identity.get("login") != reviewer:
+        raise Refused("native_review_login_mismatch")
     merge_sha = pr["merge_commit_sha"]
     issue = _owner_merged_event(
         api, base, number=number, wu=wu, repaired=repaired,
         merge_sha=merge_sha,
     )
+    _native_merged_event(repo, number, wu, base, repaired, merge_sha)
     return {
         "status": "L2_LIVE_SAME_PR_FLOW_OBSERVED",
         "authority": "read_only_qualification_report",
@@ -314,6 +378,7 @@ def verify_l2(entry: dict[str, Any], token: str,
         "initial_head": initial, "repaired_head": repaired,
         "failed_run_id": failed_id, "passed_run_id": passed_id,
         "independent_reviewer_login": reviewer,
+        "independent_reviewer_actor": reviewer_identity["actor_id"],
         "merged_commit": merge_sha, "ledger_issue": issue,
         "note": "Observed GitHub and trusted ledger records; not a merge grant.",
     }

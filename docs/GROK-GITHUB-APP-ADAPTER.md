@@ -27,9 +27,14 @@ not a qualified always-on unattended worker.
 
 ## Owner-only GitHub App setup
 
-Register your GitHub App with **Metadata:read**, **Contents:read**, and **Pull
-requests:read** on one disposable repository initially. Do not enable write
-permissions yet. In Render > service > Environment > Secret Files, add
+Owner explicitly chose to skip a separate disposable repository and use
+**NTinkicht/OneCompany directly** for this first identity check. Register/install
+the GitHub App with **Metadata:read**, **Contents:read**, and **Pull requests:read**
+on that repository; do not enable write permissions yet. The adapter's own
+GitHub installation token request also explicitly downscopes these permissions
+to read-only and one repository, regardless of any broader App installation
+permissions. This is **not** a substitute for the two distinct live A4 pilots
+required by issues #90/#92. In Render > service > Environment > Secret Files, add
 `github-app.pem` with the complete downloaded private key. Render mounts
 it at `/etc/secrets/github-app.pem`. Never send that PEM to Grok, this chat,
 GitHub, a PR, or a model-accessible tool response.
@@ -41,9 +46,13 @@ Set the following variables in Render, not in the source code:
 | `GITHUB_APP_ID` | Numeric non-secret App ID |
 | `GITHUB_APP_INSTALLATION_ID` | Numeric non-secret Installation ID |
 | `GITHUB_APP_PRIVATE_KEY_FILE` | `/etc/secrets/github-app.pem` (default) |
-| `ONECOMPANY_APPROVED_REPOSITORY` | Exactly one owner-selected disposable repo |
+| `ONECOMPANY_APPROVED_REPOSITORY` | Exactly NTinkicht/OneCompany for the owner-approved read-only identity check |
 | `ONECOMPANY_CONNECTOR_BEARER` | A random secret of 32+ characters, owner-generated and kept in Render and Grok's authentication UI |
 | `ONECOMPANY_ADAPTER_ENABLED` | `true` only after every required setting is installed and checked |
+
+For App ID 5003121 and installation ID 163051959, OneCompany is the
+allowlisted repository. These identifiers are non-secret; do not record the
+private key or connector bearer in GitHub.
 
 The bearer authenticates *to the MCP adapter*, not to GitHub. The App PEM
 never leaves Render; short-lived installation tokens are limited to the
@@ -59,7 +68,7 @@ A separately reviewed OAuth integration can be built subsequently.
 
 Invoke `onecompany_actor_identity`. It should identify logical actor
 `grok-4-6-interactive` separately from the GitHub App principal
-`<app-slug>[bot]`, confirm the one approved repository, and state that
+`<app-slug>[bot]`, confirm the approved repository NTinkicht/OneCompany, and state that
 writing and independent review remain disabled. The GitHub connector
 running under `NTinkicht` is a *different* execution identity and must
 not be treated as evidence of the App principal.

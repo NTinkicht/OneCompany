@@ -98,6 +98,31 @@ class A4InstallationIsolationTests(unittest.TestCase):
         )
         self.assertIn("repository_identity_mismatch", errors)
 
+        second_request, second_config, second_queue, second_pr = copy.deepcopy(second)
+        errors = worker.preflight(
+            second_request,
+            second_config,
+            queue,
+            second_pr,
+            repository=foreign_repository,
+            actions=True,
+            enabled=True,
+        )
+        self.assertIn("work_unit_missing_from_protected_queue", errors)
+
+        replayed_pr_number = copy.deepcopy(second_pr)
+        replayed_pr_number["number"] = 12
+        errors = worker.preflight(
+            second_request,
+            second_config,
+            second_queue,
+            replayed_pr_number,
+            repository=foreign_repository,
+            actions=True,
+            enabled=True,
+        )
+        self.assertIn("canonical_pr_not_open_or_ready", errors)
+
         request["repository"] = foreign_repository
         config["project"]["repository"] = foreign_repository
         errors = worker.preflight(

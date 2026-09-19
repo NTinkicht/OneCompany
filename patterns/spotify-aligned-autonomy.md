@@ -6,7 +6,7 @@ A multi-agent company needs both autonomy and alignment. Centralizing every deci
 
 ## Source and adaptation
 
-Spotify's published engineering-culture material described autonomous squads connected by chapters and guilds. Spotify explicitly presented that material as a journey/snapshot rather than a prescriptive framework. Tabibi's **Epic** restructuring adapted only the useful organizational ideas.
+Spotify's published engineering-culture material described autonomous squads connected by chapters and guilds. Spotify explicitly presented that material as a journey/snapshot rather than a prescriptive framework. OneCompany adapts useful organizational ideas without depending on an example product.
 
 OneCompany therefore uses the principles, not a literal copy of Spotify's org chart.
 

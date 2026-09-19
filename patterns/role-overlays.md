@@ -47,4 +47,4 @@ Examples:
 
 ## Provenance
 
-Tabibi operationalized this pattern from a curated subset of `NTinkicht/agency-agents` pinned at commit `647c8baa42b6842afb4a97bf2c0950d45ba88e8b`. OneCompany keeps the concept and governance separation, with new concise overlay files under `overlays/`.
+The specialist-profile concept informed this pattern. OneCompany keeps capability and authority separate with concise overlays under `overlays/`. External behavior-bearing profile changes require reviewed promotion.

@@ -35,7 +35,7 @@ Reject actors that:
 
 ### 3. Apply capability-specific preference
 
-Only after hard filters, rank using `.onecompany/routing.json`. The reference tendencies preserve lessons from Tabibi:
+Only after hard filters, rank using `.onecompany/routing.json`. The following optional, illustrative preferences are not binding assignments:
 
 ```text
 planning/orchestration      ChatGPT first

@@ -1,0 +1,52 @@
+{
+  "description": "Synthetic zero-extra-spend capability roster; replace all placeholder actors with independently qualified identities in the installed project.",
+  "budget": {
+    "additional_monthly_ai_spend": 0,
+    "paid_fallback": false,
+    "overage": false,
+    "auto_topup": false
+  },
+  "actors": [
+    {
+      "id": "planner",
+      "preferred_for": [
+        "orchestration",
+        "architecture"
+      ]
+    },
+    {
+      "id": "builder",
+      "preferred_for": [
+        "implementation",
+        "executable_ci_remediation"
+      ]
+    },
+    {
+      "id": "reviewer",
+      "preferred_for": [
+        "independent_review",
+        "security_review"
+      ]
+    },
+    {
+      "id": "backup-builder",
+      "preferred_for": [
+        "implementation_fallback"
+      ]
+    },
+    {
+      "id": "repository-analyst",
+      "preferred_for": [
+        "repository_intelligence"
+      ]
+    },
+    {
+      "id": "test-specialist",
+      "preferred_for": [
+        "failure_analysis",
+        "test_design"
+      ]
+    }
+  ],
+  "rule": "Illustrative IDs are not permissions, paid subscriptions or verified capacity. Eligibility is checked against each project's own policy."
+}

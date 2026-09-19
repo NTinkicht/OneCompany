@@ -20,32 +20,21 @@ Related modern agent work (convergent evidence, not original OneCompany lineage)
 
 ## Agency Agents / specialist profiles
 
-Tabibi source fork:
+Reference upstream: https://github.com/msitarzewski/agency-agents
 
-- https://github.com/NTinkicht/agency-agents
-- pinned Tabibi reference: `647c8baa42b6842afb4a97bf2c0950d45ba88e8b`
-- source lineage shown by the fork: https://github.com/msitarzewski/agency-agents
-- license at the pinned fork revision: MIT
+Profile text and behavior-bearing changes are pinned and reviewed before adoption. Upstream licensing and attribution must be preserved.
 
 OneCompany adopts the specialist-profile concept as role overlays and writes its own concise governance-focused overlays. Upstream changes are never automatically imported.
 
 ## Headroom / local context compression
 
-Tabibi evaluation fork:
-
-- https://github.com/NTinkicht/headroom
-- pinned trial revision: `97aa9f6d0fc04619e4e821e7d54611eb9d6b9b81`
-- upstream lineage used by that trial: `headroomlabs-ai/headroom` through `04cdf79ab0a8423d88148ba63e960ac6b4007b9c`
+Reference upstream: https://github.com/headroomlabs-ai/headroom
 
 OneCompany does not require Headroom. It extracts the reusable techniques: deterministic-first context routing, pinned provenance, sensitive-data exclusion, reversible original evidence, and shadow-before-authority evaluation.
 
-## Tabibi reference implementation
+## Operational evidence
 
-- https://github.com/NTinkicht/Tabibi
-- Epic context/capacity slice: PR #151
-- Epic six-actor/Spotify-inspired organization slice: PR #158
-
-Tabibi is evidence that these mechanisms were exercised in a real evolving repository. OneCompany intentionally generalizes them and does not copy Tabibi product/domain assumptions.
+The reusable source ships synthetic fixtures only. Live deployment observations, incident decisions, approvals and audit evidence remain in each adopting project's repository or explicitly target-owned store. The Git history retains product evolution without distributing a particular client's runtime state.
 
 ## OpenAI scheduled and event-triggered tasks
 

@@ -1,133 +1,43 @@
 # OneCompany Design Lineage
 
-OneCompany is a synthesis of techniques that were exercised while operating Tabibi plus ideas deliberately adapted from external engineering work. This document separates **what was actually used**, **what was adapted**, and **what is merely related evidence** so the project does not invent a false origin story.
+OneCompany combines general distributed-systems coordination, software
+engineering assurance and bounded agent automation. Its source history records
+how these mechanisms evolved without making any application its reference
+implementation or a required deployment target.
 
-## 1. Tabibi: the proving ground
+## Technical sources
 
-The reference operating experience came from `NTinkicht/Tabibi`.
+- Aligned autonomy: temporary delivery cells, shared discipline standards and
+  optional cross-cutting specialties. See
+  [pattern](../patterns/spotify-aligned-autonomy.md) and
+  [references](REFERENCES.md).
+- Actor/capability separation: a worker has identity, permissions and verified
+  capacity; a role overlay is only a professional lens. See
+  [role overlays](../patterns/role-overlays.md).
+- Reproducible agent infrastructure: pin behavior-bearing upstream versions,
+  preserve attribution and test in shadow mode before extending authority.
+- Durable coordination: one canonical Work Unit/branch/PR, exclusive writer
+  lease, deterministic evidence, independent exact-head/base review, idempotent
+  external effects and replay-safe state reconciliation.
+- Bounded autonomy: risk, budget, permissions and human-only decisions are
+  hard constraints, not routing preferences.
 
-Two key Epic slices made the model concrete:
+## General engineering invariants
 
-- PR #151 — zero-extra-cost context router and AI capacity governor;
-- PR #158 — six-actor Company OS with deterministic capability routing and Spotify-inspired organization.
+1. Assigned work is not progress; verified artifacts are progress.
+2. Failover changes the worker, not the branch, PR or accumulated authorship.
+3. A moved head or base invalidates dependent assurance.
+4. An actor declaration does not prove ready executable capacity.
+5. Quota exhaustion is not permission to buy capacity.
+6. A cached repository snapshot is not live deployment authority.
+7. Shadow adoption cannot create a second active mutation writer.
+8. A code merge is not a release or schema-migration authorization.
+9. Human sovereignty and emergency stop survive every autonomy level.
+10. Neither the core nor fresh installations inherit any client's actual
+    environment IDs, branch rules, credentials, approvals, backlog or data.
 
-Tabibi exposed practical failures that shaped OneCompany: quota exhaustion, stale state, duplicate-work risk, stale exact-SHA reviews, worker wake/runtime failures, context waste, formatting remediation by guess instead of running the formatter, and agents appearing active without durable output.
+Every adopting project supplies its own requirements, stack, security,
+runtime ownership, worker roster and independently reviewed release policy.
 
-OneCompany turns those lessons into generic invariants rather than copying Tabibi's healthcare/product details.
-
-## 2. Spotify engineering culture → aligned autonomy
-
-### Source
-
-Spotify Engineering published its engineering-culture material in 2014 describing autonomous squads plus chapters/guilds. Spotify itself described the material as a journey in progress, not a universal framework.
-
-### What Tabibi adapted
-
-The Epic restructuring used:
-
-- temporary bounded **squads** around one delivery stream;
-- **chapters** as reusable discipline standards;
-- **guilds** as lightweight cross-cutting specialist overlays;
-- autonomy constrained by alignment and company-wide invariants.
-
-### What OneCompany keeps
-
-OneCompany keeps aligned autonomy and the three useful structural ideas, but makes them machine/agent-friendly:
-
-- a squad maps to a Work Unit + leases + canonical PR;
-- a chapter maps to executable standards/contracts/tests;
-- a guild maps to optional advisory specialist lanes/overlays.
-
-It intentionally avoids literal organizational copying or mandatory ceremony.
-
-See `patterns/spotify-aligned-autonomy.md`.
-
-## 3. Agency Agents → role overlays, not fake employees
-
-### Source used in Tabibi
-
-Tabibi curated specialist profiles from the fork `NTinkicht/agency-agents`, pinned at commit:
-
-`647c8baa42b6842afb4a97bf2c0950d45ba88e8b`
-
-That fork's source lineage is `msitarzewski/agency-agents` and it is MIT licensed at the pinned revision.
-
-### Important adaptation
-
-OneCompany does **not** equate a specialist prompt/persona with an independent worker.
-
-An actor is a model/tool identity with real capacity, permissions, authorship and review eligibility. A role overlay is only a professional lens for one bounded task.
-
-Therefore an overlay cannot:
-
-- create capacity;
-- create a lease;
-- grant write permission;
-- erase material authorship;
-- make self-review independent;
-- create merge authority.
-
-This distinction was one of the most important governance improvements made in Tabibi.
-
-See `overlays/` and `patterns/role-overlays.md`.
-
-## 4. Headroom → local context compression + shadow adoption
-
-### Source used in Tabibi
-
-Tabibi evaluated `NTinkicht/headroom` pinned at:
-
-`97aa9f6d0fc04619e4e821e7d54611eb9d6b9b81`
-
-The fork was synchronized through upstream `headroomlabs-ai/headroom` commit:
-
-`04cdf79ab0a8423d88148ba63e960ac6b4007b9c`
-
-### What mattered more than the tool
-
-The durable technique was **shadow before authority**:
-
-- run experimental context compression locally/read-only beside the authoritative path;
-- keep original evidence authoritative;
-- exclude secrets/sensitive data;
-- pin and verify provenance;
-- measure omissions as well as compression ratio;
-- graduate only after project-specific fidelity evidence.
-
-This became a generic OneCompany adoption pattern for routers, agents, reviewers, summarizers, and model upgrades.
-
-See `patterns/shadow-before-authority.md` and `patterns/context-ladder.md`.
-
-## 5. Tabibi-native synthesis
-
-The following patterns emerged from operating the system rather than from a single external framework:
-
-- **single-stream lease** — one canonical implementation writer/stream per bounded WU;
-- **orthogonal parallelism** — spare workers create non-conflicting artifacts rather than duplicate code;
-- **exact-head two-key gate** — deterministic CI + independent non-author review on the same SHA;
-- **capacity circuit breaker** — quota exhaustion is degraded capacity, not permission to spend;
-- **evidence over activity** — durable artifacts outrank heartbeats/acknowledgements;
-- **GitHub truth / local cache** — derived state is convenient but live repository state wins;
-- **expected-head merge** — mechanically refuse to merge a head different from the approved one;
-- **failover keeps the stream** — change the worker, not the branch/PR/objective/history.
-
-These are the core of OneCompany because they solved repeated real coordination failures.
-
-## 6. Related modern evidence — useful, but not the origin
-
-Spotify's later **Honk** background-coding-agent series (2025–2026) independently reinforces several OneCompany choices: pluggable agents behind surrounding infrastructure, context engineering, verification loops, constrained agent permissions, CI as an outer loop, traceability, and outcome-based accountability.
-
-Those posts were not the origin of Tabibi's earlier design decisions documented above; they are useful convergent evidence and future research input.
-
-## 7. What OneCompany deliberately excludes
-
-Not every successful Tabibi mechanism belongs in a universal starter repo. OneCompany does not bake in:
-
-- Tabibi healthcare/domain rules;
-- named-provider role assignments;
-- Slack/coffee-corner culture details;
-- project-specific queue/database/realtime techniques;
-- paid-service assumptions;
-- a requirement to own six AI subscriptions.
-
-The rule is: **extract the invariant, not the accident of one project.**
+See [product boundary](PRODUCT-BOUNDARY.md),
+[patterns](../patterns/README.md), and [references](REFERENCES.md).

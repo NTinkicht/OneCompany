@@ -20,6 +20,24 @@ class ProjectIndependenceTests(unittest.TestCase):
         self.assertFalse(any(doc.name.startswith("TARGET-INSTANCE-")
                              for doc in (ROOT / "docs").glob("*.md")))
 
+    def test_shipped_guidance_does_not_bind_to_other_owner_projects(self):
+        # Infer source owner dynamically; never bake an individual user's
+        # project names into this generic framework regression.
+        source = json.loads((ROOT / ".onecompany" / "config.json").read_text())
+        owner, framework_repo = source["project"]["repository"].split("/", 1)
+        candidates = [ROOT / "README.md", ROOT / "BOOTSTRAP.md"]
+        for dirname in ("docs", "patterns", "overlays", "examples"):
+            candidates.extend((ROOT / dirname).rglob("*.md"))
+            candidates.extend((ROOT / dirname).rglob("*.json"))
+        for path in candidates:
+            content = path.read_text(encoding="utf-8")
+            import re
+            refs = re.findall(rf"\\b{re.escape(owner)}/([a-zA-Z0-9_.-]+)", content)
+            self.assertFalse(
+                [name for name in refs if name.lower() != framework_repo.lower()],
+                f"other project reference in {path.relative_to(ROOT)}",
+            )
+
     def test_shadow_fixtures_use_distinct_synthetic_repositories(self):
         fixture_dir = ROOT / ".onecompany" / "selftest" / "fixtures"
         fixtures = list(fixture_dir.glob("*-blocked-shadow.json"))

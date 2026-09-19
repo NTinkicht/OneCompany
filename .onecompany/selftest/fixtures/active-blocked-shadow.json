@@ -1,0 +1,142 @@
+{
+  "schema_version": "1.0",
+  "project": {
+    "repository": "example/active-existing-product",
+    "default_branch": "main"
+  },
+  "snapshot": {
+    "observed_at": "2026-01-01T00:00:00Z",
+    "main_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "source": "fixture-derived-from-archived-regression",
+    "stale": false,
+    "derived": false
+  },
+  "live": {
+    "work_unit": "WU76",
+    "pr": 291,
+    "pr_head": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+  },
+  "legacy": {
+    "state": {
+      "work_unit": "WU66",
+      "current_pr": null,
+      "active_actors": [
+        "chatgpt",
+        "codex",
+        "claude",
+        "copilot",
+        "gemini-cli",
+        "mistral-vibe"
+      ]
+    },
+    "work_queue": {
+      "work_unit": "WU66"
+    },
+    "registry": {
+      "active_actors": [
+        "chatgpt",
+        "codex",
+        "claude",
+        "copilot",
+        "gemini-cli",
+        "mistral-vibe"
+      ]
+    },
+    "protocol": {
+      "active_actors": [
+        "chatgpt",
+        "codex",
+        "claude",
+        "copilot"
+      ]
+    }
+  },
+  "branch_protection": {
+    "verified": false,
+    "protected": false,
+    "source": "fixture-admin-read-only"
+  },
+  "incumbent_writers": [
+    {
+      "name": "external-scheduled-supervision",
+      "active": true,
+      "mutation_capable": true,
+      "reviewed": false,
+      "capabilities": [
+        "scheduling",
+        "event_handoff",
+        "lease_failover",
+        "merge_execution"
+      ]
+    },
+    {
+      "name": "target-event-handoff-dispatcher",
+      "active": true,
+      "mutation_capable": true,
+      "reviewed": false,
+      "capabilities": [
+        "event_handoff"
+      ]
+    },
+    {
+      "name": "target-heartbeat-supervision",
+      "active": true,
+      "mutation_capable": true,
+      "reviewed": false,
+      "capabilities": [
+        "scheduling"
+      ]
+    }
+  ],
+  "cutover": {
+    "owner_by_capability": {}
+  },
+  "proposed_onecompany": {
+    "mode": "shadow",
+    "mutation_capable": false
+  },
+  "cutover_evidence": {
+    "active_stream_status": "confirmed",
+    "surface_classifications_reviewed": true,
+    "rollback_verified": false,
+    "human_decisions_resolved": false,
+    "zero_extra_spend": true,
+    "autonomy_level": "L1",
+    "staging_branch": "epic-0.6-integration",
+    "fresh_c2_reconciliation": false
+  },
+  "surfaces": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "classification": "preserve"
+    },
+    {
+      "path": ".github/workflows/event-handoff-dispatcher.yml",
+      "classification": "map/supersede-later"
+    },
+    {
+      "path": ".github/workflows/gemini-cli-wake.yml",
+      "classification": "map/preserve"
+    },
+    {
+      "path": ".github/workflows/mistral-vibe-wake.yml",
+      "classification": "map/preserve"
+    },
+    {
+      "path": "coordination/STATE.json",
+      "classification": "map"
+    },
+    {
+      "path": "coordination/WORK_QUEUE.md",
+      "classification": "map"
+    },
+    {
+      "path": "coordination/ACTOR_REGISTRY.json",
+      "classification": "map"
+    },
+    {
+      "path": "coordination/AUTONOMY_PROTOCOL.md",
+      "classification": "preserve/reconcile"
+    }
+  ]
+}

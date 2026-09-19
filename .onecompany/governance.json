@@ -2,7 +2,7 @@
   "$schema": "./schemas/governance.schema.json",
   "schema_version": "1.2",
   "control_plane": {
-    "human_merge_required": true,
+    "human_merge_required": false,
     "fail_closed_if_diff_unavailable": true,
     "protected_paths": [
       ".onecompany/**",

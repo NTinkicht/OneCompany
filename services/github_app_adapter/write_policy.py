@@ -152,6 +152,7 @@ def verify_write_contract(
         raise WriteRefused("canonical_pr_head_or_base_changed")
     return {
         "repository": repo,
+        "main_sha": main_sha,
         "branch": branch,
         "pr_number": request.pr_number,
         "expected_head_sha": request.expected_head_sha,

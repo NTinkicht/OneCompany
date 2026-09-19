@@ -84,7 +84,7 @@ def fixture_body(repo: str, wu: str, actor: str, base: str) -> str:
 
 
 def preflight(
-    config: dict, queue: dict, readiness: dict, dispatch: dict,
+    config: dict, queue: dict, readiness: dict, dispatch: dict, budget: dict,
     *, repo: str, actor: str, wu: str, base: str,
     actions: bool, enabled: bool,
 ) -> tuple[str, str]:
@@ -98,6 +98,14 @@ def preflight(
         errors.append("project_l2_approval_missing")
     if config.get("safety", {}).get("emergency_stop") is not False:
         errors.append("emergency_stop_or_unknown")
+    costs = budget.get("ai", {})
+    ci = budget.get("ci", {})
+    if (costs.get("additional_monthly_spend_cap") != 0
+        or costs.get("allow_paid_fallback") is not False
+        or costs.get("allow_overage") is not False
+        or costs.get("allow_auto_topup") is not False
+        or ci.get("runner_cost_policy") != "included_or_free_only"):
+        errors.append("zero_extra_spend_preflight_failed")
     project = config.get("project", {})
     if (project.get("repository") != repo
         or not isinstance(project.get("default_branch"), str)
@@ -130,7 +138,9 @@ def preflight(
         if (person.get("setup_state") != "ready"
             or "implementation" not in person.get("verified_capabilities", [])
             or person.get("repository_access", {}).get("write") is not True
-            or person.get("unattended", {}).get("verified") is not True):
+            or person.get("unattended", {}).get("verified") is not True
+            or person.get("capacity", {}).get("measured") is not True
+            or person.get("capacity", {}).get("implementation_streams", 0) < 1):
             errors.append("actor_unattended_write_unverified")
     routes = [x for x in dispatch.get("actors", []) if x.get("actor_id") == actor]
     mechanisms = (routes[0].get("mechanisms", []) if len(routes) == 1 else [])
@@ -161,11 +171,11 @@ def _api_branch(api: GitHub, branch: str) -> str | None:
     return result
 
 
-def _matching_pulls(api: GitHub, branch: str, base_branch: str) -> list[dict]:
+def _matching_pulls(api: GitHub, branch: str) -> list[dict]:
     owner = api.repository.split("/", 1)[0]
     query = urllib.parse.urlencode({
         "state": "all", "head": owner + ":" + branch,
-        "base": base_branch, "per_page": "100",
+        "per_page": "100",
     })
     result = api.call("GET", "/pulls?" + query)
     if not isinstance(result, list) or len(result) >= 100:
@@ -188,9 +198,22 @@ def _verify_claim(api: GitHub, head: str, base: str, target: str, body: str) -> 
         raise Refused("claim_fixture_unreadable") from exc
     if existing != body:
         raise Refused("pre_existing_branch_claim_conflict")
+    comparison = api.call("GET", "/compare/" + base + "..." + head)
+    changed = comparison.get("files", [])
+    if (not isinstance(changed, list) or len(changed) != 1
+        or changed[0].get("filename") != target
+        or changed[0].get("status") != "added"):
+        raise Refused("claim_diff_outside_exact_fixture_scope")
 
 
 def _create_claim(api: GitHub, base: str, branch: str, target: str, body: str) -> str:
+    try:
+        api.call("GET", "/contents/" + urllib.parse.quote(target, safe="/") + "?ref=" + base)
+    except ApiFailure as exc:
+        if exc.status != 404:
+            raise
+    else:
+        raise Refused("fixture_target_already_exists_at_trusted_base")
     base_commit = api.call("GET", "/git/commits/" + base)
     tree_sha = base_commit.get("tree", {}).get("sha")
     if not isinstance(tree_sha, str) or not SHA.fullmatch(tree_sha):
@@ -226,7 +249,7 @@ def _create_claim(api: GitHub, base: str, branch: str, target: str, body: str) -
 
 
 def produce(api: GitHub, *, config: dict, queue: dict, readiness: dict,
-            dispatch: dict, repo: str, actor: str, wu: str,
+            dispatch: dict, budget: dict, repo: str, actor: str, wu: str,
             checkout_sha: str, actions: bool, enabled: bool) -> dict:
     """Reserve one Git ref atomically, then create/adopt one canonical open PR."""
     if api.repository != repo:
@@ -241,12 +264,12 @@ def produce(api: GitHub, *, config: dict, queue: dict, readiness: dict,
     if not isinstance(base, str) or base != checkout_sha:
         raise Refused("trusted_checkout_or_base_moved")
     branch, target = preflight(
-        config, queue, readiness, dispatch, repo=repo, actor=actor, wu=wu,
+        config, queue, readiness, dispatch, budget, repo=repo, actor=actor, wu=wu,
         base=base, actions=actions, enabled=enabled,
     )
     body = fixture_body(repo, wu, actor, base)
     # Unmanaged existing PRs/branches cannot be overwritten or reclassified.
-    found = _matching_pulls(api, branch, default)
+    found = _matching_pulls(api, branch)
     if len(found) > 1:
         raise Refused("duplicate_canonical_pr_inventory")
     head = _api_branch(api, branch)
@@ -255,11 +278,13 @@ def produce(api: GitHub, *, config: dict, queue: dict, readiness: dict,
             raise Refused("pr_exists_without_canonical_branch")
         head = _create_claim(api, base, branch, target, body)
     _verify_claim(api, head, base, target, body)
-    found = _matching_pulls(api, branch, default)
+    found = _matching_pulls(api, branch)
     if len(found) > 1:
         raise Refused("duplicate_canonical_pr_inventory")
     if found:
         pr = found[0]
+        if pr.get("base", {}).get("ref") != default:
+            raise Refused("pr_targets_foreign_base")
         if pr.get("state") != "open" or pr.get("draft") is True:
             raise Refused("canonical_pr_closed_or_draft")
     else:
@@ -281,6 +306,7 @@ def produce(api: GitHub, *, config: dict, queue: dict, readiness: dict,
         raise Refused("canonical_pr_number_invalid")
     live = api.call("GET", "/pulls/" + str(number))
     if (live.get("state") != "open"
+        or live.get("draft") is True
         or live.get("head", {}).get("sha") != head
         or live.get("head", {}).get("ref") != branch
         or live.get("head", {}).get("repo", {}).get("full_name") != repo
@@ -313,6 +339,7 @@ def main() -> int:
             queue=load_json(CONTROL / "queue.json"),
             readiness=load_json(CONTROL / "readiness.json"),
             dispatch=load_json(CONTROL / "dispatch.json"),
+            budget=load_json(CONTROL / "budget.json"),
             repo=repo, actor=actor, wu=wu, checkout_sha=sha,
             actions=os.environ.get("GITHUB_ACTIONS") == "true",
             enabled=os.environ.get("ONECOMPANY_A4_PRODUCER_ENABLED") == "true",

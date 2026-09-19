@@ -45,6 +45,7 @@ SOURCE_INSTALLATION_SELFTESTS = frozenset({
     ".onecompany/selftest/test_dispatch_execution.py",
     ".onecompany/selftest/test_integration_promotion_remediation.py",
     ".onecompany/selftest/test_interactive_activation.py",
+    ".onecompany/selftest/test_multi_project_isolation.py",
     ".onecompany/selftest/test_qualification_executor.py",
     ".onecompany/selftest/test_zero_spend_router.py",
 })

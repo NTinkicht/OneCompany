@@ -8,9 +8,12 @@
     "schema_version": {"type": "string"},
     "control_plane": {
       "type": "object",
-      "required": ["human_merge_required", "fail_closed_if_diff_unavailable", "protected_paths", "always_human_paths"],
+      "required": ["human_merge_required", "independent_non_author_technical_review_required", "exact_head_ci_required", "expected_head_merge_required", "fail_closed_if_diff_unavailable", "protected_paths", "always_human_paths"],
       "properties": {
-        "human_merge_required": {"const": true},
+        "human_merge_required": {"type": "boolean"},
+        "independent_non_author_technical_review_required": {"const": true},
+        "exact_head_ci_required": {"const": true},
+        "expected_head_merge_required": {"const": true},
         "fail_closed_if_diff_unavailable": {"const": true},
         "protected_paths": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
         "always_human_paths": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true}

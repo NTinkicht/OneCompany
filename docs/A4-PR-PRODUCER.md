@@ -48,9 +48,19 @@ no dependencies and is not a general autonomous application producer.
 
 The disabled template is
 `.onecompany/templates/workflows/onecompany-a4-pr-producer.yml.disabled`.
-For **each** disposable installation: explicitly verify included Actions
-minutes; install a reviewed version of the template into the target repository
-as `.github/workflows/onecompany-a4-pr-producer.yml`; approve project-local
+For **each** disposable installation: use a **public disposable GitHub
+repository** and verify public visibility in live GitHub metadata **before**
+dispatch. Private or visibility-ambiguous repositories are not eligible: a
+Python cost check executes too late to stop private runner billing. Both
+installed workflows additionally use a job-level public-visibility guard,
+evaluated before a hosted runner is allocated. Install the reviewed producer
+template unchanged as `.github/workflows/onecompany-a4-pr-producer.yml` and
+the approved CI template unchanged as
+`.github/workflows/onecompany-a4-fixture-validation.yml` from
+`.onecompany/templates/workflows/onecompany-a4-fixture-validation.yml.disabled`.
+The qualifier pins this CI workflow's Git blob
+`8480f5c8bd94187efe3ccb1effa9def51d15addd` and path; an arbitrary
+manifest-selected always-green workflow is not valid. Approve project-local
 L2, register and verify the least-privilege Actions actor and route, and
 prepare an approved LOW-risk fixture WU with no PR number. Set the repository
 variables `ONECOMPANY_A4_PRODUCER_ENABLED=true`,
@@ -65,9 +75,11 @@ CI result. Send the same event again and verify no second branch/PR/commit.
 
 **GitHub caveat:** Most ordinary push/pull-request events caused by the
 repository's own `GITHUB_TOKEN` do not trigger a second Actions workflow.
-Install an independently authorized exact-head validation dispatch route or
-other GitHub-supported CI trigger in the disposable target. Do not count a
-missing PR check as green and do not merge based on the producer run alone.
+Dispatch the approved `onecompany-a4-fixture-validation.yml` workflow with
+`workflow_dispatch` on the canonical **fixture branch ref**; the resulting
+run must attest the exact fixture head and check job `validate-fixture`.
+Do not count a missing PR check as green and do not merge based on the
+producer run alone.
 The pilot's mechanism may finish creating a PR while CI/review awaits a
 separate configured trigger.
 
@@ -92,8 +104,9 @@ besides the one fixture file, or two projects controlled by the same owner.
 Source CI still does not qualify a live target installation.
 
 Each manifest entry must contain `repository`, `work_unit`, `actor`,
-`pr`, `head`, `base`, `workflow_run`, `check_name`, `ci_workflow_run`, and
-`ci_workflow_path`. The verifier
+`pr`, `head`, `base`, `workflow_run`, `check_name` (exactly
+`validate-fixture`), `ci_workflow_run`, and `ci_workflow_path` (exactly
+`.github/workflows/onecompany-a4-fixture-validation.yml`). The verifier
 requires different repository owners, exact fixture/head/base, successful real
 repository-dispatch run and a green GitHub Actions check on the exact PR
 head, bound to its successful Actions run and the authorized validation

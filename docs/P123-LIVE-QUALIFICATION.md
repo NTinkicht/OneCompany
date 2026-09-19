@@ -61,8 +61,14 @@ or make deployment claims from it.
 ## P3 — intentionally fail CI, repair on SAME canonical PR, then merge
 
 Install the **two additional disabled templates** in a *third, separately
-authorized public disposable installation* (or run A4 qualification first,
-store immutable evidence, then use an installation with a separate WU):
+authorized public disposable installation*, using a **separate pre-bound WU
+and existing canonical PR**. Do not reuse an A4 producer's pre-PR queue
+mapping for P3: the native merge kernel requires a PR-number mapping at the
+trusted base. The target must already have a real authoritative
+`ROLE_LEASE_ASSIGNED` admission for that WU/actor/PR and a live unexpired
+implementation lease derived by the native durable ledger. The A4 source
+producer, with its explicit `pr: null` preflight, is not a shortcut to that
+state.
 
 - `.onecompany/templates/workflows/onecompany-l2-fixture-validation.yml.disabled`
   as `.github/workflows/onecompany-l2-fixture-validation.yml`, unchanged;
@@ -76,7 +82,12 @@ Record the failed run ID at the exact initial PR head.
 
 To run the repair, in the project-local actor/dispatch/readiness records:
 add the verified `ci_remediation` capability and a configured unattended
-mechanism `github-actions-l2-fixture-repair`. Confirm explicit owner opt-in
+mechanism `github-actions-l2-fixture-repair`. The repaired WU's
+base-trusted queue must bind the exact PR number; its native durable
+`coordination_view(pr)` must show precisely one active admitted lease
+matching WU, actor, branch, PR, exact base and initial head. The installed
+repair workflow needs `contents: write`, `pull-requests: read`,
+and `actions: read` only. Confirm explicit owner opt-in
 `ONECOMPANY_L2_FIXTURE_REPAIR_ENABLED=true`, the approved dispatcher, true
 public repository eligibility, stop=false, zero-extra-spend baseline, trusted
 default-branch checkout, the single READY LOW-risk WU, exact fixture scope and
@@ -92,6 +103,8 @@ The reviewed worker:
    Git blob/tree/commit and a non-force branch ref update. It cannot merge.
 4. Reads back exact PR/ref/content. A duplicate dispatch reconciles the same
    repaired SHA, never opens another PR or adds another repair commit.
+   Revalidates the native durable lease and exact refs immediately before
+   the non-force ref update.
 5. After an uncertain ref response, fails without retrying a mutation.
 
 Dispatch L2 validation on the repaired branch SHA; collect its successful run
@@ -143,6 +156,14 @@ GH_TOKEN=<read-only-repository-token> python scripts/p123_qualify.py campaign.js
 The consolidated campaign CLI deliberately exits nonzero even after P1/P3
 evidence is observed, because P2's App-token-level write verification is still
 pending. Never use its report as a green promotion gate or merge authority.
+
+Run the P3 native-verification portion from the **authorized disposable
+target's clean default-branch checkout** with GitHub CLI available and
+read-only `GH_TOKEN` for that target. The verifier uses the same
+`platform_identity` reviewer/author mapping and the canonical
+`ledger_lib`/coordination replay as the merge kernel. A different Git
+checkout or an invalid ledger refuses, even if raw GitHub comments look
+plausible.
 
 P3 verification checks the same PR and exact two-commit lineage, one fixture
 path, old failed and new successful workflow_dispatch plus GitHub Actions

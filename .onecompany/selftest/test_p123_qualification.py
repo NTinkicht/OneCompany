@@ -216,6 +216,125 @@ class SamePRRepairTests(unittest.TestCase):
                 self.assertEqual(api.writes, 0)
 
 
+class NativeAuthorityTests(unittest.TestCase):
+    """Probe real policy functions with injected durable read-side evidence."""
+
+    def test_native_lease_rejects_missing_or_wrong_owner(self):
+        lease = {
+            "id": "lease-1", "role": "implementation",
+            "actor": ACTOR, "work_unit": WU, "pr": 1,
+            "branch": producer.branch_for(WU), "status": "active",
+            "start_head": CLAIM,
+            "admission_snapshot": {"trusted_ref": BASE},
+        }
+        params = {
+            "number": 1, "wu": WU, "actor": ACTOR,
+            "branch": producer.branch_for(WU), "initial": CLAIM,
+            "base": BASE,
+        }
+        with (
+            patch("ledger_lib.ledger_enabled", return_value=True),
+            patch("lease_lifecycle.coordination_view",
+                  return_value={"active_leases": [lease],
+                                "lifecycle_rejected_claims": []}) as view,
+        ):
+            self.assertEqual(repair._native_lease(**params), "lease-1")
+            for field, value in (("actor", "foreign-actor"),
+                                 ("pr", 2), ("start_head", SECOND),
+                                 ("status", "expired")):
+                with self.subTest(field=field):
+                    mutated = copy.deepcopy(lease)
+                    mutated[field] = value
+                    view.return_value = {
+                        "active_leases": [mutated],
+                        "lifecycle_rejected_claims": [],
+                    }
+                    with self.assertRaisesRegex(
+                        producer.Refused,
+                        "durable_canonical_implementation_lease_mismatch",
+                    ):
+                        repair._native_lease(**params)
+            view.return_value = {
+                "active_leases": [], "lifecycle_rejected_claims": [],
+            }
+            with self.assertRaisesRegex(
+                producer.Refused, "durable_canonical_implementation_lease_missing",
+            ):
+                repair._native_lease(**params)
+
+    def test_native_review_rejects_actor_alias_and_unmapped_identity(self):
+        with (
+            patch("platform_identity.pull_request_material_author_actor_ids",
+                  return_value=({"worker-actor"}, [])),
+            patch("platform_identity.review_platform_identity",
+                  return_value=({
+                      "actor_id": "worker-actor", "login": "alias-account",
+                      "authorities": ["code_review"],
+                  }, [])) as review,
+        ):
+            with self.assertRaisesRegex(
+                producer.Refused, "native_independent_reviewer_unverified",
+            ):
+                campaign._native_review(REPO, 1, 10, SECOND, BASE)
+            review.return_value = ({
+                "actor_id": "independent-actor",
+                "login": "independent-reviewer[bot]",
+                "authorities": ["code_review"],
+            }, [])
+            self.assertEqual(
+                campaign._native_review(REPO, 1, 10, SECOND, BASE)["actor_id"],
+                "independent-actor",
+            )
+            review.return_value = (None, ["unmapped"])
+            with self.assertRaisesRegex(
+                producer.Refused, "native_platform_reviewer_unverified",
+            ):
+                campaign._native_review(REPO, 1, 10, SECOND, BASE)
+
+    def test_native_merge_requires_canonical_admission_and_verified_replay(self):
+        event = {"version": 2, "event_id": "evt-1", "type": "MERGED",
+                 "actor": "owner", "payload": {
+                     "pr": 1, "work_unit": WU,
+                     "approved_base": BASE, "approved_head": SECOND,
+                     "merge_sha": "7" * 40,
+                 }}
+        with (
+            patch("ledger_lib._repository", return_value=REPO),
+            patch("ledger_lib.ledger_enabled", return_value=True),
+            patch("ledger_lib.list_events", return_value=[event]) as events,
+            patch("ledger_lib._verify_merged_event",
+                  return_value=({"pr": 1}, None)) as verifier,
+            patch("lease_lifecycle.coordination_view",
+                  return_value={"verified_merged_work_units": [WU]}) as view,
+        ):
+            campaign._native_merged_event(
+                REPO, 1, WU, BASE, SECOND, "7" * 40,
+            )
+            events.return_value = []
+            with self.assertRaisesRegex(
+                producer.Refused, "native_durable_merged_event_missing",
+            ):
+                campaign._native_merged_event(
+                    REPO, 1, WU, BASE, SECOND, "7" * 40,
+                )
+            events.return_value = [event]
+            verifier.return_value = (None, "invalid_event")
+            with self.assertRaisesRegex(
+                producer.Refused, "native_merged_event_failed_platform_proof",
+            ):
+                campaign._native_merged_event(
+                    REPO, 1, WU, BASE, SECOND, "7" * 40,
+                )
+            verifier.return_value = ({"pr": 1}, None)
+            view.return_value = {"verified_merged_work_units": []}
+            with self.assertRaisesRegex(
+                producer.Refused, "native_durable_merge_not_verified",
+            ):
+                campaign._native_merged_event(
+                    REPO, 1, WU, BASE, SECOND, "7" * 40,
+                )
+
+
 class EvidenceGitHub:
     """Minimal read-only provider-shaped exact-head L2 evidence."""
     def __init__(self, repo, _token):

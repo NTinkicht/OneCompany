@@ -430,7 +430,7 @@ class NativeAuthorityTests(unittest.TestCase):
                 "github_created_at": "2026-09-19T22:01:00Z",
             }]
             with self.assertRaisesRegex(
-                producer.Refused, "repair_historical_lease_missing",
+                producer.Refused, "repair_lease_interrupted_during_job",
             ):
                 campaign._historical_repair_lease(**params)
             events.return_value = [{

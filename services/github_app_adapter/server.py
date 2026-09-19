@@ -1,5 +1,7 @@
 """Authenticated, read-only OneCompany Streamable HTTP MCP endpoint."""
 from __future__ import annotations
+import asyncio
+import logging
 from contextlib import asynccontextmanager
 from mcp.server.fastmcp import FastMCP
 from mcp.server.transport_security import TransportSecuritySettings
@@ -8,7 +10,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 from auth import BearerGuard
-from github_app import AppClient
+from github_app import AppClient, AdapterRefused
 from oauth import OwnerOAuth
 from settings import Settings
 
@@ -47,10 +49,37 @@ async def health(_request: Request):
     """Unauthenticated liveness with no credential or repository metadata."""
     return JSONResponse({"status": "alive"})
 
+async def _probe_app_identity() -> None:
+    """One sanitized startup check; owner needs no extra UI action to locate 404."""
+    if not settings.github_ready():
+        logging.getLogger(__name__).warning(
+            "OneCompany GitHub App diagnostic: not_configured_or_sealed"
+        )
+        return
+    try:
+        await asyncio.to_thread(client.identity)
+    except AdapterRefused as exc:
+        logging.getLogger(__name__).warning(
+            "OneCompany GitHub App diagnostic: %s", exc
+        )
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "OneCompany GitHub App diagnostic: unexpected_probe_failure"
+        )
+    else:
+        logging.getLogger(__name__).info(
+            "OneCompany GitHub App diagnostic: verified_read_only_identity"
+        )
+
 @asynccontextmanager
 async def lifespan(_app: Starlette):
     async with mcp.session_manager.run():
-        yield
+        probe = asyncio.create_task(_probe_app_identity())
+        try:
+            yield
+        finally:
+            if not probe.done():
+                probe.cancel()
 
 inner = Starlette(
     routes=[

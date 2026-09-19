@@ -58,6 +58,15 @@ class AppClient:
         except (OSError, ValueError) as exc:
             raise AdapterRefused("github_request_unavailable") from exc
 
+    def _stage_call(self, stage: str, method: str, endpoint: str,
+                    token: str, payload: dict | None = None) -> Any:
+        """Return a safe, actionable phase on upstream failures, never a token."""
+        try:
+            return self._call(method, endpoint, token, payload)
+        except AdapterRefused as exc:
+            # The provider response body and request credentials remain private.
+            raise AdapterRefused(f"github_{stage}_{exc}") from None
+
     def _jwt(self) -> str:
         if not self.settings.github_ready():
             raise AdapterRefused("github_app_not_configured")
@@ -75,15 +84,15 @@ class AppClient:
     def _installation(self) -> tuple[str, str]:
         """Request read-only permissions for exactly one repository."""
         app_jwt = self._jwt()
-        app = self._call("GET", "/app", app_jwt)
+        app = self._stage_call("app_metadata", "GET", "/app", app_jwt)
         if not isinstance(app, dict) or app.get("id") != self.settings.app_id:
             raise AdapterRefused("github_app_identity_mismatch")
         slug = app.get("slug")
         if not isinstance(slug, str) or not slug:
             raise AdapterRefused("github_app_slug_missing")
         repo_name = self.settings.repository.split("/", 1)[1]
-        info = self._call(
-            "POST",
+        info = self._stage_call(
+            "installation_token", "POST",
             f"/app/installations/{self.settings.installation_id}/access_tokens",
             app_jwt,
             {"repositories": [repo_name],
@@ -109,7 +118,7 @@ class AppClient:
 
     def identity(self) -> dict:
         token, slug = self._installation()
-        repo = self._call("GET", f"/repos/{self.settings.repository}", token)
+        repo = self._stage_call("repository", "GET", f"/repos/{self.settings.repository}", token)
         if not isinstance(repo, dict) or repo.get("full_name") != self.settings.repository:
             raise AdapterRefused("github_repository_identity_mismatch")
         return {
@@ -150,7 +159,7 @@ class AppClient:
             f"/repos/{self.settings.repository}/contents/"
             + urllib.parse.quote(path, safe="/") + "?ref=" + ref
         )
-        result = self._call("GET", endpoint, token)
+        result = self._stage_call("document", "GET", endpoint, token)
         if not isinstance(result, dict) or result.get("type") != "file":
             raise AdapterRefused("document_not_file")
         try:

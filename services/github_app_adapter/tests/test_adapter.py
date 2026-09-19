@@ -66,6 +66,34 @@ class TestGrokAppAdapter(unittest.TestCase):
         self.assertFalse(result["unattended_write_verified"])
         self.assertFalse(result["lease_bound_write_enabled"])
 
+    def test_upstream_errors_identify_phase_without_leaking_credentials(self):
+        class RejectApp(FakeClient):
+            def _call(self, method, path, token, payload=None):
+                if path == "/app":
+                    raise AdapterRefused("github_http_status_404")
+                return super()._call(method, path, token, payload)
+        class RejectInstallation(FakeClient):
+            def _call(self, method, path, token, payload=None):
+                if path.endswith("/access_tokens"):
+                    raise AdapterRefused("github_http_status_404")
+                return super()._call(method, path, token, payload)
+        class RejectRepository(FakeClient):
+            def _call(self, method, path, token, payload=None):
+                if path == "/repos/owner/disposable":
+                    raise AdapterRefused("github_http_status_404")
+                return super()._call(method, path, token, payload)
+        for cls, phase in (
+            (RejectApp, "app_metadata"),
+            (RejectInstallation, "installation_token"),
+            (RejectRepository, "repository"),
+        ):
+            with self.subTest(phase=phase):
+                with self.assertRaisesRegex(
+                    AdapterRefused,
+                    f"github_{phase}_github_http_status_404",
+                ):
+                    cls(settings()).identity()
+
     def test_installation_token_scope_never_expands(self):
         client = FakeClient(settings())
         client.identity()

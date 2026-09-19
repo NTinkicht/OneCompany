@@ -162,7 +162,12 @@ Qualification verifies the trusted-base workflow and worker source blobs,
 the GitHub Actions job/step and single structured job-log evidence record
 bound to the actor, lease ID, WU, same PR, base and initial/repaired SHAs,
 and failed-CI run. Native durable lease history is replayed at both
-platform-recorded job start and completion times. A manual matching commit,
+platform-recorded job start and completion times. The worker refuses
+unresolved native ledger conflicts and rejected claims before Git object
+creation, even if the ledger still reports an active-looking lease. Historical
+qualification additionally binds both job timestamps to the SAME immutable
+lease assignment event and rejects any release, transfer, reaping or same-ID
+reassignment within the entire job interval. A manual matching commit,
 late lease assignment, expired/transferred lease, or unrelated successful
 workflow cannot qualify the autonomous repair.
 

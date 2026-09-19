@@ -226,9 +226,12 @@ def _verify_claim(api: GitHub, head: str, base: str, target: str, body: str) -> 
     if (not isinstance(record, dict) or record.get("type") != "file"
             or record.get("encoding") != "base64"):
         raise Refused("claim_fixture_missing_or_invalid")
+    encoded = record.get("content")
+    if not isinstance(encoded, str):
+        raise Refused("claim_fixture_unreadable")
     try:
-        existing = base64.b64decode(record["content"], validate=False).decode("utf-8")
-    except (KeyError, UnicodeError, ValueError) as exc:
+        existing = base64.b64decode(encoded, validate=False).decode("utf-8")
+    except (UnicodeError, ValueError) as exc:
         raise Refused("claim_fixture_unreadable") from exc
     if existing != body:
         raise Refused("pre_existing_branch_claim_conflict")

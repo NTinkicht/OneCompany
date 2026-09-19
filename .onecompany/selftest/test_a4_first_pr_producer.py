@@ -233,6 +233,8 @@ class FirstPRProducerTests(unittest.TestCase):
                                     return {"object": None}
                             if which == "base_commit":
                                 return {"tree": None}
+                            if which == "record" and "?ref=" + BASE in path:
+                                return super().call(op, path, payload)
                             return None
                         return super().call(op, path, payload)
                 with self.assertRaisesRegex(producer.Refused, reason):

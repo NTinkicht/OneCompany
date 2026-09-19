@@ -11,6 +11,13 @@ from urllib.parse import quote
 
 from onecompany_lib import CONTROL, ROOT, load_json, path_matches_any, run
 
+# An independently operated GitHub App must publish the exact-head/base
+# technical-review attestation. Set its vetted integration ID only after the
+# App and non-author review implementation have been independently verified.
+# None means NO trusted server-side review gate is installed; fail closed.
+REVIEW_GATE_CONTEXT = "onecompany-independent-review"
+REVIEW_GATE_APP_ID: int | None = None
+
 
 def gh_api(path: str) -> tuple[int, Any | None, str]:
     result = run(["gh", "api", path, "-H", "Accept: application/vnd.github+json"])
@@ -287,6 +294,7 @@ def inspect_enforcement(
         "rulesets": [],
         "required_checks": sorted(required_checks),
         "missing_required_checks": sorted(required_checks),
+        "review_gate_enforced": False,
         "enforcement_ok": False,
     }
 
@@ -325,6 +333,7 @@ def inspect_enforcement(
 
     observed_required: set[str] = set()
     owner_review_enforced = False
+    review_gate_enforced = False
     code, protection, _ = gh_api(f"repos/{repo}/branches/{encoded_ref}/protection")
     if code == 0 and isinstance(protection, dict):
         checks = protection.get("required_status_checks") or {}
@@ -370,6 +379,19 @@ def inspect_enforcement(
                 if not isinstance(rule, dict):
                     continue
                 contexts.update(_required_contexts_from_rule(rule))
+                if rule.get("type") == "required_status_checks":
+                    specs = (rule.get("parameters") or {}).get("required_status_checks", [])
+                    if (isinstance(REVIEW_GATE_APP_ID, int)
+                        and not isinstance(REVIEW_GATE_APP_ID, bool)
+                        and REVIEW_GATE_APP_ID > 0
+                        and isinstance(specs, list)
+                        and any(
+                            isinstance(item, dict)
+                            and item.get("context") == REVIEW_GATE_CONTEXT
+                            and item.get("integration_id") == REVIEW_GATE_APP_ID
+                            for item in specs
+                        )):
+                        review_gate_enforced = True
                 if rule.get("type") == "pull_request":
                     params = rule.get("parameters") or {}
                     code_owner = (
@@ -396,7 +418,8 @@ def inspect_enforcement(
     result["observed_required_checks"] = sorted(observed_required)
     result["missing_required_checks"] = sorted(missing)
     result["code_owner_review_enforced"] = owner_review_enforced
+    result["review_gate_enforced"] = review_gate_enforced
     result["enforcement_ok"] = bool(
-        result["codeowners_valid"] and not missing
+        result["codeowners_valid"] and not missing and review_gate_enforced
     )
     return result

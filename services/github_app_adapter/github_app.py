@@ -157,6 +157,34 @@ class AppClient:
             "write_enabled": False,
         }
 
+    def pull_request_head(self, pr_number: int) -> dict:
+        """Discover live PR SHA before requesting the pinned snapshot."""
+        if not isinstance(pr_number, int) or isinstance(pr_number, bool) or not (1 <= pr_number <= 1000000):
+            raise AdapterRefused("positive_pr_number_required")
+        token, slug, _ = self._installation()
+        item = self._stage_call(
+            "pr_head", "GET",
+            f"/repos/{self.settings.repository}/pulls/{pr_number}", token,
+        )
+        if (not isinstance(item, dict) or item.get("number") != pr_number
+                or item.get("state") != "open"
+                or (item.get("head") or {}).get("repo", {}).get("full_name")
+                    != self.settings.repository
+                or not isinstance((item.get("head") or {}).get("sha"), str)
+                or not _SHA.fullmatch(item["head"]["sha"])
+                or (item.get("base") or {}).get("repo", {}).get("full_name")
+                    != self.settings.repository):
+            raise AdapterRefused("pr_head_unavailable_or_foreign")
+        return {
+            "repository": self.settings.repository,
+            "pr_number": pr_number,
+            "exact_head_sha": item["head"]["sha"],
+            "head_branch": item["head"].get("ref"),
+            "base_branch": item["base"].get("ref"),
+            "authenticated_principal": slug + "[bot]",
+            "read_only": True,
+        }
+
     def pull_request_snapshot(self, pr_number: int, exact_head_sha: str) -> dict:
         """Read exactly one existing PR at an explicitly supplied immutable head."""
         if (not isinstance(pr_number, int) or isinstance(pr_number, bool)

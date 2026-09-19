@@ -41,6 +41,11 @@ def onecompany_repository_status() -> dict:
     return client.repository_status()
 
 @mcp.tool()
+def onecompany_pull_request_head(pr_number: int) -> dict:
+    """Discover the live head SHA of a OneCompany PR; read-only."""
+    return client.pull_request_head(pr_number)
+
+@mcp.tool()
 def onecompany_pull_request_snapshot(pr_number: int, exact_head_sha: str) -> dict:
     """Inspect one PR at its exact head using the read-only bot identity."""
     return client.pull_request_snapshot(pr_number, exact_head_sha)

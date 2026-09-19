@@ -139,10 +139,7 @@ def main() -> int:
         errors.append(
             f"manifest-required checks are not enforced on {branch}: {', '.join(missing)}"
         )
-    if not enforcement.get("code_owner_review_enforced"):
-        errors.append(
-            "Code Owner review is not enforced by classic protection or an active applicable ruleset"
-        )
+    print("INFO Code Owner review is optional for routine technical PRs; independent non-author technical review is checked by OneCompany")
     if not classic.get("configured") and not rulesets:
         errors.append("no enforceable default-branch protection/ruleset was confirmed")
     if not enforcement.get("enforcement_ok"):

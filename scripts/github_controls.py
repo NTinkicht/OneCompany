@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only inspection of live GitHub controls required by CompanyOS."""
+"""Read-only inspection of technical GitHub controls required by CompanyOS."""
 from __future__ import annotations
 
 import base64
@@ -269,7 +269,7 @@ def _codeowners_coverage(text: str) -> tuple[bool, list[str]]:
 def inspect_enforcement(
     repo: str, branch: str, required_checks: set[str]
 ) -> dict[str, Any]:
-    """Inspect whether default-branch review/check controls are non-bypassable."""
+    """Inspect technical default-branch checks and report review policy separately."""
     result: dict[str, Any] = {
         "repo": repo,
         "branch": branch,
@@ -397,6 +397,6 @@ def inspect_enforcement(
     result["missing_required_checks"] = sorted(missing)
     result["code_owner_review_enforced"] = owner_review_enforced
     result["enforcement_ok"] = bool(
-        result["codeowners_valid"] and owner_review_enforced and not missing
+        result["codeowners_valid"] and not missing
     )
     return result

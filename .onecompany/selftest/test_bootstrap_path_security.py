@@ -45,7 +45,7 @@ class BootstrapPathSecurityTests(unittest.TestCase):
                 self.skipTest("test environment cannot create symlinks")
             with self.assertRaises((OSError, ValueError)):
                 bootstrap.copy_item(
-                    ROOT / "README.md", target / "docs" / "escape.md",
+                    ROOT / "onecompany.py", target / "docs" / "escape.md",
                     False, target,
                 )
             self.assertFalse((outside / "escape.md").exists())
@@ -56,7 +56,7 @@ class BootstrapPathSecurityTests(unittest.TestCase):
             existing = target / "keep.md"
             existing.write_text("project owned\\n", encoding="utf-8")
             with self.assertRaises(FileExistsError):
-                bootstrap.copy_item(ROOT / "README.md", existing, False, target)
+                bootstrap.copy_item(ROOT / "onecompany.py", existing, False, target)
             self.assertEqual(existing.read_text(encoding="utf-8"), "project owned\\n")
 
 

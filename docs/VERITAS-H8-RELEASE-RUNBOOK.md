@@ -66,12 +66,19 @@ previous release. A bare 'live' or generic green CI status is not enough.
    that an exposed old value was revoked. Never paste old or new values,
    full connection strings, JWTs or bearer tokens into issues/logs/evidence.
 6. Reconcile the **actual candidate's** backend/frontend dependency audit
-   and known advisories. The first staging build reported a high-severity
+   and known advisories. For each finding, verify its current published
+   status, affected package and resolved version, and whether that dependency
+   and vulnerable version actually occur in the candidate's exact locked
+   graph and deployable artifact. Record withdrawn, fixed, or inapplicable
+   historical findings as such with dated evidence; they do not block
+   release by themselves. The first staging build reported a high-severity
    API `Microsoft.OpenApi` advisory and eight high-severity frontend npm
-   advisories. A routine release is blocked until those findings are
-   remediated and verified, or the owner explicitly records a scoped,
-   time-bound staging-only risk acceptance with impact, mitigation and
-   expiry. Passing build/lint/smoke tests alone does not waive advisories.
+   advisories: investigate rather than automatically treating those old
+   counts as current. A routine release is blocked by **confirmed,
+   currently applicable** high-severity findings until they are remediated
+   and verified, or the owner explicitly records a scoped, time-bound
+   staging-only risk acceptance with impact, mitigation and expiry. Passing
+   build/lint/smoke tests alone does not waive applicable advisories.
 7. Freeze new scope if an emergency stop, reviewer/capacity failure, competing
    writer, stale head, red check, unexpected paid resource or schema drift
    appears. Read-only status and diagnosis may continue.

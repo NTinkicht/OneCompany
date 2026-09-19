@@ -23,12 +23,7 @@ def command_scripts() -> set[str]:
 
 
 def executable_control_plane_paths() -> set[str]:
-    """Return every repository path that the managed CI may import/run/compile.
-
-    This is deliberately derived from directory structure rather than an enumerated
-    governance list. Adding a new helper or self-test therefore expands this set
-    automatically and validation fails unless the structural protection rule covers it.
-    """
+    """Return every repository path that the managed CI may import/run/compile."""
     result = {"onecompany.py"}
     scripts = ROOT / "scripts"
     if scripts.exists():
@@ -51,10 +46,16 @@ def main() -> int:
         return 1
 
     control = governance.get("control_plane", {})
-    if control.get("human_merge_required") is not True:
-        errors.append("control_plane.human_merge_required must be true")
-    if control.get("fail_closed_if_diff_unavailable") is not True:
-        errors.append("control_plane.fail_closed_if_diff_unavailable must be true")
+    if not isinstance(control.get("human_merge_required"), bool):
+        errors.append("control_plane.human_merge_required must be boolean")
+    for key in (
+        "independent_non_author_technical_review_required",
+        "exact_head_ci_required",
+        "expected_head_merge_required",
+        "fail_closed_if_diff_unavailable",
+    ):
+        if control.get(key) is not True:
+            errors.append(f"control_plane.{key} must be true")
     protected = list(control.get("protected_paths", []))
     always_human = list(control.get("always_human_paths", []))
     for required in {"company/CONSTITUTION.md", ".onecompany/governance.json"}:

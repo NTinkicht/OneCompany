@@ -225,9 +225,9 @@
     },
     {
       "id": "grok-4-6-interactive",
-      "display_name": "Grok 4.6 (GitHub App pilot)",
-      "enabled": false,
-      "configured": false,
+      "display_name": "Grok 4.6 (verified read-only GitHub App)",
+      "enabled": true,
+      "configured": true,
       "execution_modes": [
         "interactive",
         "connector"

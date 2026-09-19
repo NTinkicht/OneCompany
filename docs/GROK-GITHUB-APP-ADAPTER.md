@@ -118,3 +118,20 @@ A writer App is not the same identity as an independent review-attestation App.
 
 **Never record Grok as unattended or independently review-capable merely
 because an interactive connector works.**
+
+## Actual actor qualification (2026-09-19)
+
+Grok's web connector completed both `onecompany_actor_identity` and
+`onecompany_repository_status`. The reported actor was
+`grok-4-6-interactive`, GitHub principal `onecompany-grok-worker[bot]`,
+App ID `5003121`, dynamically discovered installation ID `163077002`,
+repository `NTinkicht/OneCompany`, and `read_only` mode. Render deployment
+`dep-dane5fmk1f9s738e5tig` independently logged
+`verified_read_only_identity`. Grok is enabled for *read-only interactive
+repository intelligence* with **zero implementation capacity**. This is not
+an unattended worker or independently authenticated final reviewer.
+
+The GitHub App is also installed on Tabibi and Veritas-Atlas, but this adapter
+accepts **only NTinkicht/OneCompany**. Further repository scope requires a
+separate explicit authorization and Work Unit; no cross-repo capability is
+inferred from installation-level permissions.

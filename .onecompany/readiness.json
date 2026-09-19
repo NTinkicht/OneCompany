@@ -247,12 +247,17 @@
     },
     {
       "actor_id": "grok-4-6-interactive",
-      "setup_state": "not_started",
-      "verified_surfaces": [],
-      "verified_capabilities": [],
+      "setup_state": "partially_ready",
+      "verified_surfaces": [
+        "grok-web-custom-oauth-pkce-mcp",
+        "render-github-app-onecompany-readonly"
+      ],
+      "verified_capabilities": [
+        "repository_intelligence"
+      ],
       "temporarily_unavailable_capabilities": [],
       "repository_access": {
-        "read": false,
+        "read": true,
         "write": false,
         "review": false,
         "merge": false
@@ -263,13 +268,17 @@
       },
       "capacity": {
         "implementation_streams": 0,
-        "measured": false,
-        "observed_at": null,
-        "evidence": []
+        "measured": true,
+        "observed_at": "2026-09-19T19:30:59Z",
+        "evidence": [
+          "Read-only bot identity proven; write/lease-bound implementation capacity is zero."
+        ]
       },
-      "last_verified_at": null,
+      "last_verified_at": "2026-09-19T19:30:59Z",
       "evidence": [
-        "Grok's interactive owner-token report is NOT proof of distinct GitHub App authentication; first configure and test the sealed read-only adapter."
+        "Grok web connector returned onecompany_actor_identity and onecompany_repository_status: logical actor grok-4-6-interactive, principal onecompany-grok-worker[bot], App 5003121, installation 163077002, repository NTinkicht/OneCompany, read_only.",
+        "Render deployment dep-dane5fmk1f9s738e5tig startup log 2026-09-19T19:30:59Z: verified_read_only_identity; OAuth token issued by same service.",
+        "OneCompany remains source L1; no write, unattended writing, independent review attestation, or merging verified."
       ]
     }
   ]

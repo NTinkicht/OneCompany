@@ -324,13 +324,16 @@
         {
           "id": "grok-github-app-mcp-readonly",
           "kind": "interactive",
-          "configured": false,
+          "configured": true,
           "unattended": false,
           "capabilities": [
             "repository_intelligence"
           ],
-          "invocation_hint": "Owner connects Grok custom MCP only after Render bearer/key and distinct App identity are verified. Initial adapter is READ ONLY; no implementation or review attestation authority.",
-          "evidence": []
+          "invocation_hint": "Interactive read-only GitHub App identity verified as onecompany-grok-worker[bot] for NTinkicht/OneCompany. Connector can run onecompany_actor_identity, onecompany_repository_status, onecompany_read_document. No branch/PR mutation, unattended capacity or independent gate.",
+          "evidence": [
+            "Owner-provided Grok end-to-end tool results: App 5003121 installation 163077002, onecompany-grok-worker[bot], NTinkicht/OneCompany, read_only.",
+            "Render successful App identity probe: dep-dane5fmk1f9s738e5tig (2026-09-19T19:30:59Z)."
+          ]
         }
       ]
     }

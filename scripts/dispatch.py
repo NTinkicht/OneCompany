@@ -7,6 +7,7 @@ import json
 import sys
 
 from lease_lifecycle import coordination_view
+import ledger_lib
 from ledger_lib import ledger_enabled
 from autonomy_guard import level_violations
 from onecompany_lib import CONTROL, emergency_stop_active, load_json
@@ -42,13 +43,6 @@ def resolve_dispatch(
     if emergency_stop_active() and (unattended or capability in WRITE_CAPABILITIES):
         reasons.append("emergency_stop_active")
 
-    if unattended and capability in WRITE_CAPABILITIES:
-        try:
-            config = load_json(CONTROL / "config.json")
-            reasons.extend(level_violations(config, capability, unattended=True))
-        except Exception:
-            reasons.append("autonomy_policy_unavailable")
-
     actor = actors.get(actor_id)
     ready = readiness.get(actor_id)
     entry = dispatch.get(actor_id)
@@ -75,6 +69,7 @@ def resolve_dispatch(
         ):
             reasons.append("unattended_readiness_not_verified")
 
+    verified_lease: dict | None = None
     if unattended and capability in {"implementation", "ci_remediation"}:
         try:
             durable_ledger_enabled = ledger_enabled()
@@ -102,8 +97,44 @@ def resolve_dispatch(
                     reasons.append("lease_not_canonical_active_and_unexpired")
                 elif lease.get("actor") != actor_id:
                     reasons.append("lease_actor_mismatch")
+                else:
+                    verified_lease = lease
             except Exception as exc:
                 reasons.append(f"ledger_unavailable:{exc}")
+
+    if unattended and capability in WRITE_CAPABILITIES:
+        # Never read the candidate checkout's config to authorize its own
+        # autonomy increase. The durable lease binds the live GitHub PR to
+        # an immutable verified protected-base policy snapshot.
+        if verified_lease is None:
+            reasons.append("trusted_autonomy_lease_required")
+        else:
+            admission = verified_lease.get("admission_snapshot")
+            protected_ref = (
+                admission.get("trusted_ref")
+                if isinstance(admission, dict)
+                else None
+            )
+            pr = verified_lease.get("pr")
+            if (
+                not isinstance(protected_ref, str)
+                or not isinstance(pr, int)
+                or isinstance(pr, bool)
+                or pr <= 0
+            ):
+                reasons.append("trusted_autonomy_lease_provenance_missing")
+            else:
+                try:
+                    policy = ledger_lib.trusted_runtime_context(
+                        protected_ref, pr
+                    )["config"]
+                    reasons.extend(
+                        level_violations(policy, capability, unattended=True)
+                    )
+                    if policy.get("safety", {}).get("emergency_stop") is not False:
+                        reasons.append("trusted_emergency_stop_active")
+                except Exception:
+                    reasons.append("trusted_autonomy_policy_unavailable")
 
     mechanisms: list[dict] = []
     if entry:

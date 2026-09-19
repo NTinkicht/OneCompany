@@ -63,6 +63,51 @@ class CanonicalStreamBindingTests(unittest.TestCase):
             duplicate_queue_binding_violations(list(self.queue.values())), []
         )
 
+    def test_durable_binding_requires_explicit_branch_and_pr(self) -> None:
+        queue = {"WU-A": {"id": "WU-A", "branch": None, "pr": 12}}
+        errors = binding_violations(
+            "WU-A", "chosen-at-runtime", 12, queue, [],
+            require_complete=True,
+        )
+        self.assertIn("canonical_branch_missing:WU-A", errors)
+        queue["WU-A"]["branch"] = "canonical"
+        queue["WU-A"]["pr"] = None
+        errors = binding_violations(
+            "WU-A", "canonical", 12, queue, [],
+            require_complete=True,
+        )
+        self.assertIn("canonical_pr_missing:WU-A", errors)
+
+    def test_local_acquire_rejects_stream_drift_without_appending_event(self) -> None:
+        import lease
+        candidate = {
+            "id": "WU-A", "branch": "wu-a", "pr": 12,
+            "status": "READY", "dependencies": [],
+        }
+        queue = {"work_units": [candidate]}
+        state = {"active_leases": [], "active_streams": []}
+        args = argparse.Namespace(
+            wu="WU-A", actor="builder", branch="other-branch", pr=12,
+            start_head="a" * 40,
+        )
+        def local_doc(path: Path):
+            return {
+                "queue.json": queue,
+                "planning.json": {"parallel_execution": {}},
+                "state.json": state,
+            }[Path(path).name]
+        with (
+            patch.object(lease, "emergency_stop_active", return_value=False),
+            patch.object(lease, "load_json", side_effect=local_doc),
+            patch.object(lease, "_active_view", return_value=({}, [])),
+            patch.object(lease, "append_local_event") as event,
+            patch.object(lease, "save_json") as save,
+        ):
+            result = lease._local_acquire(args)
+        self.assertEqual(result, 2)
+        event.assert_not_called()
+        save.assert_not_called()
+
     def test_unknown_or_incomplete_binding_fails_closed(self) -> None:
         self.assertIn(
             "unknown_work_unit:WU-MISSING",

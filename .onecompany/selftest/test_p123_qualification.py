@@ -412,6 +412,7 @@ class EvidenceGitHub:
             "pr_number": self.pr, "base_sha": BASE,
             "initial_head": CLAIM, "repaired_head": SECOND,
             "failed_run_id": 80, "passed_run_id": 81,
+            "repair_run_id": 82, "repair_run_attempt": 1,
             "review_id": self.review_id,
         }
         self.ledger = {
@@ -452,6 +453,10 @@ class EvidenceGitHub:
             ref = path.split("?ref=", 1)[1]
             if path.startswith("/contents/" + repair.CI_PATH):
                 body, sha = "reviewed workflow", self.ci
+            elif path.startswith("/contents/" + repair.REPAIR_PATH):
+                body, sha = "reviewed repair workflow", campaign.REPAIR_WORKFLOW_BLOB
+            elif path.startswith("/contents/scripts/l2_fixture_repair.py"):
+                body, sha = "reviewed repair code", campaign.REPAIR_SCRIPT_BLOB
             elif path.startswith("/contents/.onecompany/ledger.json"):
                 body, sha = json.dumps({
                     "enabled": True, "issue_number": 41,
@@ -471,6 +476,24 @@ class EvidenceGitHub:
                 "steps": [{
                     "name": "Validate one bounded repaired fixture",
                     "conclusion": "failure",
+                }],
+            }]}
+        if path == "/actions/runs/82":
+            return {
+                "path": repair.REPAIR_PATH, "event": "workflow_dispatch",
+                "status": "completed", "conclusion": "success",
+                "head_sha": BASE, "run_attempt": 1,
+                "repository": {"full_name": self.repository},
+            }
+        if path == "/actions/runs/82/jobs?per_page=100":
+            return {"jobs": [{
+                "id": 820, "run_id": 82, "run_attempt": 1,
+                "name": repair.REPAIR_JOB, "status": "completed",
+                "conclusion": "success",
+                "started_at": "2026-09-19T22:00:00Z",
+                "completed_at": "2026-09-19T22:02:00Z",
+                "steps": [{
+                    "name": repair.REPAIR_STEP, "conclusion": "success",
                 }],
             }]}
         if path in ("/actions/runs/80", "/actions/runs/81"):
@@ -519,9 +542,21 @@ class L2LiveWitnessTests(unittest.TestCase):
     def verify(self, api, entry):
         # Unit fixtures mock ONLY native platform bindings. The real verifier
         # must resolve these from base-trusted identity and canonical ledger.
+        repair_record = {
+            "status": "L2_REPAIR_COMMITTED", "repository": api.repository,
+            "work_unit": WU, "actor": ACTOR, "pr": 7,
+            "initial": CLAIM, "repaired": SECOND, "base": BASE,
+            "failed_ci_run_id": 80, "lease_id": "lease-1",
+            "run_id": 82, "run_attempt": 1, "already_applied": False,
+        }
+        def log(_api, job_id):
+            if job_id == 820:
+                return repair.EVIDENCE_PREFIX + json.dumps(repair_record)
+            return repair.FAILURE_MARKER
         with (
-            patch.object(campaign, "_job_log",
-                         return_value="fixture_ci_repair_not_complete"),
+            patch.object(campaign, "_job_log", side_effect=log),
+            patch.object(campaign, "_historical_repair_lease",
+                         return_value=None),
             patch.object(campaign, "_native_review", return_value={
                 "login": api.review_login, "actor_id": "independent-reviewer",
             }),
@@ -565,6 +600,62 @@ class L2LiveWitnessTests(unittest.TestCase):
             producer.Refused, "l2_intentional_fixture_failure_not_proven"
         ):
             self.verify(api, entry)
+
+    def test_repair_provenance_and_lease_are_required(self):
+        for case in ("missing_run", "wrong_head", "wrong_attempt",
+                     "no_job", "unrelated_step", "unreviewed_worker"):
+            with self.subTest(case=case):
+                api, entry = self.setup_witness()
+                original = api.call
+                if case == "missing_run":
+                    entry.pop("repair_run_id")
+                def tamper(method, path, payload=None):
+                    value = original(method, path, payload)
+                    if path == "/actions/runs/82":
+                        if case == "wrong_head":
+                            value["head_sha"] = CLAIM
+                        elif case == "wrong_attempt":
+                            value["run_attempt"] = 2
+                    elif path == "/actions/runs/82/jobs?per_page=100":
+                        if case == "no_job":
+                            value["jobs"] = []
+                        elif case == "unrelated_step":
+                            value["jobs"][0]["steps"][0]["conclusion"] = "failure"
+                    elif path.startswith("/contents/" + repair.REPAIR_PATH):
+                        if case == "unreviewed_worker":
+                            value["sha"] = "d" * 40
+                    return value
+                api.call = tamper
+                with self.assertRaises(producer.Refused):
+                    self.verify(api, entry)
+
+    def test_repair_job_lease_history_is_mandatory(self):
+        api, entry = self.setup_witness()
+        with patch.object(
+            campaign, "_historical_repair_lease",
+            side_effect=producer.Refused("repair_historical_lease_missing"),
+        ):
+            # The ordinary witness helper mocks the history, so exercise
+            # the live proof helper directly with the actual job/log shape.
+            record = {
+                "status": "L2_REPAIR_COMMITTED", "repository": api.repository,
+                "work_unit": WU, "actor": ACTOR, "pr": 7,
+                "initial": CLAIM, "repaired": SECOND, "base": BASE,
+                "failed_ci_run_id": 80, "lease_id": "lease-1",
+                "run_id": 82, "run_attempt": 1, "already_applied": False,
+            }
+            with patch.object(
+                campaign, "_job_log",
+                return_value=repair.EVIDENCE_PREFIX + json.dumps(record),
+            ):
+                with self.assertRaisesRegex(
+                    producer.Refused, "repair_historical_lease_missing",
+                ):
+                    campaign._repair_run_evidence(
+                        api, entry, repo=api.repository, number=7,
+                        wu=WU, actor=ACTOR, base=BASE,
+                        initial=CLAIM, repaired=SECOND, failed_id=80,
+                    )
 
     def test_review_self_author_refuses(self):
         api, entry = self.setup_witness()

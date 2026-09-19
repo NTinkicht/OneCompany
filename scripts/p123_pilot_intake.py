@@ -236,15 +236,25 @@ def inspect(api: GitHub, item: dict, *, l2: bool) -> dict:
         pr = api.call("GET", "/pulls/" + str(item["pr_number"]))
         head = pr.get("head") if isinstance(pr, dict) else None
         target = pr.get("base") if isinstance(pr, dict) else None
-        if (not isinstance(head, dict) or not isinstance(target, dict)
+        head_repo = head.get("repo") if isinstance(head, dict) else None
+        base_repo = target.get("repo") if isinstance(target, dict) else None
+        if (not isinstance(head_repo, dict)
+                or not isinstance(base_repo, dict)
                 or pr.get("state") != "open"
                 or pr.get("number") != item["pr_number"]
                 or head.get("ref") != branch_for(wu)
+                or not isinstance(head.get("sha"), str)
+                or not SHA.fullmatch(head["sha"])
                 or target.get("ref") != default
                 or target.get("sha") != base
-                or (head.get("repo") or {}).get("full_name") != repo
-                or (target.get("repo") or {}).get("full_name") != repo):
+                or head_repo.get("full_name") != repo
+                or base_repo.get("full_name") != repo):
             raise Refused("l2_existing_pr_identity_drift")
+        claim = api.call("GET", "/git/ref/heads/" + branch_for(wu))
+        live_ref = claim.get("object") if isinstance(claim, dict) else None
+        if (not isinstance(live_ref, dict)
+                or live_ref.get("sha") != head["sha"]):
+            raise Refused("l2_existing_branch_pr_head_drift")
         phase = "L2_SOURCE_PREPARED_LEASE_CI_REVIEW_MERGE_PROOF_PENDING"
     else:
         branch = branch_for(wu)

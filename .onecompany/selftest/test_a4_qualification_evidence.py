@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import sys
 import unittest
 from pathlib import Path
@@ -135,6 +136,21 @@ class A4QualificationEvidenceTests(unittest.TestCase):
             ),
         ):
             return qualifier.verify_pair(self.entries, "read-only-token")
+
+    def test_public_only_templates_and_pinned_verifier_blob(self):
+        """Reject accidental drift of the vetted workflow or runner guard."""
+        base = ROOT / ".onecompany" / "templates" / "workflows"
+        ci = (base / "onecompany-a4-fixture-validation.yml.disabled").read_bytes()
+        blob_id = hashlib.sha1(
+            b"blob " + str(len(ci)).encode("ascii") + b"\\0" + ci
+        ).hexdigest()
+        self.assertEqual(blob_id, qualifier.TRUSTED_CI_WORKFLOW_BLOB)
+        producer_workflow = (
+            base / "onecompany-a4-pr-producer.yml.disabled"
+        ).read_text(encoding="utf-8")
+        for workflow in (ci.decode("utf-8"), producer_workflow):
+            self.assertIn("github.event.repository.visibility == 'public'", workflow)
+            self.assertIn("github.event.repository.private == false", workflow)
 
     def test_distinct_owner_exact_run_evidence_is_admissible(self):
         """Require a pair of individually proven project-scoped trial records."""

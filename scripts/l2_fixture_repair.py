@@ -173,7 +173,7 @@ def repair(api: GitHub, *, config: dict, queue: dict, readiness: dict,
             isinstance(m, dict) and m.get("id") == "github-actions-l2-fixture-repair"
             and m.get("kind") == "github_action" and m.get("configured") is True
             and m.get("unattended") is True
-            and "ci_remediation" in m.get("capabilities")
+            and "ci_remediation" in m.get("capabilities", [])
             for m in mechanisms)):
         raise Refused("l2_remediation_route_unverified")
     meta = _object(api.call("GET", "/"), "repository_identity_unknown")

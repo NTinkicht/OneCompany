@@ -45,6 +45,6 @@ Examples:
 - deployment/recovery work → `sre`;
 - user workflow → `persona-walkthrough`.
 
-## Provenance
+## Implementation boundary
 
-Tabibi operationalized this pattern from a curated subset of `NTinkicht/agency-agents` pinned at commit `647c8baa42b6842afb4a97bf2c0950d45ba88e8b`. OneCompany keeps the concept and governance separation, with new concise overlay files under `overlays/`.
+Specialist overlays are written as reusable, concise advisory instructions. They may change how an actor investigates a Work Unit but never change its identity, permissions, reviewer independence or authority.

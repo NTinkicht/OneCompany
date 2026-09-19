@@ -80,9 +80,18 @@ event, collect non-secret manifests for both and run:
 GH_TOKEN=<read-only-token> python scripts/a4_qualify.py pilot-manifest.json
 ```
 
+The verifier also requires the immutable GitHub Actions job log to contain
+exactly one `A4_PRODUCER_EVIDENCE:` JSON record printed by the approved
+producer step. It must match repository, WU, actor, PR, branch, exact head/base,
+run ID and run attempt. The run must refer to the expected producer workflow,
+completed producer job/step and reviewed default-branch SHA, not an unrelated
+successful dispatch. The verifier rejects a commit that modifies any path
+besides the one fixture file, or two projects controlled by the same owner.
+Source CI still does not qualify a live target installation.
+
 Each manifest entry must contain `repository`, `work_unit`, `actor`,
 `pr`, `head`, `base`, `workflow_run`, `check_name`. The verifier
-requires distinct repositories, exact fixture/head/base, successful real
+requires different repository owners, exact fixture/head/base, successful real
 repository-dispatch run and a green CI check on the exact PR head. Reviewer
 independence and any later mechanical merge require separate evidence.
 A source self-test, provider promise or scheduled ChatGPT task cannot

@@ -31,18 +31,21 @@ class Refused(RuntimeError):
 
 class ApiFailure(Refused):
     def __init__(self, status: int):
+        """Initialize the strict GitHub client or a sanitized HTTP status error."""
         super().__init__(f"github_api_status_{status}")
         self.status = status
 
 
 class GitHub:
     def __init__(self, repository: str, token: str):
+        """Initialize the strict GitHub client or a sanitized HTTP status error."""
         if not REPO.fullmatch(repository) or not token:
             raise Refused("repository_identity_or_github_token_missing")
         self.repository = repository
         self.token = token
 
     def call(self, method: str, path: str, payload: dict | None = None) -> Any:
+        """Call the repository-scoped REST API without disclosing response secrets."""
         if not path.startswith("/") or "://" in path:
             raise Refused("invalid_api_path")
         data = None if payload is None else json.dumps(payload).encode("utf-8")
@@ -69,12 +72,14 @@ class GitHub:
 
 
 def branch_for(wu: str) -> str:
+    """Derive one deterministic safe branch identifier for the fixture WU."""
     if fixture_path(wu) is None:
         raise Refused("invalid_fixture_work_unit")
     return "onecompany-a4-" + wu.lower()
 
 
 def fixture_body(repo: str, wu: str, actor: str, base: str) -> str:
+    """Encode exact project/WU/actor/base identity in the fixture content."""
     return (
         "# OneCompany A4 isolated claim and implementation fixture\n\n"
         f"Repository: {repo}\nWork Unit: {wu}\nActor: {actor}\n"
@@ -160,6 +165,7 @@ def preflight(
 
 
 def _api_branch(api: GitHub, branch: str) -> str | None:
+    """Read an exact branch SHA, treating missing or malformed refs safely."""
     try:
         ref = api.call("GET", "/git/ref/heads/" + branch)
     except ApiFailure as exc:
@@ -173,6 +179,7 @@ def _api_branch(api: GitHub, branch: str) -> str | None:
 
 
 def _matching_pulls(api: GitHub, branch: str) -> list[dict]:
+    """Inventory all historical PRs for a canonical branch without truncation."""
     owner = api.repository.split("/", 1)[0]
     query = urllib.parse.urlencode({
         "state": "all", "head": owner + ":" + branch,
@@ -185,6 +192,7 @@ def _matching_pulls(api: GitHub, branch: str) -> list[dict]:
 
 
 def _verify_claim(api: GitHub, head: str, base: str, target: str, body: str) -> None:
+    """Reject a prior claim unless its ancestry, content and diff are exact."""
     commit = api.call("GET", "/git/commits/" + head)
     parents = commit.get("parents", [])
     if len(parents) != 1 or parents[0].get("sha") != base:
@@ -208,6 +216,7 @@ def _verify_claim(api: GitHub, head: str, base: str, target: str, body: str) -> 
 
 
 def _create_claim(api: GitHub, base: str, branch: str, target: str, body: str) -> str:
+    """Create one atomic branch claim and reconcile uncertain ref creation."""
     try:
         api.call("GET", "/contents/" + urllib.parse.quote(target, safe="/") + "?ref=" + base)
     except ApiFailure as exc:
@@ -325,6 +334,7 @@ def produce(api: GitHub, *, config: dict, queue: dict, readiness: dict,
 
 
 def main() -> int:
+    """Execute the reviewed adapter and print run-bound producer evidence."""
     try:
         repo = os.environ.get("GITHUB_REPOSITORY", "")
         token = os.environ.get("GH_TOKEN", "")

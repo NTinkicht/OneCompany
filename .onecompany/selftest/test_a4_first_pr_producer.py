@@ -21,6 +21,7 @@ WU = "WU-A"
 
 
 def installation(repo: str = REPO, wu: str = WU, actor: str = "fixture-bot"):
+    """Build synthetic project-scoped capability, policy and queue inputs."""
     branch = producer.branch_for(wu)
     return {
         "repo": repo, "actor": actor, "wu": wu, "checkout_sha": BASE,
@@ -64,6 +65,7 @@ class FakeGitHub:
     """Deliberately shared per-installation model of GitHub's atomic ref API."""
 
     def __init__(self, repo: str, base: str = BASE):
+        """Initialize deterministic shared GitHub ref and PR state."""
         self.repository = repo
         self.base = base
         self.refs = {"main": base}
@@ -79,6 +81,7 @@ class FakeGitHub:
         self.extra_diff = False
 
     def call(self, method: str, path: str, payload=None):
+        """Model GitHub reads, atomic ref creation and PR mutation for race tests."""
         if method == "GET" and path == "/":
             return {"default_branch": "main"}
         if method == "GET" and path.startswith("/git/ref/heads/"):
@@ -153,6 +156,7 @@ class FakeGitHub:
 
 class FirstPRProducerTests(unittest.TestCase):
     def test_first_start_and_duplicate_delivery_are_one_pr(self):
+        """Confirm replay does not open another branch, commit or PR."""
         inputs = installation()
         api = FakeGitHub(REPO)
         one = producer.produce(api, **inputs)
@@ -163,6 +167,7 @@ class FirstPRProducerTests(unittest.TestCase):
         self.assertEqual(one["head"], CLAIM)
 
     def test_two_independent_installations_no_cross_authority(self):
+        """Prove separate project identities and foreign replay refusal."""
         a = FakeGitHub("owner/disposable-a")
         b = FakeGitHub("another/disposable-b")
         aa = producer.produce(a, **installation("owner/disposable-a", "WU-A"))
@@ -174,6 +179,7 @@ class FirstPRProducerTests(unittest.TestCase):
             producer.produce(b, **installation("owner/disposable-a", "WU-A"))
 
     def test_claim_may_not_smuggle_extra_files(self):
+        """Reject a valid fixture commit that also changes unauthorized files."""
         api = FakeGitHub(REPO)
         inputs = installation()
         producer.produce(api, **inputs)
@@ -182,8 +188,10 @@ class FirstPRProducerTests(unittest.TestCase):
             producer.produce(api, **inputs)
 
     def test_racing_branch_ref_winner_is_reconciled(self):
+        """Recover the canonical winner after an ambiguous create-ref response."""
         class LostCreateResponse(FakeGitHub):
             def call(self, method, path, payload=None):
+                """Model GitHub reads, atomic ref creation and PR mutation for race tests."""
                 if method == "POST" and path == "/git/refs":
                     super().call(method, path, payload)
                     raise producer.ApiFailure(422)
@@ -194,6 +202,7 @@ class FirstPRProducerTests(unittest.TestCase):
         self.assertEqual((api.created_refs, api.created_prs), (1, 1))
 
     def test_forged_or_orphaned_branch_fails_closed(self):
+        """Refuse unrelated existing branches instead of hijacking them."""
         inputs = installation()
         api = FakeGitHub(REPO)
         branch = producer.branch_for(WU)
@@ -205,6 +214,7 @@ class FirstPRProducerTests(unittest.TestCase):
         self.assertEqual(api.created_prs, 0)
 
     def test_previous_success_with_lost_response_is_reconciled(self):
+        """Recover existing PR from GitHub after the create response is lost."""
         inputs = installation()
         api = FakeGitHub(REPO)
         api.lose_pr_response = True
@@ -216,6 +226,7 @@ class FirstPRProducerTests(unittest.TestCase):
         self.assertEqual(api.created_prs, 1)
 
     def test_closed_pr_never_reopened_by_duplicate_dispatch(self):
+        """Do not replace or reopen a closed canonical PR."""
         inputs = installation()
         api = FakeGitHub(REPO)
         producer.produce(api, **inputs)
@@ -225,6 +236,7 @@ class FirstPRProducerTests(unittest.TestCase):
         self.assertEqual(api.created_prs, 1)
 
     def test_duplicate_unmanaged_prs_are_not_self_reconciled(self):
+        """Refuse multiple matching PR identities instead of guessing a winner."""
         inputs = installation()
         api = FakeGitHub(REPO)
         producer.produce(api, **inputs)
@@ -235,6 +247,7 @@ class FirstPRProducerTests(unittest.TestCase):
         self.assertEqual(api.created_prs, 1)
 
     def test_base_move_and_unknown_provider_are_refused(self):
+        """Refuse drifted default branch, stop and unavailable actor capacity."""
         inputs = installation()
         api = FakeGitHub(REPO)
         api.refs["main"] = "9" * 40
@@ -251,6 +264,7 @@ class FirstPRProducerTests(unittest.TestCase):
         self.assertEqual(api.created_refs, 0)
 
     def test_foreign_base_or_broad_budget_is_denied(self):
+        """Keep base identity and zero-extra-spend policy binding."""
         inputs = installation()
         inputs["budget"]["ai"]["allow_overage"] = True
         with self.assertRaisesRegex(producer.Refused, "zero_extra_spend"):
@@ -262,7 +276,37 @@ class FirstPRProducerTests(unittest.TestCase):
         with self.assertRaisesRegex(producer.Refused, "pr_targets_foreign_base"):
             producer.produce(api, **inputs)
 
+    def test_unavailable_actor_refused(self):
+        """Reject a temporarily unavailable implementation capability."""
+        inputs = installation()
+        inputs["readiness"]["actors"][0][
+            "temporarily_unavailable_capabilities"
+        ] = ["implementation"]
+        api = FakeGitHub(REPO)
+        with self.assertRaisesRegex(
+            producer.Refused, "actor_unattended_write_unverified"
+        ):
+            producer.produce(api, **inputs)
+        self.assertEqual(api.created_refs, 0)
+
+    def test_missing_branch_object_is_refusal_not_uncaught_key_error(self):
+        """Represent malformed GitHub ref payload as an explicit refusal."""
+        class BrokenRef(FakeGitHub):
+            """Drop the base-ref object to exercise malformed HTTP data."""
+
+            def call(self, method, path, payload=None):
+                """Return an incomplete branch response for the default ref."""
+                if method == "GET" and path == "/git/ref/heads/main":
+                    return {"object": {}}
+                return super().call(method, path, payload)
+
+        with self.assertRaisesRegex(
+            producer.Refused, "trusted_checkout_or_base_moved"
+        ):
+            producer.produce(BrokenRef(REPO), **installation())
+
     def test_pre_pr_binding_and_exact_fixture_only(self):
+        """Require an unbound READY WU and precisely one fixture path."""
         inputs = installation()
         inputs["queue"]["work_units"][0]["pr"] = 2
         with self.assertRaisesRegex(producer.Refused, "not_canonically_pre_pr_bound"):
@@ -273,6 +317,7 @@ class FirstPRProducerTests(unittest.TestCase):
             producer.produce(FakeGitHub(REPO), **inputs)
 
     def test_identities_are_strictly_bound(self):
+        """Refuse malformed WU names and source L1 autonomy."""
         for malformed in ("WU/../../X", "WU-$HOME", "WU with space"):
             with self.assertRaises(producer.Refused):
                 producer.branch_for(malformed)

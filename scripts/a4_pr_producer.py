@@ -139,6 +139,7 @@ def preflight(
             or "implementation" not in person.get("verified_capabilities", [])
             or person.get("repository_access", {}).get("write") is not True
             or person.get("unattended", {}).get("verified") is not True
+            or "implementation" in person.get("temporarily_unavailable_capabilities", [])
             or person.get("capacity", {}).get("measured") is not True
             or person.get("capacity", {}).get("implementation_streams", 0) < 1):
             errors.append("actor_unattended_write_unverified")
@@ -288,7 +289,7 @@ def produce(api: GitHub, *, config: dict, queue: dict, readiness: dict,
         if pr.get("state") != "open" or pr.get("draft") is True:
             raise Refused("canonical_pr_closed_or_draft")
     else:
-        if api.call("GET", "/git/ref/heads/" + default)["object"]["sha"] != base:
+        if _api_branch(api, default) != base:
             raise Refused("base_moved_before_pr_creation")
         try:
             pr = api.call("POST", "/pulls", {
@@ -347,7 +348,15 @@ def main() -> int:
     except (Refused, subprocess.CalledProcessError, OSError) as exc:
         print("A4_REFUSED: " + str(exc), file=sys.stderr)
         return 2
-    print(json.dumps(answer, sort_keys=True))
+    run_id = os.environ.get("GITHUB_RUN_ID", "")
+    run_attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "")
+    if not (run_id.isdecimal() and int(run_id) > 0
+            and run_attempt.isdecimal() and int(run_attempt) > 0):
+        print("A4_REFUSED: immutable_github_run_identity_missing", file=sys.stderr)
+        return 2
+    answer["run_id"] = int(run_id)
+    answer["run_attempt"] = int(run_attempt)
+    print("A4_PRODUCER_EVIDENCE:" + json.dumps(answer, sort_keys=True))
     return 0
 
 

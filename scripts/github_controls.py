@@ -375,6 +375,7 @@ def inspect_enforcement(
                 continue
             contexts: set[str] = set()
             code_owner = False
+            review_gate_here = False
             for rule in detail.get("rules", []):
                 if not isinstance(rule, dict):
                     continue
@@ -391,7 +392,7 @@ def inspect_enforcement(
                             and item.get("integration_id") == REVIEW_GATE_APP_ID
                             for item in specs
                         )):
-                        review_gate_enforced = True
+                        review_gate_here = True
                 if rule.get("type") == "pull_request":
                     params = rule.get("parameters") or {}
                     code_owner = (
@@ -407,10 +408,13 @@ def inspect_enforcement(
                     "code_owner_review": code_owner,
                     "bypass_actors": bypass_actors if isinstance(bypass_actors, list) else None,
                     "counted_as_enforcement": not bypassable,
+                    "review_gate_present": review_gate_here,
                 }
             )
             if bypassable:
                 continue
+            if review_gate_here:
+                review_gate_enforced = True
             observed_required.update(contexts)
             owner_review_enforced = owner_review_enforced or code_owner
 

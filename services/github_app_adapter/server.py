@@ -9,10 +9,12 @@ from starlette.responses import JSONResponse
 from starlette.routing import Mount, Route
 from auth import BearerGuard
 from github_app import AppClient
+from oauth import OwnerOAuth
 from settings import Settings
 
 settings = Settings.from_environment()
 client = AppClient(settings)
+oauth = OwnerOAuth(settings)
 host = settings.public_host if settings.host_valid() else "invalid.invalid"
 security = TransportSecuritySettings(
     enable_dns_rebinding_protection=True,
@@ -53,8 +55,10 @@ async def lifespan(_app: Starlette):
 inner = Starlette(
     routes=[
         Route("/health/live", health),
+        Route("/oauth/authorize", oauth.authorize, methods=["GET", "POST"]),
+        Route("/oauth/token", oauth.token, methods=["POST"]),
         Mount("/", app=mcp.streamable_http_app()),
     ],
     lifespan=lifespan,
 )
-app = BearerGuard(inner, settings)
+app = BearerGuard(inner, settings, oauth)

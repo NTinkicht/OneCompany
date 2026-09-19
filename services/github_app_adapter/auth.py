@@ -1,17 +1,21 @@
-"""Authenticate every MCP request before SDK tool discovery or execution."""
+"""Guard protected MCP transport while allowing owner-authorized OAuth routes."""
 from __future__ import annotations
 import hmac
 from starlette.responses import PlainTextResponse
+from oauth import OwnerOAuth
 from settings import Settings
 
 class BearerGuard:
-    """The only public endpoint is a content-free health check."""
-    def __init__(self, app, settings: Settings):
+    """No MCP tools are exposed without authenticated owner-issued credentials."""
+    def __init__(self, app, settings: Settings, oauth: OwnerOAuth | None = None):
         self.app = app
         self.settings = settings
+        self.oauth = oauth or OwnerOAuth(settings)
 
     async def __call__(self, scope, receive, send):
-        if scope["type"] != "http" or scope.get("path") == "/health/live":
+        path = scope.get("path")
+        if (scope["type"] != "http" or path == "/health/live"
+                or path in {"/oauth/authorize", "/oauth/token"}):
             await self.app(scope, receive, send)
             return
         if not self.settings.auth_ready():
@@ -32,9 +36,17 @@ class BearerGuard:
             scheme, supplied = headers[0].decode("ascii").split(" ", 1)
         except (UnicodeError, ValueError):
             scheme, supplied = "", ""
-        if scheme.lower() != "bearer" or not hmac.compare_digest(
-            supplied.encode("utf-8"), self.settings.connector_secret.encode("utf-8")
-        ):
+        authorized = (
+            scheme.lower() == "bearer"
+            and (
+                hmac.compare_digest(
+                    supplied.encode("utf-8"),
+                    self.settings.connector_secret.encode("utf-8"),
+                )
+                or self.oauth.valid_token(supplied)
+            )
+        )
+        if not authorized:
             await PlainTextResponse("unauthorized", status_code=401)(
                 scope, receive, send
             )

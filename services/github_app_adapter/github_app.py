@@ -157,6 +157,114 @@ class AppClient:
             "write_enabled": False,
         }
 
+    def pull_request_snapshot(self, pr_number: int, exact_head_sha: str) -> dict:
+        """Read exactly one existing PR at an explicitly supplied immutable head."""
+        if (not isinstance(pr_number, int) or isinstance(pr_number, bool)
+                or not (1 <= pr_number <= 1000000)
+                or not isinstance(exact_head_sha, str)
+                or not _SHA.fullmatch(exact_head_sha)):
+            raise AdapterRefused("exact_pr_number_and_head_required")
+        token, slug, _ = self._installation()
+        doc = self._stage_call(
+            "pr_snapshot", "GET",
+            f"/repos/{self.settings.repository}/pulls/{pr_number}", token,
+        )
+        if not isinstance(doc, dict) or doc.get("number") != pr_number:
+            raise AdapterRefused("pr_identity_mismatch")
+        head = doc.get("head")
+        base = doc.get("base")
+        if (not isinstance(head, dict) or not isinstance(base, dict)
+                or (head.get("repo") or {}).get("full_name") != self.settings.repository
+                or head.get("sha") != exact_head_sha
+                or (base.get("repo") or {}).get("full_name") != self.settings.repository
+                or doc.get("state") != "open"):
+            raise AdapterRefused("pr_head_or_repository_changed")
+        files = self._stage_call(
+            "pr_files", "GET",
+            f"/repos/{self.settings.repository}/pulls/{pr_number}/files?per_page=100&page=1",
+            token,
+        )
+        # Never present a truncated change list as complete review material.
+        if not isinstance(files, list) or len(files) >= 100:
+            raise AdapterRefused("pr_file_list_unbounded_or_incomplete")
+        output = []
+        for file in files:
+            if not isinstance(file, dict) or not isinstance(file.get("filename"), str):
+                raise AdapterRefused("pr_file_metadata_invalid")
+            output.append({
+                "path": file["filename"],
+                "status": file.get("status"),
+                "additions": file.get("additions"),
+                "deletions": file.get("deletions"),
+            })
+        return {
+            "repository": self.settings.repository,
+            "pr_number": pr_number,
+            "title": str(doc.get("title", ""))[:300],
+            "draft": bool(doc.get("draft")),
+            "head_sha": exact_head_sha,
+            "head_branch": head.get("ref"),
+            "base_sha": base.get("sha"),
+            "base_branch": base.get("ref"),
+            "changed_files": output,
+            "authenticated_principal": slug + "[bot]",
+            "read_only": True,
+            "review_attestation": False,
+        }
+
+    def read_source(self, path: str, exact_commit_sha: str,
+                    start_line: int, end_line: int) -> dict:
+        """Bounded source excerpt from a pinned Git commit; no moving refs."""
+        if not isinstance(exact_commit_sha, str) or not _SHA.fullmatch(exact_commit_sha):
+            raise AdapterRefused("exact_commit_sha_required")
+        if (not isinstance(path, str) or len(path) > 150
+                or ".." in path or "//" in path or path.startswith("/")
+                or not re.fullmatch(
+                    r"(?:services|scripts|tests|agents|patterns|docs|company|examples|overlays)/"
+                    r"[A-Za-z0-9_.\-/]+\.(?:py|md|json|yml|yaml|toml|txt|ts|tsx|js|jsx|css|html|sh|ps1)",
+                    path,
+                )
+                or any(part.startswith(".") for part in path.split("/"))):
+            raise AdapterRefused("source_path_not_allowlisted")
+        if (not isinstance(start_line, int) or isinstance(start_line, bool)
+                or not isinstance(end_line, int) or isinstance(end_line, bool)
+                or start_line < 1 or end_line < start_line
+                or end_line - start_line > 159):
+            raise AdapterRefused("source_line_range_invalid")
+        token, _, _ = self._installation()
+        result = self._stage_call(
+            "source", "GET",
+            f"/repos/{self.settings.repository}/contents/"
+            + urllib.parse.quote(path, safe="/") + "?ref=" + exact_commit_sha,
+            token,
+        )
+        if not isinstance(result, dict) or result.get("type") != "file":
+            raise AdapterRefused("source_not_file")
+        try:
+            if result.get("encoding") != "base64" or not isinstance(result.get("content"), str):
+                raise ValueError("invalid_source_encoding")
+            content = base64.b64decode(
+                re.sub(r"[ \t\r\n]", "", result["content"]), validate=True,
+            )
+            if len(content) > 96_000:
+                raise AdapterRefused("source_exceeds_limit")
+            lines = content.decode("utf-8").splitlines()
+        except (ValueError, UnicodeError, KeyError) as exc:
+            raise AdapterRefused("source_content_unavailable") from exc
+        excerpt = "\n".join(lines[start_line - 1:end_line])
+        if len(excerpt.encode("utf-8")) > 30_000:
+            raise AdapterRefused("source_excerpt_exceeds_limit")
+        return {
+            "repository": self.settings.repository,
+            "path": path,
+            "exact_commit_sha": exact_commit_sha,
+            "start_line": start_line,
+            "end_line": min(end_line, len(lines)),
+            "total_lines": len(lines),
+            "content": excerpt,
+            "read_only": True,
+        }
+
     def read_document(self, path: str, ref: str) -> dict:
         """Read allowlisted Markdown only at an immutable SHA."""
         if not _SHA.fullmatch(ref):

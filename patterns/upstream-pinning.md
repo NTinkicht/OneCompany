@@ -16,10 +16,10 @@ For behavior-bearing external components:
 6. adapt rather than blindly copy;
 7. promote through a normal reviewed governance PR.
 
-## Tabibi examples
+## Generic examples
 
-- The role-overlay library was pinned to a specific `NTinkicht/agency-agents` commit.
-- The Headroom shadow trial required the exact approved fork revision and failed closed on provenance mismatch.
+- Pin a role-overlay library to a reviewed immutable revision.
+- Pin an optional context component and fail closed on provenance mismatch.
 
 ## What to pin
 

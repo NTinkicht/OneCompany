@@ -2,7 +2,7 @@
 
 OneCompany coordinates execution, but agents still need a stable definition of **what the product is allowed to become**.
 
-Tabibi worked well because coordination sat on top of authoritative product, architecture and security contracts. A new OneCompany deployment should establish the equivalent before high autonomy.
+Each installation needs authoritative product, architecture and security contracts before high autonomy; the core package must not supply a customer's domain decisions.
 
 ## Recommended contract map
 

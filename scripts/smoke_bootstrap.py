@@ -11,16 +11,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def run(
-    command: list[str], cwd: Path | None = None
-) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        command,
-        cwd=str(cwd or ROOT),
-        text=True,
-        capture_output=True,
-        check=False,
-    )
+def run(command: list[str], cwd: Path | None = None) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(command, cwd=str(cwd or ROOT), text=True, capture_output=True, check=False)
 
 
 def require(condition: bool, message: str) -> None:
@@ -30,6 +22,8 @@ def require(condition: bool, message: str) -> None:
 
 def main() -> int:
     try:
+        for source_only in ("source-evidence", "evidence"):
+            require(not (ROOT / source_only).exists(), f"generic product source contains target-specific {source_only}/")
         with tempfile.TemporaryDirectory(prefix="onecompany-bootstrap-") as temp:
             target = Path(temp) / "acme-product"
             target.mkdir()
@@ -37,231 +31,79 @@ def main() -> int:
             (target / "tests" / "product_test.py").write_text("# product-owned\n")
             (target / "examples").mkdir()
             (target / "examples" / "product.txt").write_text("product-owned\n")
-            require(
-                run(["git", "init", "-b", "main"], target).returncode == 0,
-                "git init failed",
-            )
-            require(
-                run(
-                    [
-                        "git",
-                        "remote",
-                        "add",
-                        "origin",
-                        "https://github.com/example/acme-product.git",
-                    ],
-                    target,
-                ).returncode
-                == 0,
-                "git remote add failed",
-            )
-            install = run(
-                [
-                    sys.executable,
-                    str(ROOT / "onecompany.py"),
-                    "bootstrap",
-                    "--target",
-                    str(target),
-                    "--repository",
-                    "example/acme-product",
-                    "--project-name",
-                    "Acme Product",
-                    "--default-branch",
-                    "main",
-                    "--code-owner",
-                    "@example/reviewers",
-                    "--root-principal",
-                    "example-admin",
-                    "--initialize-contracts",
-                ]
-            )
-            require(
-                install.returncode == 0,
-                f"bootstrap failed:\n{install.stdout}\n{install.stderr}",
-            )
-            config = json.loads(
-                (target / ".onecompany" / "config.json").read_text()
-            )
+            require(run(["git", "init", "-b", "main"], target).returncode == 0, "git init failed")
+            require(run(["git", "remote", "add", "origin", "https://github.com/example/acme-product.git"], target).returncode == 0, "git remote add failed")
+            install = run([sys.executable, str(ROOT / "onecompany.py"), "bootstrap", "--target", str(target), "--repository", "example/acme-product", "--project-name", "Acme Product", "--default-branch", "main", "--code-owner", "@example/reviewers", "--root-principal", "example-admin", "--initialize-contracts"])
+            require(install.returncode == 0, f"bootstrap failed:\n{install.stdout}\n{install.stderr}")
+            config = json.loads((target / ".onecompany" / "config.json").read_text())
             queue = json.loads((target / ".onecompany" / "queue.json").read_text())
             state = json.loads((target / ".onecompany" / "state.json").read_text())
             ledger = json.loads((target / ".onecompany" / "ledger.json").read_text())
-            supervision = json.loads(
-                (target / ".onecompany" / "supervision.json").read_text()
-            )
-            portfolio = json.loads(
-                (target / ".onecompany" / "portfolio.json").read_text()
-            )
-            catalog = json.loads(
-                (target / ".onecompany" / "requirements-catalog.json").read_text()
-            )
-            identity = json.loads(
-                (target / ".onecompany" / "identity.json").read_text()
-            )
+            supervision = json.loads((target / ".onecompany" / "supervision.json").read_text())
+            portfolio = json.loads((target / ".onecompany" / "portfolio.json").read_text())
+            catalog = json.loads((target / ".onecompany" / "requirements-catalog.json").read_text())
+            identity = json.loads((target / ".onecompany" / "identity.json").read_text())
+            readiness = json.loads((target / ".onecompany" / "readiness.json").read_text())
+            actors = json.loads((target / ".onecompany" / "actors.json").read_text())
+            dispatch = json.loads((target / ".onecompany" / "dispatch.json").read_text())
             codeowners = (target / ".github" / "CODEOWNERS").read_text()
-            roots = [
-                item
-                for item in identity.get("principals", [])
-                if "root" in item.get("authorities", [])
-            ]
-            require(
-                config["project"]["name"] == "Acme Product",
-                "bootstrap leaked source project name",
-            )
-            require(
-                config["project"]["repository"] == "example/acme-product",
-                "bootstrap leaked source repository identity",
-            )
-            require(
-                config["project"]["default_branch"] == "main",
-                "bootstrap default branch mismatch",
-            )
-            require(
-                roots and roots[0].get("login") == "example-admin",
-                "bootstrap did not bind explicit human root principal",
-            )
-            require(
-                "@example/reviewers" in codeowners and "@NTinkicht" not in codeowners,
-                "bootstrap did not rebind CODEOWNERS",
-            )
-            require(
-                config.get("safety", {}).get("emergency_stop") is False,
-                "fresh company must not start in emergency stop",
-            )
-            require(
-                ledger.get("enabled") is False,
-                "fresh company inherited source durable-ledger activation",
-            )
-            require(
-                ledger.get("issue_number") is None,
-                "fresh company inherited source Team Room issue number",
-            )
-            require(
-                ledger.get("trusted_publisher_logins") == [],
-                "fresh company inherited source trusted ledger publishers",
-            )
-            require(
-                supervision.get("enabled") is False
-                and supervision.get("mode") == "observe_only",
-                "fresh company inherited active supervision",
-            )
-            require(
-                supervision.get("coordination", {}).get("team_room_issue_number") is None,
-                "fresh company inherited source supervision Team Room binding",
-            )
-            require(
-                supervision.get("github_actions", {}).get("may_post_team_room") is False
-                and supervision.get("github_actions", {}).get("may_failover") is False
-                and supervision.get("github_actions", {}).get("may_merge") is False,
-                "fresh company inherited autonomous supervisor authority",
-            )
-            require(
-                supervision.get("chatgpt_tasks", {}).get("may_mutate") is False,
-                "fresh company inherited scheduled mutation authority",
-            )
+            roots = [item for item in identity.get("principals", []) if "root" in item.get("authorities", [])]
+            require(config["project"]["name"] == "Acme Product", "bootstrap leaked source project name")
+            require(config["project"]["repository"] == "example/acme-product", "bootstrap leaked source repository identity")
+            require(config["project"]["default_branch"] == "main", "bootstrap default branch mismatch")
+            require(roots and roots[0].get("login") == "example-admin", "bootstrap did not bind explicit human root principal")
+            require(all(line.split()[1:] == ["@example/reviewers"] for line in codeowners.splitlines() if line.strip() and not line.lstrip().startswith("#")), "bootstrap inherited product CODEOWNERS instead of target owners")
+            require(len(identity.get("principals", [])) == 1 and identity["principals"][0]["login"] == "example-admin", "fresh project inherited source reviewer or root principals")
+            for actor in readiness.get("actors", []):
+                is_root = actor.get("actor_id") == "human-owner"
+                require(actor.get("setup_state") == ("ready" if is_root else "not_started"), "fresh project readiness state is inconsistent")
+                require(actor.get("verified_surfaces") == (["bootstrap-explicit-root-principal"] if is_root else []), "fresh project inherited source verified surfaces")
+                require(actor.get("verified_capabilities") == (["repository_intelligence"] if is_root else []), "fresh project inherited source verified capabilities")
+                require(actor.get("repository_access") == {"read": is_root, "write": False, "review": False, "merge": False}, "fresh project inherited source repository authority")
+                require(not actor.get("unattended", {}).get("configured") and not actor.get("unattended", {}).get("verified"), "fresh project inherited unattended authority")
+                require(not actor.get("capacity", {}).get("measured"), "fresh project inherited source capacity evidence")
+            require(all(actor.get("configured") == (actor.get("id") == "human-owner") and actor.get("enabled") == (actor.get("id") == "human-owner") for actor in actors.get("actors", [])), "fresh project inherited enabled or configured source workers")
+            require(all(not mechanism.get("evidence") and mechanism.get("configured") == (actor.get("actor_id") == "human-owner" and mechanism.get("kind") == "manual") for actor in dispatch.get("actors", []) for mechanism in actor.get("mechanisms", [])), "fresh project inherited source dispatch evidence or authority")
+            require(config.get("safety", {}).get("emergency_stop") is False, "fresh company must not start in emergency stop")
+            require(ledger.get("enabled") is False and ledger.get("issue_number") is None and ledger.get("trusted_publisher_logins") == [], "fresh company inherited durable-ledger authority")
+            require(supervision.get("enabled") is False and supervision.get("mode") == "observe_only", "fresh company inherited active supervision")
+            require(supervision.get("coordination", {}).get("team_room_issue_number") is None, "fresh company inherited source supervision Team Room binding")
+            require(supervision.get("github_actions", {}).get("may_post_team_room") is False and supervision.get("github_actions", {}).get("may_failover") is False and supervision.get("github_actions", {}).get("may_merge") is False, "fresh company inherited autonomous supervisor authority")
+            require(supervision.get("chatgpt_tasks", {}).get("may_mutate") is False, "fresh company inherited scheduled mutation authority")
             require(queue.get("work_units") == [], "fresh target queue must start empty")
-            require(
-                portfolio.get("entities") == [] and portfolio.get("links") == [],
-                "fresh target portfolio must start empty",
-            )
-            require(
-                catalog.get("requirements") == [],
-                "fresh target requirements catalog must start empty",
-            )
-            require(
-                state.get("active_streams") == []
-                and state.get("safe_start_candidates") == [],
-                "fresh target inherited flow state",
-            )
-            require(
-                (target / "tests" / "product_test.py").read_text()
-                == "# product-owned\n",
-                "bootstrap overwrote product tests",
-            )
-            require(
-                (target / "examples" / "product.txt").read_text()
-                == "product-owned\n",
-                "bootstrap overwrote product examples",
-            )
-            require(
-                not (target / "source-evidence" / "tabibi").exists(),
-                "fresh company inherited source-only Tabibi migration evidence",
-            )
-            require(
-                (target / ".onecompany" / "selftest" / "test_planning.py").exists(),
-                "framework self-tests not installed",
-            )
-            require(
-                (
-                    target
-                    / ".onecompany"
-                    / "reference"
-                    / "assurance"
-                    / "WU900.json"
-                ).exists(),
-                "framework assurance fixture not installed",
-            )
-            for contract in (
-                "PRODUCT.md",
-                "ARCHITECTURE.md",
-                "SECURITY.md",
-                "QUALITY.md",
-                "DESIGN.md",
-                "OPERATIONS.md",
-            ):
+            require(portfolio.get("entities") == [] and portfolio.get("links") == [], "fresh target portfolio must start empty")
+            require(catalog.get("requirements") == [], "fresh target requirements catalog must start empty")
+            require(state.get("active_streams") == [] and state.get("safe_start_candidates") == [], "fresh target inherited flow state")
+            require((target / "tests" / "product_test.py").read_text() == "# product-owned\n", "bootstrap overwrote product tests")
+            require((target / "examples" / "product.txt").read_text() == "product-owned\n", "bootstrap overwrote product examples")
+            require(not (target / "source-evidence").exists() and not (target / "evidence").exists(), "fresh company inherited source project evidence")
+            require((target / ".onecompany" / "selftest" / "test_planning.py").exists(), "framework self-tests not installed")
+            require((target / ".onecompany" / "reference" / "assurance" / "WU900.json").exists(), "framework assurance fixture not installed")
+            for contract in ("PRODUCT.md", "ARCHITECTURE.md", "SECURITY.md", "QUALITY.md", "DESIGN.md", "OPERATIONS.md"):
                 require((target / contract).exists(), f"missing initialized contract {contract}")
-            for command in (
-                ["validate"],
-                ["plan", "validate"],
-                ["simulate"],
-                ["simulate-ledger"],
-                ["simulate-parallel"],
-                ["simulate-supervision"],
-                ["next-work"],
-            ):
-                result = run(
-                    [sys.executable, str(target / "onecompany.py"), *command],
-                    target,
-                )
-                require(
-                    result.returncode == 0,
-                    f"target {' '.join(command)} failed:\n{result.stdout}\n{result.stderr}",
-                )
-            selftest = run(
-                [
-                    sys.executable,
-                    "-m",
-                    "unittest",
-                    "discover",
-                    "-s",
-                    ".onecompany/selftest",
-                    "-p",
-                    "test_*.py",
-                ],
-                target,
-            )
-            require(
-                selftest.returncode == 0,
-                f"target framework self-tests failed:\n{selftest.stdout}\n{selftest.stderr}",
-            )
-            second = run(
-                [
-                    sys.executable,
-                    str(ROOT / "onecompany.py"),
-                    "bootstrap",
-                    "--target",
-                    str(target),
-                    "--repository",
-                    "example/acme-product",
-                    "--code-owner",
-                    "@example/reviewers",
-                    "--root-principal",
-                    "example-admin",
-                ]
-            )
-            require(
-                second.returncode != 0,
-                "bootstrap must refuse an existing .onecompany installation",
-            )
+            for command in (["validate"], ["plan", "validate"], ["simulate"], ["simulate-ledger"], ["simulate-parallel"], ["simulate-supervision"], ["next-work"]):
+                result = run([sys.executable, str(target / "onecompany.py"), *command], target)
+                require(result.returncode == 0, f"target {' '.join(command)} failed:\n{result.stdout}\n{result.stderr}")
+            selftest = run([sys.executable, "-m", "unittest", "discover", "-s", ".onecompany/selftest", "-p", "test_*.py"], target)
+            require(selftest.returncode == 0, f"target framework self-tests failed:\n{selftest.stdout}\n{selftest.stderr}")
+            collision_target = Path(temp) / "existing-product"
+            (collision_target / "docs").mkdir(parents=True)
+            collision_file = collision_target / "docs" / "CONFIGURATION-REFERENCE.md"
+            collision_file.write_text("project-owned documentation\\n")
+            colliding = run([
+                sys.executable, str(ROOT / "onecompany.py"), "bootstrap",
+                "--target", str(collision_target),
+                "--repository", "example/existing-product",
+                "--code-owner", "@example/reviewers",
+                "--root-principal", "example-admin",
+            ])
+            require(colliding.returncode != 0, "bootstrap silently accepted a later-path collision")
+            require(not (collision_target / ".onecompany").exists(),
+                    "a rejected bootstrap left partial control-plane installation")
+            require(collision_file.read_text() == "project-owned documentation\\n",
+                    "a rejected bootstrap modified existing product documentation")
+            second = run([sys.executable, str(ROOT / "onecompany.py"), "bootstrap", "--target", str(target), "--repository", "example/acme-product", "--code-owner", "@example/reviewers", "--root-principal", "example-admin"])
+            require(second.returncode != 0, "bootstrap must refuse an existing .onecompany installation")
         print("OneCompany bootstrap smoke PASS")
         return 0
     except AssertionError as exc:

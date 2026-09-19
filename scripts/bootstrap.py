@@ -112,21 +112,47 @@ def infer_default_branch(target: Path) -> str:
     return symbolic.split("/", 1)[1] if symbolic and "/" in symbolic else "main"
 
 
-def copy_item(source: Path, target: Path, force: bool) -> None:
+def copy_item(source: Path, target: Path, force: bool, target_root: Path) -> None:
+    """Create a bootstrap file through verified directory descriptors.
+
+    Copying through a parent Path can follow a pre-existing or swapped
+    symlink. Exclusive descriptor-relative creation avoids following target
+    parents or an attacker-supplied destination leaf.
+    """
     if source.relative_to(ROOT).as_posix() in SOURCE_INSTALLATION_SELFTESTS:
         return
     if source.is_dir():
         for child in source.rglob("*"):
             if not child.is_dir():
-                copy_item(child, target / child.relative_to(source), force)
+                copy_item(child, target / child.relative_to(source), force, target_root)
         return
-    if target.exists() and not force:
-        raise FileExistsError(
-            f"refusing to overwrite {target}; use docs/UPGRADING.md for an existing OneCompany deployment"
-        )
-    target.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(source, target)
-
+    if force:
+        raise ValueError("bootstrap is install-only and cannot overwrite existing files")
+    relative = target.relative_to(target_root)
+    if not relative.parts or any(part in ("", ".", "..") for part in relative.parts):
+        raise ValueError("unsafe bootstrap destination")
+    descriptors = [_open_root_directory(target_root)]
+    try:
+        for component in relative.parts[:-1]:
+            descriptors.append(_open_directory_at(descriptors[-1], component, create=True))
+        mode = stat.S_IMODE(source.stat().st_mode)
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+        try:
+            file_fd = os.open(relative.name, flags, mode=mode, dir_fd=descriptors[-1])
+        except FileExistsError as exc:
+            raise FileExistsError(f"bootstrap refuses existing project file {target}") from exc
+        try:
+            with os.fdopen(file_fd, "wb") as destination, source.open("rb") as original:
+                shutil.copyfileobj(original, destination)
+                destination.flush()
+                os.fchmod(destination.fileno(), mode)
+                os.fsync(destination.fileno())
+        except Exception:
+            os.unlink(relative.name, dir_fd=descriptors[-1])
+            raise
+    finally:
+        for fd in reversed(descriptors):
+            os.close(fd)
 
 
 def preflight_copy_paths(target: Path) -> None:
@@ -155,6 +181,9 @@ def preflight_copy_paths(target: Path) -> None:
                 continue
             for parent in destination.parents:
                 if parent == target:
+                    break
+                if parent.is_symlink():
+                    collisions.add(parent.relative_to(target).as_posix())
                     break
                 if parent.exists() and not parent.is_dir():
                     collisions.add(parent.relative_to(target).as_posix())
@@ -562,7 +591,7 @@ def main() -> int:
     for item in COPY_PATHS:
         source = ROOT / item
         if source.exists():
-            copy_item(source, target / item, False)
+            copy_item(source, target / item, False, target)
     configure_codeowners(target, code_owner)
     configure_root_identity(target, root_principal)
     initialize_control_plane(target, project_name, repository, default_branch)

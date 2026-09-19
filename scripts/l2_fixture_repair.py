@@ -8,6 +8,7 @@ workflow runs reviewed default-branch code, not code from the PR.
 from __future__ import annotations
 
 import base64
+import copy
 import json
 import os
 import subprocess
@@ -87,6 +88,42 @@ def _check_repaired(api: GitHub, base: str, initial: str,
         raise Refused("repair_fixture_mismatch")
 
 
+def _native_lease(*, number: int, wu: str, actor: str,
+                  branch: str, initial: str, base: str) -> str:
+    """Require the active, uniquely bound lease via canonical durable replay."""
+    import ledger_lib
+    from lease_lifecycle import coordination_view
+
+    if not ledger_lib.ledger_enabled():
+        raise Refused("durable_implementation_lease_required")
+    try:
+        view = coordination_view(number)
+    except Exception:
+        raise Refused("durable_implementation_lease_unavailable") from None
+    if not isinstance(view, dict) or view.get("lifecycle_rejected_claims"):
+        raise Refused("durable_lease_replay_rejected")
+    active = view.get("active_leases")
+    if not isinstance(active, list) or len(active) != 1:
+        raise Refused("durable_canonical_implementation_lease_missing")
+    lease = active[0]
+    admission = lease.get("admission_snapshot") if isinstance(lease, dict) else None
+    if (not isinstance(admission, dict)
+            or lease.get("role") != "implementation"
+            or lease.get("actor") != actor
+            or lease.get("work_unit") != wu
+            or lease.get("pr") != number
+            or lease.get("branch") != branch
+            or lease.get("status") != "active"
+            or admission.get("trusted_ref") != base
+            or initial not in {lease.get("start_head"),
+                               lease.get("last_progress_head")}):
+        raise Refused("durable_canonical_implementation_lease_mismatch")
+    ident = lease.get("id")
+    if not isinstance(ident, str) or not ident:
+        raise Refused("durable_canonical_implementation_lease_mismatch")
+    return ident
+
+
 def repair(api: GitHub, *, config: dict, queue: dict, readiness: dict,
            dispatch: dict, budget: dict, actors: dict, repo: str,
            actor: str, wu: str, checkout_sha: str, number: int,
@@ -99,8 +136,23 @@ def repair(api: GitHub, *, config: dict, queue: dict, readiness: dict,
             or isinstance(failed_run_id, bool) or failed_run_id <= 0
             or not isinstance(initial, str) or not SHA.fullmatch(initial)):
         raise Refused("repair_request_invalid")
+    # P3 is a separate *pre-bound* canonical PR, not the A4 unbound-first-PR
+    # queue entry. Use A4's validated fixture-only policy only after the live
+    # queue binds this exact PR; clear its pre-PR field in a local PROJECTION,
+    # never alter the authoritative target queue or its lease.
+    units = queue.get("work_units") if isinstance(queue, dict) else None
+    matches = [
+        item for item in units if isinstance(item, dict)
+        and item.get("id") == wu
+    ] if isinstance(units, list) else []
+    if len(matches) != 1 or matches[0].get("pr") != number:
+        raise Refused("p3_canonical_pr_queue_binding_required")
+    projected = copy.deepcopy(queue)
+    for item in projected["work_units"]:
+        if isinstance(item, dict) and item.get("id") == wu:
+            item["pr"] = None
     branch, target = preflight(
-        config, queue, readiness, dispatch, budget, actors,
+        config, projected, readiness, dispatch, budget, actors,
         repo=repo, actor=actor, wu=wu, base=checkout_sha,
         actions=actions, enabled=enabled,
     )
@@ -141,6 +193,10 @@ def repair(api: GitHub, *, config: dict, queue: dict, readiness: dict,
     if (len(found) != 1 or found[0].get("number") != number):
         raise Refused("canonical_pr_inventory_ambiguous")
     _verify_claim(api, initial, base, target, fixture_body(repo, wu, actor, base))
+    lease_id = _native_lease(
+        number=number, wu=wu, actor=actor, branch=branch,
+        initial=initial, base=base,
+    )
     body = fixture_body(repo, wu, actor, base) + REPAIR_LINE
     current = _head(api, number, repo, branch, base, default)
     if _api_branch(api, branch) != current:
@@ -151,6 +207,7 @@ def repair(api: GitHub, *, config: dict, queue: dict, readiness: dict,
             "status": "L2_REPAIR_RECONCILED", "repository": repo,
             "work_unit": wu, "pr": number, "initial": initial,
             "repaired": current, "base": base, "already_applied": True,
+            "lease_id": lease_id,
         }
     run = _object(api.call("GET", f"/actions/runs/{failed_run_id}"),
                   "failed_ci_run_unavailable")
@@ -198,6 +255,11 @@ def repair(api: GitHub, *, config: dict, queue: dict, readiness: dict,
             or _api_branch(api, branch) != initial
             or _head(api, number, repo, branch, base, default) != initial):
         raise Refused("pilot_head_or_base_changed_before_ref")
+    if _native_lease(
+        number=number, wu=wu, actor=actor, branch=branch,
+        initial=initial, base=base,
+    ) != lease_id:
+        raise Refused("durable_lease_changed_before_ref")
     # An uncertain PATCH is not retried. The NEXT run reconciles exact content.
     try:
         api.call("PATCH", "/git/refs/heads/" + branch,
@@ -212,7 +274,7 @@ def repair(api: GitHub, *, config: dict, queue: dict, readiness: dict,
         "status": "L2_REPAIR_COMMITTED", "repository": repo,
         "work_unit": wu, "pr": number, "initial": initial,
         "repaired": proposed, "base": base, "already_applied": False,
-        "failed_ci_run_id": failed_run_id,
+        "failed_ci_run_id": failed_run_id, "lease_id": lease_id,
     }
 
 

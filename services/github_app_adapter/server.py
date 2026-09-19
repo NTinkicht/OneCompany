@@ -1,0 +1,60 @@
+"""Authenticated, read-only OneCompany Streamable HTTP MCP endpoint."""
+from __future__ import annotations
+from contextlib import asynccontextmanager
+from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
+from starlette.applications import Starlette
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+from starlette.routing import Mount, Route
+from auth import BearerGuard
+from github_app import AppClient
+from settings import Settings
+
+settings = Settings.from_environment()
+client = AppClient(settings)
+host = settings.public_host if settings.host_valid() else "invalid.invalid"
+security = TransportSecuritySettings(
+    enable_dns_rebinding_protection=True,
+    allowed_hosts=[host, host + ":*", "localhost:*", "127.0.0.1:*"],
+    allowed_origins=[
+        "https://" + host, "http://localhost:*", "http://127.0.0.1:*"
+    ],
+)
+mcp = FastMCP(
+    "OneCompany GitHub App Adapter",
+    stateless_http=True, json_response=True, transport_security=security,
+)
+
+@mcp.tool()
+def onecompany_actor_identity() -> dict:
+    """Prove logical Grok actor and real GitHub App principal without tokens."""
+    return client.identity()
+
+@mcp.tool()
+def onecompany_repository_status() -> dict:
+    """Inspect only the one owner-approved repository with read-only App token."""
+    return client.repository_status()
+
+@mcp.tool()
+def onecompany_read_document(path: str, commit_sha: str) -> dict:
+    """Read allowlisted documentation from one immutable commit SHA."""
+    return client.read_document(path, commit_sha)
+
+async def health(_request: Request):
+    """Unauthenticated liveness with no credential or repository metadata."""
+    return JSONResponse({"status": "alive"})
+
+@asynccontextmanager
+async def lifespan(_app: Starlette):
+    async with mcp.session_manager.run():
+        yield
+
+inner = Starlette(
+    routes=[
+        Route("/health/live", health),
+        Mount("/", app=mcp.streamable_http_app()),
+    ],
+    lifespan=lifespan,
+)
+app = BearerGuard(inner, settings)

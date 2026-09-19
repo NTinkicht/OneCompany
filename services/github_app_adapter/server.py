@@ -41,6 +41,22 @@ def onecompany_repository_status() -> dict:
     return client.repository_status()
 
 @mcp.tool()
+def onecompany_pull_request_head(pr_number: int) -> dict:
+    """Discover the live head SHA of a OneCompany PR; read-only."""
+    return client.pull_request_head(pr_number)
+
+@mcp.tool()
+def onecompany_pull_request_snapshot(pr_number: int, exact_head_sha: str) -> dict:
+    """Inspect one PR at its exact head using the read-only bot identity."""
+    return client.pull_request_snapshot(pr_number, exact_head_sha)
+
+@mcp.tool()
+def onecompany_read_source(path: str, exact_commit_sha: str,
+                           start_line: int = 1, end_line: int = 160) -> dict:
+    """Read 160 or fewer source lines pinned to an immutable commit."""
+    return client.read_source(path, exact_commit_sha, start_line, end_line)
+
+@mcp.tool()
 def onecompany_read_document(path: str, commit_sha: str) -> dict:
     """Read allowlisted documentation from one immutable commit SHA."""
     return client.read_document(path, commit_sha)

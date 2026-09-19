@@ -2,20 +2,53 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "OneCompany Pattern Registry",
   "type": "object",
-  "required": ["version", "patterns"],
+  "required": [
+    "version",
+    "patterns"
+  ],
   "properties": {
-    "version": {"type": "integer", "minimum": 1},
+    "version": {
+      "type": "integer",
+      "minimum": 1
+    },
     "patterns": {
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["id", "adoption", "origin", "source", "purpose"],
+        "required": [
+          "id",
+          "adoption",
+          "origin",
+          "source",
+          "purpose"
+        ],
         "properties": {
-          "id": {"type": "string", "minLength": 1},
-          "adoption": {"enum": ["core", "recommended", "optional", "experimental"]},
-          "origin": {"enum": ["tabibi-derived", "adapted", "onecompany-native"]},
-          "source": {"type": "string", "minLength": 1},
-          "purpose": {"type": "string", "minLength": 1}
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "adoption": {
+            "enum": [
+              "core",
+              "recommended",
+              "optional",
+              "experimental"
+            ]
+          },
+          "origin": {
+            "enum": [
+              "adapted",
+              "onecompany-native"
+            ]
+          },
+          "source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "purpose": {
+            "type": "string",
+            "minLength": 1
+          }
         },
         "additionalProperties": true
       }

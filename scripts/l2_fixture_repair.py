@@ -106,7 +106,16 @@ def _native_lease(*, number: int, wu: str, actor: str,
         view = coordination_view(number)
     except Exception:
         raise Refused("durable_implementation_lease_unavailable") from None
-    if not isinstance(view, dict) or view.get("lifecycle_rejected_claims"):
+    # Native replay can retain an apparently active lease even when admission
+    # or event-id conflicts make that authority ambiguous. Inspect all of the
+    # canonical replay's refusal channels, not only lifecycle-specific ones.
+    if not isinstance(view, dict) or any(
+        not isinstance(view.get(key), list) or bool(view[key])
+        for key in (
+            "lifecycle_rejected_claims", "integrity_conflicts",
+            "conflicts", "rejected_claims",
+        )
+    ):
         raise Refused("durable_lease_replay_rejected")
     active = view.get("active_leases")
     if not isinstance(active, list) or len(active) != 1:

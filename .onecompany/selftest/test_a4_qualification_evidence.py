@@ -83,7 +83,7 @@ class PilotApi(FakeGitHub):
         if method == "GET" and path.startswith("/contents/docs/") and self.wrap_base64:
             result = super().call(method, path, payload)
             encoded = result["content"]
-            result["content"] = encoded[:45] + "\\n" + encoded[45:]
+            result["content"] = encoded[:45] + "\n" + encoded[45:]
             return result
         return super().call(method, path, payload)
 

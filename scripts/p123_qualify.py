@@ -358,8 +358,10 @@ def main() -> int:
         print("P123_QUALIFY_REFUSED:" + reason, file=sys.stderr)
         return 2
     print(json.dumps(outcome, sort_keys=True, indent=2))
-    # Report observed evidence without mislabeling P2 as qualified.
-    return 0
+    # An observed GitHub author login never qualifies P2 token-bound writes.
+    # Return a nonzero result so automation cannot interpret this partial
+    # campaign evidence as a completed P1–P3 qualification.
+    return 2
 
 
 if __name__ == "__main__":

@@ -278,6 +278,25 @@ def _historical_repair_lease(*, repo: str, number: int, wu: str,
             if not isinstance(event, dict):
                 raise Refused("repair_native_ledger_malformed")
             stamped.append((_utc_platform(event.get("github_created_at")), event))
+        # A lease can disappear and be reassigned with the SAME lease_id
+        # between the two platform job timestamps. Endpoint-only snapshots
+        # would miss the unauthorised gap. The original assignment event is
+        # immutable, and no revocation/reassignment may touch it mid-job.
+        for when, event in stamped:
+            if not started < when <= completed:
+                continue
+            payload = event.get("payload")
+            if not isinstance(payload, dict):
+                raise Refused("repair_historical_ledger_malformed")
+            if event.get("type") in {
+                "ROLE_LEASE_ASSIGNED", "ROLE_LEASE_RELEASED",
+                "ROLE_LEASE_TRANSFERRED", "ROLE_LEASE_REAPED",
+            } and lease_id in (
+                payload.get("lease_id"), payload.get("old_lease_id"),
+                payload.get("new_lease_id"),
+            ):
+                raise Refused("repair_lease_interrupted_during_job")
+        assignment_id = None
         for instant in (started, completed):
             historical = [
                 event for when, event in stamped if when <= instant
@@ -285,11 +304,13 @@ def _historical_repair_lease(*, repo: str, number: int, wu: str,
             view = derive_lifecycle(
                 historical, number, now=instant, durable=True,
             )
-            if (not isinstance(view, dict)
-                    or view.get("lifecycle_rejected_claims")
-                    or view.get("integrity_conflicts")
-                    or view.get("conflicts")
-                    or view.get("rejected_claims")):
+            if not isinstance(view, dict) or any(
+                not isinstance(view.get(key), list) or bool(view[key])
+                for key in (
+                    "lifecycle_rejected_claims", "integrity_conflicts",
+                    "conflicts", "rejected_claims",
+                )
+            ):
                 raise Refused("repair_historical_ledger_rejected")
             active = view.get("active_leases")
             if not isinstance(active, list) or len(active) != 1:
@@ -297,7 +318,12 @@ def _historical_repair_lease(*, repo: str, number: int, wu: str,
             lease = active[0]
             admission = (lease.get("admission_snapshot")
                          if isinstance(lease, dict) else None)
+            origin = lease.get("event") if isinstance(lease, dict) else None
+            origin_id = (
+                origin.get("event_id") if isinstance(origin, dict) else None
+            )
             if (not isinstance(admission, dict)
+                    or not isinstance(origin_id, str) or not origin_id
                     or lease.get("id") != lease_id
                     or lease.get("role") != "implementation"
                     or lease.get("status") != "active"
@@ -310,6 +336,10 @@ def _historical_repair_lease(*, repo: str, number: int, wu: str,
                         lease.get("start_head"), lease.get("last_progress_head")
                     }):
                 raise Refused("repair_historical_lease_mismatch")
+            if assignment_id is None:
+                assignment_id = origin_id
+            elif origin_id != assignment_id:
+                raise Refused("repair_lease_assignment_changed_during_job")
     except Refused:
         raise
     except Exception:

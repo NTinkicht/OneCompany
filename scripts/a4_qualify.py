@@ -17,6 +17,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import zipfile
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -101,7 +102,7 @@ def _decode_job_log(raw: bytes) -> str:
                     parts.append(data.decode("utf-8"))
         except Refused:
             raise
-        except (OSError, UnicodeError, zipfile.BadZipFile, RuntimeError, ValueError) as exc:
+        except (OSError, UnicodeError, zipfile.BadZipFile, RuntimeError, ValueError, EOFError, zlib.error) as exc:
             raise Refused("github_job_log_not_utf8") from exc
         return "\n".join(parts)
     if len(raw) > MAX_JOB_LOG_BYTES:
@@ -123,202 +124,177 @@ def _job_evidence(log: str) -> dict[str, Any]:
         raise Refused("producer_job_evidence_missing_or_ambiguous")
     try:
         record = json.loads(matching[0])
-    except (ValueError, TypeError) as exc:
-        raise Refused("producer_job_evidence_invalid_json") from exc
+    except json.JSONDecodeError as exc:
+        raise Refused("producer_job_evidence_invalid") from exc
     if not isinstance(record, dict):
-        raise Refused("producer_job_evidence_not_object")
+        raise Refused("producer_job_evidence_invalid")
     return record
 
 
-def verify_installation(entry: dict, token: str) -> dict:
-    """Verify fixture-only diff, producer job provenance and exact-head CI."""
-    repo = entry["repository"]
-    wu = entry["work_unit"]
-    actor = entry["actor"]
-    head = entry["head"]
-    base = entry["base"]
-    number = entry["pr"]
-    run_id = entry["workflow_run"]
-    check_name = entry["check_name"]
-    ci_workflow_path = entry["ci_workflow_path"]
-    ci_run_id = entry["ci_workflow_run"]
-    branch = branch_for(wu)
-    if not all(isinstance(value, str) and value for value in
-               (repo, actor, check_name)) or not REPO.fullmatch(repo):
-        raise Refused("manifest_identity_missing")
-    if not SHA.fullmatch(head) or not SHA.fullmatch(base):
-        raise Refused("manifest_exact_sha_missing")
-    if not isinstance(number, int) or isinstance(number, bool) or number < 1:
-        raise Refused("manifest_pr_invalid")
-    if not isinstance(run_id, int) or isinstance(run_id, bool) or run_id < 1:
-        raise Refused("manifest_run_invalid")
-    if ci_workflow_path != TRUSTED_CI_WORKFLOW_PATH or check_name != TRUSTED_CI_CHECK_NAME:
-        raise Refused("manifest_ci_workflow_not_approved")
-    if (not isinstance(ci_run_id, int) or isinstance(ci_run_id, bool)
-        or ci_run_id < 1 or not isinstance(ci_workflow_path, str)
-        or not re.fullmatch(r"\.github/workflows/[A-Za-z0-9_.-]+\.yml", ci_workflow_path)):
-        raise Refused("manifest_ci_workflow_invalid")
-    api = GitHub(repo, token)
-    meta = api.call("GET", "/")
-    pr = api.call("GET", "/pulls/" + str(number))
-    if (pr.get("head", {}).get("sha") != head
-        or pr.get("head", {}).get("ref") != branch
-        or pr.get("head", {}).get("repo", {}).get("full_name") != repo
-        or pr.get("base", {}).get("sha") != base
-        or pr.get("base", {}).get("ref") != meta.get("default_branch")
-        or pr.get("base", {}).get("repo", {}).get("full_name") != repo):
-        raise Refused("manifest_pr_not_exact_live_identity")
-    original = fixture_body(repo, wu, actor, base)
-    commit = api.call("GET", "/git/commits/" + head)
-    if (len(commit.get("parents", [])) != 1
-        or commit["parents"][0].get("sha") != base):
-        raise Refused("manifest_not_initial_fixture_claim")
-    target = "docs/onecompany-fixture/" + wu + ".md"
-    comparison = api.call("GET", "/compare/" + base + "..." + head)
-    changed = comparison.get("files")
-    if (comparison.get("status") != "ahead"
-        or comparison.get("total_commits") != 1
-        or comparison.get("truncated") is True
-        or not isinstance(changed, list)
-        or len(changed) != 1
-        or changed[0].get("filename") != target
-        or changed[0].get("status") != "added"):
-        raise Refused("manifest_commit_changes_outside_fixture")
-    content = api.call("GET", "/contents/" + target + "?ref=" + head)
+def _positive_int(value: Any, refusal: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
+        raise Refused(refusal)
+    return value
+
+
+def _decode_content(payload: dict[str, Any]) -> bytes:
+    if payload.get("encoding") != "base64" or not isinstance(payload.get("content"), str):
+        raise Refused("fixture_content_unreadable")
+    compact = re.sub(r"[ \t\r\n]", "", payload["content"])
     try:
-        encoded = content["content"]
-        if not isinstance(encoded, str) or content.get("encoding") != "base64":
-            raise ValueError("unexpected_contents_encoding")
-        normalized = re.sub(r"[ \t\r\n]", "", encoded)
-        actual = base64.b64decode(normalized, validate=True).decode("utf-8")
-    except (KeyError, UnicodeError, ValueError) as exc:
-        raise Refused("manifest_fixture_unreadable") from exc
-    if actual != original:
-        raise Refused("manifest_fixture_content_not_exact")
-    run = api.call("GET", "/actions/runs/" + str(run_id))
-    if (run.get("id") != run_id
-        or run.get("event") != "repository_dispatch"
-        or run.get("path") != WORKFLOW_PATH
-        or run.get("head_sha") != base
-        or run.get("status") != "completed"
-        or run.get("conclusion") != "success"
-        or run.get("repository", {}).get("full_name") != repo):
-        raise Refused("unattended_project_run_not_proven")
-    jobs = api.call(
-        "GET", "/actions/runs/" + str(run_id) + "/jobs?per_page=100"
-    ).get("jobs", [])
-    if not isinstance(jobs, list) or len(jobs) >= 100:
-        raise Refused("producer_job_inventory_ambiguous")
-    matched = [
-        job for job in jobs
-        if job.get("name") == PRODUCER_JOB and job.get("run_id") == run_id
-    ]
-    if len(matched) != 1:
-        raise Refused("producer_job_missing_or_ambiguous")
-    job = matched[0]
-    if (job.get("status") != "completed"
-        or job.get("conclusion") != "success"
-        or not any(
-            step.get("name") == PRODUCER_STEP
-            and step.get("status") == "completed"
-            and step.get("conclusion") == "success"
-            for step in job.get("steps", [])
-        )):
-        raise Refused("producer_job_not_successful")
-    record = _job_evidence(_job_log(api, job.get("id")))
+        return base64.b64decode(compact, validate=True)
+    except (ValueError, base64.binascii.Error) as exc:
+        raise Refused("fixture_content_unreadable") from exc
+
+
+def _require_object(value: Any, refusal: str) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise Refused(refusal)
+    return value
+
+
+def _require_list(value: Any, refusal: str) -> list[Any]:
+    if not isinstance(value, list):
+        raise Refused(refusal)
+    return value
+
+
+def _verify_installation(entry: dict[str, Any], token: str) -> dict[str, str]:
+    repo = entry.get("repository")
+    wu = entry.get("wu")
+    expected_actor = entry.get("actor")
+    base = entry.get("base_sha")
+    run_id = _positive_int(entry.get("run_id"), "producer_run_id_invalid")
+    number = _positive_int(entry.get("pr_number"), "pilot_pr_number_invalid")
+    if not isinstance(repo, str) or not REPO.fullmatch(repo):
+        raise Refused("pilot_repository_invalid")
+    if not isinstance(wu, str) or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", wu):
+        raise Refused("pilot_work_unit_invalid")
+    if not isinstance(expected_actor, str) or not expected_actor:
+        raise Refused("pilot_actor_invalid")
+    if not isinstance(base, str) or not SHA.fullmatch(base):
+        raise Refused("pilot_base_sha_invalid")
+    api = GitHub(repo, token)
+    metadata = _require_object(api.call("GET", ""), "pilot_repository_metadata_invalid")
+    if metadata.get("full_name") != repo or metadata.get("visibility") != "public" or metadata.get("private") is not False:
+        raise Refused("pilot_repository_must_be_public")
+    pr = _require_object(api.call("GET", f"/pulls/{number}"), "pilot_pr_invalid")
+    if pr.get("state") != "open":
+        raise Refused("pilot_pr_not_open")
+    head = _require_object(pr.get("head"), "pilot_pr_head_invalid")
+    base_ref = _require_object(pr.get("base"), "pilot_pr_base_invalid")
+    head_repo = _require_object(head.get("repo"), "pilot_pr_head_invalid")
+    base_repo = _require_object(base_ref.get("repo"), "pilot_pr_base_invalid")
+    head_sha = head.get("sha")
+    if head_repo.get("full_name") != repo or base_repo.get("full_name") != repo:
+        raise Refused("pilot_pr_repository_mismatch")
+    if base_ref.get("sha") != base or not isinstance(head_sha, str) or not SHA.fullmatch(head_sha):
+        raise Refused("pilot_pr_lineage_mismatch")
+    if head.get("ref") != branch_for(wu):
+        raise Refused("pilot_branch_mismatch")
+
+    compare = _require_object(api.call("GET", f"/compare/{base}...{head_sha}"), "pilot_compare_invalid")
+    files = _require_list(compare.get("files"), "pilot_compare_invalid")
+    commits = _require_list(compare.get("commits"), "pilot_compare_invalid")
+    expected_path = f"docs/onecompany-fixture/{wu}.md"
+    if compare.get("status") != "ahead" or len(commits) != 1 or len(files) != 1:
+        raise Refused("pilot_fixture_scope_invalid")
+    if files[0].get("filename") != expected_path or files[0].get("status") != "added":
+        raise Refused("pilot_fixture_scope_invalid")
+
+    fixture = _require_object(api.call("GET", f"/contents/{expected_path}?ref={head_sha}"), "fixture_content_unreadable")
+    if _decode_content(fixture) != fixture_body(repo, wu, base):
+        raise Refused("pilot_fixture_content_invalid")
+
+    run = _require_object(api.call("GET", f"/actions/runs/{run_id}"), "producer_run_invalid")
+    if run.get("event") != "repository_dispatch" or run.get("conclusion") != "success" or run.get("head_sha") != base:
+        raise Refused("producer_run_invalid")
+    if run.get("path") != WORKFLOW_PATH:
+        raise Refused("producer_run_workflow_invalid")
+    run_repo = _require_object(run.get("repository"), "producer_run_invalid")
+    if run_repo.get("full_name") != repo:
+        raise Refused("producer_run_repository_mismatch")
+    jobs_payload = _require_object(api.call("GET", f"/actions/runs/{run_id}/jobs?per_page=100"), "producer_jobs_invalid")
+    jobs = _require_list(jobs_payload.get("jobs"), "producer_jobs_invalid")
+    candidates = [job for job in jobs if isinstance(job, dict) and job.get("name") == PRODUCER_JOB]
+    if len(candidates) != 1 or candidates[0].get("conclusion") != "success":
+        raise Refused("producer_job_invalid")
+    job = candidates[0]
+    job_id = _positive_int(job.get("id"), "producer_job_id_invalid")
+    steps = _require_list(job.get("steps"), "producer_job_invalid")
+    producer_steps = [step for step in steps if isinstance(step, dict) and step.get("name") == PRODUCER_STEP]
+    if len(producer_steps) != 1 or producer_steps[0].get("conclusion") != "success":
+        raise Refused("producer_step_invalid")
+    evidence = _job_evidence(_job_log(api, job_id))
     expected = {
-        "status": "PR_CREATED_OR_RECONCILED",
-        "repository": repo, "work_unit": wu, "actor": actor,
-        "branch": branch, "pr": number, "head": head,
-        "base": base, "fixture_path": target,
-        "run_id": run_id, "run_attempt": run.get("run_attempt"),
+        "repository": repo,
+        "wu": wu,
+        "actor": expected_actor,
+        "pr": number,
+        "head": head_sha,
+        "base": base,
+        "branch": branch_for(wu),
+        "run_id": run_id,
+        "run_attempt": run.get("run_attempt"),
     }
-    if not isinstance(expected["run_attempt"], int) or any(
-        record.get(key) != value for key, value in expected.items()
-    ):
-        raise Refused("producer_job_evidence_identity_mismatch")
-    workflow_at_base = api.call(
-        "GET", "/contents/" + ci_workflow_path + "?ref=" + base
-    )
-    if workflow_at_base.get("type") != "file":
-        raise Refused("trusted_ci_workflow_missing_from_base")
-    if workflow_at_base.get("sha") != TRUSTED_CI_WORKFLOW_BLOB:
-        raise Refused("trusted_ci_workflow_blob_mismatch")
-    if meta.get("private") is not False or meta.get("visibility") != "public":
-        raise Refused("public_disposable_runner_requirement_not_proven")
-    checks = api.call("GET", "/commits/" + head + "/check-runs?per_page=100")
-    rows = checks.get("check_runs", [])
-    if not isinstance(rows, list) or len(rows) >= 100:
-        raise Refused("exact_head_ci_inventory_ambiguous")
-    trusted_url = re.compile(
-        r"https://github\.com/" + re.escape(repo)
-        + r"/actions/runs/" + str(ci_run_id) + r"/job/[0-9]+/?$"
-    )
-    matching = [
-        item for item in rows
-        if isinstance(item, dict) and item.get("name") == check_name
-        and item.get("head_sha") == head
-        and item.get("status") == "completed"
-        and item.get("conclusion") == "success"
-        and isinstance(item.get("app"), dict)
-        and item["app"].get("slug") == "github-actions"
-        and isinstance(item.get("details_url"), str)
-        and trusted_url.fullmatch(item["details_url"])
-    ]
-    if len(matching) != 1:
-        raise Refused("exact_head_ci_not_proven")
-    ci_run = api.call("GET", "/actions/runs/" + str(ci_run_id))
-    if (ci_run.get("id") != ci_run_id
-        or ci_run.get("head_sha") != head
-        or ci_run.get("path") != ci_workflow_path
-        or ci_run.get("status") != "completed"
-        or ci_run.get("conclusion") != "success"
-        or ci_run.get("repository", {}).get("full_name") != repo):
-        raise Refused("trusted_exact_head_ci_run_not_proven")
-    return {
-        "repository": repo, "work_unit": wu, "pr": number,
-        "head": head, "base": base, "workflow_run": run_id,
-        "producer_job": job["id"], "check_name": check_name,
-        "ci_workflow_path": ci_workflow_path, "ci_workflow_run": ci_run_id,
-        "result": "DISPOSABLE_A4_UNATTENDED_CREATION_CI_VERIFIED",
-        "review_and_merge": "separate independent gates, not attested by A4",
-    }
+    if any(evidence.get(key) != value for key, value in expected.items()):
+        raise Refused("producer_job_evidence_mismatch")
 
-
-def verify_pair(entries: list[dict], token: str) -> dict:
-    """Require two distinct owners and independently authenticated run data."""
-    if not isinstance(entries, list) or len(entries) != 2:
-        raise Refused("exactly_two_installations_required")
-    repos = [entry.get("repository") for entry in entries]
-    if not all(isinstance(repo, str) and REPO.fullmatch(repo)
-               for repo in repos):
-        raise Refused("installations_repository_identity_invalid")
-    if repos[0].split("/", 1)[0].casefold() == repos[1].split("/", 1)[0].casefold():
-        raise Refused("installations_must_have_distinct_owners")
-    outcomes = [verify_installation(entry, token) for entry in entries]
-    return {
-        "result": "TWO_REAL_ISOLATED_A4_PILOTS_VERIFIED",
-        "installations": outcomes,
-    }
+    ci_workflow_path = entry.get("ci_workflow_path")
+    check_name = entry.get("check_name")
+    if ci_workflow_path != TRUSTED_CI_WORKFLOW_PATH or check_name != TRUSTED_CI_CHECK_NAME:
+        raise Refused("trusted_ci_identity_mismatch")
+    workflow_at_base = _require_object(api.call("GET", f"/contents/{TRUSTED_CI_WORKFLOW_PATH}?ref={base}"), "trusted_ci_workflow_missing")
+    if workflow_at_base.get("type") != "file" or workflow_at_base.get("sha") != TRUSTED_CI_WORKFLOW_BLOB:
+        raise Refused("trusted_ci_workflow_mismatch")
+    checks_payload = _require_object(api.call("GET", f"/commits/{head_sha}/check-runs?per_page=100"), "pilot_checks_invalid")
+    checks = _require_list(checks_payload.get("check_runs"), "pilot_checks_invalid")
+    trusted = []
+    for check in checks:
+        if not isinstance(check, dict) or check.get("name") != TRUSTED_CI_CHECK_NAME or check.get("conclusion") != "success" or check.get("head_sha") != head_sha:
+            continue
+        app = check.get("app")
+        if not isinstance(app, dict) or app.get("slug") != "github-actions":
+            continue
+        details = check.get("details_url")
+        if isinstance(details, str):
+            match = re.fullmatch(r"https://github\.com/[^/]+/[^/]+/actions/runs/(\d+)/job/\d+", details)
+            if match:
+                trusted.append(int(match.group(1)))
+    if len(trusted) != 1:
+        raise Refused("trusted_exact_head_ci_missing_or_ambiguous")
+    ci_run = _require_object(api.call("GET", f"/actions/runs/{trusted[0]}"), "trusted_ci_run_invalid")
+    ci_repo = _require_object(ci_run.get("repository"), "trusted_ci_run_invalid")
+    if ci_run.get("conclusion") != "success" or ci_run.get("head_sha") != head_sha or ci_run.get("path") != TRUSTED_CI_WORKFLOW_PATH or ci_repo.get("full_name") != repo:
+        raise Refused("trusted_exact_head_ci_invalid")
+    return {"repository": repo, "owner": repo.split("/", 1)[0], "head": head_sha}
 
 
 def main() -> int:
-    """Validate a non-secret manifest using read-only GitHub API access."""
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "manifest", type=Path,
-        help="JSON array of two non-secret disposable-pilot records",
-    )
+    parser.add_argument("manifest", type=Path)
     args = parser.parse_args()
-    try:
-        data = json.loads(args.manifest.read_text(encoding="utf-8"))
-        result = verify_pair(data, os.environ.get("GH_TOKEN", ""))
-    except (Refused, OSError, ValueError, KeyError, TypeError) as exc:
-        print("A4_QUALIFICATION_REFUSED: " + str(exc), file=sys.stderr)
+    token = os.environ.get("GH_TOKEN", "")
+    if not token:
+        print("A4_QUALIFY_REFUSED: missing_token", file=sys.stderr)
         return 2
-    print(json.dumps(result, indent=2, sort_keys=True))
+    try:
+        manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
+        if not isinstance(manifest, dict):
+            raise Refused("manifest_invalid")
+        pilots = manifest.get("pilots")
+        if not isinstance(pilots, list) or len(pilots) != 2 or not all(isinstance(item, dict) for item in pilots):
+            raise Refused("manifest_requires_exactly_two_pilots")
+        verified = [_verify_installation(item, token) for item in pilots]
+        if verified[0]["repository"] == verified[1]["repository"] or verified[0]["owner"] == verified[1]["owner"]:
+            raise Refused("installations_must_be_distinct_repositories")
+    except (OSError, UnicodeError, json.JSONDecodeError, Refused) as exc:
+        reason = exc.reason if isinstance(exc, Refused) else "manifest_invalid"
+        print("A4_QUALIFY_REFUSED: " + reason, file=sys.stderr)
+        return 2
+    print(json.dumps({"status": "TWO_REAL_ISOLATED_A4_PILOTS_VERIFIED", "pilots": verified}, sort_keys=True))
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

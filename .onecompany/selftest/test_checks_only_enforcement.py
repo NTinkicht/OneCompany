@@ -111,6 +111,50 @@ class ChecksOnlyEnforcementTests(unittest.TestCase):
         self.assertFalse(result["review_gate_enforced"])
         self.assertFalse(result["enforcement_ok"])
 
+    def test_non_bypassable_classic_pinned_review_app(self):
+        """Classic protection counts only a source-pinned, non-bypassable gate."""
+        original = self.api
+        expected = {
+            "enforce_admins": {"enabled": True},
+            "required_pull_request_reviews": {
+                "bypass_pull_request_allowances": {
+                    "users": [], "teams": [], "apps": [],
+                },
+                "require_code_owner_reviews": False,
+            },
+            "required_status_checks": {
+                "contexts": ["validate"],
+                "checks": [
+                    {"context": controls.REVIEW_GATE_CONTEXT, "app_id": 117},
+                ],
+            },
+        }
+        def check(payload):
+            def api(path):
+                if path.endswith("/protection"):
+                    return 0, payload, ""
+                return original(path)
+            with (
+                patch.object(controls, "gh_api", side_effect=api),
+                patch.object(controls, "_codeowners_coverage", return_value=(True, [])),
+                patch.object(controls, "REVIEW_GATE_APP_ID", 117),
+            ):
+                return controls.inspect_enforcement(
+                    "example/app", "main", {"validate"},
+                )
+        result = check(expected)
+        self.assertTrue(result["review_gate_enforced"])
+        self.assertTrue(result["enforcement_ok"])
+        wrong = dict(expected)
+        wrong["required_status_checks"] = {
+            "contexts": ["validate", controls.REVIEW_GATE_CONTEXT],
+            "checks": [{"context": controls.REVIEW_GATE_CONTEXT, "app_id": 999}],
+        }
+        self.assertFalse(check(wrong)["review_gate_enforced"])
+        bypassable = dict(expected)
+        bypassable["enforce_admins"] = {"enabled": False}
+        self.assertFalse(check(bypassable)["review_gate_enforced"])
+
     def test_missing_required_check_is_a_blocker_even_without_review_gate(self):
         """Keep exact-head status checks mechanically required."""
         with (

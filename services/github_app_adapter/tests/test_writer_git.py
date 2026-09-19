@@ -125,6 +125,81 @@ class ExactRefWriterTests(unittest.TestCase):
                 for method, path, _ in client.calls)
         )
 
+    def test_malformed_truthy_pr_identity_refuses_before_git_mutation(self):
+        """Do not dereference malformed head or nested repo from GitHub."""
+        for field in ("head", "head_repo"):
+            for malformed in (None, "invalid", ["invalid"]):
+                with self.subTest(field=field, malformed=malformed):
+                    class MalformedHead(WriterFake):
+                        def _call(self, method, path, token, payload=None):
+                            if path == f"/repos/{REPO}/pulls/106":
+                                head = {"sha": HEAD, "ref": "wu-grok-smoke",
+                                        "repo": {"full_name": REPO}}
+                                if field == "head":
+                                    head = malformed
+                                else:
+                                    head["repo"] = malformed
+                                return {"head": head,
+                                        "base": {"sha": BASE, "ref": "main",
+                                                 "repo": {"full_name": REPO}}}
+                            return super()._call(method, path, token, payload)
+                    client = MalformedHead()
+                    writer = ExactRefWriter(client)
+                    with patch.object(writer.authority, "inspect", return_value={
+                        "branch": "wu-grok-smoke",
+                        "expected_head_sha": HEAD, "main_sha": BASE,
+                    }):
+                        with patch.dict(os.environ, {
+                            "ONECOMPANY_GROK_WRITE_ENABLED": "true"
+                        }):
+                            with self.assertRaisesRegex(
+                                WriteRefused, "writer_canonical_branch_changed"
+                            ):
+                                writer.submit(request(), "d" * 40)
+                    self.assertFalse(any(
+                        path.endswith("/git/blobs") or method == "PATCH"
+                        for method, path, _ in client.calls
+                    ))
+
+    def test_malformed_pr_on_later_reads_is_fail_closed(self):
+        """The second read refuses before ref mutation; third read is indeterminate."""
+        for bad_read in (2, 3):
+            for bad_field in ("head", "base"):
+                for malformed in ("invalid", ["invalid"]):
+                    with self.subTest(bad_read=bad_read, bad_field=bad_field,
+                                      malformed=malformed):
+                        class SequentialMalformed(WriterFake):
+                            def __init__(self):
+                                super().__init__()
+                                self.pr_reads = 0
+                            def _call(self, method, path, token, payload=None):
+                                response = super()._call(method, path, token, payload)
+                                if path == f"/repos/{REPO}/pulls/106":
+                                    self.pr_reads += 1
+                                    if self.pr_reads == bad_read:
+                                        response[bad_field] = malformed
+                                return response
+                        client = SequentialMalformed()
+                        writer = ExactRefWriter(client)
+                        with patch.object(writer.authority, "inspect", return_value={
+                            "branch": "wu-grok-smoke",
+                            "expected_head_sha": HEAD, "main_sha": BASE,
+                        }):
+                            with patch.dict(os.environ, {
+                                "ONECOMPANY_GROK_WRITE_ENABLED": "true"
+                            }):
+                                expected = (
+                                    "writer_pr_changed_before_ref" if bad_read == 2
+                                    else "writer_pr_indeterminate_reconcile_no_retry"
+                                )
+                                with self.assertRaisesRegex(WriteRefused, expected):
+                                    writer.submit(request(), "d" * 40)
+                        updates = [call for call in client.calls
+                                   if call[0] == "PATCH"]
+                        self.assertEqual(len(updates), 0 if bad_read == 2 else 1)
+                        self.assertEqual(client.current,
+                                         HEAD if bad_read == 2 else NEW)
+
     def test_wrong_blob_or_stale_head_prevents_ref_mutation(self):
         for changed in (False,True):
             client=WriterFake()

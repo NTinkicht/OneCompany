@@ -183,6 +183,63 @@ class FirstPRProducerTests(unittest.TestCase):
         self.assertEqual(api.created_prs, 1)
         self.assertEqual(one["head"], CLAIM)
 
+    def test_deleted_fork_or_malformed_live_pr_refuses_cleanly(self):
+        """Treat null or invalid GitHub PR identity as a sanitized refusal."""
+        for which in ("head_repo", "base_repo", "head", "base", "response"):
+            with self.subTest(which=which):
+                class DeletedFork(FakeGitHub):
+                    def call(self, method, path, payload=None):
+                        answer = super().call(method, path, payload)
+                        if method == "GET" and path.startswith("/pulls/"):
+                            if which == "response":
+                                return None
+                            if which == "head":
+                                answer["head"] = None
+                            elif which == "base":
+                                answer["base"] = None
+                            elif which == "head_repo":
+                                answer["head"]["repo"] = None
+                            else:
+                                answer["base"]["repo"] = None
+                        return answer
+                with self.assertRaisesRegex(
+                    producer.Refused, "created_pr_exact_identity_drift"
+                ):
+                    producer.produce(DeletedFork(REPO), **installation())
+
+    def test_malformed_api_shapes_refuse_without_traceback(self):
+        """No decoded null/list objects may escape as AttributeError/KeyError."""
+        cases = (
+            ("meta", "GET", "/", "public_disposable_runner_requirement_not_proven"),
+            ("base_data", "GET", "/git/ref/heads/main", "trusted_checkout_or_base_moved"),
+            ("base_ref", "GET", "/git/ref/heads/onecompany-a4-wu-a", "branch_ref_ambiguous"),
+            ("base_commit", "GET", "/git/commits/" + BASE, "base_tree_unavailable"),
+            ("blob", "POST", "/git/blobs", "claim_blob_uncertain_reconcile_before_retry"),
+            ("tree", "POST", "/git/trees", "claim_tree_uncertain_reconcile_before_retry"),
+            ("commit", "POST", "/git/commits", "claim_commit_uncertain_reconcile_before_retry"),
+            ("verify_commit", "GET", "/git/commits/" + CLAIM, "pre_existing_branch_not_exact_claim"),
+            ("record", "GET", "/contents/", "claim_fixture_missing_or_invalid"),
+            ("comparison", "GET", "/compare/", "claim_diff_outside_exact_fixture_scope"),
+        )
+        for which, method, endpoint, reason in cases:
+            with self.subTest(which=which):
+                class Malformed(FakeGitHub):
+                    def call(self, op, path, payload=None):
+                        if op == method and (path == endpoint or
+                                             (endpoint.endswith("/") and path.startswith(endpoint))):
+                            if which == "base_ref":
+                                # The first default-branch read must remain valid.
+                                if path == "/git/ref/heads/onecompany-a4-wu-a":
+                                    return {"object": None}
+                            if which == "base_commit":
+                                return {"tree": None}
+                            if which == "record" and "?ref=" + BASE in path:
+                                return super().call(op, path, payload)
+                            return None
+                        return super().call(op, path, payload)
+                with self.assertRaisesRegex(producer.Refused, reason):
+                    producer.produce(Malformed(REPO), **installation())
+
     def test_two_independent_installations_no_cross_authority(self):
         """Prove separate project identities and foreign replay refusal."""
         a = FakeGitHub("owner/disposable-a")

@@ -192,7 +192,8 @@ def _api_branch(api: GitHub, branch: str) -> str | None:
         if exc.status == 404:
             return None
         raise
-    result = ref.get("object", {}).get("sha")
+    obj = ref.get("object") if isinstance(ref, dict) else None
+    result = obj.get("sha") if isinstance(obj, dict) else None
     if not isinstance(result, str) or not SHA.fullmatch(result):
         raise Refused("branch_ref_ambiguous")
     return result
@@ -206,7 +207,8 @@ def _matching_pulls(api: GitHub, branch: str) -> list[dict]:
         "per_page": "100",
     })
     result = api.call("GET", "/pulls?" + query)
-    if not isinstance(result, list) or len(result) >= 100:
+    if (not isinstance(result, list) or len(result) >= 100
+            or any(not isinstance(pr, dict) for pr in result)):
         raise Refused("pull_request_inventory_ambiguous")
     return result
 
@@ -214,22 +216,29 @@ def _matching_pulls(api: GitHub, branch: str) -> list[dict]:
 def _verify_claim(api: GitHub, head: str, base: str, target: str, body: str) -> None:
     """Reject a prior claim unless its ancestry, content and diff are exact."""
     commit = api.call("GET", "/git/commits/" + head)
-    parents = commit.get("parents", [])
-    if len(parents) != 1 or parents[0].get("sha") != base:
+    parents = commit.get("parents") if isinstance(commit, dict) else None
+    if (not isinstance(parents, list) or len(parents) != 1
+            or not isinstance(parents[0], dict)
+            or parents[0].get("sha") != base):
         raise Refused("pre_existing_branch_not_exact_claim")
     path = urllib.parse.quote(target, safe="/")
     record = api.call("GET", "/contents/" + path + "?ref=" + head)
-    if record.get("type") != "file" or record.get("encoding") != "base64":
+    if (not isinstance(record, dict) or record.get("type") != "file"
+            or record.get("encoding") != "base64"):
         raise Refused("claim_fixture_missing_or_invalid")
+    encoded = record.get("content")
+    if not isinstance(encoded, str):
+        raise Refused("claim_fixture_unreadable")
     try:
-        existing = base64.b64decode(record["content"], validate=False).decode("utf-8")
-    except (KeyError, UnicodeError, ValueError) as exc:
+        existing = base64.b64decode(encoded, validate=False).decode("utf-8")
+    except (UnicodeError, ValueError) as exc:
         raise Refused("claim_fixture_unreadable") from exc
     if existing != body:
         raise Refused("pre_existing_branch_claim_conflict")
     comparison = api.call("GET", "/compare/" + base + "..." + head)
-    changed = comparison.get("files", [])
+    changed = comparison.get("files") if isinstance(comparison, dict) else None
     if (not isinstance(changed, list) or len(changed) != 1
+        or not isinstance(changed[0], dict)
         or changed[0].get("filename") != target
         or changed[0].get("status") != "added"):
         raise Refused("claim_diff_outside_exact_fixture_scope")
@@ -245,21 +254,28 @@ def _create_claim(api: GitHub, base: str, branch: str, target: str, body: str) -
     else:
         raise Refused("fixture_target_already_exists_at_trusted_base")
     base_commit = api.call("GET", "/git/commits/" + base)
-    tree_sha = base_commit.get("tree", {}).get("sha")
+    base_tree = base_commit.get("tree") if isinstance(base_commit, dict) else None
+    tree_sha = base_tree.get("sha") if isinstance(base_tree, dict) else None
     if not isinstance(tree_sha, str) or not SHA.fullmatch(tree_sha):
         raise Refused("base_tree_unavailable")
     blob = api.call("POST", "/git/blobs", {"content": body, "encoding": "utf-8"})
+    blob_sha = blob.get("sha") if isinstance(blob, dict) else None
+    if not isinstance(blob_sha, str) or not SHA.fullmatch(blob_sha):
+        raise Refused("claim_blob_uncertain_reconcile_before_retry")
     tree = api.call("POST", "/git/trees", {
         "base_tree": tree_sha,
-        "tree": [{"path": target, "mode": "100644", "type": "blob", "sha": blob["sha"]}],
+        "tree": [{"path": target, "mode": "100644", "type": "blob", "sha": blob_sha}],
     })
+    new_tree_sha = tree.get("sha") if isinstance(tree, dict) else None
+    if not isinstance(new_tree_sha, str) or not SHA.fullmatch(new_tree_sha):
+        raise Refused("claim_tree_uncertain_reconcile_before_retry")
     commit = api.call("POST", "/git/commits", {
         "message": "test-only: reserve and implement " + branch,
-        "tree": tree["sha"], "parents": [base],
+        "tree": new_tree_sha, "parents": [base],
     })
-    proposed = commit.get("sha")
+    proposed = commit.get("sha") if isinstance(commit, dict) else None
     if not isinstance(proposed, str) or not SHA.fullmatch(proposed):
-        raise Refused("claim_commit_unavailable")
+        raise Refused("claim_commit_uncertain_reconcile_before_retry")
     try:
         api.call("POST", "/git/refs", {
             "ref": "refs/heads/" + branch, "sha": proposed,
@@ -285,14 +301,16 @@ def produce(api: GitHub, *, config: dict, queue: dict, readiness: dict,
     if api.repository != repo:
         raise Refused("project_identity_mismatch")
     meta = api.call("GET", "/")
-    if meta.get("private") is not False or meta.get("visibility") != "public":
+    if (not isinstance(meta, dict) or meta.get("private") is not False
+            or meta.get("visibility") != "public"):
         raise Refused("public_disposable_runner_requirement_not_proven")
     default = meta.get("default_branch")
     expected_default = config.get("project", {}).get("default_branch")
     if default != expected_default or not isinstance(default, str):
         raise Refused("trusted_default_branch_mismatch")
     base_data = api.call("GET", "/git/ref/heads/" + default)
-    base = base_data.get("object", {}).get("sha")
+    base_object = base_data.get("object") if isinstance(base_data, dict) else None
+    base = base_object.get("sha") if isinstance(base_object, dict) else None
     if not isinstance(base, str) or base != checkout_sha:
         raise Refused("trusted_checkout_or_base_moved")
     branch, target = preflight(
@@ -315,7 +333,8 @@ def produce(api: GitHub, *, config: dict, queue: dict, readiness: dict,
         raise Refused("duplicate_canonical_pr_inventory")
     if found:
         pr = found[0]
-        if pr.get("base", {}).get("ref") != default:
+        pr_base = pr.get("base") if isinstance(pr, dict) else None
+        if not isinstance(pr_base, dict) or pr_base.get("ref") != default:
             raise Refused("pr_targets_foreign_base")
         if pr.get("state") != "open" or pr.get("draft") is True:
             raise Refused("canonical_pr_closed_or_draft")
@@ -339,14 +358,24 @@ def produce(api: GitHub, *, config: dict, queue: dict, readiness: dict,
     if not isinstance(number, int) or isinstance(number, bool) or number <= 0:
         raise Refused("pr_creation_uncertain_reconcile_before_retry")
     live = api.call("GET", "/pulls/" + str(number))
+    if not isinstance(live, dict):
+        raise Refused("created_pr_exact_identity_drift")
+    live_head = live.get("head")
+    live_base = live.get("base")
+    if not isinstance(live_head, dict) or not isinstance(live_base, dict):
+        raise Refused("created_pr_exact_identity_drift")
+    head_repo = live_head.get("repo")
+    base_repo = live_base.get("repo")
+    if not isinstance(head_repo, dict) or not isinstance(base_repo, dict):
+        raise Refused("created_pr_exact_identity_drift")
     if (live.get("state") != "open"
         or live.get("draft") is True
-        or live.get("head", {}).get("sha") != head
-        or live.get("head", {}).get("ref") != branch
-        or live.get("head", {}).get("repo", {}).get("full_name") != repo
-        or live.get("base", {}).get("sha") != base
-        or live.get("base", {}).get("ref") != default
-        or live.get("base", {}).get("repo", {}).get("full_name") != repo):
+        or live_head.get("sha") != head
+        or live_head.get("ref") != branch
+        or head_repo.get("full_name") != repo
+        or live_base.get("sha") != base
+        or live_base.get("ref") != default
+        or base_repo.get("full_name") != repo):
         raise Refused("created_pr_exact_identity_drift")
     return {
         "status": "PR_CREATED_OR_RECONCILED",

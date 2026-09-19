@@ -25,7 +25,7 @@ class InteractiveActivationTests(unittest.TestCase):
         actors = load("actors.json")["actors"]
         enabled = {item["id"] for item in actors if item.get("enabled")}
         configured = {item["id"] for item in actors if item.get("configured")}
-        expected = {"human-owner", "chatgpt", "onecompany-local"}
+        expected = {"human-owner", "chatgpt", "onecompany-local", "grok-4-6-interactive"}
         self.assertEqual(enabled, expected)
         self.assertEqual(configured, expected)
 
@@ -61,8 +61,20 @@ class InteractiveActivationTests(unittest.TestCase):
         self.assertTrue(local["capacity"]["measured"])
         self.assertTrue(local["capacity"]["evidence"])
 
+        grok = readiness["grok-4-6-interactive"]
+        self.assertEqual(grok["setup_state"], "ready")
+        self.assertEqual(grok["verified_capabilities"], ["repository_intelligence"])
+        self.assertTrue(grok["repository_access"]["read"])
+        self.assertFalse(grok["repository_access"]["write"])
+        self.assertFalse(grok["repository_access"]["review"])
+        self.assertFalse(grok["repository_access"]["merge"])
+        self.assertEqual(grok["capacity"]["implementation_streams"], 0)
+        self.assertTrue(grok["capacity"]["measured"])
+        self.assertTrue(grok["capacity"]["evidence"])
+        self.assertTrue(grok["evidence"])
+
         for actor_id, actor in actors.items():
-            if actor_id in {"human-owner", "chatgpt", "onecompany-local"}:
+            if actor_id in {"human-owner", "chatgpt", "onecompany-local", "grok-4-6-interactive"}:
                 continue
             self.assertFalse(actor["enabled"], actor_id)
             self.assertFalse(actor["configured"], actor_id)

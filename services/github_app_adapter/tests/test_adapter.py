@@ -150,6 +150,9 @@ class TestGrokAppAdapter(unittest.TestCase):
             client.pull_request_snapshot(102, "main")
         with self.assertRaisesRegex(AdapterRefused, "head_or_repository_changed"):
             client.pull_request_snapshot(102, "c" * 40)
+        head = client.pull_request_head(102)
+        self.assertEqual(head["exact_head_sha"], "a" * 40)
+        self.assertTrue(head["read_only"])
         result = client.pull_request_snapshot(102, "a" * 40)
         self.assertEqual(result["head_branch"], "wu-test")
         self.assertEqual(result["authenticated_principal"], "onecompany-grok-worker[bot]")

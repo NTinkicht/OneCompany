@@ -232,6 +232,56 @@ class A4QualificationEvidenceTests(unittest.TestCase):
         with self.assertRaisesRegex(producer.Refused, "exact_head_ci_not_proven"):
             self.verify()
 
+    def test_malformed_compressed_job_log_fails_closed(self):
+        """Translate decompressor failures into the stable refusal contract."""
+        class Info:
+            file_size = 1
+
+        class BrokenArchive:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def namelist(self):
+                return ["log.txt"]
+
+            def getinfo(self, name):
+                return Info()
+
+            def read(self, name):
+                raise qualifier.zlib.error("corrupt deflate stream")
+
+        with patch.object(qualifier.zipfile, "ZipFile", return_value=BrokenArchive()):
+            with self.assertRaisesRegex(producer.Refused, "github_job_log_not_utf8"):
+                qualifier._decode_job_log(b"PK-corrupt")
+
+    def test_truncated_compressed_job_log_fails_closed(self):
+        """Translate premature compressed-member EOF into refusal."""
+        class Info:
+            file_size = 1
+
+        class TruncatedArchive:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def namelist(self):
+                return ["log.txt"]
+
+            def getinfo(self, name):
+                return Info()
+
+            def read(self, name):
+                raise EOFError("truncated member")
+
+        with patch.object(qualifier.zipfile, "ZipFile", return_value=TruncatedArchive()):
+            with self.assertRaisesRegex(producer.Refused, "github_job_log_not_utf8"):
+                qualifier._decode_job_log(b"PK-truncated")
+
 
 if __name__ == "__main__":
     unittest.main()

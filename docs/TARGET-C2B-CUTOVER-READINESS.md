@@ -4,7 +4,7 @@ This document defines the **pre-cutover rehearsal boundary** for Epic 0.6 C2b.
 
 The gate is deliberately target-agnostic and non-mutating. It does not install OneCompany into a target repository, stop schedulers, acquire leases, create target branches or pull requests, dispatch product work, publish target authority, or perform a migration. Its only job is to prove whether a separately reviewed cutover could be considered safely.
 
-Veritas Atlas (`NTinkicht/veritas-atlas`) is the first active proving-ground target. Historical Tabibi C1/C2a evidence remains valid only for its original provenance and regression coverage; it is not reused as Veritas evidence.
+Every candidate project supplies its own current, scoped C1/C2a evidence in its repository or isolated authorized state store. Historical evidence from one installation cannot become another project's authority.
 
 ## Command
 
@@ -92,15 +92,17 @@ OneCompany becomes the single canonical owner
 
 If any step becomes ambiguous, the safe state is to keep the target unchanged and re-run reconciliation.
 
-## First active target: Veritas Atlas
+## Per-project execution evidence
 
-Veritas Atlas must receive fresh C1 read-only onboarding and C2a shadow evidence before this gate can support a real cutover decision. The current pivot does not mutate Veritas Atlas and does not inherit target facts from Tabibi.
+For each distinct target, collect fresh read-only onboarding, a scoped shadow
+manifest, exact-state writer inventory, deployment and rollback ownership, and
+explicit human authority before any installation. OneCompany's source tree
+ships the **generic gate implementation**, not a target's service IDs, account
+identities, incident records, release plans or approvals. Project-specific
+evidence stays in the owning project or isolated authorized state store.
 
-The initial read-only baseline has already identified important items that must remain blockers until independently resolved: unprotected `main`, no observed GitHub Actions workflow estate, local-only documented smoke tests, and unknown deployment/runtime mutators.
-
-## Historical Tabibi evidence
-
-Existing Tabibi C1/C2a evidence is preserved as historical provenance and fail-closed regression coverage. Tabibi remains under its existing control plane. This target-neutral gate does not stop its schedules, change its writers, or reinterpret its stored state.
+Historical case files may inform synthetic regression fixtures, never
+another project's current write, review, release or merge authority.
 
 ## Governance invariants
 

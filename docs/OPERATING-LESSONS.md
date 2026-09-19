@@ -85,3 +85,34 @@ An unattended loop without a clear human override is not mature autonomy.
 Forcing every actor to emit activity wastes capacity and can degrade quality.
 
 **Design consequence:** the company optimizes Work Unit throughput and risk closure, not per-agent utilization. Idle specialists are fine; idle ready work is the fault.
+
+## 15. Positive test fixtures must resemble real provider payloads
+
+An in-memory GitHub double returning one-line Base64 or a successful check name
+without app/run identity may let synthetic tests pass while a real installation
+fails or a forged success is accepted.
+
+**Design consequence:** test provider-native wrapped content, malformed JSON,
+ambiguous mutation results, exact diff and ancestry, GitHub Actions job/run
+provenance, trusted workflow identity and independently sourced check results.
+Do not mistake a passing source simulation for a completed live pilot.
+
+## 16. Preconditions must precede the first external write
+
+A worker that checks run IDs, cost class or actor availability after creating
+its PR can leave a durable mutation without reproducible provenance.
+
+**Design consequence:** validate complete zero-extra-spend policy, actor cost and
+capacity, temporary outages, repository/base and immutable run identity before
+calling mutation APIs. A malformed response after a successful API mutation is
+uncertain; reconcile the canonical remote identity instead of blindly retrying.
+
+## 17. Review policy and enforcement code must describe the same system
+
+Updating CODEOWNERS or a runbook alone does not update `inspect_enforcement`,
+`doctor` and `github-audit`. A stale mandatory review predicate can make
+otherwise compliant technical delivery appear blocked.
+
+**Design consequence:** modify policy, machine validators, operational reports
+and negative regression coverage in the same PR. Keep technical status-check
+verification explicit and independent of optional reviewer assignment.

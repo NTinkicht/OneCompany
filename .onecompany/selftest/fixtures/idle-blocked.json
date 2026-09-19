@@ -7,7 +7,7 @@
   "snapshot": {
     "observed_at": "2026-09-18T14:43:52Z",
     "main_sha": "cccccccccccccccccccccccccccccccccccccccc",
-    "source": "github:synthetic-observation-boundary",
+    "source": "fixture-synthetic-read-only",
     "stale": false,
     "derived": false,
     "observation_boundary_ref": "github:synthetic-observation-boundary"
@@ -122,5 +122,6 @@
       "path": "target-control-plane",
       "classification": "add-later-only-after-reviewed-cutover"
     }
-  ]
+  ],
+  "fixture_note": "Synthetic regression case; no claim about an actual project or operational state."
 }

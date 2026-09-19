@@ -7,7 +7,7 @@
   "snapshot": {
     "observed_at": "2026-09-17T13:54:00Z",
     "main_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-    "source": "github-live-read-only",
+    "source": "fixture-synthetic-read-only",
     "stale": false,
     "derived": false
   },
@@ -138,5 +138,6 @@
       "path": "coordination/AUTONOMY_PROTOCOL.md",
       "classification": "preserve/reconcile"
     }
-  ]
+  ],
+  "fixture_note": "Synthetic regression case; no claim about an actual project or operational state."
 }

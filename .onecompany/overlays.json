@@ -5,7 +5,9 @@
     "concept_adapted_from": "msitarzewski/agency-agents",
     "source_lineage": "msitarzewski/agency-agents",
     "reference_license": "MIT",
-    "policy": "OneCompany overlays are generic governance-focused adaptations. Upstream changes are opt-in and require review."
+    "policy": "OneCompany overlays are generic governance-focused adaptations. Upstream changes are opt-in and require review.",
+    "pinned_reference_commit": "647c8baa42b6842afb4a97bf2c0950d45ba88e8b",
+    "reference_repository": "msitarzewski/agency-agents"
   },
   "rules": {
     "creates_actor": false,

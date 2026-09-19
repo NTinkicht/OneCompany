@@ -1,6 +1,6 @@
 {
   "$schema": "./schemas/patterns.schema.json",
-  "version": 1,
+  "version": 2,
   "patterns": [
     {
       "id": "spotify-aligned-autonomy",

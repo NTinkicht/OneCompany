@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Read-only inspection of live GitHub controls required by CompanyOS."""
+"""Read-only inspection of technical GitHub controls required by CompanyOS."""
 from __future__ import annotations
 
 import base64
@@ -10,6 +10,13 @@ from typing import Any
 from urllib.parse import quote
 
 from onecompany_lib import CONTROL, ROOT, load_json, path_matches_any, run
+
+# An independently operated GitHub App must publish the exact-head/base
+# technical-review attestation. Set its vetted integration ID only after the
+# App and non-author review implementation have been independently verified.
+# None means NO trusted server-side review gate is installed; fail closed.
+REVIEW_GATE_CONTEXT = "onecompany-independent-review"
+REVIEW_GATE_APP_ID: int | None = None
 
 
 def gh_api(path: str) -> tuple[int, Any | None, str]:
@@ -269,7 +276,7 @@ def _codeowners_coverage(text: str) -> tuple[bool, list[str]]:
 def inspect_enforcement(
     repo: str, branch: str, required_checks: set[str]
 ) -> dict[str, Any]:
-    """Inspect whether default-branch review/check controls are non-bypassable."""
+    """Inspect technical default-branch checks and report review policy separately."""
     result: dict[str, Any] = {
         "repo": repo,
         "branch": branch,
@@ -287,6 +294,7 @@ def inspect_enforcement(
         "rulesets": [],
         "required_checks": sorted(required_checks),
         "missing_required_checks": sorted(required_checks),
+        "review_gate_enforced": False,
         "enforcement_ok": False,
     }
 
@@ -325,6 +333,7 @@ def inspect_enforcement(
 
     observed_required: set[str] = set()
     owner_review_enforced = False
+    review_gate_enforced = False
     code, protection, _ = gh_api(f"repos/{repo}/branches/{encoded_ref}/protection")
     if code == 0 and isinstance(protection, dict):
         checks = protection.get("required_status_checks") or {}
@@ -333,6 +342,17 @@ def inspect_enforcement(
             str(item.get("context"))
             for item in checks.get("checks", [])
             if isinstance(item, dict) and item.get("context")
+        )
+        classic_review_gate = (
+            isinstance(REVIEW_GATE_APP_ID, int)
+            and not isinstance(REVIEW_GATE_APP_ID, bool)
+            and REVIEW_GATE_APP_ID > 0
+            and any(
+                isinstance(item, dict)
+                and item.get("context") == REVIEW_GATE_CONTEXT
+                and item.get("app_id") == REVIEW_GATE_APP_ID
+                for item in checks.get("checks", [])
+            )
         )
         reviews = protection.get("required_pull_request_reviews") or {}
         code_owner = reviews.get("require_code_owner_reviews") is True
@@ -347,6 +367,7 @@ def inspect_enforcement(
         if not bypassable:
             observed_required.update(contexts)
             owner_review_enforced = owner_review_enforced or code_owner
+            review_gate_enforced = review_gate_enforced or classic_review_gate
 
     code, rulesets, _ = gh_api(f"repos/{repo}/rulesets")
     if code == 0 and isinstance(rulesets, list):
@@ -366,10 +387,24 @@ def inspect_enforcement(
                 continue
             contexts: set[str] = set()
             code_owner = False
+            review_gate_here = False
             for rule in detail.get("rules", []):
                 if not isinstance(rule, dict):
                     continue
                 contexts.update(_required_contexts_from_rule(rule))
+                if rule.get("type") == "required_status_checks":
+                    specs = (rule.get("parameters") or {}).get("required_status_checks", [])
+                    if (isinstance(REVIEW_GATE_APP_ID, int)
+                        and not isinstance(REVIEW_GATE_APP_ID, bool)
+                        and REVIEW_GATE_APP_ID > 0
+                        and isinstance(specs, list)
+                        and any(
+                            isinstance(item, dict)
+                            and item.get("context") == REVIEW_GATE_CONTEXT
+                            and item.get("integration_id") == REVIEW_GATE_APP_ID
+                            for item in specs
+                        )):
+                        review_gate_here = True
                 if rule.get("type") == "pull_request":
                     params = rule.get("parameters") or {}
                     code_owner = (
@@ -385,10 +420,13 @@ def inspect_enforcement(
                     "code_owner_review": code_owner,
                     "bypass_actors": bypass_actors if isinstance(bypass_actors, list) else None,
                     "counted_as_enforcement": not bypassable,
+                    "review_gate_present": review_gate_here,
                 }
             )
             if bypassable:
                 continue
+            if review_gate_here:
+                review_gate_enforced = True
             observed_required.update(contexts)
             owner_review_enforced = owner_review_enforced or code_owner
 
@@ -396,7 +434,8 @@ def inspect_enforcement(
     result["observed_required_checks"] = sorted(observed_required)
     result["missing_required_checks"] = sorted(missing)
     result["code_owner_review_enforced"] = owner_review_enforced
+    result["review_gate_enforced"] = review_gate_enforced
     result["enforcement_ok"] = bool(
-        result["codeowners_valid"] and owner_review_enforced and not missing
+        result["codeowners_valid"] and not missing and review_gate_enforced
     )
     return result

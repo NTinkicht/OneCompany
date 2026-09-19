@@ -16,19 +16,22 @@ It focuses reviews on OneCompany's highest-risk invariants: platform-derived ide
 
 ## Governance boundary
 
-OCR is **never** an eligible replacement for the independent human Code Owner approval required by protected `main`.
+OCR is an advisory review scaffold; it does not replace deterministic CI,
+independent non-author technical review or OneCompany's exact-head/base merge
+gate. The former platform approval policy and two-person CODEOWNERS roster
+are historical and no longer describe this repository.
 
-The upstream GitHub publisher submits PR reviews with event `COMMENT`, not `APPROVE`. Even if a future integration posts under a branded GitHub App identity, OneCompany must treat the result as advisory technical evidence only.
+A compliant deployment also needs a server-side required review attestation:
+`onecompany-independent-review` from an independently operated, vetted
+GitHub App with a pinned integration ID, as required by `inspect_enforcement`.
+A plain green `validate` check or an advisory bot comment is not sufficient.
+This source release deliberately leaves the app ID unconfigured and reports
+review enforcement as **not verified** until that integration is installed.
 
-The protected-main ruleset remains authoritative:
-
-- one approving review;
-- Code Owner review;
-- stale approvals dismissed after push;
-- approval of the most recent reviewable push;
-- all review conversations resolved;
-- required `validate` check;
-- no bypass actors.
+Routine technical PRs need no manually requested reviewer. Source ownership
+is assigned only to the repository owner. Exceptional budget, credentials,
+constitutional, legal and destructive-production decisions follow the separate
+governance policy.
 
 ## Recommended zero-additional-spend mode
 
@@ -66,7 +69,7 @@ OCR can also install a Claude command/skill upstream, but OneCompany does not ve
 
 ## Codex
 
-The same delegation flow can be used with Codex when quota is available. OCR improves deterministic file/rule coverage; Codex remains the reasoning engine. A Codex/OCR review is advisory unless the GitHub platform records a separately eligible approval from an independent human Code Owner.
+The same delegation flow can be used with Codex when quota is available. OCR improves deterministic file/rule coverage; Codex remains the reasoning engine. A Codex/OCR review contributes independent technical evidence only when reviewer independence and the exact head/base are verified by OneCompany.
 
 ## GitHub automation - intentionally not required
 
@@ -90,6 +93,8 @@ If automated OCR is enabled later, the integration must:
 - remain advisory and non-required unless a later governance change proves deterministic availability and evidence semantics;
 - stop rather than incur paid overage or activate a paid fallback.
 
-## Human reviewer continuity
+## Review continuity
 
-Protected CompanyOS paths have two human Code Owners: `@NTinkicht` and `@kaporal159`. The author/last pusher cannot satisfy their own final approval, so the other human supplies the independent platform approval. OCR, Claude, Codex, Copilot, or any other automated reviewer can strengthen the technical review but cannot replace that human gate.
+CodeRabbit, Codex and other eligible non-author technical reviewers may
+supply advisory findings for the current exact SHA. Evidence and required
+checks remain separate. Do not request another individual on routine PRs.

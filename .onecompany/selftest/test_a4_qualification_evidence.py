@@ -1,0 +1,322 @@
+from __future__ import annotations
+
+import json
+import hashlib
+import os
+import tempfile
+from contextlib import redirect_stderr
+from io import StringIO
+import sys
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[2]
+SCRIPTS = ROOT / "scripts"
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
+
+import a4_pr_producer as producer
+import a4_qualify as qualifier
+from test_a4_first_pr_producer import BASE, FakeGitHub, installation
+
+
+class PilotApi(FakeGitHub):
+    """Synthetic GitHub audit records; NOT a completed live project pilot."""
+
+    def __init__(self, repo: str):
+        super().__init__(repo)
+        self.run_success = True
+        self.step_success = True
+        self.ci_success = True
+        self.run_path = qualifier.WORKFLOW_PATH
+        self.record = None
+        self.run_id = 42
+        self.job_id = 97
+        self.ci_run_id = 84
+        self.ci_path = qualifier.TRUSTED_CI_WORKFLOW_PATH
+        self.ci_blob = qualifier.TRUSTED_CI_WORKFLOW_BLOB
+        self.trusted_app_slug = "github-actions"
+        self.wrap_base64 = False
+
+    def call(self, method, path, payload=None):
+        """Return provider-shaped workflow/job/check results for refusal tests."""
+        if method == "GET" and path.startswith("/compare/"):
+            original = super().call(method, path, payload)
+            original.update({"status": "ahead", "total_commits": 1, "commits": [{"sha": self.next_commit}]})
+            return original
+        if method == "GET" and path == "/":
+            original = super().call(method, path, payload)
+            original["full_name"] = self.repository
+            return original
+        if method == "GET" and path == "/actions/runs/84":
+            return {
+                "id": self.ci_run_id, "path": self.ci_path,
+                "head_sha": self.refs["onecompany-a4-" + self.record["work_unit"].lower()],
+                "status": "completed", "conclusion": "success",
+                "repository": {"full_name": self.repository},
+            }
+        if method == "GET" and path == "/contents/" + qualifier.TRUSTED_CI_WORKFLOW_PATH + "?ref=" + BASE:
+            return {"type": "file", "sha": self.ci_blob}
+        if method == "GET" and path == "/actions/runs/42":
+            return {
+                "id": self.run_id, "event": "repository_dispatch",
+                "path": self.run_path, "head_sha": BASE,
+                "status": "completed",
+                "conclusion": "success" if self.run_success else "failure",
+                "run_attempt": 1,
+                "repository": {"full_name": self.repository},
+            }
+        if method == "GET" and path == "/actions/runs/42/jobs?per_page=100":
+            return {"jobs": [{
+                "id": self.job_id, "run_id": self.run_id,
+                "name": qualifier.PRODUCER_JOB,
+                "status": "completed",
+                "conclusion": "success" if self.run_success else "failure",
+                "steps": [{
+                    "name": qualifier.PRODUCER_STEP, "status": "completed",
+                    "conclusion": "success" if self.step_success else "skipped",
+                }],
+            }]}
+        if method == "GET" and path.startswith("/commits/") and path.endswith("/check-runs?per_page=100"):
+            head = path.split("/commits/", 1)[1].split("/", 1)[0]
+            return {"check_runs": [{
+                "name": qualifier.TRUSTED_CI_CHECK_NAME, "head_sha": head,
+                "status": "completed",
+                "conclusion": "success" if self.ci_success else "failure",
+                "app": {"slug": self.trusted_app_slug},
+                "details_url": (
+                    f"https://github.com/{self.repository}/actions/runs/"
+                    f"{self.ci_run_id}/job/100"
+                ),
+            }]}
+        if method == "GET" and path.startswith("/contents/docs/") and self.wrap_base64:
+            result = super().call(method, path, payload)
+            encoded = result["content"]
+            result["content"] = encoded[:45] + "\n" + encoded[45:]
+            return result
+        return super().call(method, path, payload)
+
+
+def installed(api: PilotApi, wu: str) -> dict:
+    """Create one test-only fixture and synthetic run-bound evidence record."""
+    result = producer.produce(api, **installation(api.repository, wu))
+    api.record = {**result, "run_id": api.run_id, "run_attempt": 1}
+    return {
+        "repository": api.repository, "wu": wu, "actor": "fixture-bot",
+        "pr_number": result["pr"], "base_sha": BASE,
+        "run_id": api.run_id,
+        "check_name": qualifier.TRUSTED_CI_CHECK_NAME,
+        "ci_workflow_run": api.ci_run_id, "ci_workflow_path": api.ci_path,
+    }
+
+
+class A4QualificationEvidenceTests(unittest.TestCase):
+    """Reject a fabricated pilot when any immutable audit binding is missing."""
+
+    def setUp(self):
+        """Build two independent fake installations, never touching GitHub."""
+        self.first = PilotApi("owner-a/disposable-a")
+        self.second = PilotApi("owner-b/disposable-b")
+        self.entries = [
+            installed(self.first, "WU-A"), installed(self.second, "WU-B"),
+        ]
+        for api, wu in ((self.first, "WU-A"), (self.second, "WU-B")):
+            self.assertEqual(
+                api.files[api.next_commit],
+                producer.fixture_body(api.repository, wu, "fixture-bot", BASE),
+            )
+        self.registry = {
+            self.first.repository: self.first,
+            self.second.repository: self.second,
+        }
+
+    def verify(self):
+        """Replace network and job-log reads with deterministic local results."""
+        with (
+            patch.object(
+                qualifier, "GitHub",
+                side_effect=lambda repo, token: self.registry[repo],
+            ),
+            patch.object(
+                qualifier, "_job_log",
+                side_effect=lambda api, job_id: (
+                    "2026-09-19T12:00:00Z "
+                    + qualifier.EVIDENCE_PREFIX
+                    + json.dumps(api.record, sort_keys=True)
+                    + "\n"
+                ),
+            ),
+        ):
+            return qualifier.verify_pair(self.entries, "read-only-token")
+
+    def test_real_producer_evidence_key_and_cli_refusal(self):
+        """Do not inject synthetic wu; report malformed manifest as exit 2."""
+        self.assertEqual(self.first.record["work_unit"], "WU-A")
+        self.assertNotIn("wu", self.first.record)
+        self.assertEqual(self.verify()["result"], "TWO_REAL_ISOLATED_A4_PILOTS_VERIFIED")
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "invalid-manifest.json"
+            path.write_text('{"pilots":[]}', encoding="utf-8")
+            errors = StringIO()
+            with (
+                patch.object(sys, "argv", ["a4_qualify.py", str(path)]),
+                patch.dict(os.environ, {"GH_TOKEN": "test-only-token"}),
+                redirect_stderr(errors),
+            ):
+                exit_code = qualifier.main()
+            self.assertEqual(exit_code, 2)
+            self.assertIn("A4_QUALIFY_REFUSED: manifest_requires_exactly_two_pilots",
+                          errors.getvalue())
+            self.assertNotIn("Traceback", errors.getvalue())
+
+    def test_public_only_templates_and_pinned_verifier_blob(self):
+        """Reject accidental drift of the vetted workflow or runner guard."""
+        base = ROOT / ".onecompany" / "templates" / "workflows"
+        ci = (base / "onecompany-a4-fixture-validation.yml.disabled").read_bytes()
+        blob_id = hashlib.sha1(
+            b"blob " + str(len(ci)).encode("ascii") + b"\x00" + ci
+        ).hexdigest()
+        self.assertEqual(blob_id, qualifier.TRUSTED_CI_WORKFLOW_BLOB)
+        producer_workflow = (
+            base / "onecompany-a4-pr-producer.yml.disabled"
+        ).read_text(encoding="utf-8")
+        for workflow in (ci.decode("utf-8"), producer_workflow):
+            self.assertIn("github.event.repository.visibility == 'public'", workflow)
+            self.assertIn("github.event.repository.private == false", workflow)
+
+    def test_distinct_owner_exact_run_evidence_is_admissible(self):
+        """Require a pair of individually proven project-scoped trial records."""
+        result = self.verify()
+        self.assertEqual(result["result"], "TWO_REAL_ISOLATED_A4_PILOTS_VERIFIED")
+        self.assertEqual(len(result["installations"]), 2)
+
+    def test_same_owner_is_not_two_independent_installations(self):
+        """Reject two separately named repos sharing the same GitHub owner."""
+        same_owner = PilotApi("owner-a/other-repo")
+        self.registry[same_owner.repository] = same_owner
+        self.entries[1] = installed(same_owner, "WU-B")
+        with self.assertRaisesRegex(producer.Refused, "installations_must_be_distinct_repositories"):
+            self.verify()
+
+    def test_unrelated_successful_workflow_does_not_prove_producer(self):
+        """Reject valid but unrelated repository-dispatch run records."""
+        self.first.run_path = ".github/workflows/unrelated.yml"
+        with self.assertRaisesRegex(producer.Refused, "producer_run_workflow_invalid"):
+            self.verify()
+
+    def test_skipped_job_step_cannot_substitute_for_execution(self):
+        """Reject a workflow with an absent or skipped producer step."""
+        self.first.step_success = False
+        with self.assertRaisesRegex(producer.Refused, "producer_step_invalid"):
+            self.verify()
+
+    def test_same_workflow_but_foreign_result_is_refused(self):
+        """Bind producer log to the exact WU, PR, head, base and run."""
+        self.first.record["head"] = "e" * 40
+        with self.assertRaisesRegex(producer.Refused, "producer_job_evidence_mismatch"):
+            self.verify()
+
+    def test_run_attempt_mismatch_is_refused(self):
+        """Prevent a stale result from satisfying a later run attempt."""
+        self.first.record["run_attempt"] = 99
+        with self.assertRaisesRegex(producer.Refused, "producer_job_evidence_mismatch"):
+            self.verify()
+
+    def test_additional_policy_file_in_claim_is_refused(self):
+        """Reject additional files even when the fixture body is correct."""
+        self.first.extra_diff = True
+        with self.assertRaisesRegex(producer.Refused, "pilot_fixture_scope_invalid"):
+            self.verify()
+
+    def test_github_wrapped_base64_content_is_valid(self):
+        """Accept GitHub\\u0027s line-wrapped Base64 but require exact decoded bytes."""
+        self.first.wrap_base64 = True
+        self.assertEqual(self.verify()["result"], "TWO_REAL_ISOLATED_A4_PILOTS_VERIFIED")
+
+    def test_forged_or_untrusted_ci_check_is_refused(self):
+        """Reject arbitrary check names or a check from an untrusted app."""
+        self.first.trusted_app_slug = "untrusted-app"
+        with self.assertRaisesRegex(producer.Refused, "trusted_exact_head_ci_missing_or_ambiguous"):
+            self.verify()
+        self.first.trusted_app_slug = "github-actions"
+        self.first.ci_path = ".github/workflows/unrelated.yml"
+        with self.assertRaisesRegex(producer.Refused, "trusted_exact_head_ci_invalid"):
+            self.verify()
+
+    def test_manifest_selected_ci_workflow_is_refused(self):
+        """Do not let evidence provider select its own validation workflow."""
+        self.entries[0]["ci_workflow_path"] = ".github/workflows/unrelated.yml"
+        with self.assertRaisesRegex(producer.Refused, "trusted_ci_identity_mismatch"):
+            self.verify()
+        self.entries[0]["ci_workflow_path"] = qualifier.TRUSTED_CI_WORKFLOW_PATH
+        self.first.ci_blob = "f" * 40
+        with self.assertRaisesRegex(producer.Refused, "trusted_ci_workflow_mismatch"):
+            self.verify()
+
+    def test_private_disposable_pilot_cannot_be_qualified(self):
+        """Reject a target with private or uncertain Actions billing."""
+        self.first.private = True
+        self.first.visibility = "private"
+        with self.assertRaisesRegex(producer.Refused, "pilot_repository_must_be_public"):
+            self.verify()
+
+    def test_no_exact_head_green_ci_is_refused(self):
+        """Producer completion never substitutes for deterministic CI."""
+        self.first.ci_success = False
+        with self.assertRaisesRegex(producer.Refused, "trusted_exact_head_ci_missing_or_ambiguous"):
+            self.verify()
+
+    def test_malformed_compressed_job_log_fails_closed(self):
+        """Translate decompressor failures into the stable refusal contract."""
+        class Info:
+            file_size = 1
+
+        class BrokenArchive:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def namelist(self):
+                return ["log.txt"]
+
+            def getinfo(self, name):
+                return Info()
+
+            def read(self, name):
+                raise qualifier.zlib.error("corrupt deflate stream")
+
+        with patch.object(qualifier.zipfile, "ZipFile", return_value=BrokenArchive()):
+            with self.assertRaisesRegex(producer.Refused, "github_job_log_not_utf8"):
+                qualifier._decode_job_log(b"PK-corrupt")
+
+    def test_truncated_compressed_job_log_fails_closed(self):
+        """Translate premature compressed-member EOF into refusal."""
+        class Info:
+            file_size = 1
+
+        class TruncatedArchive:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def namelist(self):
+                return ["log.txt"]
+
+            def getinfo(self, name):
+                return Info()
+
+            def read(self, name):
+                raise EOFError("truncated member")
+
+        with patch.object(qualifier.zipfile, "ZipFile", return_value=TruncatedArchive()):
+            with self.assertRaisesRegex(producer.Refused, "github_job_log_not_utf8"):
+                qualifier._decode_job_log(b"PK-truncated")
+
+
+if __name__ == "__main__":
+    unittest.main()

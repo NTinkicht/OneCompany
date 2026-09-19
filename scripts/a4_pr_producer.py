@@ -99,7 +99,9 @@ def preflight(
     if config.get("safety", {}).get("emergency_stop") is not False:
         errors.append("emergency_stop_or_unknown")
     project = config.get("project", {})
-    if project.get("repository") != repo or project.get("default_branch") != "main":
+    if (project.get("repository") != repo
+        or not isinstance(project.get("default_branch"), str)
+        or not re.fullmatch(r"[A-Za-z0-9._/-]+", project["default_branch"])):
         errors.append("project_identity_or_default_branch_mismatch")
     if not SHA.fullmatch(base):
         errors.append("trusted_base_sha_missing")
@@ -159,11 +161,11 @@ def _api_branch(api: GitHub, branch: str) -> str | None:
     return result
 
 
-def _matching_pulls(api: GitHub, branch: str) -> list[dict]:
+def _matching_pulls(api: GitHub, branch: str, base_branch: str) -> list[dict]:
     owner = api.repository.split("/", 1)[0]
     query = urllib.parse.urlencode({
         "state": "all", "head": owner + ":" + branch,
-        "base": "main", "per_page": "100",
+        "base": base_branch, "per_page": "100",
     })
     result = api.call("GET", "/pulls?" + query)
     if not isinstance(result, list) or len(result) >= 100:
@@ -231,9 +233,12 @@ def produce(api: GitHub, *, config: dict, queue: dict, readiness: dict,
         raise Refused("project_identity_mismatch")
     meta = api.call("GET", "/")
     default = meta.get("default_branch")
-    base_data = api.call("GET", "/git/ref/heads/main")
+    expected_default = config.get("project", {}).get("default_branch")
+    if default != expected_default or not isinstance(default, str):
+        raise Refused("trusted_default_branch_mismatch")
+    base_data = api.call("GET", "/git/ref/heads/" + default)
     base = base_data.get("object", {}).get("sha")
-    if default != "main" or not isinstance(base, str) or base != checkout_sha:
+    if not isinstance(base, str) or base != checkout_sha:
         raise Refused("trusted_checkout_or_base_moved")
     branch, target = preflight(
         config, queue, readiness, dispatch, repo=repo, actor=actor, wu=wu,
@@ -241,7 +246,7 @@ def produce(api: GitHub, *, config: dict, queue: dict, readiness: dict,
     )
     body = fixture_body(repo, wu, actor, base)
     # Unmanaged existing PRs/branches cannot be overwritten or reclassified.
-    found = _matching_pulls(api, branch)
+    found = _matching_pulls(api, branch, default)
     if len(found) > 1:
         raise Refused("duplicate_canonical_pr_inventory")
     head = _api_branch(api, branch)
@@ -250,7 +255,7 @@ def produce(api: GitHub, *, config: dict, queue: dict, readiness: dict,
             raise Refused("pr_exists_without_canonical_branch")
         head = _create_claim(api, base, branch, target, body)
     _verify_claim(api, head, base, target, body)
-    found = _matching_pulls(api, branch)
+    found = _matching_pulls(api, branch, default)
     if len(found) > 1:
         raise Refused("duplicate_canonical_pr_inventory")
     if found:
@@ -258,12 +263,12 @@ def produce(api: GitHub, *, config: dict, queue: dict, readiness: dict,
         if pr.get("state") != "open" or pr.get("draft") is True:
             raise Refused("canonical_pr_closed_or_draft")
     else:
-        if api.call("GET", "/git/ref/heads/main")["object"]["sha"] != base:
+        if api.call("GET", "/git/ref/heads/" + default)["object"]["sha"] != base:
             raise Refused("base_moved_before_pr_creation")
         try:
             pr = api.call("POST", "/pulls", {
                 "title": f"test-only: A4 isolated producer {wu}",
-                "head": branch, "base": "main",
+                "head": branch, "base": default,
                 "body": f"Disposable A4 pilot for {wu}; no deployment or merge authority.",
                 "draft": False,
             })
@@ -280,6 +285,7 @@ def produce(api: GitHub, *, config: dict, queue: dict, readiness: dict,
         or live.get("head", {}).get("ref") != branch
         or live.get("head", {}).get("repo", {}).get("full_name") != repo
         or live.get("base", {}).get("sha") != base
+        or live.get("base", {}).get("ref") != default
         or live.get("base", {}).get("repo", {}).get("full_name") != repo):
         raise Refused("created_pr_exact_identity_drift")
     return {

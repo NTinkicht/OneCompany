@@ -1,22 +1,93 @@
 #!/usr/bin/env python3
-"""Read-only verifier for TWO real, isolated A4 disposable installations.
+"""Read-only, run-bound verifier for two disposable A4 installations.
 
-Do not confuse this live evidence check with the synthetic self-tests.
-Requires a separately generated non-secret manifest and a read-only GitHub
-token. It never creates repositories, merges PRs or promotes autonomy.
+The actual producer result is recovered from the successful GitHub Actions
+job's immutable log, never trusted from a self-asserted manifest field.
 """
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
+import re
 import sys
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
+from typing import Any
 
-from a4_pr_producer import GitHub, Refused, SHA, branch_for, fixture_body
+from a4_pr_producer import GitHub, Refused, SHA, REPO, branch_for, fixture_body
+
+EVIDENCE_PREFIX = "A4_PRODUCER_EVIDENCE:"
+WORKFLOW_PATH = ".github/workflows/onecompany-a4-pr-producer.yml"
+PRODUCER_JOB = "bounded-first-pr"
+PRODUCER_STEP = "Reserve one branch and create or reconcile one fixture PR"
+
+
+class _SafeLogRedirect(urllib.request.HTTPRedirectHandler):
+    """Drop repository token on GitHub's signed, cross-host log redirect."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        redirected = super().redirect_request(req, fp, code, msg, headers, newurl)
+        if redirected is None:
+            return None
+        if urllib.parse.urlsplit(newurl).scheme != "https":
+            raise Refused("github_job_log_redirect_not_https")
+        if urllib.parse.urlsplit(newurl).hostname != "api.github.com":
+            redirected.remove_header("Authorization")
+            redirected.remove_header("authorization")
+        return redirected
+
+
+def _job_log(api: GitHub, job_id: int) -> str:
+    """Fetch the GitHub-hosted job log with a bounded, token-safe redirect."""
+    if not isinstance(job_id, int) or isinstance(job_id, bool) or job_id <= 0:
+        raise Refused("producer_job_id_invalid")
+    request = urllib.request.Request(
+        f"https://api.github.com/repos/{api.repository}/actions/jobs/{job_id}/logs",
+        headers={
+            "Authorization": "Bearer " + api.token,
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+    )
+    try:
+        with urllib.request.build_opener(_SafeLogRedirect()).open(
+            request, timeout=20
+        ) as response:
+            raw = response.read(2_000_001)
+    except (OSError, urllib.error.HTTPError, ValueError) as exc:
+        raise Refused("github_job_log_unavailable") from exc
+    if len(raw) > 2_000_000:
+        raise Refused("github_job_log_too_large")
+    try:
+        return raw.decode("utf-8")
+    except UnicodeError as exc:
+        raise Refused("github_job_log_not_utf8") from exc
+
+
+def _job_evidence(log: str) -> dict[str, Any]:
+    """Accept one complete JSON producer result from a job log, not prose."""
+    matching = [
+        line.split(EVIDENCE_PREFIX, 1)[1].strip()
+        for line in log.splitlines()
+        if EVIDENCE_PREFIX in line
+    ]
+    if len(matching) != 1:
+        raise Refused("producer_job_evidence_missing_or_ambiguous")
+    try:
+        record = json.loads(matching[0])
+    except (ValueError, TypeError) as exc:
+        raise Refused("producer_job_evidence_invalid_json") from exc
+    if not isinstance(record, dict):
+        raise Refused("producer_job_evidence_not_object")
+    return record
 
 
 def verify_installation(entry: dict, token: str) -> dict:
+    """Verify fixture-only diff, producer job provenance and exact-head CI."""
     repo = entry["repository"]
     wu = entry["work_unit"]
     actor = entry["actor"]
@@ -27,7 +98,7 @@ def verify_installation(entry: dict, token: str) -> dict:
     check_name = entry["check_name"]
     branch = branch_for(wu)
     if not all(isinstance(value, str) and value for value in
-               (repo, actor, check_name)):
+               (repo, actor, check_name)) or not REPO.fullmatch(repo):
         raise Refused("manifest_identity_missing")
     if not SHA.fullmatch(head) or not SHA.fullmatch(base):
         raise Refused("manifest_exact_sha_missing")
@@ -50,22 +121,71 @@ def verify_installation(entry: dict, token: str) -> dict:
     if (len(commit.get("parents", [])) != 1
         or commit["parents"][0].get("sha") != base):
         raise Refused("manifest_not_initial_fixture_claim")
-    content = api.call(
-        "GET", "/contents/docs/onecompany-fixture/" + wu + ".md?ref=" + head
-    )
-    import base64
-    actual = base64.b64decode(content["content"]).decode("utf-8")
+    target = "docs/onecompany-fixture/" + wu + ".md"
+    comparison = api.call("GET", "/compare/" + base + "..." + head)
+    changed = comparison.get("files")
+    if (comparison.get("status") != "ahead"
+        or comparison.get("total_commits") != 1
+        or comparison.get("truncated") is True
+        or not isinstance(changed, list)
+        or len(changed) != 1
+        or changed[0].get("filename") != target
+        or changed[0].get("status") != "added"):
+        raise Refused("manifest_commit_changes_outside_fixture")
+    content = api.call("GET", "/contents/" + target + "?ref=" + head)
+    try:
+        actual = base64.b64decode(
+            content["content"], validate=True
+        ).decode("utf-8")
+    except (KeyError, UnicodeError, ValueError) as exc:
+        raise Refused("manifest_fixture_unreadable") from exc
     if actual != original:
         raise Refused("manifest_fixture_content_not_exact")
     run = api.call("GET", "/actions/runs/" + str(run_id))
-    if (run.get("event") != "repository_dispatch"
+    if (run.get("id") != run_id
+        or run.get("event") != "repository_dispatch"
+        or run.get("path") != WORKFLOW_PATH
+        or run.get("head_sha") != base
         or run.get("status") != "completed"
         or run.get("conclusion") != "success"
         or run.get("repository", {}).get("full_name") != repo):
         raise Refused("unattended_project_run_not_proven")
+    jobs = api.call(
+        "GET", "/actions/runs/" + str(run_id) + "/jobs?per_page=100"
+    ).get("jobs", [])
+    if not isinstance(jobs, list) or len(jobs) >= 100:
+        raise Refused("producer_job_inventory_ambiguous")
+    matched = [
+        job for job in jobs
+        if job.get("name") == PRODUCER_JOB and job.get("run_id") == run_id
+    ]
+    if len(matched) != 1:
+        raise Refused("producer_job_missing_or_ambiguous")
+    job = matched[0]
+    if (job.get("status") != "completed"
+        or job.get("conclusion") != "success"
+        or not any(
+            step.get("name") == PRODUCER_STEP
+            and step.get("status") == "completed"
+            and step.get("conclusion") == "success"
+            for step in job.get("steps", [])
+        )):
+        raise Refused("producer_job_not_successful")
+    record = _job_evidence(_job_log(api, job.get("id")))
+    expected = {
+        "status": "PR_CREATED_OR_RECONCILED",
+        "repository": repo, "work_unit": wu, "actor": actor,
+        "branch": branch, "pr": number, "head": head,
+        "base": base, "fixture_path": target,
+        "run_id": run_id, "run_attempt": run.get("run_attempt"),
+    }
+    if not isinstance(expected["run_attempt"], int) or any(
+        record.get(key) != value for key, value in expected.items()
+    ):
+        raise Refused("producer_job_evidence_identity_mismatch")
     checks = api.call("GET", "/commits/" + head + "/check-runs?per_page=100")
     rows = checks.get("check_runs", [])
-    if not any(
+    if not isinstance(rows, list) or len(rows) >= 100 or not any(
         item.get("name") == check_name
         and item.get("head_sha") == head
         and item.get("status") == "completed"
@@ -74,27 +194,38 @@ def verify_installation(entry: dict, token: str) -> dict:
     ):
         raise Refused("exact_head_ci_not_proven")
     return {
-        "repository": repo, "work_unit": wu, "pr": number, "head": head,
-        "base": base, "workflow_run": run_id, "check_name": check_name,
+        "repository": repo, "work_unit": wu, "pr": number,
+        "head": head, "base": base, "workflow_run": run_id,
+        "producer_job": job["id"], "check_name": check_name,
         "result": "DISPOSABLE_A4_UNATTENDED_CREATION_CI_VERIFIED",
         "review_and_merge": "separate independent gates, not attested by A4",
     }
 
 
 def verify_pair(entries: list[dict], token: str) -> dict:
+    """Require two distinct owners and independently authenticated run data."""
     if not isinstance(entries, list) or len(entries) != 2:
         raise Refused("exactly_two_installations_required")
-    if entries[0].get("repository") == entries[1].get("repository"):
-        raise Refused("installations_must_be_distinct_repositories")
+    repos = [entry.get("repository") for entry in entries]
+    if not all(isinstance(repo, str) and REPO.fullmatch(repo)
+               for repo in repos):
+        raise Refused("installations_repository_identity_invalid")
+    if repos[0].split("/", 1)[0].casefold() == repos[1].split("/", 1)[0].casefold():
+        raise Refused("installations_must_have_distinct_owners")
     outcomes = [verify_installation(entry, token) for entry in entries]
-    return {"result": "TWO_REAL_ISOLATED_A4_PILOTS_VERIFIED",
-            "installations": outcomes}
+    return {
+        "result": "TWO_REAL_ISOLATED_A4_PILOTS_VERIFIED",
+        "installations": outcomes,
+    }
 
 
 def main() -> int:
+    """Validate a non-secret manifest using read-only GitHub API access."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("manifest", type=Path,
-                        help="JSON array of two non-secret disposable-pilot records")
+    parser.add_argument(
+        "manifest", type=Path,
+        help="JSON array of two non-secret disposable-pilot records",
+    )
     args = parser.parse_args()
     try:
         data = json.loads(args.manifest.read_text(encoding="utf-8"))

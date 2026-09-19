@@ -93,6 +93,20 @@ class AppClient:
         # Disambiguate a wrong Installation ID from an App not installed on
         # this particular repository. Both can otherwise surface as 404 when
         # POSTing an installation-token request.
+        # The repository lookup identifies the App installation for the
+        # exact approved repo even when an owner supplied a wrong numeric ID.
+        assigned = self._stage_call(
+            "repository_installation_lookup", "GET",
+            f"/repos/{self.settings.repository}/installation", app_jwt,
+        )
+        if not isinstance(assigned, dict) or not isinstance(assigned.get("id"), int):
+            raise AdapterRefused("github_repository_installation_invalid")
+        if assigned["id"] != self.settings.installation_id:
+            # Installation IDs are non-secret configuration identifiers.
+            raise AdapterRefused(
+                "github_repository_installation_id_mismatch_"
+                f"actual_{assigned['id']}"
+            )
         installation = self._stage_call(
             "installation_lookup", "GET",
             f"/app/installations/{self.settings.installation_id}", app_jwt,
@@ -101,14 +115,6 @@ class AppClient:
             installation.get("id") != self.settings.installation_id
         ):
             raise AdapterRefused("github_installation_id_mismatch")
-        assigned = self._stage_call(
-            "repository_installation_lookup", "GET",
-            f"/repos/{self.settings.repository}/installation", app_jwt,
-        )
-        if not isinstance(assigned, dict) or (
-            assigned.get("id") != self.settings.installation_id
-        ):
-            raise AdapterRefused("github_repository_installation_id_mismatch")
         repo_name = self.settings.repository.split("/", 1)[1]
         info = self._stage_call(
             "installation_token", "POST",

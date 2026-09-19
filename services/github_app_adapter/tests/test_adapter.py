@@ -98,8 +98,8 @@ class TestGrokAppAdapter(unittest.TestCase):
                 return super()._call(method, path, token, payload)
         for cls, phase in (
             (RejectApp, "app_metadata"),
-            (RejectInstallationLookup, "installation_lookup"),
             (RejectRepositoryInstallation, "repository_installation_lookup"),
+            (RejectInstallationLookup, "installation_lookup"),
             (RejectInstallation, "installation_token"),
             (RejectRepository, "repository"),
         ):
@@ -109,6 +109,17 @@ class TestGrokAppAdapter(unittest.TestCase):
                     f"github_{phase}_github_http_status_404",
                 ):
                     cls(settings()).identity()
+
+    def test_wrong_installation_id_reports_real_repo_installation(self):
+        class DifferentInstallation(FakeClient):
+            def _call(self, method, path, token, payload=None):
+                if path == "/repos/owner/disposable/installation":
+                    return {"id": 987}
+                return super()._call(method, path, token, payload)
+        with self.assertRaisesRegex(
+            AdapterRefused, "github_repository_installation_id_mismatch_actual_987"
+        ):
+            DifferentInstallation(settings()).identity()
 
     def test_installation_token_scope_never_expands(self):
         client = FakeClient(settings())

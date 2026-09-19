@@ -142,7 +142,7 @@ class A4QualificationEvidenceTests(unittest.TestCase):
         base = ROOT / ".onecompany" / "templates" / "workflows"
         ci = (base / "onecompany-a4-fixture-validation.yml.disabled").read_bytes()
         blob_id = hashlib.sha1(
-            b"blob " + str(len(ci)).encode("ascii") + b"\\0" + ci
+            b"blob " + str(len(ci)).encode("ascii") + b"\x00" + ci
         ).hexdigest()
         self.assertEqual(blob_id, qualifier.TRUSTED_CI_WORKFLOW_BLOB)
         producer_workflow = (

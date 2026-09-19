@@ -120,6 +120,32 @@ class TestGrokOAuth(unittest.IsolatedAsyncioTestCase):
             refreshed.json()["access_token"]
         ))
 
+    async def test_unbounded_or_chunked_oauth_form_is_refused_before_parsing(self):
+        async def oversized():
+            yield b"client_id=onecompany-grok-web&" + b"x" * 8190
+            yield b"y" * 512
+        for route in ("/oauth/authorize", "/oauth/token"):
+            with self.subTest(route=route):
+                reply = await self.client.post(
+                    route, content=oversized(),
+                    headers={"content-type": "application/x-www-form-urlencoded"},
+                )
+                self.assertEqual(reply.status_code, 400)
+                self.assertEqual(reply.json()["error"], "invalid_request")
+        reply = await self.client.post(
+            "/oauth/token",
+            content=b"client_id=a&client_id=b",
+            headers={"content-type": "application/x-www-form-urlencoded"},
+        )
+        self.assertEqual(reply.status_code, 400)
+        self.assertEqual(reply.json()["error"], "invalid_request")
+        reply = await self.client.post(
+            "/oauth/token",
+            content=b"client_id=onecompany-grok-web",
+            headers={"content-type": "multipart/form-data"},
+        )
+        self.assertEqual(reply.status_code, 400)
+
     async def test_refuses_foreign_redirect_and_wrong_pkce(self):
         params = oauth_args()
         params["redirect_uri"] = "https://attacker.example/callback"

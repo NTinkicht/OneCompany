@@ -4,7 +4,11 @@
 
 OneCompany is a reusable **CompanyOS** for running a software company from a GitHub repository. It combines strategy, requirements, planning, safe parallel execution, multi-agent routing, deterministic engineering assurance, independent review, release governance, continuous supervision and organizational learning without surrendering human sovereignty over critical decisions.
 
-It was shaped by real operating experience building Tabibi with ChatGPT, Codex, Claude, GitHub Copilot, Gemini CLI, Mistral, GitHub Actions, strict budget limits, provider capacity constraints, failovers, CI incidents and exact-head review discipline.
+It was shaped by reusable multi-agent engineering lessons, strict budget limits, provider capacity constraints, failovers, CI incidents and exact-head review discipline. It does not ship any named customer project's authority or operational state.
+
+## Reusable product boundary
+
+OneCompany is independent of any project it may later create or operate. Named-project backlogs, host/database identities, deployment evidence and approvals stay in each project's own repository or isolated authorized state store. See [Generic product boundary](docs/GENERIC-PRODUCT-BOUNDARY.md).
 
 ## Start here
 

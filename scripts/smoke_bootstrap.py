@@ -104,6 +104,15 @@ def main() -> int:
             identity = json.loads(
                 (target / ".onecompany" / "identity.json").read_text()
             )
+            readiness = json.loads(
+                (target / ".onecompany" / "readiness.json").read_text()
+            )
+            actors = json.loads(
+                (target / ".onecompany" / "actors.json").read_text()
+            )
+            dispatch = json.loads(
+                (target / ".onecompany" / "dispatch.json").read_text()
+            )
             codeowners = (target / ".github" / "CODEOWNERS").read_text()
             roots = [
                 item
@@ -127,8 +136,51 @@ def main() -> int:
                 "bootstrap did not bind explicit human root principal",
             )
             require(
-                "@example/reviewers" in codeowners and "@NTinkicht" not in codeowners,
-                "bootstrap did not rebind CODEOWNERS",
+                all(
+                    line.split()[1:] == ["@example/reviewers"]
+                    for line in codeowners.splitlines()
+                    if line.strip() and not line.lstrip().startswith("#")
+                ),
+                "bootstrap inherited product CODEOWNERS instead of target owners",
+            )
+            require(
+                len(identity.get("principals", [])) == 1
+                and identity["principals"][0]["login"] == "example-admin",
+                "fresh project inherited source reviewer or root principals",
+            )
+            require(
+                all(
+                    actor.get("setup_state") == "not_started"
+                    and not actor.get("verified_surfaces")
+                    and not actor.get("verified_capabilities")
+                    and not any(actor.get("repository_access", {}).values())
+                    and not actor.get("unattended", {}).get("configured")
+                    and not actor.get("unattended", {}).get("verified")
+                    and not actor.get("capacity", {}).get("measured")
+                    and not actor.get("evidence")
+                    for actor in readiness.get("actors", [])
+                ),
+                "fresh project inherited another repository's verified workers",
+            )
+            require(
+                all(
+                    actor.get("configured") == (actor.get("id") == "human-owner")
+                    and actor.get("enabled") == (actor.get("id") == "human-owner")
+                    for actor in actors.get("actors", [])
+                ),
+                "fresh project inherited enabled or configured source workers",
+            )
+            require(
+                all(
+                    not mechanism.get("evidence")
+                    and mechanism.get("configured") == (
+                        actor.get("actor_id") == "human-owner"
+                        and mechanism.get("kind") == "manual"
+                    )
+                    for actor in dispatch.get("actors", [])
+                    for mechanism in actor.get("mechanisms", [])
+                ),
+                "fresh project inherited source dispatch evidence or authority",
             )
             require(
                 config.get("safety", {}).get("emergency_stop") is False,

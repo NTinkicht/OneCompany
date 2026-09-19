@@ -40,7 +40,16 @@ def installation(repo: str = REPO, wu: str = WU, actor: str = "fixture-bot"):
             "verified_capabilities": ["implementation"],
             "repository_access": {"write": True},
             "unattended": {"verified": True},
+            "capacity": {"measured": True, "implementation_streams": 1},
         }]},
+        "budget": {
+            "ai": {
+                "additional_monthly_spend_cap": 0,
+                "allow_paid_fallback": False, "allow_overage": False,
+                "allow_auto_topup": False,
+            },
+            "ci": {"runner_cost_policy": "included_or_free_only"},
+        },
         "dispatch": {"actors": [{
             "actor_id": actor, "mechanisms": [{
                 "id": "github-actions-a4-pr-producer",
@@ -67,6 +76,7 @@ class FakeGitHub:
         self.next_tree = "d" * 40
         self.next_commit = CLAIM
         self.lose_pr_response = False
+        self.extra_diff = False
 
     def call(self, method: str, path: str, payload=None):
         if method == "GET" and path == "/":
@@ -100,6 +110,11 @@ class FakeGitHub:
             self.refs[branch] = payload["sha"]
             self.created_refs += 1
             return {"ref": payload["ref"]}
+        if method == "GET" and path.startswith("/compare/"):
+            changed = [{"filename": self.fixture_path, "status": "added"}]
+            if self.extra_diff:
+                changed.append({"filename": "hidden.py", "status": "added"})
+            return {"files": changed}
         if method == "GET" and path.startswith("/contents/"):
             sha = path.split("?ref=", 1)[1]
             if sha not in self.files:
@@ -158,6 +173,26 @@ class FirstPRProducerTests(unittest.TestCase):
         with self.assertRaisesRegex(producer.Refused, "project_identity"):
             producer.produce(b, **installation("owner/disposable-a", "WU-A"))
 
+    def test_claim_may_not_smuggle_extra_files(self):
+        api = FakeGitHub(REPO)
+        inputs = installation()
+        producer.produce(api, **inputs)
+        api.extra_diff = True
+        with self.assertRaisesRegex(producer.Refused, "outside_exact_fixture_scope"):
+            producer.produce(api, **inputs)
+
+    def test_racing_branch_ref_winner_is_reconciled(self):
+        class LostCreateResponse(FakeGitHub):
+            def call(self, method, path, payload=None):
+                if method == "POST" and path == "/git/refs":
+                    super().call(method, path, payload)
+                    raise producer.ApiFailure(422)
+                return super().call(method, path, payload)
+        api = LostCreateResponse(REPO)
+        result = producer.produce(api, **installation())
+        self.assertEqual(result["pr"], 1)
+        self.assertEqual((api.created_refs, api.created_prs), (1, 1))
+
     def test_forged_or_orphaned_branch_fails_closed(self):
         inputs = installation()
         api = FakeGitHub(REPO)
@@ -214,6 +249,18 @@ class FirstPRProducerTests(unittest.TestCase):
         with self.assertRaisesRegex(producer.Refused, "unattended_write_unverified"):
             producer.produce(api, **inputs)
         self.assertEqual(api.created_refs, 0)
+
+    def test_foreign_base_or_broad_budget_is_denied(self):
+        inputs = installation()
+        inputs["budget"]["ai"]["allow_overage"] = True
+        with self.assertRaisesRegex(producer.Refused, "zero_extra_spend"):
+            producer.produce(FakeGitHub(REPO), **inputs)
+        inputs["budget"]["ai"]["allow_overage"] = False
+        api = FakeGitHub(REPO)
+        producer.produce(api, **inputs)
+        api.prs[0]["base"]["ref"] = "unrelated"
+        with self.assertRaisesRegex(producer.Refused, "pr_targets_foreign_base"):
+            producer.produce(api, **inputs)
 
     def test_pre_pr_binding_and_exact_fixture_only(self):
         inputs = installation()

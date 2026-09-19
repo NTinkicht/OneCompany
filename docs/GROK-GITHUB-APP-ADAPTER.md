@@ -154,3 +154,19 @@ requests. CI and Render install the same exactly pinned dependency versions
 from `services/github_app_adapter/requirements.txt`; upgrades require a new
 reviewed commit and exact-head validation. This preserves the existing public
 OAuth callback and unchanged connector credentials.
+
+## PR snapshot and write qualification boundary (2026-09-20)
+
+The read-only PR snapshot fetches the current PR before and **again after**
+GitHub's moving `/pulls/{number}/files` response, failing closed if its head,
+base or relevant identity changes. Rename entries preserve `previous_path`.
+Deleted/foreign fork repositories are sanitized refusals, not traceback data.
+The adapter never treats this read-only snapshot as independent final review.
+
+Grok can inspect OneCompany under `onecompany-grok-worker[bot]`, but full
+interactive bot-written WU contributions remain **unqualified**. The merged
+internal writer is not an MCP write tool; it is sealed by default and still
+requires exact native WU lease authority, OAuth write-scope separation,
+owner-approved GitHub App permissions and a live bot-authored smoke test.
+See Issue #105. Do not expand App permissions to Tabibi or Veritas-Atlas to
+qualify the OneCompany-only adapter. The source autonomy level is still L1.

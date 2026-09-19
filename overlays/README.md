@@ -24,6 +24,6 @@ The actor still needs the real lease/capability/permission to perform the work.
 - Overlay findings use the project's canonical severity/verdict system.
 - Upstream profile changes are opt-in; never auto-sync behavior into a governed project.
 
-## Provenance
+## Implementation boundary
 
-The profile-library idea was adapted in Tabibi from `NTinkicht/agency-agents` pinned at `647c8baa42b6842afb4a97bf2c0950d45ba88e8b` (source lineage `msitarzewski/agency-agents`, MIT). These OneCompany overlay texts are concise, governance-focused adaptations rather than a wholesale copy of upstream personalities.
+The role-overlay library is advisory. Project-specific profiles belong in the consuming project's workspace; generic overlays never carry project history or grant identity, capacity, permission or merge rights.

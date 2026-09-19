@@ -17,6 +17,7 @@ from ledger_lib import (
     trusted_pr_base,
 )
 from onecompany_lib import CONTROL, active_implementation_leases, emergency_stop_active, load_json, save_json
+from stream_binding import binding_violations
 from planning_lib import (
     by_id,
     dependency_closure,
@@ -320,6 +321,16 @@ def acquire(args: argparse.Namespace) -> int:
         )
         return 2
 
+    local_stream_errors = binding_violations(
+        args.wu, args.branch, args.pr, local_work_map, active
+    )
+    if local_stream_errors:
+        print(
+            "REFUSED: canonical Work Unit stream binding conflict: "
+            + "; ".join(local_stream_errors)
+        )
+        return 2
+
     durable_done: set[str] = set()
     trusted_ref: str | None = None
     policy_blobs: dict | None = None
@@ -342,6 +353,15 @@ def acquire(args: argparse.Namespace) -> int:
                 return 2
             candidate = context["work_item"]
             work_map = context["work_map"]
+            trusted_stream_errors = binding_violations(
+                args.wu, args.branch, args.pr, work_map, active
+            )
+            if trusted_stream_errors:
+                print(
+                    "REFUSED: protected-base canonical stream binding conflict: "
+                    + "; ".join(trusted_stream_errors)
+                )
+                return 2
             planning = context["planning"]
             policy_blobs = context["policy_blobs"]
             actor_limit = int(context.get("actor_limit") or 0)

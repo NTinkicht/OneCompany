@@ -17,8 +17,8 @@ class ProjectIndependenceTests(unittest.TestCase):
     def test_framework_documents_use_generic_contracts(self):
         self.assertTrue((ROOT / "docs" / "PRODUCT-INDEPENDENCE.md").is_file())
         self.assertTrue((ROOT / "docs" / "OPERATING-LESSONS.md").is_file())
-        self.assertFalse((ROOT / "docs" / "VERITAS-ACTIVATION.md").exists())
-        self.assertFalse((ROOT / "docs" / "TABIBI-LESSONS.md").exists())
+        self.assertFalse(any(doc.name.startswith("TARGET-INSTANCE-")
+                             for doc in (ROOT / "docs").glob("*.md")))
 
     def test_shadow_fixtures_use_distinct_synthetic_repositories(self):
         fixture_dir = ROOT / ".onecompany" / "selftest" / "fixtures"

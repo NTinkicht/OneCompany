@@ -28,6 +28,10 @@ class PilotApi(FakeGitHub):
         self.record = None
         self.run_id = 42
         self.job_id = 97
+        self.ci_run_id = 84
+        self.ci_path = ".github/workflows/onecompany-validate.yml"
+        self.trusted_app_slug = "github-actions"
+        self.wrap_base64 = False
 
     def call(self, method, path, payload=None):
         """Return provider-shaped workflow/job/check results for refusal tests."""
@@ -35,6 +39,15 @@ class PilotApi(FakeGitHub):
             original = super().call(method, path, payload)
             original.update({"status": "ahead", "total_commits": 1})
             return original
+        if method == "GET" and path == "/actions/runs/84":
+            return {
+                "id": self.ci_run_id, "path": self.ci_path,
+                "head_sha": self.refs["onecompany-a4-" + self.record["work_unit"].lower()],
+                "status": "completed", "conclusion": "success",
+                "repository": {"full_name": self.repository},
+            }
+        if method == "GET" and path == "/contents/.github/workflows/onecompany-validate.yml?ref=" + BASE:
+            return {"type": "file"}
         if method == "GET" and path == "/actions/runs/42":
             return {
                 "id": self.run_id, "event": "repository_dispatch",
@@ -61,7 +74,17 @@ class PilotApi(FakeGitHub):
                 "name": "validate", "head_sha": head,
                 "status": "completed",
                 "conclusion": "success" if self.ci_success else "failure",
+                "app": {"slug": self.trusted_app_slug},
+                "details_url": (
+                    f"https://github.com/{self.repository}/actions/runs/"
+                    f"{self.ci_run_id}/job/100"
+                ),
             }]}
+        if method == "GET" and path.startswith("/contents/docs/") and self.wrap_base64:
+            result = super().call(method, path, payload)
+            encoded = result["content"]
+            result["content"] = encoded[:45] + "\\n" + encoded[45:]
+            return result
         return super().call(method, path, payload)
 
 
@@ -73,6 +96,7 @@ def installed(api: PilotApi, wu: str) -> dict:
         "repository": api.repository, "work_unit": wu, "actor": "fixture-bot",
         "pr": result["pr"], "head": result["head"], "base": BASE,
         "workflow_run": api.run_id, "check_name": "validate",
+        "ci_workflow_run": api.ci_run_id, "ci_workflow_path": api.ci_path,
     }
 
 
@@ -150,6 +174,21 @@ class A4QualificationEvidenceTests(unittest.TestCase):
         """Reject additional files even when the fixture body is correct."""
         self.first.extra_diff = True
         with self.assertRaisesRegex(producer.Refused, "outside_fixture"):
+            self.verify()
+
+    def test_github_wrapped_base64_content_is_valid(self):
+        """Accept GitHub\\u0027s line-wrapped Base64 but require exact decoded bytes."""
+        self.first.wrap_base64 = True
+        self.assertEqual(self.verify()["result"], "TWO_REAL_ISOLATED_A4_PILOTS_VERIFIED")
+
+    def test_forged_or_untrusted_ci_check_is_refused(self):
+        """Reject arbitrary check names or a check from an untrusted app."""
+        self.first.trusted_app_slug = "untrusted-app"
+        with self.assertRaisesRegex(producer.Refused, "exact_head_ci_not_proven"):
+            self.verify()
+        self.first.trusted_app_slug = "github-actions"
+        self.first.ci_path = ".github/workflows/unrelated.yml"
+        with self.assertRaisesRegex(producer.Refused, "trusted_exact_head_ci_run"):
             self.verify()
 
     def test_no_exact_head_green_ci_is_refused(self):

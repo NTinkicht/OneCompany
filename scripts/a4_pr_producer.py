@@ -227,7 +227,9 @@ def produce(api: GitHub, *, config: dict, queue: dict, readiness: dict,
             dispatch: dict, repo: str, actor: str, wu: str,
             checkout_sha: str, actions: bool, enabled: bool) -> dict:
     """Reserve one Git ref atomically, then create/adopt one canonical open PR."""
-    meta = api.call("GET", "")
+    if api.repository != repo:
+        raise Refused("project_identity_mismatch")
+    meta = api.call("GET", "/")
     default = meta.get("default_branch")
     base_data = api.call("GET", "/git/ref/heads/main")
     base = base_data.get("object", {}).get("sha")

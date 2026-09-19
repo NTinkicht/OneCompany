@@ -159,6 +159,59 @@ class TestGrokAppAdapter(unittest.TestCase):
         self.assertEqual(result["changed_files"][0]["path"], "scripts/test.py")
         self.assertFalse(result["review_attestation"])
 
+    def test_pr_snapshot_refuses_head_change_during_files_fetch(self):
+        class RacingPR(FakeClient):
+            def __init__(self, settings):
+                super().__init__(settings)
+                self.pr_reads = 0
+            def _call(self, method, path, token, payload=None):
+                if path == "/repos/owner/disposable/pulls/102":
+                    self.pr_reads += 1
+                    return {"number": 102, "state": "open", "draft": False,
+                            "head": {"sha": ("a" if self.pr_reads == 1 else "b") * 40,
+                                     "ref": "wu-test",
+                                     "repo": {"full_name": "owner/disposable"}},
+                            "base": {"sha": "c" * 40, "ref": "main",
+                                     "repo": {"full_name": "owner/disposable"}}}
+                if path.startswith("/repos/owner/disposable/pulls/102/files?"):
+                    return [{"filename": "scripts/changed.py", "status": "modified"}]
+                return super()._call(method, path, token, payload)
+        c = RacingPR(settings())
+        with self.assertRaisesRegex(AdapterRefused, "pr_changed_during_file_snapshot"):
+            c.pull_request_snapshot(102, "a" * 40)
+        self.assertEqual(c.pr_reads, 2)
+
+    def test_pr_snapshot_keeps_renamed_source_path(self):
+        class RenamePR(FakeClient):
+            def _call(self, method, path, token, payload=None):
+                if path == "/repos/owner/disposable/pulls/102":
+                    return {"number": 102, "state": "open", "draft": False,
+                            "head": {"sha": "a" * 40, "ref": "wu-test",
+                                     "repo": {"full_name": "owner/disposable"}},
+                            "base": {"sha": "b" * 40, "ref": "main",
+                                     "repo": {"full_name": "owner/disposable"}}}
+                if path.startswith("/repos/owner/disposable/pulls/102/files?"):
+                    return [{"filename": "docs/new.md",
+                             "previous_filename": "docs/old.md",
+                             "status": "renamed"}]
+                return super()._call(method, path, token, payload)
+        result = RenamePR(settings()).pull_request_snapshot(102, "a" * 40)
+        self.assertEqual(result["changed_files"][0]["previous_path"], "docs/old.md")
+
+    def test_deleted_fork_is_a_sanitized_pr_refusal(self):
+        class RemovedFork(FakeClient):
+            def _call(self, method, path, token, payload=None):
+                if path == "/repos/owner/disposable/pulls/102":
+                    return {"number": 102, "state": "open", "draft": False,
+                            "head": {"sha": "a" * 40, "ref": "wu-test", "repo": None},
+                            "base": {"sha": "b" * 40, "ref": "main", "repo": None}}
+                return super()._call(method, path, token, payload)
+        client = RemovedFork(settings())
+        with self.assertRaisesRegex(AdapterRefused, "pr_head_unavailable_or_foreign"):
+            client.pull_request_head(102)
+        with self.assertRaisesRegex(AdapterRefused, "pr_head_or_repository_changed"):
+            client.pull_request_snapshot(102, "a" * 40)
+
     def test_source_excerpt_requires_safe_path_and_pinned_sha(self):
         client = FakeClient(settings())
         for path in (".onecompany/ledger.json", "../secret.txt",

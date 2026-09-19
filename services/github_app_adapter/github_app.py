@@ -168,11 +168,11 @@ class AppClient:
         )
         if (not isinstance(item, dict) or item.get("number") != pr_number
                 or item.get("state") != "open"
-                or (item.get("head") or {}).get("repo", {}).get("full_name")
+                or ((item.get("head") or {}).get("repo") or {}).get("full_name")
                     != self.settings.repository
                 or not isinstance((item.get("head") or {}).get("sha"), str)
                 or not _SHA.fullmatch(item["head"]["sha"])
-                or (item.get("base") or {}).get("repo", {}).get("full_name")
+                or ((item.get("base") or {}).get("repo") or {}).get("full_name")
                     != self.settings.repository):
             raise AdapterRefused("pr_head_unavailable_or_foreign")
         return {
@@ -219,12 +219,40 @@ class AppClient:
         for file in files:
             if not isinstance(file, dict) or not isinstance(file.get("filename"), str):
                 raise AdapterRefused("pr_file_metadata_invalid")
-            output.append({
+            projected = {
                 "path": file["filename"],
                 "status": file.get("status"),
                 "additions": file.get("additions"),
                 "deletions": file.get("deletions"),
-            })
+            }
+            if file.get("status") == "renamed":
+                previous = file.get("previous_filename")
+                if (not isinstance(previous, str)
+                        or not previous or len(previous) > 1024):
+                    raise AdapterRefused("renamed_pr_source_path_missing")
+                projected["previous_path"] = previous
+            output.append(projected)
+        # GitHub's /pulls/{number}/files follows a MOVING PR head. A push
+        # between initial identity validation and this read would otherwise
+        # mislabel a newer diff as the caller-supplied immutable head SHA.
+        after = self._stage_call(
+            "pr_snapshot_recheck", "GET",
+            f"/repos/{self.settings.repository}/pulls/{pr_number}", token,
+        )
+        if (not isinstance(after, dict) or after.get("number") != pr_number
+                or after.get("state") != "open"
+                or after.get("draft") != doc.get("draft")
+                or not isinstance(after.get("head"), dict)
+                or not isinstance(after.get("base"), dict)
+                or (after["head"].get("repo") or {}).get("full_name")
+                    != self.settings.repository
+                or (after["base"].get("repo") or {}).get("full_name")
+                    != self.settings.repository
+                or after["head"].get("sha") != exact_head_sha
+                or after["head"].get("ref") != head.get("ref")
+                or after["base"].get("sha") != base.get("sha")
+                or after["base"].get("ref") != base.get("ref")):
+            raise AdapterRefused("pr_changed_during_file_snapshot")
         return {
             "repository": self.settings.repository,
             "pr_number": pr_number,

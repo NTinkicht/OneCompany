@@ -1,6 +1,8 @@
 language: en-US
 reviews:
   profile: chill
+  suggested_reviewers: false
+  auto_assign_reviewers: false
   auto_review:
     enabled: true
     auto_incremental_review: true

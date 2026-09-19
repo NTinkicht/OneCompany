@@ -344,9 +344,23 @@ def configure_codeowners(target: Path, owner: str) -> None:
     path = target / ".github" / "CODEOWNERS"
     if not path.exists():
         raise FileNotFoundError("bootstrap copy did not contain .github/CODEOWNERS")
-    text = path.read_text(encoding="utf-8")
-    text = re.sub(r"(?<!\S)@NTinkicht(?!\S)", owner, text)
-    path.write_text(text, encoding="utf-8")
+    # Source CODEOWNERS are OneCompany *product* maintainers, not owners of
+    # a newly installed project. Remove ALL source owners, not one username.
+    lines = []
+    protected_paths = 0
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            lines.append(line)
+            continue
+        parts = stripped.split()
+        if not parts[0].startswith("/") or len(parts) < 2:
+            raise ValueError("unexpected source CODEOWNERS format during bootstrap")
+        lines.append(f"{parts[0]} {owner}")
+        protected_paths += 1
+    if protected_paths == 0:
+        raise ValueError("bootstrap requires protected CODEOWNERS paths")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def configure_root_identity(target: Path, login: str) -> None:
@@ -368,6 +382,8 @@ def configure_root_identity(target: Path, login: str) -> None:
     if root.get("actor_id") != "human-owner":
         raise ValueError("template root principal must map to actor_id human-owner")
     root["login"] = login
+    # Never inherit the product installation\u0027s other reviewer principals.
+    identity["principals"] = [root]
     write_json(path, identity)
 
 
@@ -383,6 +399,50 @@ def initialize_control_plane(
     config["project"]["repository"] = repository
     config["project"]["default_branch"] = default_branch
     write_json(config_path, config)
+
+    # Worker verification is scoped to the source repository and MUST NOT
+    # become capability or access evidence in a new installation.
+    readiness_path = target / ".onecompany" / "readiness.json"
+    readiness = json.loads(readiness_path.read_text(encoding="utf-8"))
+    for actor in readiness.get("actors", []):
+        actor["setup_state"] = "not_started"
+        actor["verified_surfaces"] = []
+        actor["verified_capabilities"] = []
+        actor["temporarily_unavailable_capabilities"] = []
+        actor["repository_access"] = {
+            key: False for key in ("read", "write", "review", "merge")
+        }
+        actor["unattended"] = {"configured": False, "verified": False}
+        actor["capacity"] = {
+            "implementation_streams": 0,
+            "measured": False,
+            "observed_at": None,
+            "evidence": [],
+        }
+        actor["last_verified_at"] = None
+        actor["evidence"] = []
+    write_json(readiness_path, readiness)
+
+    actors_path = target / ".onecompany" / "actors.json"
+    actors = json.loads(actors_path.read_text(encoding="utf-8"))
+    for actor in actors.get("actors", []):
+        # Root is explicitly selected. Every non-human worker requires fresh
+        # target-specific configuration, identity, capacity and access tests.
+        is_root = actor.get("id") == "human-owner"
+        actor["enabled"] = is_root
+        actor["configured"] = is_root
+    write_json(actors_path, actors)
+
+    dispatch_path = target / ".onecompany" / "dispatch.json"
+    dispatch = json.loads(dispatch_path.read_text(encoding="utf-8"))
+    for actor in dispatch.get("actors", []):
+        for mechanism in actor.get("mechanisms", []):
+            mechanism["configured"] = (
+                actor.get("actor_id") == "human-owner"
+                and mechanism.get("kind") == "manual"
+            )
+            mechanism["evidence"] = []
+    write_json(dispatch_path, dispatch)
 
     # Durable coordination is installation-specific authority. Never inherit the
     # source repository's Team Room or trusted publisher identities into a fresh

@@ -87,7 +87,7 @@ base-trusted queue must bind the exact PR number; its native durable
 `coordination_view(pr)` must show precisely one active admitted lease
 matching WU, actor, branch, PR, exact base and initial head. The installed
 repair workflow needs `contents: write`, `pull-requests: read`,
-and `actions: read` only. Confirm explicit owner opt-in
+`actions: read`, and `issues: read` only. Confirm explicit owner opt-in
 `ONECOMPANY_L2_FIXTURE_REPAIR_ENABLED=true`, the approved dispatcher, true
 public repository eligibility, stop=false, zero-extra-spend baseline, trusted
 default-branch checkout, the single READY LOW-risk WU, exact fixture scope and

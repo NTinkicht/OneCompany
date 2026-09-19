@@ -99,8 +99,10 @@ The reviewed worker:
    authoritative target policy and canonical first-PR claim.
 2. Rejects foreign/stale/ambiguous refs, nonfailure CI, changed base, unrelated
    files, absent remediation capacity or unexpected client input.
-3. Appends **only** `Repair: complete\n` to the exact fixture; uses one
-   Git blob/tree/commit and a non-force branch ref update. It cannot merge.
+3. Proves the failure came from the exact named fixture-validation step and
+   its GitHub-hosted log marker; unrelated checkout/setup failures cannot
+   trigger a repair. Appends **only** `Repair: complete\n` to the exact fixture;
+   uses one Git blob/tree/commit and a non-force ref update. It cannot merge.
 4. Reads back exact PR/ref/content. A duplicate dispatch reconciles the same
    repaired SHA, never opens another PR or adds another repair commit.
    Revalidates the native durable lease and exact refs immediately before
@@ -142,6 +144,7 @@ A source-compatible read-only qualification campaign manifest is:
     "wu": "WU-C", "actor": "fixture-bot", "pr_number": 1,
     "base_sha": "<exact-base>", "initial_head": "<exact-initial>",
     "repaired_head": "<exact-repaired>", "failed_run_id": 333,
+    "repair_run_id": 334, "repair_run_attempt": 1,
     "passed_run_id": 444, "review_id": 555
   }
 }
@@ -152,6 +155,15 @@ The manifest is a *request to read live evidence*, not authority. Run:
 ```sh
 GH_TOKEN=<read-only-repository-token> python scripts/p123_qualify.py campaign.json
 ```
+
+The P3 manifest requires the exact successful repair-run ID and run attempt.
+Qualification verifies the trusted-base workflow and worker source blobs,
+the GitHub Actions job/step and single structured job-log evidence record
+bound to the actor, lease ID, WU, same PR, base and initial/repaired SHAs,
+and failed-CI run. Native durable lease history is replayed at both
+platform-recorded job start and completion times. A manual matching commit,
+late lease assignment, expired/transferred lease, or unrelated successful
+workflow cannot qualify the autonomous repair.
 
 The consolidated campaign CLI deliberately exits nonzero even after P1/P3
 evidence is observed, because P2's App-token-level write verification is still

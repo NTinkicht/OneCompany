@@ -110,7 +110,7 @@ def verify_installation(entry: dict, token: str) -> dict:
         raise Refused("manifest_run_invalid")
     if (not isinstance(ci_run_id, int) or isinstance(ci_run_id, bool)
         or ci_run_id < 1 or not isinstance(ci_workflow_path, str)
-        or not re.fullmatch(r"\\.github/workflows/[A-Za-z0-9_.-]+\\.yml", ci_workflow_path)):
+        or not re.fullmatch(r"\.github/workflows/[A-Za-z0-9_.-]+\.yml", ci_workflow_path)):
         raise Refused("manifest_ci_workflow_invalid")
     api = GitHub(repo, token)
     meta = api.call("GET", "/")
@@ -143,7 +143,7 @@ def verify_installation(entry: dict, token: str) -> dict:
         encoded = content["content"]
         if not isinstance(encoded, str) or content.get("encoding") != "base64":
             raise ValueError("unexpected_contents_encoding")
-        normalized = re.sub(r"[ \\t\\r\\n]", "", encoded)
+        normalized = re.sub(r"[ \t\r\n]", "", encoded)
         actual = base64.b64decode(normalized, validate=True).decode("utf-8")
     except (KeyError, UnicodeError, ValueError) as exc:
         raise Refused("manifest_fixture_unreadable") from exc
@@ -201,7 +201,7 @@ def verify_installation(entry: dict, token: str) -> dict:
     if not isinstance(rows, list) or len(rows) >= 100:
         raise Refused("exact_head_ci_inventory_ambiguous")
     trusted_url = re.compile(
-        r"https://github\\.com/" + re.escape(repo)
+        r"https://github\.com/" + re.escape(repo)
         + r"/actions/runs/" + str(ci_run_id) + r"/job/[0-9]+/?$"
     )
     matching = [

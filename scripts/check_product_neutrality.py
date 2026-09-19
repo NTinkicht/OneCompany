@@ -57,6 +57,9 @@ def main() -> int:
         print("FAIL product-boundary: tracked-file inspection unavailable", file=sys.stderr)
         return 1
     tracked = [name.decode("utf-8") for name in result.stdout.split(b"\0") if name]
+    if not tracked:
+        print("FAIL product-boundary: no tracked source files", file=sys.stderr)
+        return 1
     problems = find_violations(tracked, ROOT)
     for problem in problems:
         print(f"FAIL product-boundary: {problem}", file=sys.stderr)

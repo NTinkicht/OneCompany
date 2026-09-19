@@ -1,8 +1,11 @@
 {
   "$schema": "./schemas/governance.schema.json",
-  "schema_version": "1.2",
+  "schema_version": "1.3",
   "control_plane": {
-    "human_merge_required": true,
+    "human_merge_required": false,
+    "independent_non_author_technical_review_required": true,
+    "exact_head_ci_required": true,
+    "expected_head_merge_required": true,
     "fail_closed_if_diff_unavailable": true,
     "protected_paths": [
       ".onecompany/**",

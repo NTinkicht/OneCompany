@@ -4,6 +4,8 @@ on:
   pull_request:
     paths:
       - '.onecompany/**'
+      - 'evidence/**'
+      - 'source-evidence/**'
       - '.opencodereview/**'
       - 'agents/**'
       - 'company/**'
@@ -34,6 +36,8 @@ on:
     branches: [main]
     paths:
       - '.onecompany/**'
+      - 'evidence/**'
+      - 'source-evidence/**'
       - '.opencodereview/**'
       - 'agents/**'
       - 'company/**'

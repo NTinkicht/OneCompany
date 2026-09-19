@@ -420,8 +420,8 @@ class CutoverReadinessTests(unittest.TestCase):
         self.assertFalse(report["cutover_ready"]); self.assertIn("ROLLBACK_PLAN_INCOMPLETE", report["blocker_codes"])
 
     def test_c2a_blockers_propagate_fail_closed(self):
-        fixture = ROOT / "source-evidence" / "tabibi" / "c1-shadow.json"
-        if not fixture.exists(): self.skipTest("source-only Tabibi fixture is intentionally absent")
+        fixture = ROOT / ".onecompany" / "selftest" / "fixtures" / "active-legacy-shadow.json"
+        self.assertTrue(fixture.exists(), "synthetic active-legacy fixture is required")
         report = cutover_readiness.analyze_cutover(cutover_readiness.load_manifest(fixture))
         self.assertFalse(report["shadow_mutation_ready"]); self.assertFalse(report["cutover_ready"])
         self.assertIn("SHADOW_READINESS_REQUIRED", report["blocker_codes"])

@@ -39,7 +39,11 @@ class PilotApi(FakeGitHub):
         """Return provider-shaped workflow/job/check results for refusal tests."""
         if method == "GET" and path.startswith("/compare/"):
             original = super().call(method, path, payload)
-            original.update({"status": "ahead", "total_commits": 1})
+            original.update({"status": "ahead", "total_commits": 1, "commits": [{"sha": self.refs["onecompany-a4-" + self.record["work_unit"].lower()]}]})
+            return original
+        if method == "GET" and path == "/":
+            original = super().call(method, path, payload)
+            original["full_name"] = self.repository
             return original
         if method == "GET" and path == "/actions/runs/84":
             return {
@@ -93,11 +97,11 @@ class PilotApi(FakeGitHub):
 def installed(api: PilotApi, wu: str) -> dict:
     """Create one test-only fixture and synthetic run-bound evidence record."""
     result = producer.produce(api, **installation(api.repository, wu))
-    api.record = {**result, "run_id": api.run_id, "run_attempt": 1}
+    api.record = {**result, "wu": wu, "run_id": api.run_id, "run_attempt": 1}
     return {
-        "repository": api.repository, "work_unit": wu, "actor": "fixture-bot",
-        "pr": result["pr"], "head": result["head"], "base": BASE,
-        "workflow_run": api.run_id,
+        "repository": api.repository, "wu": wu, "actor": "fixture-bot",
+        "pr_number": result["pr"], "base_sha": BASE,
+        "run_id": api.run_id,
         "check_name": qualifier.TRUSTED_CI_CHECK_NAME,
         "ci_workflow_run": api.ci_run_id, "ci_workflow_path": api.ci_path,
     }
@@ -161,37 +165,37 @@ class A4QualificationEvidenceTests(unittest.TestCase):
     def test_same_owner_is_not_two_independent_installations(self):
         """Reject two separately named repos sharing the same GitHub owner."""
         self.entries[1]["repository"] = "owner-a/other-repo"
-        with self.assertRaisesRegex(producer.Refused, "distinct_owners"):
+        with self.assertRaisesRegex(producer.Refused, "installations_must_be_distinct_repositories"):
             self.verify()
 
     def test_unrelated_successful_workflow_does_not_prove_producer(self):
         """Reject valid but unrelated repository-dispatch run records."""
         self.first.run_path = ".github/workflows/unrelated.yml"
-        with self.assertRaisesRegex(producer.Refused, "run_not_proven"):
+        with self.assertRaisesRegex(producer.Refused, "producer_run_workflow_invalid"):
             self.verify()
 
     def test_skipped_job_step_cannot_substitute_for_execution(self):
         """Reject a workflow with an absent or skipped producer step."""
         self.first.step_success = False
-        with self.assertRaisesRegex(producer.Refused, "job_not_successful"):
+        with self.assertRaisesRegex(producer.Refused, "producer_step_invalid"):
             self.verify()
 
     def test_same_workflow_but_foreign_result_is_refused(self):
         """Bind producer log to the exact WU, PR, head, base and run."""
         self.first.record["head"] = "e" * 40
-        with self.assertRaisesRegex(producer.Refused, "evidence_identity_mismatch"):
+        with self.assertRaisesRegex(producer.Refused, "producer_job_evidence_mismatch"):
             self.verify()
 
     def test_run_attempt_mismatch_is_refused(self):
         """Prevent a stale result from satisfying a later run attempt."""
         self.first.record["run_attempt"] = 99
-        with self.assertRaisesRegex(producer.Refused, "evidence_identity_mismatch"):
+        with self.assertRaisesRegex(producer.Refused, "producer_job_evidence_mismatch"):
             self.verify()
 
     def test_additional_policy_file_in_claim_is_refused(self):
         """Reject additional files even when the fixture body is correct."""
         self.first.extra_diff = True
-        with self.assertRaisesRegex(producer.Refused, "outside_fixture"):
+        with self.assertRaisesRegex(producer.Refused, "pilot_fixture_scope_invalid"):
             self.verify()
 
     def test_github_wrapped_base64_content_is_valid(self):
@@ -202,34 +206,34 @@ class A4QualificationEvidenceTests(unittest.TestCase):
     def test_forged_or_untrusted_ci_check_is_refused(self):
         """Reject arbitrary check names or a check from an untrusted app."""
         self.first.trusted_app_slug = "untrusted-app"
-        with self.assertRaisesRegex(producer.Refused, "exact_head_ci_not_proven"):
+        with self.assertRaisesRegex(producer.Refused, "trusted_exact_head_ci_missing_or_ambiguous"):
             self.verify()
         self.first.trusted_app_slug = "github-actions"
         self.first.ci_path = ".github/workflows/unrelated.yml"
-        with self.assertRaisesRegex(producer.Refused, "trusted_exact_head_ci_run"):
+        with self.assertRaisesRegex(producer.Refused, "trusted_exact_head_ci_invalid"):
             self.verify()
 
     def test_manifest_selected_ci_workflow_is_refused(self):
         """Do not let evidence provider select its own validation workflow."""
         self.entries[0]["ci_workflow_path"] = ".github/workflows/unrelated.yml"
-        with self.assertRaisesRegex(producer.Refused, "not_approved"):
+        with self.assertRaisesRegex(producer.Refused, "trusted_ci_identity_mismatch"):
             self.verify()
         self.entries[0]["ci_workflow_path"] = qualifier.TRUSTED_CI_WORKFLOW_PATH
         self.first.ci_blob = "f" * 40
-        with self.assertRaisesRegex(producer.Refused, "blob_mismatch"):
+        with self.assertRaisesRegex(producer.Refused, "trusted_ci_workflow_mismatch"):
             self.verify()
 
     def test_private_disposable_pilot_cannot_be_qualified(self):
         """Reject a target with private or uncertain Actions billing."""
         self.first.private = True
         self.first.visibility = "private"
-        with self.assertRaisesRegex(producer.Refused, "public_disposable_runner"):
+        with self.assertRaisesRegex(producer.Refused, "pilot_repository_must_be_public"):
             self.verify()
 
     def test_no_exact_head_green_ci_is_refused(self):
         """Producer completion never substitutes for deterministic CI."""
         self.first.ci_success = False
-        with self.assertRaisesRegex(producer.Refused, "exact_head_ci_not_proven"):
+        with self.assertRaisesRegex(producer.Refused, "trusted_exact_head_ci_missing_or_ambiguous"):
             self.verify()
 
     def test_malformed_compressed_job_log_fails_closed(self):

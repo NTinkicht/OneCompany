@@ -43,13 +43,24 @@ def installation(repo: str = REPO, wu: str = WU, actor: str = "fixture-bot"):
             "unattended": {"verified": True},
             "capacity": {"measured": True, "implementation_streams": 1},
         }]},
+        "actors": {"actors": [{
+            "id": actor, "enabled": True, "configured": True,
+            "capabilities": ["implementation"],
+            "cost_class": "FREE_ALLOWANCE",
+        }]},
         "budget": {
             "ai": {
                 "additional_monthly_spend_cap": 0,
                 "allow_paid_fallback": False, "allow_overage": False,
                 "allow_auto_topup": False,
+                "allow_new_paid_vendor": False,
+                "unknown_cost_behavior": "forbid",
             },
             "ci": {"runner_cost_policy": "included_or_free_only"},
+            "cost_classes": {
+                "allowed": ["FREE_ALLOWANCE", "LOCAL", "INCLUDED_SUBSCRIPTION"],
+                "conditionally_allowed": [], "forbidden": ["METERED_ALLOWED", "UNKNOWN_COST"],
+            },
         },
         "dispatch": {"actors": [{
             "actor_id": actor, "mechanisms": [{
@@ -304,6 +315,58 @@ class FirstPRProducerTests(unittest.TestCase):
             producer.Refused, "trusted_checkout_or_base_moved"
         ):
             producer.produce(BrokenRef(REPO), **installation())
+
+    def test_unknown_cost_and_paid_vendor_fail_before_mutation(self):
+        """Reject permissive budgets and individually forbidden actors."""
+        for name, value in (
+            ("allow_new_paid_vendor", True),
+            ("unknown_cost_behavior", "allow_within_cap"),
+        ):
+            with self.subTest(name=name):
+                inputs = installation()
+                inputs["budget"]["ai"][name] = value
+                api = FakeGitHub(REPO)
+                with self.assertRaisesRegex(producer.Refused, "zero_extra_spend"):
+                    producer.produce(api, **inputs)
+                self.assertEqual(api.created_refs, 0)
+        inputs = installation()
+        inputs["actors"]["actors"][0]["cost_class"] = "METERED_ALLOWED"
+        api = FakeGitHub(REPO)
+        with self.assertRaisesRegex(producer.Refused, "actor_cost_class"):
+            producer.produce(api, **inputs)
+        self.assertEqual(api.created_refs, 0)
+
+    def test_malformed_unavailability_is_refused(self):
+        """Fail closed for null or invalid temporary actor capacity states."""
+        for value in (None, "implementation", 1, {"implementation": True}):
+            with self.subTest(value=value):
+                inputs = installation()
+                inputs["readiness"]["actors"][0][
+                    "temporarily_unavailable_capabilities"
+                ] = value
+                api = FakeGitHub(REPO)
+                with self.assertRaisesRegex(producer.Refused, "actor_unattended_write"):
+                    producer.produce(api, **inputs)
+                self.assertEqual(api.created_refs, 0)
+
+    def test_malformed_pr_create_response_reconciles_on_next_invocation(self):
+        """Do not dereference a successful mutation's malformed JSON reply."""
+        class InvalidCreateReply(FakeGitHub):
+            """Model a successful PR POST that returns JSON null."""
+
+            def call(self, method, path, payload=None):
+                """Replace only the first newly created PR response."""
+                if method == "POST" and path == "/pulls":
+                    super().call(method, path, payload)
+                    return None
+                return super().call(method, path, payload)
+
+        api = InvalidCreateReply(REPO)
+        with self.assertRaisesRegex(producer.Refused, "pr_creation_uncertain"):
+            producer.produce(api, **installation())
+        result = producer.produce(api, **installation())
+        self.assertEqual(result["pr"], 1)
+        self.assertEqual(api.created_prs, 1)
 
     def test_pre_pr_binding_and_exact_fixture_only(self):
         """Require an unbound READY WU and precisely one fixture path."""

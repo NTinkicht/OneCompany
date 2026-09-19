@@ -127,6 +127,45 @@ def copy_item(source: Path, target: Path, force: bool) -> None:
     shutil.copy2(source, target)
 
 
+
+def preflight_copy_paths(target: Path) -> None:
+    """Reject target collisions before writing even one installer file.
+
+    Existing product files must never be overwritten or leave an
+    unrepairable half-install when a later COPY_PATHS entry collides.
+    """
+    collisions: set[str] = set()
+    for item in COPY_PATHS:
+        source = ROOT / item
+        if not source.exists():
+            continue
+        leaves = (
+            (child for child in source.rglob("*") if not child.is_dir())
+            if source.is_dir()
+            else (source,)
+        )
+        for leaf in leaves:
+            relative = leaf.relative_to(ROOT).as_posix()
+            if relative in SOURCE_INSTALLATION_SELFTESTS:
+                continue
+            destination = target / relative
+            if destination.exists() or destination.is_symlink():
+                collisions.add(relative)
+                continue
+            for parent in destination.parents:
+                if parent == target:
+                    break
+                if parent.exists() and not parent.is_dir():
+                    collisions.add(parent.relative_to(target).as_posix())
+                    break
+    if collisions:
+        raise FileExistsError(
+            "bootstrap refuses existing project files before installation: "
+            + ", ".join(sorted(collisions))
+            + "; resolve naming collisions without overwriting the product"
+        )
+
+
 def write_json(path: Path, value: dict) -> None:
     path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
 
@@ -518,6 +557,7 @@ def main() -> int:
         root_principal=args.root_principal,
     )
 
+    preflight_copy_paths(target)
     for item in COPY_PATHS:
         source = ROOT / item
         if source.exists():

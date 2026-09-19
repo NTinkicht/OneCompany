@@ -84,13 +84,16 @@ class SamePRRepairTests(unittest.TestCase):
         options = approved()
         first = producer.produce(api, **options)
         self.assertEqual(first["head"], CLAIM)
+        # A separate P3 pre-bound project baseline, not A4's pre-PR queue.
+        options["queue"]["work_units"][0]["pr"] = 1
         return api, options
 
     def invoke(self, api, options):
-        return repair.repair(
-            api, **options, number=1, initial=CLAIM,
-            failed_run_id=42,
-        )
+        with patch.object(repair, "_native_lease", return_value="lease-test"):
+            return repair.repair(
+                api, **options, number=1, initial=CLAIM,
+                failed_run_id=42,
+            )
 
     def test_one_repair_then_idempotent_replay_same_pr(self):
         api, options = self.setup_pilot()
@@ -109,6 +112,29 @@ class SamePRRepairTests(unittest.TestCase):
             producer.fixture_body(REPO, WU, ACTOR, BASE)
             + repair.REPAIR_LINE,
         )
+
+    def test_native_lease_absence_refuses_before_git_mutation(self):
+        api, options = self.setup_pilot()
+        with patch.object(
+            repair, "_native_lease",
+            side_effect=producer.Refused("durable_canonical_implementation_lease_missing"),
+        ):
+            with self.assertRaisesRegex(
+                producer.Refused, "durable_canonical_implementation_lease_missing"
+            ):
+                repair.repair(
+                    api, **options, number=1, initial=CLAIM, failed_run_id=42,
+                )
+        self.assertEqual(api.writes, 0)
+
+    def test_pre_pr_queue_does_not_count_as_p3_binding(self):
+        api, options = self.setup_pilot()
+        options["queue"]["work_units"][0]["pr"] = None
+        with self.assertRaisesRegex(
+            producer.Refused, "p3_canonical_pr_queue_binding_required"
+        ):
+            self.invoke(api, options)
+        self.assertEqual(api.writes, 0)
 
     def test_uncertain_ref_update_never_retries_or_rewrites(self):
         api, options = self.setup_pilot()

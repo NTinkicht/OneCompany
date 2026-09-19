@@ -1,0 +1,26 @@
+name: Grok App Adapter Validation
+
+on:
+  pull_request:
+    paths:
+      - "services/github_app_adapter/**"
+      - ".onecompany/selftest/test_grok_app_adapter.py"
+      - ".github/workflows/grok-app-adapter-validation.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  adapter-test:
+    if: github.event.repository.private == false && github.event.repository.visibility == 'public'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install isolated adapter dependencies
+        run: python -m pip install -r services/github_app_adapter/requirements.txt
+      - name: Run complete offline adapter and OAuth test suite
+        run: python -m unittest discover -s services/github_app_adapter/tests -p 'test_*.py' -v

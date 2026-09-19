@@ -60,11 +60,37 @@ single approved repository and read-only permissions.
 
 ## Connect Grok
 
-Use Grok > Connectors > New Connector > Custom with the public `/mcp`
-URL and the supported authentication UI. **Verify that the actual Grok UI
-supports the required bearer configuration before enabling the service.**
-If it does not, stop; do not put credentials in the URL or disable auth.
-A separately reviewed OAuth integration can be built subsequently.
+Grok's **web custom connector requires OAuth**, not static bearer entry. The
+same Render service now implements a single-owner, read-only OAuth + PKCE
+bridge, authenticated with the already-configured Render connector bearer
+through an owner-only browser consent form. Do NOT paste the GitHub App PEM
+or OAuth access tokens into a model conversation. Grok receives OAuth access
+and refresh tokens, never the Render secret or GitHub installation token.
+
+Use Grok > Connectors > New Connector > Custom, MCP URL
+`https://onecompany-github-adapter.onrender.com/mcp` and:
+
+| Grok field | Exact value |
+|---|---|
+| Client ID | `onecompany-grok-web` |
+| Client Secret | **Leave empty** (public client with PKCE) |
+| Authorization Endpoint | `https://onecompany-github-adapter.onrender.com/oauth/authorize` |
+| Token Endpoint | `https://onecompany-github-adapter.onrender.com/oauth/token` |
+| Scopes | `onecompany:read` |
+| Token Auth Method | `none (PKCE only)` |
+
+When redirected to the OneCompany-branded authorization page, enter the
+**existing** `ONECOMPANY_CONNECTOR_BEARER` value privately into its password
+field once. This is the secret used to authorize a browser session; do not
+paste it into the Grok chat, client ID/secret field or URL. The OAuth bridge
+accepts only allowlisted Grok callback URLs, binds exchanges to PKCE S256,
+consumes authorization codes once, and issues audience-bound one-hour access
+and renewable 30-day refresh credentials. Rotating the Render connector
+secret invalidates all sessions.
+
+If Grok rejects a blank Client Secret or the callback URL differs from the
+allowlist, STOP and report the field/error without sending credentials; do
+not weaken authentication or guess alternative OAuth endpoints.
 
 Invoke `onecompany_actor_identity`. It should identify logical actor
 `grok-4-6-interactive` separately from the GitHub App principal

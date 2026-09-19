@@ -61,6 +61,12 @@ class TestGrokOAuth(unittest.IsolatedAsyncioTestCase):
         data = oauth_args() if args is None else args
         response = await self.client.get("/oauth/authorize", params=data)
         self.assertEqual(response.status_code, 200)
+        # Chromium enforces form-action over redirect chains, including
+        # the cross-origin 303 back to Grok. A self-only policy makes the
+        # authorization popup appear to do nothing despite HTTP 303.
+        csp = response.headers["content-security-policy"]
+        self.assertIn("form-action 'self' https://grok.com", csp)
+        self.assertNotIn("attacker.example", csp)
         self.assertNotIn(SECRET, response.text)
         refused = await self.client.post(
             "/oauth/authorize",

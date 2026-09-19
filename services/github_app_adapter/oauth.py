@@ -142,7 +142,7 @@ class OwnerOAuth:
             return HTMLResponse(
                 page, headers={
                     "Cache-Control": "no-store",
-                    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'",
+                    "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; form-action 'self' https://grok.com https://www.grok.com; base-uri 'none'; frame-ancestors 'none'",
                     "Referrer-Policy": "no-referrer",
                     "X-Content-Type-Options": "nosniff",
                 },

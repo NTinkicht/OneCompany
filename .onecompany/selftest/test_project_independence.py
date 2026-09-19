@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import unittest
 from pathlib import Path
 
@@ -31,8 +32,7 @@ class ProjectIndependenceTests(unittest.TestCase):
             candidates.extend((ROOT / dirname).rglob("*.json"))
         for path in candidates:
             content = path.read_text(encoding="utf-8")
-            import re
-            refs = re.findall(rf"\\b{re.escape(owner)}/([a-zA-Z0-9_.-]+)", content)
+            refs = re.findall(rf"\b{re.escape(owner)}/([a-zA-Z0-9_.-]+)", content)
             self.assertFalse(
                 [name for name in refs if name.lower() != framework_repo.lower()],
                 f"other project reference in {path.relative_to(ROOT)}",

@@ -175,7 +175,7 @@ def _verify_installation(entry: dict[str, Any], token: str) -> dict[str, str]:
     if not isinstance(base, str) or not SHA.fullmatch(base):
         raise Refused("pilot_base_sha_invalid")
     api = GitHub(repo, token)
-    metadata = _require_object(api.call("GET", ""), "pilot_repository_metadata_invalid")
+    metadata = _require_object(api.call("GET", "/"), "pilot_repository_metadata_invalid")
     if metadata.get("full_name") != repo or metadata.get("visibility") != "public" or metadata.get("private") is not False:
         raise Refused("pilot_repository_must_be_public")
     pr = _require_object(api.call("GET", f"/pulls/{number}"), "pilot_pr_invalid")

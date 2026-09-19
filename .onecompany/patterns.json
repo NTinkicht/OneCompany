@@ -5,70 +5,70 @@
     {
       "id": "spotify-aligned-autonomy",
       "adoption": "core",
-      "origin": "generalized",
+      "origin": "onecompany-native",
       "source": "OneCompany generic engineering invariant",
       "purpose": "Balance bounded autonomous delivery with shared discipline standards and lightweight cross-cutting expertise."
     },
     {
       "id": "single-stream-lease",
       "adoption": "core",
-      "origin": "generalized",
+      "origin": "onecompany-native",
       "source": "OneCompany generic engineering invariant",
       "purpose": "Prevent duplicate implementation by allowing exactly one canonical implementation stream and explicit lease per bounded Work Unit."
     },
     {
       "id": "orthogonal-parallelism",
       "adoption": "core",
-      "origin": "generalized",
+      "origin": "onecompany-native",
       "source": "OneCompany generic engineering invariant",
       "purpose": "Use spare capacity on non-conflicting specialist lanes instead of duplicate implementation."
     },
     {
       "id": "exact-head-two-key-gate",
       "adoption": "core",
-      "origin": "generalized",
+      "origin": "onecompany-native",
       "source": "OneCompany generic engineering invariant",
       "purpose": "Require deterministic CI plus independent non-author review on the same exact candidate SHA."
     },
     {
       "id": "capacity-circuit-breaker",
       "adoption": "core",
-      "origin": "generalized",
+      "origin": "onecompany-native",
       "source": "OneCompany generic engineering invariant",
       "purpose": "Treat quota/cost uncertainty as degraded capacity rather than permission to spend."
     },
     {
       "id": "context-ladder",
       "adoption": "recommended",
-      "origin": "generalized",
+      "origin": "onecompany-native",
       "source": "OneCompany generic engineering invariant",
       "purpose": "Use indexes and deterministic repository evidence before expensive model context."
     },
     {
       "id": "shadow-before-authority",
       "adoption": "recommended",
-      "origin": "generalized",
+      "origin": "onecompany-native",
       "source": "OneCompany generic engineering invariant",
       "purpose": "Evaluate new agent infrastructure beside the authoritative path before it is allowed to control decisions."
     },
     {
       "id": "role-overlays",
       "adoption": "recommended",
-      "origin": "generalized",
+      "origin": "onecompany-native",
       "source": "OneCompany generic engineering invariant",
       "purpose": "Apply task-specific professional lenses to actors without confusing a prompt persona with an actor, lease, or authority."
     },
     {
       "id": "evidence-over-activity",
       "adoption": "core",
-      "origin": "generalized",
+      "origin": "onecompany-native",
       "source": "OneCompany generic engineering invariant",
       "purpose": "Measure progress by durable artifacts, not acknowledgements, heartbeats, or claimed activity."
     },
     {
       "id": "upstream-pinning",
       "adoption": "recommended",
-      "origin": "generalized",
+      "origin": "onecompany-native",
       "source": "OneCompany generic engineering invariant",
       "purpose": "Pin external behavior-bearing dependencies and make upstream upgrades explicit reviewed decisions."
     }

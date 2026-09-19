@@ -279,6 +279,20 @@ class PilotIntakeTests(unittest.TestCase):
                         api, manifest()["l2_pilot"], l2=True,
                     )
 
+    def test_audit_reports_bounded_why_blocked_without_remote_body(self):
+        apis = self.setup_targets()
+        apis[REPOS[1]].docs["budget"]["ai"]["allow_overage"] = True
+        with self.assertRaisesRegex(
+            producer.Refused,
+            "pilot_preflight_blocked:a4:owner-b/scratch-b:"
+            "zero_extra_spend_preflight_failed",
+        ):
+            intake.audit(manifest(), "reader", lambda name, token: apis[name])
+        self.assertTrue(all(
+            method == "GET" for api in apis.values()
+            for method, _, _ in api.calls
+        ))
+
     def test_replay_does_not_create_or_claim_pilot_success(self):
         apis = self.setup_targets()
         result1 = intake.audit(

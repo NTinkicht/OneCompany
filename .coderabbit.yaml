@@ -1,0 +1,9 @@
+language: en-US
+reviews:
+  profile: chill
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    drafts: false
+    base_branches:
+      - "^epic-0\\.6-integration$"

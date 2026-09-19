@@ -1,133 +1,47 @@
-# OneCompany Design Lineage
+# Design Lineage and Generic Invariants
 
-OneCompany is a synthesis of techniques that were exercised while operating Tabibi plus ideas deliberately adapted from external engineering work. This document separates **what was actually used**, **what was adapted**, and **what is merely related evidence** so the project does not invent a false origin story.
+OneCompany is a reusable orchestration and software-company operating
+product. Its design draws on multi-agent delivery experience and published
+engineering practices. This source tree contains **general rules**, not
+operating records or privilege assignments for any customer project.
 
-## 1. Tabibi: the proving ground
+## Aligned autonomy
 
-The reference operating experience came from `NTinkicht/Tabibi`.
+Spotify's engineering-culture material described squads, chapters and guilds.
+OneCompany adapts useful principles, not a literal organization chart:
 
-Two key Epic slices made the model concrete:
+- Work Unit + canonical branch/PR + leases: bounded delivery ownership;
+- engineering contracts and deterministic tests: reusable discipline;
+- optional specialist overlays: advisory expertise independent of identity.
 
-- PR #151 — zero-extra-cost context router and AI capacity governor;
-- PR #158 — six-actor Company OS with deterministic capability routing and Spotify-inspired organization.
+## Specialist profiles
 
-Tabibi exposed practical failures that shaped OneCompany: quota exhaustion, stale state, duplicate-work risk, stale exact-SHA reviews, worker wake/runtime failures, context waste, formatting remediation by guess instead of running the formatter, and agents appearing active without durable output.
+The MIT-licensed upstream `msitarzewski/agency-agents` library helped frame
+generic professional lenses. An overlay is **not** a worker, permission,
+subscription, reviewer identity, lease or merge authority.
 
-OneCompany turns those lessons into generic invariants rather than copying Tabibi's healthcare/product details.
+## Context and shadow adoption
 
-## 2. Spotify engineering culture → aligned autonomy
+Research on context compression informed a deterministic-first context ladder.
+Optional compressors, routers, reviewers and agents begin in read-only shadow
+mode; original evidence remains authoritative, omission risks are measured,
+and promotion requires review rather than an automatic policy change.
 
-### Source
+## Core coordination invariants
 
-Spotify Engineering published its engineering-culture material in 2014 describing autonomous squads plus chapters/guilds. Spotify itself described the material as a journey in progress, not a universal framework.
+1. One canonical implementation stream and explicit lease per bounded WU.
+2. Parallel lanes only for non-conflicting work with verified capacity.
+3. Deterministic CI and independent non-author review at the **same head**.
+4. Budget/quota exhaustion is a visible capacity blocker, not spend consent.
+5. Derived state must reconcile with the actual source-of-truth platform.
+6. Failover changes an eligible worker, not the branch, PR or authorship.
+7. Consequential authority and autonomy increases remain explicitly governed.
+8. Project evidence, deployment ownership, credentials and domain contracts
+   are installation-specific; they never ship as product defaults.
 
-### What Tabibi adapted
+## Provenance versus authority
 
-The Epic restructuring used:
-
-- temporary bounded **squads** around one delivery stream;
-- **chapters** as reusable discipline standards;
-- **guilds** as lightweight cross-cutting specialist overlays;
-- autonomy constrained by alignment and company-wide invariants.
-
-### What OneCompany keeps
-
-OneCompany keeps aligned autonomy and the three useful structural ideas, but makes them machine/agent-friendly:
-
-- a squad maps to a Work Unit + leases + canonical PR;
-- a chapter maps to executable standards/contracts/tests;
-- a guild maps to optional advisory specialist lanes/overlays.
-
-It intentionally avoids literal organizational copying or mandatory ceremony.
-
-See `patterns/spotify-aligned-autonomy.md`.
-
-## 3. Agency Agents → role overlays, not fake employees
-
-### Source used in Tabibi
-
-Tabibi curated specialist profiles from the fork `NTinkicht/agency-agents`, pinned at commit:
-
-`647c8baa42b6842afb4a97bf2c0950d45ba88e8b`
-
-That fork's source lineage is `msitarzewski/agency-agents` and it is MIT licensed at the pinned revision.
-
-### Important adaptation
-
-OneCompany does **not** equate a specialist prompt/persona with an independent worker.
-
-An actor is a model/tool identity with real capacity, permissions, authorship and review eligibility. A role overlay is only a professional lens for one bounded task.
-
-Therefore an overlay cannot:
-
-- create capacity;
-- create a lease;
-- grant write permission;
-- erase material authorship;
-- make self-review independent;
-- create merge authority.
-
-This distinction was one of the most important governance improvements made in Tabibi.
-
-See `overlays/` and `patterns/role-overlays.md`.
-
-## 4. Headroom → local context compression + shadow adoption
-
-### Source used in Tabibi
-
-Tabibi evaluated `NTinkicht/headroom` pinned at:
-
-`97aa9f6d0fc04619e4e821e7d54611eb9d6b9b81`
-
-The fork was synchronized through upstream `headroomlabs-ai/headroom` commit:
-
-`04cdf79ab0a8423d88148ba63e960ac6b4007b9c`
-
-### What mattered more than the tool
-
-The durable technique was **shadow before authority**:
-
-- run experimental context compression locally/read-only beside the authoritative path;
-- keep original evidence authoritative;
-- exclude secrets/sensitive data;
-- pin and verify provenance;
-- measure omissions as well as compression ratio;
-- graduate only after project-specific fidelity evidence.
-
-This became a generic OneCompany adoption pattern for routers, agents, reviewers, summarizers, and model upgrades.
-
-See `patterns/shadow-before-authority.md` and `patterns/context-ladder.md`.
-
-## 5. Tabibi-native synthesis
-
-The following patterns emerged from operating the system rather than from a single external framework:
-
-- **single-stream lease** — one canonical implementation writer/stream per bounded WU;
-- **orthogonal parallelism** — spare workers create non-conflicting artifacts rather than duplicate code;
-- **exact-head two-key gate** — deterministic CI + independent non-author review on the same SHA;
-- **capacity circuit breaker** — quota exhaustion is degraded capacity, not permission to spend;
-- **evidence over activity** — durable artifacts outrank heartbeats/acknowledgements;
-- **GitHub truth / local cache** — derived state is convenient but live repository state wins;
-- **expected-head merge** — mechanically refuse to merge a head different from the approved one;
-- **failover keeps the stream** — change the worker, not the branch/PR/objective/history.
-
-These are the core of OneCompany because they solved repeated real coordination failures.
-
-## 6. Related modern evidence — useful, but not the origin
-
-Spotify's later **Honk** background-coding-agent series (2025–2026) independently reinforces several OneCompany choices: pluggable agents behind surrounding infrastructure, context engineering, verification loops, constrained agent permissions, CI as an outer loop, traceability, and outcome-based accountability.
-
-Those posts were not the origin of Tabibi's earlier design decisions documented above; they are useful convergent evidence and future research input.
-
-## 7. What OneCompany deliberately excludes
-
-Not every successful Tabibi mechanism belongs in a universal starter repo. OneCompany does not bake in:
-
-- Tabibi healthcare/domain rules;
-- named-provider role assignments;
-- Slack/coffee-corner culture details;
-- project-specific queue/database/realtime techniques;
-- paid-service assumptions;
-- a requirement to own six AI subscriptions.
-
-The rule is: **extract the invariant, not the accident of one project.**
+External public references and licenses belong in `docs/REFERENCES.md`.
+Per-project engineering evidence belongs to its source project or separate
+authorized state store. Historical Git commits remain an audit trail but
+cannot be used as current target authority or product defaults.

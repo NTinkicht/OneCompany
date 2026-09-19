@@ -38,6 +38,22 @@ The company continuously performs delivery, maintenance, regression response, bo
 
 L5 does not mean “no humans.” It means routine execution no longer depends on continuous human prompting.
 
+## Mechanically enforced dispatch floors
+
+The dispatch resolver checks the **installed project's** current autonomy
+policy before exposing an unattended mutating capability. Unattended
+implementation and deterministic CI remediation require approved L2;
+unattended merge requires approved L3; automatically selecting a subsequent WU
+requires approved L4 **and** an explicit continuous-selection switch. Read-only
+unattended repository intelligence can operate at L1 if its independent
+readiness, scope, budget and execution mechanism are verified.
+
+These are minimum authorization floors, **not readiness evidence**. A level
+alone does not grant access to a worker, repository, lease, token, protected
+branch, paid quota, database, release or merge. The default OneCompany source
+and new installations remain L1; this code does not activate or upgrade any
+project. Raising the level remains a human-only policy decision.
+
 ## Raising the level
 
 Before each increase, run `docs/SIMULATION.md` scenarios and confirm:

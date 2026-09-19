@@ -1,0 +1,127 @@
+{
+  "schema_version": "1.0",
+  "project": {
+    "repository": "example/idle-repository",
+    "default_branch": "main"
+  },
+  "snapshot": {
+    "observed_at": "2026-09-18T14:43:52Z",
+    "main_sha": "cccccccccccccccccccccccccccccccccccccccc",
+    "source": "fixture-synthetic-read-only",
+    "stale": false,
+    "derived": false,
+    "observation_boundary_ref": "github:synthetic-observation-boundary"
+  },
+  "live": {
+    "mode": "idle",
+    "idle": {
+      "verified": true,
+      "open_pr_count": 0,
+      "active_work_unit_count": 0,
+      "evidence_ref": "github:synthetic-observation-boundary",
+      "snapshot_sha": "cccccccccccccccccccccccccccccccccccccccc",
+      "observed_at": "2026-09-18T14:43:52Z",
+      "observation_boundary_ref": "github:synthetic-observation-boundary"
+    }
+  },
+  "legacy": {
+    "mode": "absent",
+    "control_plane_absence": {
+      "verified": true,
+      "evidence_ref": "github:synthetic-observation-boundary",
+      "snapshot_sha": "cccccccccccccccccccccccccccccccccccccccc",
+      "observed_at": "2026-09-18T14:43:52Z",
+      "observation_boundary_ref": "github:synthetic-observation-boundary"
+    }
+  },
+  "branch_protection": {
+    "verified": true,
+    "protected": false,
+    "source": "github-branch-and-ruleset-read-only"
+  },
+  "incumbent_writer_inventory_complete": false,
+  "incumbent_writers": [],
+  "no_active_mutation_writers_verified": false,
+  "cutover": {
+    "owner_by_capability": {}
+  },
+  "proposed_onecompany": {
+    "mode": "shadow",
+    "mutation_capable": false
+  },
+  "cutover_evidence": {
+    "active_stream_status": "confirmed",
+    "surface_classifications_reviewed": true,
+    "rollback_verified": false,
+    "human_decisions_resolved": false,
+    "zero_extra_spend": true,
+    "autonomy_level": "L1",
+    "staging_branch": "epic-0.6-integration",
+    "fresh_c2_reconciliation": false
+  },
+  "adoption_blockers": [
+    {
+      "code": "NO_REPOSITORY_CI_WORKFLOW",
+      "message": "The target has no observed repository-native exact-head CI workflow."
+    },
+    {
+      "code": "NO_DOTNET_TEST_PROJECT",
+      "message": "No .NET test project was observed in the C1 repository tree."
+    },
+    {
+      "code": "HEALTH_CONTRACT_UNRESOLVED",
+      "message": "Smoke/frontend health calls are not matched by an observed backend health mapping."
+    },
+    {
+      "code": "TOPOLOGY_DOCUMENTATION_DRIFT",
+      "message": "The root README describes topology that does not match the observed repository tree."
+    },
+    {
+      "code": "SECONDARY_FRONTEND_UNRESOLVED",
+      "message": "Canonical ownership of apps/web/app versus root frontend/ remains unresolved."
+    },
+    {
+      "code": "MUTATION_WRITER_INVENTORY_UNVERIFIED",
+      "message": "External mutation/deployment writers have not been proven complete or absent."
+    },
+    {
+      "code": "DEPLOYMENT_RUNTIME_OWNERSHIP_UNVERIFIED",
+      "message": "Hosting, deployment, database migration, and rollback ownership remain unverified."
+    },
+    {
+      "code": "PRODUCTION_AUTH_SECRET_BOUNDARY_UNVERIFIED",
+      "message": "Development auth/secret defaults have not been separated from a verified production runtime boundary."
+    }
+  ],
+  "surfaces": [
+    {
+      "path": "apps/api",
+      "classification": "preserve/adapt"
+    },
+    {
+      "path": "apps/web/app",
+      "classification": "preserve/adapt"
+    },
+    {
+      "path": "frontend",
+      "classification": "investigate/retire-later-if-superseded"
+    },
+    {
+      "path": "tests/smoke",
+      "classification": "preserve/adapt-to-ci"
+    },
+    {
+      "path": "_diagnostics",
+      "classification": "historical-evidence-only"
+    },
+    {
+      "path": "README.md",
+      "classification": "adapt"
+    },
+    {
+      "path": "target-control-plane",
+      "classification": "add-later-only-after-reviewed-cutover"
+    }
+  ],
+  "fixture_note": "Synthetic regression case; no claim about an actual project or operational state."
+}

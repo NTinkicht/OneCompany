@@ -32,8 +32,8 @@ Define them before the trial. Typical criteria:
 
 A serious omission in a high-risk domain resets the relevant graduation claim. Do not average away catastrophic misses with a good aggregate compression percentage.
 
-## Tabibi / Headroom case
+## Reusable evaluation example
 
-Tabibi evaluated a pinned fork of Headroom as local context-compression infrastructure in read-only shadow mode. Original evidence remained authoritative, sensitive material was excluded, and Headroom could not rewrite governance files or become a merge/security authority.
+An experimental context compressor can run read-only beside the authoritative evidence path. Original evidence remains authoritative, sensitive material stays excluded, and the experiment cannot rewrite governance files or grant itself merge/security authority.
 
-This pattern generalizes to new agents, reviewers, routers, summarizers, test generators, and model upgrades.
+The same pattern applies to new agents, reviewers, routers, summarizers, test generators, and model upgrades.

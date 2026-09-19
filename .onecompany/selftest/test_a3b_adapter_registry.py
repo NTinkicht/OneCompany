@@ -18,7 +18,11 @@ class A3bAdapterRegistryTests(unittest.TestCase):
     def test_only_reviewed_a3b_mechanisms_are_in_registry(self):
         self.assertEqual(
             set(dispatch_execute_entry.ADAPTERS),
-            {"onecompany-actions-readonly", "copilot-actions-readonly"},
+            {
+                "onecompany-actions-readonly",
+                "copilot-actions-readonly",
+                "github-actions-fixture-writer",
+            },
         )
 
 

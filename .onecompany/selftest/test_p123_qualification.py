@@ -204,14 +204,14 @@ class SamePRRepairTests(unittest.TestCase):
                 self.assertNotIn(SECOND, api.parents)
 
     def test_dispatch_without_capabilities_fails_closed(self):
-        for missing in (True, False):
-            with self.subTest(missing=missing):
+        for invalid in ("missing", None, "ci_remediation", []):
+            with self.subTest(invalid=invalid):
                 api, options = self.setup_pilot()
                 mechanism = options["dispatch"]["actors"][0]["mechanisms"][1]
-                if missing:
+                if invalid == "missing":
                     mechanism.pop("capabilities")
                 else:
-                    mechanism["capabilities"] = []
+                    mechanism["capabilities"] = invalid
                 with self.assertRaisesRegex(
                     producer.Refused, "l2_remediation_route_unverified",
                 ):

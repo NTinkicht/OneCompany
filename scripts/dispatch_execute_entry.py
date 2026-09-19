@@ -10,11 +10,13 @@ from typing import Callable
 import copilot_actions_adapter
 import dispatch_execute
 import local_actions_adapter
+import fixture_actions_adapter
 
 AutomaticAdapter = Callable[[dict], dict]
 ADAPTERS: dict[str, AutomaticAdapter] = {
     copilot_actions_adapter.MECHANISM_ID: copilot_actions_adapter.invoke,
     local_actions_adapter.MECHANISM_ID: local_actions_adapter.invoke,
+    fixture_actions_adapter.MECHANISM_ID: fixture_actions_adapter.invoke,
 }
 
 

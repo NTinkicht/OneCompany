@@ -12,6 +12,7 @@ import copy
 import hashlib
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any, Callable
@@ -272,10 +273,17 @@ def audit(manifest: dict, token: str,
             result = inspect(
                 factory(entry["repository"], token), entry, l2=role == "l2",
             )
-        except (Refused, OSError, ValueError, TypeError, KeyError):
-            # Never display arbitrary untrusted API data, token, or file body.
+        except Refused as exc:
+            # These are fixed local refusal codes/path identifiers, not
+            # remote API bodies. Strip everything else before reporting.
+            reason = str(exc)
+            if not re.fullmatch(r"[A-Za-z0-9_./,:-]{1,230}", reason):
+                reason = "unavailable"
             raise Refused("pilot_preflight_blocked:" + role + ":"
-                          + entry["repository"]) from None
+                          + entry["repository"] + ":" + reason) from None
+        except (OSError, ValueError, TypeError, KeyError):
+            raise Refused("pilot_preflight_blocked:" + role + ":"
+                          + entry["repository"] + ":live_unavailable") from None
         results.append(result)
     return {
         "status": "THREE_PILOT_INSTALLATIONS_PRECHECKED_NOT_QUALIFIED",
@@ -298,8 +306,11 @@ def main() -> int:
     try:
         data = json.loads(args.manifest.read_text(encoding="utf-8"))
         outcome = audit(data, token)
-    except (Refused, OSError, UnicodeError, ValueError):
-        print("PILOT_INTAKE_REFUSED:preflight_blocked", file=sys.stderr)
+    except Refused as exc:
+        print("PILOT_INTAKE_REFUSED:" + str(exc), file=sys.stderr)
+        return 2
+    except (OSError, UnicodeError, ValueError):
+        print("PILOT_INTAKE_REFUSED:manifest_unavailable", file=sys.stderr)
         return 2
     print(json.dumps(outcome, sort_keys=True, indent=2))
     return 0

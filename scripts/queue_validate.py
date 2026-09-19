@@ -6,6 +6,7 @@ import sys
 
 from onecompany_lib import CONTROL, load_json
 from planning_lib import by_id, work_units_conflict
+from stream_binding import duplicate_queue_binding_violations
 
 ACTIVEISH = {"LEASED", "IN_PROGRESS", "CI_PENDING", "REVIEW_PENDING", "REMEDIATION", "MERGE_READY"}
 
@@ -14,6 +15,7 @@ def main() -> int:
     queue = load_json(CONTROL / "queue.json"); planning = load_json(CONTROL / "planning.json")
     work = queue.get("work_units", []); errors: list[str] = []; warnings: list[str] = []
     work_map = by_id(work)
+    errors.extend(duplicate_queue_binding_violations(work))
     if len(work_map) != len([item for item in work if isinstance(item.get("id"), str) and item.get("id")]):
         seen: set[str] = set()
         for item in work:

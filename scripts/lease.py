@@ -15,6 +15,7 @@ from typing import Any
 import lease_core as core
 import lease_lifecycle as lifecycle
 import ledger_lib
+from stream_binding import binding_violations, duplicate_queue_binding_violations
 from local_event_mutation import (
     LocalEventMutationUncertainError,
     append_local_event,
@@ -236,6 +237,16 @@ def _local_acquire(args: argparse.Namespace) -> int:
         return 2
 
     view, active = _active_view()
+    stream_errors = [
+        *duplicate_queue_binding_violations(queue.get("work_units", [])),
+        *binding_violations(args.wu, args.branch, args.pr, work_map, active),
+    ]
+    if stream_errors:
+        print(
+            "REFUSED: canonical Work Unit stream binding conflict: "
+            + "; ".join(sorted(set(stream_errors)))
+        )
+        return 2
     integrity = view.get("integrity_conflicts", view.get("conflicts", []))
     if integrity:
         print(

@@ -21,7 +21,7 @@ from a4_pr_producer import (
 from onecompany_lib import CONTROL, load_json
 
 CI_PATH = ".github/workflows/onecompany-l2-fixture-validation.yml"
-CI_BLOB = "3f68b827a2eeb159394f5225e8f4dd042c31a465"
+CI_BLOB = "6b1099fe03f4adb74054d05034dc2c2c2d6e6be7"
 REPAIR_LINE = "Repair: complete\n"
 EVIDENCE_PREFIX = "L2_REPAIR_EVIDENCE:"
 

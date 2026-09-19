@@ -247,7 +247,7 @@
     },
     {
       "actor_id": "grok-4-6-interactive",
-      "setup_state": "partially_ready",
+      "setup_state": "ready",
       "verified_surfaces": [
         "grok-web-custom-oauth-pkce-mcp",
         "render-github-app-onecompany-readonly"

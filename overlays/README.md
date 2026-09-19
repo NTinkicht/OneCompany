@@ -26,4 +26,4 @@ The actor still needs the real lease/capability/permission to perform the work.
 
 ## Provenance
 
-The profile-library idea was adapted in Tabibi from `NTinkicht/agency-agents` pinned at `647c8baa42b6842afb4a97bf2c0950d45ba88e8b` (source lineage `msitarzewski/agency-agents`, MIT). These OneCompany overlay texts are concise, governance-focused adaptations rather than a wholesale copy of upstream personalities.
+These OneCompany overlays are concise, governance-focused prompts rather than wholesale copies of external personalities. Optional third-party sources require reviewed licensing and provenance.

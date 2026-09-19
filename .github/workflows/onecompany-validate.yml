@@ -118,6 +118,8 @@ jobs:
         run: python onecompany.py simulate-parallel
       - name: Simulate 24/7 supervision invariants
         run: python onecompany.py simulate-supervision
+      - name: Reject bundled client runtime evidence
+        run: python scripts/check_product_neutrality.py
       - name: Smoke-test fresh bootstrap
         run: python scripts/smoke_bootstrap.py
       - name: Smoke-test GitHub-template initialization

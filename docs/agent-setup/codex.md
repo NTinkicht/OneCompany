@@ -8,7 +8,7 @@ If your Codex surface can already open the intended GitHub repository, create br
 
 ## 2. Optional cloud-workspace GitHub authentication fallback
 
-When a Codex cloud workspace has the repository checkout but no usable Git credential, OneCompany includes a reference pattern under `.onecompany/templates/scripts/codex-cloud-github-auth.sh.template`, derived from the path exercised in Tabibi.
+When a Codex cloud workspace has the repository checkout but no usable Git credential, OneCompany includes a reference pattern under `.onecompany/templates/scripts/codex-cloud-github-auth.sh.template`, derived from a generic cloud-workspace capability pattern.
 
 Use a **fine-grained GitHub PAT restricted to the target repository and minimum permissions**. Store it only in the Codex environment's secret store. Never commit it and do not put it in `.onecompany/*.json`.
 

@@ -47,4 +47,4 @@ Examples:
 
 ## Provenance
 
-Tabibi operationalized this pattern from a curated subset of `NTinkicht/agency-agents` pinned at commit `647c8baa42b6842afb4a97bf2c0950d45ba88e8b`. OneCompany keeps the concept and governance separation, with new concise overlay files under `overlays/`.
+OneCompany includes its own concise, governance-focused overlays under `overlays/`. External profiles can inform optional customization but never become worker identities or an application dependency.

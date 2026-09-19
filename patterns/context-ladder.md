@@ -30,6 +30,6 @@ cache/index
 
 Context is a budget. OneCompany treats token/context consumption like compute: route discovery to deterministic tools and reserve strong models for decisions that need reasoning.
 
-## Tabibi lesson
+## Operating principle
 
-The Epic context router used this ladder and kept optional compression off by default. It also guarded local budgets and sensitive paths rather than assuming “cheaper model” meant “safe model.”
+Keep optional compression off by default. Guard budgets and sensitive paths rather than assuming that a cheaper model is safe.

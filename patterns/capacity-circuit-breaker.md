@@ -37,6 +37,6 @@ It is **not** permission to enable paid fallback.
 - no secrets added merely to reach a paid provider;
 - routing preference changes do not rewrite financial policy.
 
-## Tabibi lesson
+## Operating principle
 
-Epic encoded zero-extra-spend as a technical invariant and even added regressions against accidentally reintroducing forbidden provider routes. This turned a preference (“please don't spend more”) into enforceable operating policy.
+Encode zero-extra-spend as a technical invariant and test against accidentally reintroducing forbidden paid provider routes.

@@ -138,3 +138,19 @@ The GitHub App is also installed on Tabibi and Veritas-Atlas, but this adapter
 accepts **only NTinkicht/OneCompany**. Further repository scope requires a
 separate explicit authorization and Work Unit; no cross-repo capability is
 inferred from installation-level permissions.
+
+## Read-document scope and reviewed runtime hardening
+
+`onecompany_read_document` accepts only allowlisted README/AGENTS/docs Markdown
+at the **current main commit SHA**, independently resolved by the server
+immediately before the GitHub contents request. It rejects historical or
+feature-branch SHA reads. This phase does not grant project-wide source or
+candidate-PR file access. Future PR/source inspection is a distinct,
+separately reviewed Work Unit (#105 / PR #106).
+
+The OAuth POST handler enforces an 8 KiB cap on the **actual streamed bytes**
+before decoding the bounded URL-encoded form, including chunked/no-Length
+requests. CI and Render install the same exactly pinned dependency versions
+from `services/github_app_adapter/requirements.txt`; upgrades require a new
+reviewed commit and exact-head validation. This preserves the existing public
+OAuth callback and unchanged connector credentials.

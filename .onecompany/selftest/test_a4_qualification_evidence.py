@@ -117,6 +117,11 @@ class A4QualificationEvidenceTests(unittest.TestCase):
         self.entries = [
             installed(self.first, "WU-A"), installed(self.second, "WU-B"),
         ]
+        for api, wu in ((self.first, "WU-A"), (self.second, "WU-B")):
+            self.assertEqual(
+                api.files[api.next_commit],
+                producer.fixture_body(api.repository, wu, "fixture-bot", BASE),
+            )
         self.registry = {
             self.first.repository: self.first,
             self.second.repository: self.second,

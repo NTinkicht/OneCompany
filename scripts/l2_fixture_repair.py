@@ -22,6 +22,12 @@ from a4_pr_producer import (
 from onecompany_lib import CONTROL, load_json
 
 CI_PATH = ".github/workflows/onecompany-l2-fixture-validation.yml"
+REPAIR_PATH = ".github/workflows/onecompany-l2-fixture-repair.yml"
+REPAIR_JOB = "repair"
+REPAIR_STEP = "Repair exact failed fixture CI on same canonical PR"
+CI_JOB = "validate-fixture"
+CI_STEP = "Validate one bounded repaired fixture"
+FAILURE_MARKER = "fixture_ci_repair_not_complete"
 CI_BLOB = "6b1099fe03f4adb74054d05034dc2c2c2d6e6be7"
 REPAIR_LINE = "Repair: complete\n"
 EVIDENCE_PREFIX = "L2_REPAIR_EVIDENCE:"
@@ -124,6 +130,56 @@ def _native_lease(*, number: int, wu: str, actor: str,
     return ident
 
 
+def _failed_fixture_ci(api: GitHub, run_id: int, sha: str,
+                       repo: str) -> None:
+    """Require the named failing step and its GitHub-hosted log before writing.
+
+    A failed Actions run alone is insufficient: checkout, runner setup and
+    unrelated failures must not trigger a PR mutation. No candidate code runs
+    in the trusted producer process.
+    """
+    from a4_qualify import _job_log
+
+    run = _object(api.call("GET", f"/actions/runs/{run_id}"),
+                  "failed_ci_run_unavailable")
+    owner = _object(run.get("repository"), "failed_ci_run_unavailable")
+    if (run.get("event") != "workflow_dispatch"
+            or run.get("path") != CI_PATH
+            or run.get("head_sha") != sha
+            or run.get("status") != "completed"
+            or run.get("conclusion") != "failure"
+            or owner.get("full_name") != repo):
+        raise Refused("failed_ci_not_exact_initial_head")
+    listing = _object(api.call(
+        "GET", f"/actions/runs/{run_id}/jobs?per_page=100",
+    ), "failed_ci_jobs_unavailable")
+    jobs = listing.get("jobs")
+    if not isinstance(jobs, list) or len(jobs) >= 100:
+        raise Refused("failed_ci_jobs_unavailable")
+    matches = [
+        job for job in jobs
+        if isinstance(job, dict) and job.get("name") == CI_JOB
+        and job.get("status") == "completed"
+        and job.get("conclusion") == "failure"
+    ]
+    if len(matches) != 1:
+        raise Refused("intended_fixture_failure_not_proven")
+    job = matches[0]
+    steps = job.get("steps")
+    if not isinstance(steps, list) or sum(
+        isinstance(step, dict)
+        and step.get("name") == CI_STEP
+        and step.get("conclusion") == "failure"
+        for step in steps
+    ) != 1:
+        raise Refused("intended_fixture_failure_not_proven")
+    job_id = job.get("id")
+    if not isinstance(job_id, int) or isinstance(job_id, bool) or job_id <= 0:
+        raise Refused("failed_ci_job_id_invalid")
+    if FAILURE_MARKER not in _job_log(api, job_id):
+        raise Refused("intended_fixture_failure_not_proven")
+
+
 def repair(api: GitHub, *, config: dict, queue: dict, readiness: dict,
            dispatch: dict, budget: dict, actors: dict, repo: str,
            actor: str, wu: str, checkout_sha: str, number: int,
@@ -209,15 +265,7 @@ def repair(api: GitHub, *, config: dict, queue: dict, readiness: dict,
             "repaired": current, "base": base, "already_applied": True,
             "lease_id": lease_id,
         }
-    run = _object(api.call("GET", f"/actions/runs/{failed_run_id}"),
-                  "failed_ci_run_unavailable")
-    run_repo = _object(run.get("repository"), "failed_ci_run_unavailable")
-    if (run.get("event") != "workflow_dispatch"
-            or run.get("path") != CI_PATH
-            or run.get("head_sha") != initial
-            or run.get("conclusion") != "failure"
-            or run_repo.get("full_name") != repo):
-        raise Refused("failed_ci_not_exact_initial_head")
+    _failed_fixture_ci(api, failed_run_id, initial, repo)
     # Nothing from the failing PR is executed as producer authority.
     # Last live recheck precedes any Git object writes.
     if _head(api, number, repo, branch, base, default) != initial:
@@ -288,6 +336,12 @@ def main() -> int:
             ["git", "rev-parse", "HEAD"], check=True,
             capture_output=True, text=True,
         ).stdout.strip()
+        run_id = os.getenv("GITHUB_RUN_ID", "")
+        attempt = os.getenv("GITHUB_RUN_ATTEMPT", "")
+        if (not run_id.isdecimal() or int(run_id) <= 0
+                or not attempt.isdecimal() or int(attempt) <= 0
+                or os.getenv("GITHUB_EVENT_NAME") != "workflow_dispatch"):
+            raise Refused("repair_workflow_run_identity_missing")
         result = repair(
             GitHub(repo, token),
             config=load_json(CONTROL / "config.json"),
@@ -308,6 +362,9 @@ def main() -> int:
         reason = str(exc) if isinstance(exc, Refused) else "runtime_unavailable"
         print("L2_REPAIR_REFUSED:" + reason, file=sys.stderr)
         return 2
+    result["run_id"] = int(run_id)
+    result["run_attempt"] = int(attempt)
+    result["actor"] = os.getenv("A4_ACTOR", "")
     print(EVIDENCE_PREFIX + json.dumps(result, sort_keys=True))
     return 0
 

@@ -207,12 +207,27 @@ class AppClient:
                 or (base.get("repo") or {}).get("full_name") != self.settings.repository
                 or doc.get("state") != "open"):
             raise AdapterRefused("pr_head_or_repository_changed")
-        files = self._stage_call(
-            "pr_files", "GET",
-            f"/repos/{self.settings.repository}/pulls/{pr_number}/files?per_page=100&page=1",
-            token,
+        # GitHub /pulls/{number}/files tracks a MOVING ref: even an A->B->A
+        # force-push could fool two PR metadata reads. The Compare API is
+        # pinned to immutable base AND head SHAs, not the branch name.
+        base_sha = base.get("sha")
+        if not isinstance(base_sha, str) or not _SHA.fullmatch(base_sha):
+            raise AdapterRefused("pr_base_sha_invalid")
+        comparison = self._stage_call(
+            "immutable_pr_compare", "GET",
+            f"/repos/{self.settings.repository}/compare/"
+            f"{base_sha}...{exact_head_sha}", token,
         )
-        # Never present a truncated change list as complete review material.
+        if (not isinstance(comparison, dict)
+                or comparison.get("status") not in {"ahead", "diverged"}
+                or (comparison.get("base_commit") or {}).get("sha") != base_sha
+                or not isinstance(comparison.get("merge_base_commit"), dict)
+                or not isinstance(comparison["merge_base_commit"].get("sha"), str)
+                or not _SHA.fullmatch(comparison["merge_base_commit"]["sha"])):
+            raise AdapterRefused("pr_immutable_comparison_invalid")
+        files = comparison.get("files")
+        # GitHub can cap comparison file lists: never claim to show a whole
+        # PR when a list is absent or near a page/result truncation boundary.
         if not isinstance(files, list) or len(files) >= 100:
             raise AdapterRefused("pr_file_list_unbounded_or_incomplete")
         output = []
@@ -263,6 +278,8 @@ class AppClient:
             "base_sha": base.get("sha"),
             "base_branch": base.get("ref"),
             "changed_files": output,
+            "comparison": "immutable_three_dot_base_head",
+            "merge_base_sha": comparison["merge_base_commit"]["sha"],
             "authenticated_principal": slug + "[bot]",
             "read_only": True,
             "review_attestation": False,

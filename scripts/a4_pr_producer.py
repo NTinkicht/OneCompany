@@ -285,6 +285,8 @@ def produce(api: GitHub, *, config: dict, queue: dict, readiness: dict,
     if api.repository != repo:
         raise Refused("project_identity_mismatch")
     meta = api.call("GET", "/")
+    if meta.get("private") is not False or meta.get("visibility") != "public":
+        raise Refused("public_disposable_runner_requirement_not_proven")
     default = meta.get("default_branch")
     expected_default = config.get("project", {}).get("default_branch")
     if default != expected_default or not isinstance(default, str):

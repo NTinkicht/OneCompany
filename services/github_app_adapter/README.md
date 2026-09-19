@@ -15,3 +15,8 @@ No merge/release/deploy/branch/PR mutation or GitHub settings tool exists.
 
 First-phase deployment does NOT make Grok a verified unattended writer or an
 independent reviewer. See docs/GROK-GITHUB-APP-ADAPTER.md.
+
+Security scope: pinned **live-main** Markdown reads only, no feature-branch
+source reads in this phase. OAuth URL-encoded POST bodies are streamed under
+an 8 KiB effective cap, including missing/forged Content-Length. Requirements
+pin the deployed/validated Python package versions.

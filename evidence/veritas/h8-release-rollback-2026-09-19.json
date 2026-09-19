@@ -50,7 +50,10 @@
     "recovery_drill_verified": false,
     "immutable_container_digest_captured": false,
     "github_admin_protection_observed": false,
-    "other_external_writers_exhaustively inventoried": false
+    "other_external_writers_exhaustively inventoried": false,
+    "owner_reported_neon_and_bootstrap_credentials_rotated": true,
+    "credential_rotation_proof_in_non_secret_release_record": false,
+    "candidate_security_advisories_resolved_or_owner_risk_accepted": false
   },
   "release_policy": {
     "manual_go_no_go_required": true,
@@ -67,7 +70,9 @@
     "No verified rollback/recovery drill",
     "No verified digest/config revision for currently deployed artifacts",
     "No recorded Neon backup/PITR recovery rehearsal or RPO/RTO",
-    "No separately authorized deployment of pending database-readiness endpoint"
+    "No separately authorized deployment of pending database-readiness endpoint",
+    "Verify rotation/revocation of previously exposed Neon/bootstrap credentials with non-secret operator receipt and current Render config revision",
+    "Remediate and verify known high-severity backend/frontend dependency advisories or capture explicit staging-only owner risk acceptance with expiry and mitigations"
   ],
   "onecompany_mutation_authorized": false,
   "companyos_cutover_authorized": false,
@@ -83,5 +88,11 @@
     "NTinkicht/OneCompany#87",
     "NTinkicht/OneCompany#85"
   ],
-  "operating_instructions_ref": "docs/VERITAS-H8-RELEASE-RUNBOOK.md"
+  "operating_instructions_ref": "docs/VERITAS-H8-RELEASE-RUNBOOK.md",
+  "known_dependency_advisories_at_initial_build": {
+    "api": [
+      "Microsoft.OpenApi 2.3.0 high-severity advisory (recorded at first Render build; recheck exact candidate dependency graph)"
+    ],
+    "frontend": "8 high, 2 moderate, 1 low npm advisories (first Render build; recheck exact candidate)"
+  }
 }

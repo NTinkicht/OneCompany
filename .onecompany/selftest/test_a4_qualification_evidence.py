@@ -169,7 +169,9 @@ class A4QualificationEvidenceTests(unittest.TestCase):
 
     def test_same_owner_is_not_two_independent_installations(self):
         """Reject two separately named repos sharing the same GitHub owner."""
-        self.entries[1]["repository"] = "owner-a/other-repo"
+        same_owner = PilotApi("owner-a/other-repo")
+        self.registry[same_owner.repository] = same_owner
+        self.entries[1] = installed(same_owner, "WU-B")
         with self.assertRaisesRegex(producer.Refused, "installations_must_be_distinct_repositories"):
             self.verify()
 

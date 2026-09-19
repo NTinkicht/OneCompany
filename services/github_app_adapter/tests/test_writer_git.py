@@ -71,6 +71,16 @@ class ExactRefWriterTests(unittest.TestCase):
                 writer.submit(request(),"d"*40)
         self.assertEqual(client.calls,[])
 
+    def test_write_token_refuses_unrequested_permissions(self):
+        class ExtraPrivilege(WriterFake):
+            def _call(self, method, path, token, payload=None):
+                result = super()._call(method, path, token, payload)
+                if path.endswith("/access_tokens"):
+                    result["permissions"]["administration"] = "write"
+                return result
+        with self.assertRaisesRegex(WriteRefused, "writer_token_scope_unverified"):
+            ExactRefWriter(ExtraPrivilege())._write_token()
+
     def test_write_token_is_one_repo_with_narrow_permissions(self):
         client=WriterFake()
         writer=ExactRefWriter(client)

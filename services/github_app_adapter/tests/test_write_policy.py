@@ -92,6 +92,14 @@ class WritePolicyTests(unittest.TestCase):
         data=fixture(); data["config"]["project"]["repository"]="NTinkicht/Tabibi"
         self.refuse(data,"repository_or_base_mismatch")
 
+    def test_pr_repo_null_and_truthy_malformed_values_fail_closed(self):
+        for endpoint in ("head", "base"):
+            for invalid in (None, "invalid", ["invalid"]):
+                with self.subTest(endpoint=endpoint, invalid=invalid):
+                    data = fixture()
+                    data["pr"][endpoint]["repo"] = invalid
+                    self.refuse(data, "canonical_pr_head_or_base_changed")
+
     def test_forbid_controls_credentials_and_large_content(self):
         self.assertFalse(scoped_path(".onecompany/ledger.json",["**/*"]))
         self.assertFalse(scoped_path(".github/workflows/ci.yml",["**/*"]))

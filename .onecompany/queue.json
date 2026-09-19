@@ -6,22 +6,80 @@
       "id": "WU-PFC-001",
       "title": "Planning and Flow Control",
       "work_kind": "ENABLER",
-      "status": "IN_PROGRESS",
+      "status": "DONE",
       "priority": 100,
       "dependencies": [],
       "issue": 8,
       "pr": 9,
       "branch": "onecompany-planning-flow-control",
       "risk_class": "HIGH",
-      "planning_refs": ["EPIC-001", "CAP-001"],
-      "requirement_ids": ["FR-001", "FR-002", "FR-003", "NFR-001", "SEC-001"],
-      "write_scope": ["**/*"],
-      "resource_locks": ["onecompany:control-plane"],
+      "planning_refs": [
+        "EPIC-001",
+        "CAP-001"
+      ],
+      "requirement_ids": [
+        "FR-001",
+        "FR-002",
+        "FR-003",
+        "NFR-001",
+        "SEC-001"
+      ],
+      "write_scope": [
+        "**/*"
+      ],
+      "resource_locks": [
+        "onecompany:control-plane"
+      ],
       "parallelism": "serial",
       "priority_inputs": {
         "business_value": 100,
         "time_criticality": 80,
         "risk_reduction": 95,
+        "dependency_unlock": 100,
+        "job_size": 13,
+        "confidence": 0.8
+      },
+      "estimate": {
+        "job_size": 13,
+        "confidence": 0.8,
+        "lower": 8,
+        "upper": 21,
+        "unit": "relative_points"
+      },
+      "release": "0.3.0"
+    },
+    {
+      "id": "WU-A4-FACTORY-001",
+      "title": "Generic first-PR producer and isolated qualification",
+      "work_kind": "ENABLER",
+      "status": "IN_PROGRESS",
+      "priority": 100,
+      "dependencies": [
+        "WU-PFC-001"
+      ],
+      "issue": 90,
+      "pr": 102,
+      "branch": "epic-0.6-a4-factory-priorities-1-4",
+      "risk_class": "HIGH",
+      "planning_refs": [
+        "EPIC-001",
+        "CAP-001"
+      ],
+      "requirement_ids": [
+        "FR-001",
+        "SEC-001"
+      ],
+      "write_scope": [
+        "**/*"
+      ],
+      "resource_locks": [
+        "onecompany:control-plane"
+      ],
+      "parallelism": "serial",
+      "priority_inputs": {
+        "business_value": 100,
+        "time_criticality": 95,
+        "risk_reduction": 100,
         "dependency_unlock": 100,
         "job_size": 13,
         "confidence": 0.8

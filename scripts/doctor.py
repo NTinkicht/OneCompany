@@ -76,8 +76,11 @@ def main() -> int:
         line(codeowners_valid, "Effective CODEOWNERS", codeowners_detail)
         failures += 0 if codeowners_valid else 1
         review_ok = enforcement.get("code_owner_review_enforced") is True
-        line(review_ok, "Code Owner review enforcement", "required" if review_ok else "not required by branch/ruleset protection")
-        failures += 0 if review_ok else 1
+        line(True, "Code Owner review (informational)", "configured" if review_ok else "not required for routine technical PRs")
+        review_gate = enforcement.get("review_gate_enforced") is True
+        line(review_gate, "Server-side independent review check",
+             "pinned and required" if review_gate else "missing trusted review App or non-bypassable rule")
+        failures += 0 if review_gate else 1
         missing = enforcement.get("missing_required_checks", [])
         checks_ok = not missing
         line(checks_ok, "Manifest required-check enforcement", "all enforced" if checks_ok else f"missing live enforcement: {','.join(missing)}")

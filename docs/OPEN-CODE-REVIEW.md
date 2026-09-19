@@ -21,6 +21,13 @@ independent non-author technical review or OneCompany's exact-head/base merge
 gate. The former platform approval policy and two-person CODEOWNERS roster
 are historical and no longer describe this repository.
 
+A compliant deployment also needs a server-side required review attestation:
+`onecompany-independent-review` from an independently operated, vetted
+GitHub App with a pinned integration ID, as required by `inspect_enforcement`.
+A plain green `validate` check or an advisory bot comment is not sufficient.
+This source release deliberately leaves the app ID unconfigured and reports
+review enforcement as **not verified** until that integration is installed.
+
 Routine technical PRs need no manually requested reviewer. Source ownership
 is assigned only to the repository owner. Exceptional budget, credentials,
 constitutional, legal and destructive-production decisions follow the separate

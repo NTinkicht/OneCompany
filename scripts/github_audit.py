@@ -140,6 +140,11 @@ def main() -> int:
             f"manifest-required checks are not enforced on {branch}: {', '.join(missing)}"
         )
     print("INFO Code Owner review is optional for routine technical PRs; independent non-author technical review is checked by OneCompany")
+    if not enforcement.get("review_gate_enforced"):
+        errors.append(
+            "no pinned independent-review GitHub App check is required server-side; "
+            "checks-only CI cannot enforce exact-head non-author review"
+        )
     if not classic.get("configured") and not rulesets:
         errors.append("no enforceable default-branch protection/ruleset was confirmed")
     if not enforcement.get("enforcement_ok"):

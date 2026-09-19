@@ -48,7 +48,7 @@ class ChecksOnlyEnforcementTests(unittest.TestCase):
             }, ""
         raise AssertionError(path)
 
-    def test_non_author_review_is_separate_from_github_check_enforcement(self):
+    def test_checks_only_does_not_enforce_independent_review(self):
         """Pass non-bypassable technical checks without a Code Owner rule."""
         with (
             patch.object(controls, "gh_api", side_effect=self.api),
@@ -62,7 +62,54 @@ class ChecksOnlyEnforcementTests(unittest.TestCase):
         self.assertTrue(result["codeowners_valid"])
         self.assertFalse(result["code_owner_review_enforced"])
         self.assertEqual(result["missing_required_checks"], [])
+        self.assertFalse(result["review_gate_enforced"])
+        self.assertFalse(result["enforcement_ok"])
+
+    def test_pinned_review_app_status_check_enforces_independence(self):
+        """Permit an independently vetted app, not a candidate-controlled name."""
+        original = self.api
+        def pinned_api(path):
+            """Require the exact review App for the non-bypassable ruleset."""
+            code, payload, error = original(path)
+            if path.endswith("/rulesets/1"):
+                payload["rules"][0]["parameters"]["required_status_checks"].append({
+                    "context": controls.REVIEW_GATE_CONTEXT,
+                    "integration_id": 117,
+                })
+            return code, payload, error
+        with (
+            patch.object(controls, "gh_api", side_effect=pinned_api),
+            patch.object(controls, "_codeowners_coverage", return_value=(True, [])),
+            patch.object(controls, "REVIEW_GATE_APP_ID", 117),
+        ):
+            result = controls.inspect_enforcement(
+                "example/app", "main", {"validate"},
+            )
+        self.assertTrue(result["review_gate_enforced"])
         self.assertTrue(result["enforcement_ok"])
+
+    def test_wrong_review_app_cannot_fake_attestation(self):
+        """Reject status context published by the wrong GitHub integration."""
+        original = self.api
+        def foreign_api(path):
+            """Return a same-named status check from an unauthorized app."""
+            code, payload, error = original(path)
+            if path.endswith("/rulesets/1"):
+                payload["rules"][0]["parameters"]["required_status_checks"].append({
+                    "context": controls.REVIEW_GATE_CONTEXT,
+                    "integration_id": 999,
+                })
+            return code, payload, error
+        with (
+            patch.object(controls, "gh_api", side_effect=foreign_api),
+            patch.object(controls, "_codeowners_coverage", return_value=(True, [])),
+            patch.object(controls, "REVIEW_GATE_APP_ID", 117),
+        ):
+            result = controls.inspect_enforcement(
+                "example/app", "main", {"validate"},
+            )
+        self.assertFalse(result["review_gate_enforced"])
+        self.assertFalse(result["enforcement_ok"])
 
     def test_missing_required_check_is_a_blocker_even_without_review_gate(self):
         """Keep exact-head status checks mechanically required."""

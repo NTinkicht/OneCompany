@@ -29,7 +29,8 @@ class PilotApi(FakeGitHub):
         self.run_id = 42
         self.job_id = 97
         self.ci_run_id = 84
-        self.ci_path = ".github/workflows/onecompany-validate.yml"
+        self.ci_path = qualifier.TRUSTED_CI_WORKFLOW_PATH
+        self.ci_blob = qualifier.TRUSTED_CI_WORKFLOW_BLOB
         self.trusted_app_slug = "github-actions"
         self.wrap_base64 = False
 
@@ -46,8 +47,8 @@ class PilotApi(FakeGitHub):
                 "status": "completed", "conclusion": "success",
                 "repository": {"full_name": self.repository},
             }
-        if method == "GET" and path == "/contents/.github/workflows/onecompany-validate.yml?ref=" + BASE:
-            return {"type": "file"}
+        if method == "GET" and path == "/contents/" + qualifier.TRUSTED_CI_WORKFLOW_PATH + "?ref=" + BASE:
+            return {"type": "file", "sha": self.ci_blob}
         if method == "GET" and path == "/actions/runs/42":
             return {
                 "id": self.run_id, "event": "repository_dispatch",
@@ -71,7 +72,7 @@ class PilotApi(FakeGitHub):
         if method == "GET" and path.startswith("/commits/") and path.endswith("/check-runs?per_page=100"):
             head = path.split("/commits/", 1)[1].split("/", 1)[0]
             return {"check_runs": [{
-                "name": "validate", "head_sha": head,
+                "name": qualifier.TRUSTED_CI_CHECK_NAME, "head_sha": head,
                 "status": "completed",
                 "conclusion": "success" if self.ci_success else "failure",
                 "app": {"slug": self.trusted_app_slug},
@@ -95,7 +96,8 @@ def installed(api: PilotApi, wu: str) -> dict:
     return {
         "repository": api.repository, "work_unit": wu, "actor": "fixture-bot",
         "pr": result["pr"], "head": result["head"], "base": BASE,
-        "workflow_run": api.run_id, "check_name": "validate",
+        "workflow_run": api.run_id,
+        "check_name": qualifier.TRUSTED_CI_CHECK_NAME,
         "ci_workflow_run": api.ci_run_id, "ci_workflow_path": api.ci_path,
     }
 
@@ -189,6 +191,23 @@ class A4QualificationEvidenceTests(unittest.TestCase):
         self.first.trusted_app_slug = "github-actions"
         self.first.ci_path = ".github/workflows/unrelated.yml"
         with self.assertRaisesRegex(producer.Refused, "trusted_exact_head_ci_run"):
+            self.verify()
+
+    def test_manifest_selected_ci_workflow_is_refused(self):
+        """Do not let evidence provider select its own validation workflow."""
+        self.entries[0]["ci_workflow_path"] = ".github/workflows/unrelated.yml"
+        with self.assertRaisesRegex(producer.Refused, "not_approved"):
+            self.verify()
+        self.entries[0]["ci_workflow_path"] = qualifier.TRUSTED_CI_WORKFLOW_PATH
+        self.first.ci_blob = "f" * 40
+        with self.assertRaisesRegex(producer.Refused, "blob_mismatch"):
+            self.verify()
+
+    def test_private_disposable_pilot_cannot_be_qualified(self):
+        """Reject a target with private or uncertain Actions billing."""
+        self.first.private = True
+        self.first.visibility = "private"
+        with self.assertRaisesRegex(producer.Refused, "public_disposable_runner"):
             self.verify()
 
     def test_no_exact_head_green_ci_is_refused(self):

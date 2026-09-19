@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import base64
 import copy
+import os
+from contextlib import redirect_stderr
+from io import StringIO
+from unittest.mock import patch
 import json
 import sys
 import unittest
@@ -367,6 +371,23 @@ class FirstPRProducerTests(unittest.TestCase):
         result = producer.produce(api, **installation())
         self.assertEqual(result["pr"], 1)
         self.assertEqual(api.created_prs, 1)
+
+    def test_run_identity_required_before_mutating_github(self):
+        """No GitHub API or subprocess write can precede run provenance."""
+        with (
+            patch.dict(os.environ, {
+                "GITHUB_REPOSITORY": REPO, "GH_TOKEN": "synthetic-token",
+                "A4_ACTOR": "fixture-bot", "A4_WORK_UNIT": WU,
+                "GITHUB_RUN_ID": "", "GITHUB_RUN_ATTEMPT": "",
+            }),
+            patch.object(producer, "produce") as write,
+            patch.object(producer.subprocess, "run") as process,
+            redirect_stderr(StringIO()) as stderr,
+        ):
+            self.assertEqual(producer.main(), 2)
+        write.assert_not_called()
+        process.assert_not_called()
+        self.assertIn("immutable_github_run_identity_missing", stderr.getvalue())
 
     def test_pre_pr_binding_and_exact_fixture_only(self):
         """Require an unbound READY WU and precisely one fixture path."""

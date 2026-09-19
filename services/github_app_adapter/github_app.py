@@ -17,7 +17,7 @@ import jwt
 from settings import Settings
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
-_FILE = re.compile(r"^(?:README\\.md|AGENTS\\.md|docs/[A-Za-z0-9_.\\-/]+\\.md)$")
+_FILE = re.compile(r"^(?:README\.md|AGENTS\.md|docs/[A-Za-z0-9_.\-/]+\.md)$")
 
 class AdapterRefused(RuntimeError):
     """Sanitized refusal without raw provider responses, credentials or tokens."""
@@ -157,7 +157,7 @@ class AppClient:
             encoded = result["content"]
             if result.get("encoding") != "base64" or not isinstance(encoded, str):
                 raise ValueError("invalid_encoding")
-            normalized = re.sub(r"[ \\t\\r\\n]", "", encoded)
+            normalized = re.sub(r"[ \t\r\n]", "", encoded)
             content = base64.b64decode(normalized, validate=True)
             if len(content) > 30_000:
                 raise AdapterRefused("document_exceeds_limit")

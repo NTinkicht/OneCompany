@@ -18,34 +18,13 @@ Related modern agent work (convergent evidence, not original OneCompany lineage)
 - “Background Coding Agents: Predictable Results Through Strong Feedback Loops (Honk, Part 3)” (2025): https://engineering.atspotify.com/2025/12/feedback-loops-background-coding-agents-part-3
 - “Background Coding Agents: Supercharging Downstream Consumer Dataset Migrations (Honk, Part 4)” (2026): https://www.engineering.atspotify.com/2026/4/background-coding-agents-dataset-migrations-honk-part-4
 
-## Agency Agents / specialist profiles
+## Specialist profiles and context tooling
 
-Tabibi source fork:
-
-- https://github.com/NTinkicht/agency-agents
-- pinned Tabibi reference: `647c8baa42b6842afb4a97bf2c0950d45ba88e8b`
-- source lineage shown by the fork: https://github.com/msitarzewski/agency-agents
-- license at the pinned fork revision: MIT
-
-OneCompany adopts the specialist-profile concept as role overlays and writes its own concise governance-focused overlays. Upstream changes are never automatically imported.
-
-## Headroom / local context compression
-
-Tabibi evaluation fork:
-
-- https://github.com/NTinkicht/headroom
-- pinned trial revision: `97aa9f6d0fc04619e4e821e7d54611eb9d6b9b81`
-- upstream lineage used by that trial: `headroomlabs-ai/headroom` through `04cdf79ab0a8423d88148ba63e960ac6b4007b9c`
-
-OneCompany does not require Headroom. It extracts the reusable techniques: deterministic-first context routing, pinned provenance, sensitive-data exclusion, reversible original evidence, and shadow-before-authority evaluation.
-
-## Tabibi reference implementation
-
-- https://github.com/NTinkicht/Tabibi
-- Epic context/capacity slice: PR #151
-- Epic six-actor/Spotify-inspired organization slice: PR #158
-
-Tabibi is evidence that these mechanisms were exercised in a real evolving repository. OneCompany intentionally generalizes them and does not copy Tabibi product/domain assumptions.
+External role profiles and context-compression techniques may inform optional
+overlays and shadow experiments. Any imported third-party code or text retains
+its actual upstream copyright/license attribution. Optional behavior-bearing
+tools are pinned and independently reviewed for each installation; neither
+these tools nor a customer repository is a dependency of the generic product.
 
 ## OpenAI scheduled and event-triggered tasks
 

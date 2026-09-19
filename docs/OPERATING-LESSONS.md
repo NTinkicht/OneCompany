@@ -1,6 +1,6 @@
 # Lessons That Shaped OneCompany
 
-OneCompany is built from operational lessons observed while coordinating a real multi-agent project (Tabibi). The goal is to encode the lessons as system constraints rather than folklore.
+OneCompany encodes reusable multi-agent operating lessons as executable system constraints rather than project-specific folklore.
 
 ## 1. “Assigned” is not “working”
 

@@ -27,8 +27,8 @@ REPAIR_JOB = "repair"
 REPAIR_STEP = "Repair exact failed fixture CI on same canonical PR"
 CI_JOB = "validate-fixture"
 CI_STEP = "Validate one bounded repaired fixture"
-FAILURE_MARKER = "fixture_ci_repair_not_complete"
-CI_BLOB = "6b1099fe03f4adb74054d05034dc2c2c2d6e6be7"
+FAILURE_MARKER = "L2_FIXTURE_INTENTIONAL_FAILURE:fixture_ci_repair_not_complete"
+CI_BLOB = "cea82d19270270fc4bc5350ed48e3dbdd1c31744"
 REPAIR_LINE = "Repair: complete\n"
 EVIDENCE_PREFIX = "L2_REPAIR_EVIDENCE:"
 
@@ -176,7 +176,10 @@ def _failed_fixture_ci(api: GitHub, run_id: int, sha: str,
     job_id = job.get("id")
     if not isinstance(job_id, int) or isinstance(job_id, bool) or job_id <= 0:
         raise Refused("failed_ci_job_id_invalid")
-    if FAILURE_MARKER not in _job_log(api, job_id):
+    if sum(
+        line.strip().endswith(FAILURE_MARKER)
+        for line in _job_log(api, job_id).splitlines()
+    ) != 1:
         raise Refused("intended_fixture_failure_not_proven")
 
 

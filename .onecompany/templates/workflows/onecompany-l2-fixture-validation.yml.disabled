@@ -46,6 +46,10 @@ jobs:
               "# OneCompany A4 isolated claim and implementation fixture\n\n"
               f"Repository: {os.environ['PILOT_REPO']}\n"
               f"Work Unit: {Path(names[0]).stem}\n"
-          ) or not content.endswith("Repair: complete\n")):
+          ):
+              raise SystemExit("fixture_provenance_invalid")
+          if not content.endswith("Repair: complete\n"):
+              print("L2_FIXTURE_INTENTIONAL_FAILURE:fixture_ci_repair_not_complete",
+                    flush=True)
               raise SystemExit("fixture_ci_repair_not_complete")
           PY

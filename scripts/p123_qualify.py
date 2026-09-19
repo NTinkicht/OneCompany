@@ -26,13 +26,13 @@ from a4_qualify import (
 )
 from l2_fixture_repair import (
     CI_PATH, CI_BLOB, REPAIR_LINE, REPAIR_PATH, REPAIR_JOB,
-    REPAIR_STEP, EVIDENCE_PREFIX,
+    REPAIR_STEP, EVIDENCE_PREFIX, FAILURE_MARKER,
 )
 
 # Installed disposable target must run exactly these reviewed base-trusted
 # files, not candidate-selected workflow/script bytes.
 REPAIR_WORKFLOW_BLOB = "3a5f18c5fa08c0a7ac79ccd04dc5da3de4b51aa2"
-REPAIR_SCRIPT_BLOB = "f87055ed804a5a512125f4ee4b5d512cee187b73"
+REPAIR_SCRIPT_BLOB = "3fb9581eb607ddf292506dc0ddf76d784bbdf1aa"
 
 MARKER = "<!-- onecompany-ledger-v1 -->"
 EVENT = re.compile(
@@ -509,7 +509,10 @@ def verify_l2(entry: dict[str, Any], token: str,
         raise Refused("l2_intentional_fixture_failure_not_proven")
     job_id = _positive_int(failed_job.get("id"),
                            "l2_failed_job_id_invalid")
-    if "fixture_ci_repair_not_complete" not in _job_log(api, job_id):
+    if sum(
+        line.strip().endswith(FAILURE_MARKER)
+        for line in _job_log(api, job_id).splitlines()
+    ) != 1:
         raise Refused("l2_intentional_fixture_failure_not_proven")
     _check(api, initial, failed_id, "failure")
     _check(api, repaired, passed_id, "success")

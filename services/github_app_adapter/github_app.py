@@ -30,7 +30,7 @@ class AppClient:
               payload: dict | None = None) -> Any:
         """Fixed GitHub host, strict response bound, sanitized transport errors."""
         if (not endpoint.startswith("/") or "//" in endpoint
-                or ":" in endpoint or method not in {"GET", "POST"}):
+                or ":" in endpoint or method not in {"GET", "POST", "PATCH"}):
             raise AdapterRefused("invalid_github_endpoint")
         request = urllib.request.Request(
             "https://api.github.com" + endpoint,

@@ -13,7 +13,7 @@
         "properties": {
           "id": {"type": "string", "minLength": 1},
           "adoption": {"enum": ["core", "recommended", "optional", "experimental"]},
-          "origin": {"enum": ["tabibi-derived", "adapted", "onecompany-native"]},
+          "origin": {"enum": ["field-derived", "adapted", "onecompany-native"]},
           "source": {"type": "string", "minLength": 1},
           "purpose": {"type": "string", "minLength": 1}
         },

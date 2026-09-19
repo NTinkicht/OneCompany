@@ -58,7 +58,7 @@ class TestGrokAppAdapter(unittest.TestCase):
 
     def test_logical_and_app_principals_differ(self):
         result = FakeClient(settings()).identity()
-        self.assertEqual(result["logical_actor"], "grok-4.6-interactive")
+        self.assertEqual(result["logical_actor"], "grok-4-6-interactive")
         self.assertEqual(
             result["authenticated_principal"], "onecompany-grok-worker[bot]"
         )

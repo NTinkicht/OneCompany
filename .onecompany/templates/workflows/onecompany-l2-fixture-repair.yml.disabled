@@ -24,6 +24,7 @@ permissions:
   contents: write
   pull-requests: read
   actions: read
+  issues: read
 concurrency:
   group: l2-repair-${{ github.event.inputs.work_unit || github.run_id }}
   cancel-in-progress: false

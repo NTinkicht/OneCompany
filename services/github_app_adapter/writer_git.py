@@ -179,8 +179,7 @@ class ExactRefWriter:
         current = self._read_current_pr(request.pr_number, token)
         if ((current.get("head") or {}).get("sha") != request.expected_head_sha
                 or (current.get("head") or {}).get("ref") != branch
-                or (current.get("base") or {}).get("sha")
-                   != (latest.get("main_sha") or (current.get("base") or {}).get("sha"))):
+                or (current.get("base") or {}).get("sha") != latest["main_sha"]):
             raise WriteRefused("writer_pr_changed_before_ref")
         # PATCH is the only mutation to a Git ref. A sibling commit based on
         # a stale head fails GitHub's fast-forward-only reference update.

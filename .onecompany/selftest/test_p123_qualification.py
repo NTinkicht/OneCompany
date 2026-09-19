@@ -320,6 +320,76 @@ class NativeAuthorityTests(unittest.TestCase):
             ):
                 repair._native_lease(**params)
 
+    def test_historical_lease_replays_only_platform_published_events(self):
+        """Late assignment or mid-job release cannot retrospectively qualify."""
+        import datetime as dt
+        start = dt.datetime(2026, 9, 19, 22, 0, tzinfo=dt.timezone.utc)
+        end = start + dt.timedelta(minutes=2)
+        lease = {
+            "id": "lease-1", "role": "implementation", "status": "active",
+            "actor": ACTOR, "work_unit": WU,
+            "branch": producer.branch_for(WU), "pr": 1,
+            "start_head": CLAIM,
+            "admission_snapshot": {"trusted_ref": BASE},
+        }
+        assignment = {
+            "type": "ROLE_LEASE_ASSIGNED",
+            "github_created_at": "2026-09-19T21:59:00Z",
+        }
+        release = {
+            "type": "ROLE_LEASE_RELEASED",
+            "github_created_at": "2026-09-19T22:01:00Z",
+        }
+        params = {
+            "repo": REPO, "number": 1, "wu": WU, "actor": ACTOR,
+            "branch": producer.branch_for(WU), "base": BASE,
+            "initial": CLAIM, "lease_id": "lease-1",
+            "started": start, "completed": end,
+        }
+        captured = []
+        def replay(events, number, *, now, durable):
+            captured.append((now, [e["type"] for e in events]))
+            return {
+                "active_leases": [lease] if (
+                    any(e["type"] == "ROLE_LEASE_ASSIGNED" for e in events)
+                    and not any(
+                        e["type"] == "ROLE_LEASE_RELEASED" for e in events
+                    )
+                ) else [],
+            }
+        with (
+            patch("ledger_lib._repository", return_value=REPO),
+            patch("ledger_lib.ledger_enabled", return_value=True),
+            patch("ledger_lib.list_events", return_value=[assignment]) as events,
+            patch("lease_lifecycle.derive_lifecycle", side_effect=replay),
+        ):
+            campaign._historical_repair_lease(**params)
+            self.assertEqual(len(captured), 2)
+            self.assertEqual(
+                captured[0][1], ["ROLE_LEASE_ASSIGNED"],
+            )
+            events.return_value = [assignment, release]
+            with self.assertRaisesRegex(
+                producer.Refused, "repair_historical_lease_missing",
+            ):
+                campaign._historical_repair_lease(**params)
+            events.return_value = [{
+                **assignment,
+                "github_created_at": "2026-09-19T22:01:00Z",
+            }]
+            with self.assertRaisesRegex(
+                producer.Refused, "repair_historical_lease_missing",
+            ):
+                campaign._historical_repair_lease(**params)
+            events.return_value = [{
+                **assignment,
+                "github_created_at": None,
+            }]
+            with self.assertRaisesRegex(
+                producer.Refused, "repair_platform_timestamp_missing",
+            ):
+                campaign._historical_repair_lease(**params)
+
     def test_native_review_rejects_actor_alias_and_unmapped_identity(self):
         with (
             patch("platform_identity.pull_request_material_author_actor_ids",

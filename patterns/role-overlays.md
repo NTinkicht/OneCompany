@@ -47,4 +47,4 @@ Examples:
 
 ## Provenance
 
-Tabibi operationalized this pattern from a curated subset of `NTinkicht/agency-agents` pinned at commit `647c8baa42b6842afb4a97bf2c0950d45ba88e8b`. OneCompany keeps the concept and governance separation, with new concise overlay files under `overlays/`.
+The specialist-profile concept draws on the MIT-licensed upstream `msitarzewski/agency-agents` library. OneCompany keeps the concept and governance separation, with new concise overlay files under `overlays/`.

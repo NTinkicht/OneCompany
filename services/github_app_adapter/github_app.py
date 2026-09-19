@@ -90,6 +90,25 @@ class AppClient:
         slug = app.get("slug")
         if not isinstance(slug, str) or not slug:
             raise AdapterRefused("github_app_slug_missing")
+        # Disambiguate a wrong Installation ID from an App not installed on
+        # this particular repository. Both can otherwise surface as 404 when
+        # POSTing an installation-token request.
+        installation = self._stage_call(
+            "installation_lookup", "GET",
+            f"/app/installations/{self.settings.installation_id}", app_jwt,
+        )
+        if not isinstance(installation, dict) or (
+            installation.get("id") != self.settings.installation_id
+        ):
+            raise AdapterRefused("github_installation_id_mismatch")
+        assigned = self._stage_call(
+            "repository_installation_lookup", "GET",
+            f"/repos/{self.settings.repository}/installation", app_jwt,
+        )
+        if not isinstance(assigned, dict) or (
+            assigned.get("id") != self.settings.installation_id
+        ):
+            raise AdapterRefused("github_repository_installation_id_mismatch")
         repo_name = self.settings.repository.split("/", 1)[1]
         info = self._stage_call(
             "installation_token", "POST",

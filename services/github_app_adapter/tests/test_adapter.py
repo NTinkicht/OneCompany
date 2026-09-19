@@ -27,6 +27,10 @@ class FakeClient(AppClient):
         self.calls.append((method, path, payload))
         if path == "/app":
             return {"id": self.settings.app_id, "slug": "onecompany-grok-worker"}
+        if path == "/app/installations/34":
+            return {"id": 34}
+        if path == "/repos/owner/disposable/installation":
+            return {"id": 34}
         if path.endswith("/access_tokens"):
             return {
                 "token": "z" * 40,
@@ -72,6 +76,16 @@ class TestGrokAppAdapter(unittest.TestCase):
                 if path == "/app":
                     raise AdapterRefused("github_http_status_404")
                 return super()._call(method, path, token, payload)
+        class RejectInstallationLookup(FakeClient):
+            def _call(self, method, path, token, payload=None):
+                if path == "/app/installations/34":
+                    raise AdapterRefused("github_http_status_404")
+                return super()._call(method, path, token, payload)
+        class RejectRepositoryInstallation(FakeClient):
+            def _call(self, method, path, token, payload=None):
+                if path == "/repos/owner/disposable/installation":
+                    raise AdapterRefused("github_http_status_404")
+                return super()._call(method, path, token, payload)
         class RejectInstallation(FakeClient):
             def _call(self, method, path, token, payload=None):
                 if path.endswith("/access_tokens"):
@@ -84,6 +98,8 @@ class TestGrokAppAdapter(unittest.TestCase):
                 return super()._call(method, path, token, payload)
         for cls, phase in (
             (RejectApp, "app_metadata"),
+            (RejectInstallationLookup, "installation_lookup"),
+            (RejectRepositoryInstallation, "repository_installation_lookup"),
             (RejectInstallation, "installation_token"),
             (RejectRepository, "repository"),
         ):
@@ -97,7 +113,7 @@ class TestGrokAppAdapter(unittest.TestCase):
     def test_installation_token_scope_never_expands(self):
         client = FakeClient(settings())
         client.identity()
-        self.assertEqual(client.calls[1][2], {
+        self.assertEqual(client.calls[3][2], {
             "repositories": ["disposable"],
             "permissions": {"contents": "read", "pull_requests": "read"},
         })

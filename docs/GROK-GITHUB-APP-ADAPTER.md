@@ -144,9 +144,12 @@ inferred from installation-level permissions.
 `onecompany_read_document` accepts only allowlisted README/AGENTS/docs Markdown
 at the **current main commit SHA**, independently resolved by the server
 immediately before the GitHub contents request. It rejects historical or
-feature-branch SHA reads. This phase does not grant project-wide source or
-candidate-PR file access. Future PR/source inspection is a distinct,
-separately reviewed Work Unit (#105 / PR #106).
+feature-branch SHA reads for **this specific tool**. Following reviewed
+WU-GROK-002 (#105 / merged PR #106), three additional read-only tools
+support bounded candidate-PR metadata and immutable, allowlisted source
+excerpts (including feature-branch SHAs); the GitHub installation token
+remains restricted to NTinkicht/OneCompany, and no write or final-review
+attestation tool is available.
 
 The OAuth POST handler enforces an 8 KiB cap on the **actual streamed bytes**
 before decoding the bounded URL-encoded form, including chunked/no-Length

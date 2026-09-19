@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -46,6 +47,12 @@ class ProductBoundaryTests(unittest.TestCase):
             self.assertTrue(neutrality.find_violations([relative], root))
 
     def test_reusable_repo_current_checkout_is_clean(self) -> None:
+        tracked = subprocess.run(
+            ["git", "ls-files", "-z", "--cached"], cwd=ROOT,
+            capture_output=True, check=False,
+        )
+        if tracked.returncode != 0 or not tracked.stdout:
+            self.skipTest("installed project self-test has no tracked framework source")
         self.assertEqual(neutrality.main(), 0)
 
 

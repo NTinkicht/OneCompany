@@ -1,0 +1,62 @@
+# DISABLED TEMPLATE. Copy to an explicitly authorized DISPOSABLE project
+# only after reviewed L2, bounded WU/PR/lease, free Actions capacity and
+# GitHub branch/ruleset prerequisites. Never enable in source OneCompany.
+name: OneCompany A4 Fixture-Only PR Writer
+
+on:
+  repository_dispatch:
+    types: [onecompany.fixture-pr]
+  workflow_dispatch:
+    inputs:
+      work_unit:
+        description: "Pre-bound LOW-risk fixture Work Unit"
+        required: true
+        type: string
+      actor:
+        description: "Configured and verified project-local Actions actor"
+        required: true
+        type: string
+      lease_id:
+        description: "Existing durable canonical implementation lease ID"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: a4-fixture-${{ github.event.client_payload.work_unit || inputs.work_unit || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  single-canonical-fixture-edit:
+    if: vars.ONECOMPANY_A4_FIXTURE_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - name: Check out reviewed project default branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: true
+      - name: Set up included Python runtime
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+      - name: Execute exact-lease, fixture-only adapter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ONECOMPANY_A4_FIXTURE_ENABLED: ${{ vars.ONECOMPANY_A4_FIXTURE_ENABLED }}
+          A4_WORK_UNIT: ${{ github.event.client_payload.work_unit || inputs.work_unit }}
+          A4_ACTOR: ${{ github.event.client_payload.actor || inputs.actor }}
+          A4_LEASE_ID: ${{ github.event.client_payload.lease_id || inputs.lease_id }}
+        run: |
+          python onecompany.py dispatch-execute \
+            --actor "$A4_ACTOR" \
+            --capability implementation \
+            --mechanism github-actions-fixture-writer \
+            --work-unit "$A4_WORK_UNIT" \
+            --lease-id "$A4_LEASE_ID" \
+            --unattended

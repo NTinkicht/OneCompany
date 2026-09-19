@@ -99,12 +99,14 @@ def active_implementation_lease(
     if not isinstance(ttl_seconds, int) or isinstance(ttl_seconds, bool) or not 0 < ttl_seconds <= 14400:
         raise WriteRefused("ledger_ttl_unverified")
     active: dict[str, dict] = {}
+    all_lease_ids: set[str] = set()
     for event in events:
         kind, payload = event["type"], event["payload"]
         if kind == "ROLE_LEASE_ASSIGNED":
             lid = payload.get("lease_id")
-            if not isinstance(lid, str) or not lid or lid in active:
+            if not isinstance(lid, str) or not lid or lid in all_lease_ids:
                 raise WriteRefused("ledger_lease_conflict")
+            all_lease_ids.add(lid)
             active[lid] = {
                 "id": lid, "actor": event["actor"],
                 "role": payload.get("role", "implementation"),
@@ -122,9 +124,12 @@ def active_implementation_lease(
         elif kind == "ROLE_LEASE_TRANSFERRED":
             old = payload.get("old_lease_id")
             lid = payload.get("new_lease_id")
-            if old not in active or not isinstance(lid, str) or not lid or lid in active:
+            if old not in active or not isinstance(lid, str) or not lid or lid in all_lease_ids:
                 raise WriteRefused("ledger_transfer_ambiguous")
+            if _utc(active[old]["expires_at"]) <= event["created_at"]:
+                raise WriteRefused("ledger_transfer_source_expired")
             del active[old]
+            all_lease_ids.add(lid)
             active[lid] = {
                 "id": lid, "actor": event["actor"],
                 "role": payload.get("role", "implementation"),

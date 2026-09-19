@@ -183,10 +183,10 @@ def invoke(request: dict[str, Any]) -> dict[str, Any]:
     if not folder.resolve().is_relative_to(root):
         raise RuntimeError("fixture_worker_target_escaped_checkout")
     body = (
-        "# OneCompany isolated implementation fixture\\n\\n"
-        f"Work Unit: {work_unit}\\n"
-        f"Lease: {lease['id']}\\n"
-        "Mode: deterministic test-only source edit; no deployment.\\n"
+        "# OneCompany isolated implementation fixture\n\n"
+        f"Work Unit: {work_unit}\n"
+        f"Lease: {lease['id']}\n"
+        "Mode: deterministic test-only source edit; no deployment.\n"
     )
     if path.exists():
         if not path.is_file() or path.read_text(encoding="utf-8") != body:

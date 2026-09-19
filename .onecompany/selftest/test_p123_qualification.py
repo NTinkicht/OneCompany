@@ -261,6 +261,15 @@ class EvidenceGitHub:
                 sha = "f" * 40
             return {"type": "file", "sha": sha, "encoding": "base64",
                     "content": base64.b64encode(body.encode()).decode()}
+        if path == "/actions/runs/80/jobs?per_page=100":
+            return {"jobs": [{
+                "id": 800, "name": "validate-fixture",
+                "conclusion": "failure",
+                "steps": [{
+                    "name": "Validate one bounded repaired fixture",
+                    "conclusion": "failure",
+                }],
+            }]}
         if path in ("/actions/runs/80", "/actions/runs/81"):
             first = path.endswith("80")
             return {
@@ -305,9 +314,13 @@ class L2LiveWitnessTests(unittest.TestCase):
         return api, copy.deepcopy(api.l2)
 
     def verify(self, api, entry):
-        return campaign.verify_l2(
-            entry, "read-only", factory=lambda repo, token: api
-        )
+        with patch.object(
+            campaign, "_job_log",
+            return_value="fixture_ci_repair_not_complete",
+        ):
+            return campaign.verify_l2(
+                entry, "read-only", factory=lambda repo, token: api
+            )
 
     def test_exact_head_ci_repair_review_merge_and_ledger(self):
         api, entry = self.setup_witness()
@@ -327,6 +340,20 @@ class L2LiveWitnessTests(unittest.TestCase):
         api.call = bad
         with self.assertRaisesRegex(
             producer.Refused, "pilot_run_wrong_identity_or_conclusion"
+        ):
+            self.verify(api, entry)
+
+    def test_failed_ci_without_target_fixture_failure_refuses(self):
+        api, entry = self.setup_witness()
+        original = api.call
+        def bad(method, path, payload=None):
+            result = original(method, path, payload)
+            if path == "/actions/runs/80/jobs?per_page=100":
+                result["jobs"][0]["steps"][0]["conclusion"] = "success"
+            return result
+        api.call = bad
+        with self.assertRaisesRegex(
+            producer.Refused, "l2_intentional_fixture_failure_not_proven"
         ):
             self.verify(api, entry)
 

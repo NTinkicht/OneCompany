@@ -127,6 +127,52 @@ class TestGrokAppAdapter(unittest.TestCase):
         with self.assertRaisesRegex(AdapterRefused, "scope_unverified"):
             ForeignClient(settings()).identity()
 
+    def test_pr_snapshot_is_exact_head_readonly(self):
+        class PRClient(FakeClient):
+            def _call(self, method, path, token, payload=None):
+                if path == "/repos/owner/disposable/pulls/102":
+                    return {
+                        "number": 102, "state": "open", "title": "Testing",
+                        "draft": False,
+                        "head": {"sha": "a" * 40, "ref": "wu-test",
+                                 "repo": {"full_name": "owner/disposable"}},
+                        "base": {"sha": "b" * 40, "ref": "main",
+                                 "repo": {"full_name": "owner/disposable"}},
+                    }
+                if path.startswith("/repos/owner/disposable/pulls/102/files?"):
+                    return [{"filename": "scripts/test.py", "status": "modified",
+                             "additions": 2, "deletions": 1}]
+                return super()._call(method, path, token, payload)
+        client = PRClient(settings())
+        with self.assertRaisesRegex(AdapterRefused, "head_required"):
+            client.pull_request_snapshot(102, "main")
+        with self.assertRaisesRegex(AdapterRefused, "head_or_repository_changed"):
+            client.pull_request_snapshot(102, "c" * 40)
+        head = client.pull_request_head(102)
+        self.assertEqual(head["exact_head_sha"], "a" * 40)
+        self.assertTrue(head["read_only"])
+        result = client.pull_request_snapshot(102, "a" * 40)
+        self.assertEqual(result["head_branch"], "wu-test")
+        self.assertEqual(result["authenticated_principal"], "onecompany-grok-worker[bot]")
+        self.assertEqual(result["changed_files"][0]["path"], "scripts/test.py")
+        self.assertFalse(result["review_attestation"])
+
+    def test_source_excerpt_requires_safe_path_and_pinned_sha(self):
+        client = FakeClient(settings())
+        for path in (".onecompany/ledger.json", "../secret.txt",
+                     "services/.env", "scripts/secret.pem",
+                     "scripts/test.py/../../config.py"):
+            with self.subTest(path=path):
+                with self.assertRaisesRegex(AdapterRefused, "source_path_not_allowlisted"):
+                    client.read_source(path, "a" * 40, 1, 2)
+        with self.assertRaisesRegex(AdapterRefused, "exact_commit"):
+            client.read_source("scripts/lease.py", "main", 1, 5)
+        with self.assertRaisesRegex(AdapterRefused, "source_line_range"):
+            client.read_source("scripts/lease.py", "a" * 40, 1, 500)
+        result = client.read_source("scripts/lease.py", "a" * 40, 1, 2)
+        self.assertEqual(result["content"], "# Hello")
+        self.assertEqual(result["total_lines"], 1)
+
     def test_reject_mutable_ref_and_unauthorized_document_paths(self):
         client = FakeClient(settings())
         for path, ref in [

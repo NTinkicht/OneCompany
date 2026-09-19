@@ -168,7 +168,7 @@ def _verify_installation(entry: dict[str, Any], token: str) -> dict[str, str]:
     number = _positive_int(entry.get("pr_number"), "pilot_pr_number_invalid")
     if not isinstance(repo, str) or not REPO.fullmatch(repo):
         raise Refused("pilot_repository_invalid")
-    if not isinstance(wu, str) or not re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,63}", wu):
+    if not isinstance(wu, str) or not re.fullmatch(r"WU[A-Za-z0-9._-]{1,58}", wu):
         raise Refused("pilot_work_unit_invalid")
     if not isinstance(expected_actor, str) or not expected_actor:
         raise Refused("pilot_actor_invalid")
@@ -270,6 +270,20 @@ def _verify_installation(entry: dict[str, Any], token: str) -> dict[str, str]:
     return {"repository": repo, "owner": repo.split("/", 1)[0], "head": head_sha}
 
 
+def verify_pair(entries: list[dict[str, Any]], token: str) -> dict[str, Any]:
+    """One shared fail-closed verification path for CLI and offline tests."""
+    if not isinstance(entries, list) or len(entries) != 2 or not all(
+        isinstance(entry, dict) for entry in entries
+    ):
+        raise Refused("manifest_requires_exactly_two_pilots")
+    verified = [_verify_installation(item, token) for item in entries]
+    if (verified[0]["repository"] == verified[1]["repository"]
+            or verified[0]["owner"] == verified[1]["owner"]):
+        raise Refused("installations_must_be_distinct_repositories")
+    return {"result": "TWO_REAL_ISOLATED_A4_PILOTS_VERIFIED",
+            "installations": verified}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("manifest", type=Path)
@@ -283,11 +297,7 @@ def main() -> int:
         if not isinstance(manifest, dict):
             raise Refused("manifest_invalid")
         pilots = manifest.get("pilots")
-        if not isinstance(pilots, list) or len(pilots) != 2 or not all(isinstance(item, dict) for item in pilots):
-            raise Refused("manifest_requires_exactly_two_pilots")
-        verified = [_verify_installation(item, token) for item in pilots]
-        if verified[0]["repository"] == verified[1]["repository"] or verified[0]["owner"] == verified[1]["owner"]:
-            raise Refused("installations_must_be_distinct_repositories")
+        verified = verify_pair(pilots, token)["installations"]
     except (OSError, UnicodeError, json.JSONDecodeError, Refused) as exc:
         reason = exc.reason if isinstance(exc, Refused) else "manifest_invalid"
         print("A4_QUALIFY_REFUSED: " + reason, file=sys.stderr)

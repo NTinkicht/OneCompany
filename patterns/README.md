@@ -32,6 +32,6 @@ Patterns are not independent in every combination:
 
 ## Do not cargo-cult the vocabulary
 
-OneCompany uses patterns because they solved observed failure modes in Tabibi. A new project should preserve the invariant and may rename the mechanism. For example, a team does not need to call a temporary delivery group a “squad”; it needs bounded ownership, alignment, and a single canonical stream.
+OneCompany uses these generic patterns because they address recurrent coordination failures. Each new project may preserve the invariant while choosing its own domain vocabulary. For example, a team does not need to call a temporary delivery group a “squad”; it needs bounded ownership, alignment, and a single canonical stream.
 
 See `docs/DESIGN-LINEAGE.md` for provenance and `docs/REFERENCES.md` for source material.

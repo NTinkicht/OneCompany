@@ -89,7 +89,8 @@ def fixture_body(repo: str, wu: str, actor: str, base: str) -> str:
 
 
 def preflight(
-    config: dict, queue: dict, readiness: dict, dispatch: dict, budget: dict,
+    config: dict, queue: dict, readiness: dict, dispatch: dict,
+    budget: dict, actors: dict,
     *, repo: str, actor: str, wu: str, base: str,
     actions: bool, enabled: bool,
 ) -> tuple[str, str]:
@@ -106,6 +107,8 @@ def preflight(
     costs = budget.get("ai", {})
     ci = budget.get("ci", {})
     if (costs.get("additional_monthly_spend_cap") != 0
+        or costs.get("allow_new_paid_vendor") is not False
+        or costs.get("unknown_cost_behavior") != "forbid"
         or costs.get("allow_paid_fallback") is not False
         or costs.get("allow_overage") is not False
         or costs.get("allow_auto_topup") is not False
@@ -140,14 +143,31 @@ def preflight(
         errors.append("actor_not_in_verified_registry")
     else:
         person = people[0]
+        unavailable = person.get("temporarily_unavailable_capabilities", [])
+        if (not isinstance(unavailable, list)
+            or any(not isinstance(value, str) for value in unavailable)
+            or "implementation" in unavailable):
+            errors.append("actor_unattended_write_unverified")
         if (person.get("setup_state") != "ready"
             or "implementation" not in person.get("verified_capabilities", [])
             or person.get("repository_access", {}).get("write") is not True
             or person.get("unattended", {}).get("verified") is not True
-            or "implementation" in person.get("temporarily_unavailable_capabilities", [])
             or person.get("capacity", {}).get("measured") is not True
             or person.get("capacity", {}).get("implementation_streams", 0) < 1):
             errors.append("actor_unattended_write_unverified")
+    roster = [x for x in actors.get("actors", [])
+              if isinstance(x, dict) and x.get("id") == actor]
+    allowed = budget.get("cost_classes", {}).get("allowed", [])
+    if len(roster) != 1 or not isinstance(allowed, list):
+        errors.append("actor_cost_class_not_verified")
+    else:
+        cost_class = roster[0].get("cost_class")
+        if (roster[0].get("enabled") is not True
+            or roster[0].get("configured") is not True
+            or "implementation" not in roster[0].get("capabilities", [])
+            or cost_class not in {"FREE_ALLOWANCE", "LOCAL", "INCLUDED_SUBSCRIPTION"}
+            or cost_class not in allowed):
+            errors.append("actor_cost_class_not_verified")
     routes = [x for x in dispatch.get("actors", []) if x.get("actor_id") == actor]
     mechanisms = (routes[0].get("mechanisms", []) if len(routes) == 1 else [])
     if not any(
@@ -259,7 +279,7 @@ def _create_claim(api: GitHub, base: str, branch: str, target: str, body: str) -
 
 
 def produce(api: GitHub, *, config: dict, queue: dict, readiness: dict,
-            dispatch: dict, budget: dict, repo: str, actor: str, wu: str,
+            dispatch: dict, budget: dict, actors: dict, repo: str, actor: str, wu: str,
             checkout_sha: str, actions: bool, enabled: bool) -> dict:
     """Reserve one Git ref atomically, then create/adopt one canonical open PR."""
     if api.repository != repo:
@@ -274,7 +294,7 @@ def produce(api: GitHub, *, config: dict, queue: dict, readiness: dict,
     if not isinstance(base, str) or base != checkout_sha:
         raise Refused("trusted_checkout_or_base_moved")
     branch, target = preflight(
-        config, queue, readiness, dispatch, budget, repo=repo, actor=actor, wu=wu,
+        config, queue, readiness, dispatch, budget, actors, repo=repo, actor=actor, wu=wu,
         base=base, actions=actions, enabled=enabled,
     )
     body = fixture_body(repo, wu, actor, base)
@@ -311,9 +331,11 @@ def produce(api: GitHub, *, config: dict, queue: dict, readiness: dict,
             # A successful API mutation can lose its response. Never retry POST
             # without inventory reconciliation and a fresh independent run.
             raise Refused("pr_creation_uncertain_reconcile_before_retry") from None
+    if not isinstance(pr, dict):
+        raise Refused("pr_creation_uncertain_reconcile_before_retry")
     number = pr.get("number")
     if not isinstance(number, int) or isinstance(number, bool) or number <= 0:
-        raise Refused("canonical_pr_number_invalid")
+        raise Refused("pr_creation_uncertain_reconcile_before_retry")
     live = api.call("GET", "/pulls/" + str(number))
     if (live.get("state") != "open"
         or live.get("draft") is True
@@ -340,6 +362,11 @@ def main() -> int:
         token = os.environ.get("GH_TOKEN", "")
         actor = os.environ.get("A4_ACTOR", "")
         wu = os.environ.get("A4_WORK_UNIT", "")
+        run_id = os.environ.get("GITHUB_RUN_ID", "")
+        run_attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "")
+        if not (run_id.isdecimal() and int(run_id) > 0
+                and run_attempt.isdecimal() and int(run_attempt) > 0):
+            raise Refused("immutable_github_run_identity_missing")
         sha = subprocess.run(
             ["git", "rev-parse", "HEAD"], capture_output=True, text=True,
             check=True,
@@ -351,18 +378,13 @@ def main() -> int:
             readiness=load_json(CONTROL / "readiness.json"),
             dispatch=load_json(CONTROL / "dispatch.json"),
             budget=load_json(CONTROL / "budget.json"),
+            actors=load_json(CONTROL / "actors.json"),
             repo=repo, actor=actor, wu=wu, checkout_sha=sha,
             actions=os.environ.get("GITHUB_ACTIONS") == "true",
             enabled=os.environ.get("ONECOMPANY_A4_PRODUCER_ENABLED") == "true",
         )
     except (Refused, subprocess.CalledProcessError, OSError) as exc:
         print("A4_REFUSED: " + str(exc), file=sys.stderr)
-        return 2
-    run_id = os.environ.get("GITHUB_RUN_ID", "")
-    run_attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "")
-    if not (run_id.isdecimal() and int(run_id) > 0
-            and run_attempt.isdecimal() and int(run_attempt) > 0):
-        print("A4_REFUSED: immutable_github_run_identity_missing", file=sys.stderr)
         return 2
     answer["run_id"] = int(run_id)
     answer["run_attempt"] = int(run_attempt)

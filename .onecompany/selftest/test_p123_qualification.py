@@ -138,6 +138,44 @@ class SamePRRepairTests(unittest.TestCase):
                 )
         self.assertEqual(api.writes, 0)
 
+    def test_conflicted_live_ledger_refuses_before_any_git_object(self):
+        """An active-looking lease cannot override a durable replay conflict."""
+        api, options = self.setup_pilot()
+        calls = []
+        previous = api.call
+        def recording(method, path, payload=None):
+            if method in {"POST", "PATCH"}:
+                calls.append((method, path))
+            return previous(method, path, payload)
+        api.call = recording
+        valid_lease = {
+            "id": "lease-1", "role": "implementation",
+            "actor": ACTOR, "work_unit": WU, "pr": 1,
+            "branch": producer.branch_for(WU),
+            "status": "active", "start_head": CLAIM,
+            "admission_snapshot": {"trusted_ref": BASE},
+        }
+        with (
+            patch("ledger_lib.ledger_enabled", return_value=True),
+            patch("lease_lifecycle.coordination_view", return_value={
+                "active_leases": [valid_lease],
+                "lifecycle_rejected_claims": [],
+                "integrity_conflicts": [{"reason": "duplicate_event_id"}],
+                "conflicts": [{"reason": "duplicate_event_id"}],
+                "rejected_claims": [],
+            }),
+        ):
+            with self.assertRaisesRegex(
+                producer.Refused, "durable_lease_replay_rejected",
+            ):
+                repair.repair(
+                    api, **options, number=1, initial=CLAIM,
+                    failed_run_id=42,
+                )
+        self.assertEqual(calls, [])
+        self.assertEqual(api.writes, 0)
+        self.assertNotIn(SECOND, api.parents)
+
     def test_pre_pr_queue_does_not_count_as_p3_binding(self):
         api, options = self.setup_pilot()
         options["queue"]["work_units"][0]["pr"] = None

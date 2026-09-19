@@ -1,0 +1,98 @@
+{
+  "schema_version": "onecompany.veritas.h8.v1",
+  "target": "NTinkicht/veritas-atlas",
+  "observed_target_main_sha": "a0cd9230b68b7a5b4fd6c9392b9f748afb49bfb0",
+  "date": "2026-09-19",
+  "gate": "H8",
+  "status": "blocked",
+  "authority": "read-only-planning-evidence",
+  "environment": "isolated-Veritas-Atlas-staging",
+  "render": {
+    "workspace_id": "tea-d9cm2fnavr4c739vvl50",
+    "auto_deploy": false,
+    "api": {
+      "service_id": "srv-dan1pqbtqb8s73a979s0",
+      "deploy_id": "dep-dan1pqrtqb8s73a97bag",
+      "status": "live",
+      "deployed_source_sha": "47bd085cb5e75d4b72acffc7a9e1e54300a61977",
+      "liveness_path": "/health/live",
+      "database_readiness_path_after_pr7_release": "/health/ready"
+    },
+    "web": {
+      "service_id": "srv-dan1pqjtqb8s73a979tg",
+      "deploy_id": "dep-dan1pqrtqb8s73a97b00",
+      "status": "live",
+      "deployed_source_sha": "47bd085cb5e75d4b72acffc7a9e1e54300a61977"
+    }
+  },
+  "neon": {
+    "project_id": "quiet-bar-44039561",
+    "project_name": "Veritas Atlas Staging",
+    "database": "veritas_atlas",
+    "branch_id": "br-calm-wildflower-b1lw0zuf",
+    "initial_schema_applied": true,
+    "public_tables_including_history": 14,
+    "history": [
+      "20260401172450_InitialCreate",
+      "20260406222302_ContradictionSlice"
+    ],
+    "future_schema_migration_approval_granted": false,
+    "project_human_in_scope": false
+  },
+  "verification": {
+    "read_only_external_http_smoke_run_id": 35431595762,
+    "externally_verified_api_liveness": true,
+    "externally_verified_frontend_reachability": true,
+    "externally_verified_unauthenticated_boundary": true,
+    "authenticated_operator_login_verified": false,
+    "api_db_readiness_live_verified": false,
+    "business_db_read_workflow_verified": false,
+    "recovery_drill_verified": false,
+    "immutable_container_digest_captured": false,
+    "github_admin_protection_observed": false,
+    "other_external_writers_exhaustively inventoried": false,
+    "owner_reported_neon_and_bootstrap_credentials_rotated": true,
+    "credential_rotation_proof_in_non_secret_release_record": false,
+    "candidate_security_advisories_resolved_or_owner_risk_accepted": false
+  },
+  "release_policy": {
+    "manual_go_no_go_required": true,
+    "candidate_pr_merge_is_not_release": true,
+    "routine_auto_deploy_enabled": false,
+    "first_release_has_previous_known_good_after_new_deploy_only": true,
+    "migration_is_independent_human_only_decision": true,
+    "rollback_requires_observed_api_web_compatibility": true
+  },
+  "open_blockers": [
+    "GitHub administrative promotion protection not independently evidenced (H1)",
+    "Full writer/provider inventory not complete (H7)",
+    "No authenticated DB-backed operator smoke evidence",
+    "No verified rollback/recovery drill",
+    "No verified digest/config revision for currently deployed artifacts",
+    "No recorded Neon backup/PITR recovery rehearsal or RPO/RTO",
+    "No separately authorized deployment of pending database-readiness endpoint",
+    "Verify rotation/revocation of previously exposed Neon/bootstrap credentials with non-secret operator receipt and current Render config revision",
+    "Remediate and verify known high-severity backend/frontend dependency advisories or capture explicit staging-only owner risk acceptance with expiry and mitigations"
+  ],
+  "onecompany_mutation_authorized": false,
+  "companyos_cutover_authorized": false,
+  "autonomy_promotion_authorized": false,
+  "budget_expansion_authorized": false,
+  "evidence_refs": [
+    "NTinkicht/veritas-atlas#4",
+    "NTinkicht/veritas-atlas#5",
+    "NTinkicht/veritas-atlas#6",
+    "NTinkicht/veritas-atlas#7 (candidate only)",
+    "NTinkicht/OneCompany#83",
+    "NTinkicht/OneCompany#86",
+    "NTinkicht/OneCompany#87",
+    "NTinkicht/OneCompany#85"
+  ],
+  "operating_instructions_ref": "docs/VERITAS-H8-RELEASE-RUNBOOK.md",
+  "known_dependency_advisories_at_initial_build": {
+    "api": [
+      "Microsoft.OpenApi 2.3.0 high-severity advisory (recorded at first Render build; recheck exact candidate dependency graph)"
+    ],
+    "frontend": "8 high, 2 moderate, 1 low npm advisories (first Render build; recheck exact candidate)"
+  }
+}

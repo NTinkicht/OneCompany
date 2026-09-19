@@ -36,6 +36,19 @@ COPY_PATHS = [
     ".github/PULL_REQUEST_TEMPLATE.md",
     ".github/workflows/onecompany-validate.yml",
 ]
+# Product installation acceptance tests below rely on worker readiness and
+# dispatch evidence verified for the OneCompany SOURCE repository only. They
+# run in the source CI, but are not portable into a fresh, unconfigured target.
+# All portable policy/security/algorithm tests remain installed and executable.
+SOURCE_INSTALLATION_SELFTESTS = frozenset({
+    ".onecompany/selftest/test_a3b_activation.py",
+    ".onecompany/selftest/test_dispatch_execution.py",
+    ".onecompany/selftest/test_integration_promotion_remediation.py",
+    ".onecompany/selftest/test_interactive_activation.py",
+    ".onecompany/selftest/test_qualification_executor.py",
+    ".onecompany/selftest/test_zero_spend_router.py",
+})
+
 CONTRACTS = {
     "PRODUCT.md.template": "PRODUCT.md",
     "ARCHITECTURE.md.template": "ARCHITECTURE.md",
@@ -99,6 +112,8 @@ def infer_default_branch(target: Path) -> str:
 
 
 def copy_item(source: Path, target: Path, force: bool) -> None:
+    if source.relative_to(ROOT).as_posix() in SOURCE_INSTALLATION_SELFTESTS:
+        return
     if source.is_dir():
         for child in source.rglob("*"):
             if not child.is_dir():

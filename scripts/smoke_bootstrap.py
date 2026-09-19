@@ -86,6 +86,22 @@ def main() -> int:
                 require(result.returncode == 0, f"target {' '.join(command)} failed:\n{result.stdout}\n{result.stderr}")
             selftest = run([sys.executable, "-m", "unittest", "discover", "-s", ".onecompany/selftest", "-p", "test_*.py"], target)
             require(selftest.returncode == 0, f"target framework self-tests failed:\n{selftest.stdout}\n{selftest.stderr}")
+            collision_target = Path(temp) / "existing-product"
+            (collision_target / "docs").mkdir(parents=True)
+            collision_file = collision_target / "docs" / "CONFIGURATION-REFERENCE.md"
+            collision_file.write_text("project-owned documentation\\n")
+            colliding = run([
+                sys.executable, str(ROOT / "onecompany.py"), "bootstrap",
+                "--target", str(collision_target),
+                "--repository", "example/existing-product",
+                "--code-owner", "@example/reviewers",
+                "--root-principal", "example-admin",
+            ])
+            require(colliding.returncode != 0, "bootstrap silently accepted a later-path collision")
+            require(not (collision_target / ".onecompany").exists(),
+                    "a rejected bootstrap left partial control-plane installation")
+            require(collision_file.read_text() == "project-owned documentation\\n",
+                    "a rejected bootstrap modified existing product documentation")
             second = run([sys.executable, str(ROOT / "onecompany.py"), "bootstrap", "--target", str(target), "--repository", "example/acme-product", "--code-owner", "@example/reviewers", "--root-principal", "example-admin"])
             require(second.returncode != 0, "bootstrap must refuse an existing .onecompany installation")
         print("OneCompany bootstrap smoke PASS")

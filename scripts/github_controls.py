@@ -343,6 +343,17 @@ def inspect_enforcement(
             for item in checks.get("checks", [])
             if isinstance(item, dict) and item.get("context")
         )
+        classic_review_gate = (
+            isinstance(REVIEW_GATE_APP_ID, int)
+            and not isinstance(REVIEW_GATE_APP_ID, bool)
+            and REVIEW_GATE_APP_ID > 0
+            and any(
+                isinstance(item, dict)
+                and item.get("context") == REVIEW_GATE_CONTEXT
+                and item.get("app_id") == REVIEW_GATE_APP_ID
+                for item in checks.get("checks", [])
+            )
+        )
         reviews = protection.get("required_pull_request_reviews") or {}
         code_owner = reviews.get("require_code_owner_reviews") is True
         bypassable = _classic_has_bypass(protection)
@@ -356,6 +367,7 @@ def inspect_enforcement(
         if not bypassable:
             observed_required.update(contexts)
             owner_review_enforced = owner_review_enforced or code_owner
+            review_gate_enforced = review_gate_enforced or classic_review_gate
 
     code, rulesets, _ = gh_api(f"repos/{repo}/rulesets")
     if code == 0 and isinstance(rulesets, list):

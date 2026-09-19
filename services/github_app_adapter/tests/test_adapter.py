@@ -161,6 +161,73 @@ class TestGrokAppAdapter(unittest.TestCase):
         self.assertEqual(result["changed_files"][0]["path"], "scripts/test.py")
         self.assertFalse(result["review_attestation"])
 
+    def test_malformed_pr_identity_is_sanitized(self):
+        """Truthy non-object identity fields never escape as AttributeError."""
+        valid = {"sha": "a" * 40, "ref": "wu-test",
+                 "repo": {"full_name": "owner/disposable"}}
+        base = {"sha": "b" * 40, "ref": "main",
+                "repo": {"full_name": "owner/disposable"}}
+        for field in ("head", "base", "head_repo", "base_repo"):
+            for malformed in (None, "invalid", ["invalid"]):
+                with self.subTest(field=field, malformed=malformed):
+                    class MalformedPR(FakeClient):
+                        def _call(self, method, path, token, payload=None):
+                            if path == "/repos/owner/disposable/pulls/102":
+                                head_value = dict(valid)
+                                head_value["repo"] = dict(valid["repo"])
+                                base_value = dict(base)
+                                base_value["repo"] = dict(base["repo"])
+                                if field == "head":
+                                    head_value = malformed
+                                elif field == "base":
+                                    base_value = malformed
+                                elif field == "head_repo":
+                                    head_value["repo"] = malformed
+                                else:
+                                    base_value["repo"] = malformed
+                                return {"number": 102, "state": "open",
+                                        "draft": False, "head": head_value,
+                                        "base": base_value}
+                            return super()._call(method, path, token, payload)
+                    client = MalformedPR(settings())
+                    with self.assertRaisesRegex(
+                        AdapterRefused, "pr_head_unavailable_or_foreign"
+                    ):
+                        client.pull_request_head(102)
+                    with self.assertRaisesRegex(
+                        AdapterRefused, "pr_head_or_repository_changed"
+                    ):
+                        client.pull_request_snapshot(102, "a" * 40)
+
+    def test_pr_snapshot_refuses_malformed_recheck_and_comparison(self):
+        """Immutable-compare and post-read identity also fail closed."""
+        class MalformedPR(FakeClient):
+            bad_path = ""
+            bad_value = None
+            def _call(self, method, path, token, payload=None):
+                if path == self.bad_path:
+                    return self.bad_value
+                if path == "/repos/owner/disposable/pulls/102":
+                    self.calls.append((method, path, payload))
+                    return {"number": 102, "state": "open", "draft": False,
+                            "head": {"sha": "a" * 40, "ref": "wu-test",
+                                     "repo": {"full_name": "owner/disposable"}},
+                            "base": {"sha": "b" * 40, "ref": "main",
+                                     "repo": {"full_name": "owner/disposable"}}}
+                return super()._call(method, path, token, payload)
+        client = MalformedPR(settings())
+        client.bad_path = (
+            "/repos/owner/disposable/compare/" + "b" * 40 + "..." + "a" * 40
+        )
+        for value in ({"status": "ahead", "base_commit": ["invalid"]},
+                      {"status": "ahead", "base_commit": "invalid"}):
+            with self.subTest(value=value):
+                client.bad_value = value
+                with self.assertRaisesRegex(
+                    AdapterRefused, "pr_immutable_comparison_invalid"
+                ):
+                    client.pull_request_snapshot(102, "a" * 40)
+
     def test_pr_snapshot_refuses_head_change_during_files_fetch(self):
         class RacingPR(FakeClient):
             def __init__(self, settings):

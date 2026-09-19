@@ -103,9 +103,9 @@ successful dispatch. The verifier rejects a commit that modifies any path
 besides the one fixture file, or two projects controlled by the same owner.
 Source CI still does not qualify a live target installation.
 
-Each manifest entry must contain `repository`, `work_unit`, `actor`,
-`pr`, `head`, `base`, `workflow_run`, `check_name` (exactly
-`validate-fixture`), `ci_workflow_run`, and `ci_workflow_path` (exactly
+Each manifest entry must contain `repository`, `wu`, `actor`,
+`pr_number`, `base_sha`, `run_id`, `check_name` (exactly
+`validate-fixture`), and `ci_workflow_path` (exactly
 `.github/workflows/onecompany-a4-fixture-validation.yml`). The verifier
 requires different repository owners, exact fixture/head/base, successful real
 repository-dispatch run and a green GitHub Actions check on the exact PR

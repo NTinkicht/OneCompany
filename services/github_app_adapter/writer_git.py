@@ -90,11 +90,13 @@ class ExactRefWriter:
         repo = self.client.settings.repository
         target_path = urllib.parse.quote(request.path, safe="/")
         current_pr = self._read_current_pr(request.pr_number, token)
-        if ((current_pr.get("head") or {}).get("sha")
-                != request.expected_head_sha):
+        head = current_pr.get("head")
+        if not isinstance(head, dict) or not isinstance(head.get("repo"), dict):
+            raise WriteRefused("writer_canonical_branch_changed")
+        if head.get("sha") != request.expected_head_sha:
             raise WriteRefused("writer_head_changed_before_git_objects")
-        if ((current_pr.get("head") or {}).get("ref") != branch
-                or ((current_pr.get("head") or {}).get("repo") or {}).get("full_name") != repo):
+        if (head.get("ref") != branch
+                or head["repo"].get("full_name") != repo):
             raise WriteRefused("writer_canonical_branch_changed")
         try:
             current = self.client._stage_call(

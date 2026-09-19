@@ -167,20 +167,23 @@ class AppClient:
             f"/repos/{self.settings.repository}/pulls/{pr_number}", token,
         )
         if (not isinstance(item, dict) or item.get("number") != pr_number
-                or item.get("state") != "open"
-                or ((item.get("head") or {}).get("repo") or {}).get("full_name")
-                    != self.settings.repository
-                or not isinstance((item.get("head") or {}).get("sha"), str)
-                or not _SHA.fullmatch(item["head"]["sha"])
-                or ((item.get("base") or {}).get("repo") or {}).get("full_name")
-                    != self.settings.repository):
+                or item.get("state") != "open"):
+            raise AdapterRefused("pr_head_unavailable_or_foreign")
+        head, base = item.get("head"), item.get("base")
+        if (not isinstance(head, dict) or not isinstance(base, dict)
+                or not isinstance(head.get("repo"), dict)
+                or not isinstance(base.get("repo"), dict)
+                or head["repo"].get("full_name") != self.settings.repository
+                or base["repo"].get("full_name") != self.settings.repository
+                or not isinstance(head.get("sha"), str)
+                or not _SHA.fullmatch(head["sha"])):
             raise AdapterRefused("pr_head_unavailable_or_foreign")
         return {
             "repository": self.settings.repository,
             "pr_number": pr_number,
-            "exact_head_sha": item["head"]["sha"],
-            "head_branch": item["head"].get("ref"),
-            "base_branch": item["base"].get("ref"),
+            "exact_head_sha": head["sha"],
+            "head_branch": head.get("ref"),
+            "base_branch": base.get("ref"),
             "authenticated_principal": slug + "[bot]",
             "read_only": True,
         }
@@ -202,9 +205,11 @@ class AppClient:
         head = doc.get("head")
         base = doc.get("base")
         if (not isinstance(head, dict) or not isinstance(base, dict)
-                or (head.get("repo") or {}).get("full_name") != self.settings.repository
+                or not isinstance(head.get("repo"), dict)
+                or not isinstance(base.get("repo"), dict)
+                or head["repo"].get("full_name") != self.settings.repository
                 or head.get("sha") != exact_head_sha
-                or (base.get("repo") or {}).get("full_name") != self.settings.repository
+                or base["repo"].get("full_name") != self.settings.repository
                 or doc.get("state") != "open"):
             raise AdapterRefused("pr_head_or_repository_changed")
         # GitHub /pulls/{number}/files tracks a MOVING ref: even an A->B->A
@@ -220,7 +225,8 @@ class AppClient:
         )
         if (not isinstance(comparison, dict)
                 or comparison.get("status") not in {"ahead", "diverged"}
-                or (comparison.get("base_commit") or {}).get("sha") != base_sha
+                or not isinstance(comparison.get("base_commit"), dict)
+                or comparison["base_commit"].get("sha") != base_sha
                 or not isinstance(comparison.get("merge_base_commit"), dict)
                 or not isinstance(comparison["merge_base_commit"].get("sha"), str)
                 or not _SHA.fullmatch(comparison["merge_base_commit"]["sha"])):
@@ -259,9 +265,11 @@ class AppClient:
                 or after.get("draft") != doc.get("draft")
                 or not isinstance(after.get("head"), dict)
                 or not isinstance(after.get("base"), dict)
-                or (after["head"].get("repo") or {}).get("full_name")
+                or not isinstance(after["head"].get("repo"), dict)
+                or not isinstance(after["base"].get("repo"), dict)
+                or after["head"]["repo"].get("full_name")
                     != self.settings.repository
-                or (after["base"].get("repo") or {}).get("full_name")
+                or after["base"]["repo"].get("full_name")
                     != self.settings.repository
                 or after["head"].get("sha") != exact_head_sha
                 or after["head"].get("ref") != head.get("ref")

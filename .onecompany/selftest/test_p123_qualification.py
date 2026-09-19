@@ -340,9 +340,15 @@ class L2LiveWitnessTests(unittest.TestCase):
         return api, copy.deepcopy(api.l2)
 
     def verify(self, api, entry):
-        with patch.object(
-            campaign, "_job_log",
-            return_value="fixture_ci_repair_not_complete",
+        # Unit fixtures mock ONLY native platform bindings. The real verifier
+        # must resolve these from base-trusted identity and canonical ledger.
+        with (
+            patch.object(campaign, "_job_log",
+                         return_value="fixture_ci_repair_not_complete"),
+            patch.object(campaign, "_native_review", return_value={
+                "login": api.review_login, "actor_id": "independent-reviewer",
+            }),
+            patch.object(campaign, "_native_merged_event", return_value=None),
         ):
             return campaign.verify_l2(
                 entry, "read-only", factory=lambda repo, token: api

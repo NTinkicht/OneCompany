@@ -192,6 +192,12 @@ def repair(api: GitHub, *, config: dict, queue: dict, readiness: dict,
     proposed = commit.get("sha")
     if not isinstance(proposed, str) or not SHA.fullmatch(proposed):
         raise Refused("repair_commit_uncertain_reconcile")
+    # Reconcile the live trust root and exact PR/ref a second time immediately
+    # before the ONE ref mutation; never publish objects after base/head drift.
+    if (_api_branch(api, default) != base
+            or _api_branch(api, branch) != initial
+            or _head(api, number, repo, branch, base, default) != initial):
+        raise Refused("pilot_head_or_base_changed_before_ref")
     # An uncertain PATCH is not retried. The NEXT run reconciles exact content.
     try:
         api.call("PATCH", "/git/refs/heads/" + branch,

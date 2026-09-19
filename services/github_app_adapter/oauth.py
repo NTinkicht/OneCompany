@@ -16,7 +16,7 @@ import json
 import re
 import secrets
 import time
-from urllib.parse import urlencode
+from urllib.parse import parse_qs, urlencode
 
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
@@ -104,16 +104,44 @@ class OwnerOAuth:
         except (ValueError, UnicodeError, TypeError, AttributeError):
             return False
 
+    async def _bounded_form(self, request: Request) -> dict[str, str] | None:
+        """Bound the bytes ACTUALLY received, even without Content-Length."""
+        if request.headers.get("content-type", "").split(";", 1)[0].strip().lower() != "application/x-www-form-urlencoded":
+            return None
+        length = request.headers.get("content-length")
+        if length is not None:
+            try:
+                if int(length) < 0 or int(length) > 8192:
+                    return None
+            except ValueError:
+                return None
+        payload = bytearray()
+        async for chunk in request.stream():
+            if len(payload) + len(chunk) > 8192:
+                return None
+            payload.extend(chunk)
+        try:
+            fields = parse_qs(
+                payload.decode("utf-8"), keep_blank_values=True,
+                strict_parsing=True, max_num_fields=16,
+            )
+        except (ValueError, UnicodeError):
+            return None
+        if any(len(values) != 1 for values in fields.values()):
+            return None
+        return {key: values[0] for key, values in fields.items()}
+
     async def authorize(self, request: Request):
         if not self.settings.auth_ready():
             return _response("temporarily_unavailable", 503)
         if request.method == "GET":
+            if len(request.scope.get("query_string", b"")) > 8192:
+                return _response("invalid_request", 400)
             args = dict(request.query_params)
         else:
-            if int(request.headers.get("content-length", "0") or "0") > 8192:
+            args = await self._bounded_form(request)
+            if args is None:
                 return _response("invalid_request", 400)
-            form = await request.form()
-            args = {key: str(value) for key, value in form.items()}
         if not self._valid_request(args):
             return _response("invalid_request", 400)
         if request.method == "GET":
@@ -174,10 +202,9 @@ class OwnerOAuth:
     async def token(self, request: Request):
         if not self.settings.auth_ready():
             return _response("temporarily_unavailable", 503)
-        if int(request.headers.get("content-length", "0") or "0") > 8192:
+        args = await self._bounded_form(request)
+        if args is None:
             return _response("invalid_request", 400)
-        form = await request.form()
-        args = {key: str(value) for key, value in form.items()}
         if args.get("client_id") != CLIENT_ID:
             return _response("invalid_client", 401)
         grant = args.get("grant_type")

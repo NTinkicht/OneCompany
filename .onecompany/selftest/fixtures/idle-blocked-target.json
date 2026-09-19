@@ -1,16 +1,16 @@
 {
   "schema_version": "1.0",
   "project": {
-    "repository": "NTinkicht/veritas-atlas",
+    "repository": "example/idle-target",
     "default_branch": "main"
   },
   "snapshot": {
     "observed_at": "2026-09-18T14:43:52Z",
-    "main_sha": "e19a0780ec8d5237d923f6d1cdb3a4af24346c95",
-    "source": "github-live-read-only; shared observation boundary github:NTinkicht/OneCompany#76:comment-5731658616",
+    "main_sha": "cccccccccccccccccccccccccccccccccccccccc",
+    "source": "fixture-synthetic-read-only",
     "stale": false,
     "derived": false,
-    "observation_boundary_ref": "github:NTinkicht/OneCompany#76:comment-5731658616"
+    "observation_boundary_ref": "fixture:idle-boundary"
   },
   "live": {
     "mode": "idle",
@@ -18,20 +18,20 @@
       "verified": true,
       "open_pr_count": 0,
       "active_work_unit_count": 0,
-      "evidence_ref": "github:NTinkicht/OneCompany#76:comment-5731658616",
-      "snapshot_sha": "e19a0780ec8d5237d923f6d1cdb3a4af24346c95",
+      "evidence_ref": "fixture:idle-boundary",
+      "snapshot_sha": "cccccccccccccccccccccccccccccccccccccccc",
       "observed_at": "2026-09-18T14:43:52Z",
-      "observation_boundary_ref": "github:NTinkicht/OneCompany#76:comment-5731658616"
+      "observation_boundary_ref": "fixture:idle-boundary"
     }
   },
   "legacy": {
     "mode": "absent",
     "control_plane_absence": {
       "verified": true,
-      "evidence_ref": "github:NTinkicht/OneCompany#76:comment-5731658616",
-      "snapshot_sha": "e19a0780ec8d5237d923f6d1cdb3a4af24346c95",
+      "evidence_ref": "fixture:idle-boundary",
+      "snapshot_sha": "cccccccccccccccccccccccccccccccccccccccc",
       "observed_at": "2026-09-18T14:43:52Z",
-      "observation_boundary_ref": "github:NTinkicht/OneCompany#76:comment-5731658616"
+      "observation_boundary_ref": "fixture:idle-boundary"
     }
   },
   "branch_protection": {
@@ -62,7 +62,7 @@
   "adoption_blockers": [
     {
       "code": "NO_REPOSITORY_CI_WORKFLOW",
-      "message": "Veritas Atlas has no observed repository-native exact-head CI workflow."
+      "message": "The fixture target has no observed repository-native exact-head CI workflow."
     },
     {
       "code": "NO_DOTNET_TEST_PROJECT",
@@ -122,5 +122,6 @@
       "path": "target-control-plane",
       "classification": "add-later-only-after-reviewed-cutover"
     }
-  ]
+  ],
+  "fixture_note": "Synthetic verified-idle shadow sample; all blockers are illustrative, not current facts."
 }

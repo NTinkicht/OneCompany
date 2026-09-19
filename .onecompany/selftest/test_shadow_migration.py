@@ -69,10 +69,8 @@ def verified_idle_manifest() -> dict:
 
 
 class ShadowMigrationTests(unittest.TestCase):
-    def test_tabibi_fixture_fails_closed_without_mutation_readiness(self):
-        fixture = ROOT / "source-evidence" / "tabibi" / "c1-shadow.json"
-        if not fixture.exists():
-            self.skipTest("source-only Tabibi fixture is intentionally absent from installed copies")
+    def test_conflicted_fixture_fails_closed_without_mutation_readiness(self):
+        fixture = ROOT / ".onecompany" / "selftest" / "fixtures" / "conflicted-target.json"
         report = shadow_migration.analyze_manifest(shadow_migration.load_manifest(fixture))
         self.assertFalse(report["mutation_ready"])
         self.assertTrue(report["shadow_only"])
@@ -182,10 +180,8 @@ class ShadowMigrationTests(unittest.TestCase):
         report = shadow_migration.analyze_manifest(manifest)
         self.assertFalse(report["mutation_ready"]); self.assertIn("NO_CI", report["blocker_codes"])
 
-    def test_veritas_idle_fixture_preserves_c1_blockers_without_fake_live_state(self):
-        fixture = ROOT / "source-evidence" / "veritas-atlas" / "c2a-shadow.json"
-        if not fixture.exists():
-            self.skipTest("source-only Veritas fixture is intentionally absent from installed copies")
+    def test_idle_fixture_preserves_c1_blockers_without_fake_live_state(self):
+        fixture = ROOT / ".onecompany" / "selftest" / "fixtures" / "idle-blocked-target.json"
         report = shadow_migration.analyze_manifest(shadow_migration.load_manifest(fixture))
         self.assertFalse(report["mutation_ready"])
         self.assertTrue(report["shadow_only"])

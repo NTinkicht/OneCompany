@@ -4,7 +4,7 @@ This document defines the **pre-cutover rehearsal boundary** for Epic 0.6 C2b.
 
 The gate is deliberately target-agnostic and non-mutating. It does not install OneCompany into a target repository, stop schedulers, acquire leases, create target branches or pull requests, dispatch product work, publish target authority, or perform a migration. Its only job is to prove whether a separately reviewed cutover could be considered safely.
 
-Veritas Atlas (`NTinkicht/veritas-atlas`) is the first active proving-ground target. Historical Tabibi C1/C2a evidence remains valid only for its original provenance and regression coverage; it is not reused as Veritas evidence.
+Target evidence belongs to the target repository or an explicitly designated target-owned evidence store. The reusable OneCompany source must not bind this gate to a named application or copy live target observations into its distributable files.
 
 ## Command
 
@@ -92,15 +92,13 @@ OneCompany becomes the single canonical owner
 
 If any step becomes ambiguous, the safe state is to keep the target unchanged and re-run reconciliation.
 
-## First active target: Veritas Atlas
+## Target-owned evidence
 
-Veritas Atlas must receive fresh C1 read-only onboarding and C2a shadow evidence before this gate can support a real cutover decision. The current pivot does not mutate Veritas Atlas and does not inherit target facts from Tabibi.
-
-The initial read-only baseline has already identified important items that must remain blockers until independently resolved: unprotected `main`, no observed GitHub Actions workflow estate, local-only documented smoke tests, and unknown deployment/runtime mutators.
-
-## Historical Tabibi evidence
-
-Existing Tabibi C1/C2a evidence is preserved as historical provenance and fail-closed regression coverage. Tabibi remains under its existing control plane. This target-neutral gate does not stop its schedules, change its writers, or reinterpret its stored state.
+Each adopting project supplies a fresh target-bound C1/C2a/C2b manifest and
+reviews its own deployment writers, protected branches, release ownership and
+rollback plan. A demonstration fixture is not evidence of another repository.
+Generic fixtures live under `.onecompany/selftest/fixtures/` and must not be
+interpreted as observations or authorizations for a live target.
 
 ## Governance invariants
 

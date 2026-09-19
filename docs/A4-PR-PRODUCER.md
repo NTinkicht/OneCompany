@@ -22,8 +22,10 @@ worker. An explicitly approved L2 disposable installation, verified actor and
 event dispatcher may submit `repository_dispatch` event
 `onecompany.a4-produce` with `{"work_unit":"WU-A","actor":"fixture-bot"}`.
 
-The worker verifies the checked-out default-branch SHA against live GitHub,
-project identity, L2+ autonomy, stop state, READY LOW-risk WU, a **single
+The worker validates GitHub run identity before any write and verifies the
+checked-out default-branch SHA against live GitHub,
+project identity, L2+ autonomy, stop state, complete zero-extra-spend
+policy, verified included/free actor cost class, READY LOW-risk WU, a **single
 deterministic branch** `onecompany-a4-wu-a`, absent PR mapping, exact fixture
 scope, verified unattended actor and configured route. It creates an immutable
 Git blob/tree/commit with fixture provenance and atomically creates the branch
@@ -90,9 +92,14 @@ besides the one fixture file, or two projects controlled by the same owner.
 Source CI still does not qualify a live target installation.
 
 Each manifest entry must contain `repository`, `work_unit`, `actor`,
-`pr`, `head`, `base`, `workflow_run`, `check_name`. The verifier
+`pr`, `head`, `base`, `workflow_run`, `check_name`, `ci_workflow_run`, and
+`ci_workflow_path`. The verifier
 requires different repository owners, exact fixture/head/base, successful real
-repository-dispatch run and a green CI check on the exact PR head. Reviewer
+repository-dispatch run and a green GitHub Actions check on the exact PR
+head, bound to its successful Actions run and the authorized validation
+workflow path already present on the trusted base branch. Invoke the
+validation workflow against the exact PR ref, not merely the default branch;
+the check's verified Actions run must record the PR head SHA. Reviewer
 independence and any later mechanical merge require separate evidence.
 A source self-test, provider promise or scheduled ChatGPT task cannot
 substitute for these two real runs.

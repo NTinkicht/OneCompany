@@ -4,7 +4,7 @@ This document defines the **pre-cutover rehearsal boundary** for Epic 0.6 C2b.
 
 The gate is deliberately target-agnostic and non-mutating. It does not install OneCompany into a target repository, stop schedulers, acquire leases, create target branches or pull requests, dispatch product work, publish target authority, or perform a migration. Its only job is to prove whether a separately reviewed cutover could be considered safely.
 
-Veritas Atlas (`NTinkicht/veritas-atlas`) is the first active proving-ground target. Historical Tabibi C1/C2a evidence remains valid only for its original provenance and regression coverage; it is not reused as Veritas evidence.
+Any target must present its **own** fresh C1/C2a evidence and explicit source identifiers. Evidence from any other project, even if similar, cannot establish the target's permissions, live state or cutover readiness.
 
 ## Command
 
@@ -92,15 +92,16 @@ OneCompany becomes the single canonical owner
 
 If any step becomes ambiguous, the safe state is to keep the target unchanged and re-run reconciliation.
 
-## First active target: Veritas Atlas
+## Instance-owned adoption evidence
 
-Veritas Atlas must receive fresh C1 read-only onboarding and C2a shadow evidence before this gate can support a real cutover decision. The current pivot does not mutate Veritas Atlas and does not inherit target facts from Tabibi.
-
-The initial read-only baseline has already identified important items that must remain blockers until independently resolved: unprotected `main`, no observed GitHub Actions workflow estate, local-only documented smoke tests, and unknown deployment/runtime mutators.
-
-## Historical Tabibi evidence
-
-Existing Tabibi C1/C2a evidence is preserved as historical provenance and fail-closed regression coverage. Tabibi remains under its existing control plane. This target-neutral gate does not stop its schedules, change its writers, or reinterpret its stored state.
+Every target's current main SHA, workflows, branch protection, auth policy,
+deployments, external writers and rollback owner must be captured and reviewed
+in **that target's operational workspace**. Missing or stale observations remain
+blockers; the framework cannot interpret a different project's historical
+evidence as current facts. A new project begins with its own independently
+verified boundary; the target-specific migration remains a separate reviewed
+operation. Synthetic fixtures may exercise generic fail-closed logic but
+cannot justify a real cutover.
 
 ## Governance invariants
 

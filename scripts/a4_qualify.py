@@ -24,6 +24,10 @@ EVIDENCE_PREFIX = "A4_PRODUCER_EVIDENCE:"
 WORKFLOW_PATH = ".github/workflows/onecompany-a4-pr-producer.yml"
 PRODUCER_JOB = "bounded-first-pr"
 PRODUCER_STEP = "Reserve one branch and create or reconcile one fixture PR"
+# Both constants live in the verifier source, never in the pilot manifest.
+TRUSTED_CI_WORKFLOW_PATH = ".github/workflows/onecompany-a4-fixture-validation.yml"
+TRUSTED_CI_WORKFLOW_BLOB = "8480f5c8bd94187efe3ccb1effa9def51d15addd"
+TRUSTED_CI_CHECK_NAME = "validate-fixture"
 
 
 class _SafeLogRedirect(urllib.request.HTTPRedirectHandler):
@@ -108,6 +112,8 @@ def verify_installation(entry: dict, token: str) -> dict:
         raise Refused("manifest_pr_invalid")
     if not isinstance(run_id, int) or isinstance(run_id, bool) or run_id < 1:
         raise Refused("manifest_run_invalid")
+    if ci_workflow_path != TRUSTED_CI_WORKFLOW_PATH or check_name != TRUSTED_CI_CHECK_NAME:
+        raise Refused("manifest_ci_workflow_not_approved")
     if (not isinstance(ci_run_id, int) or isinstance(ci_run_id, bool)
         or ci_run_id < 1 or not isinstance(ci_workflow_path, str)
         or not re.fullmatch(r"\.github/workflows/[A-Za-z0-9_.-]+\.yml", ci_workflow_path)):
@@ -196,6 +202,10 @@ def verify_installation(entry: dict, token: str) -> dict:
     )
     if workflow_at_base.get("type") != "file":
         raise Refused("trusted_ci_workflow_missing_from_base")
+    if workflow_at_base.get("sha") != TRUSTED_CI_WORKFLOW_BLOB:
+        raise Refused("trusted_ci_workflow_blob_mismatch")
+    if meta.get("private") is not False or meta.get("visibility") != "public":
+        raise Refused("public_disposable_runner_requirement_not_proven")
     checks = api.call("GET", "/commits/" + head + "/check-runs?per_page=100")
     rows = checks.get("check_runs", [])
     if not isinstance(rows, list) or len(rows) >= 100:

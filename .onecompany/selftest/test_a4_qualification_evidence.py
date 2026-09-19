@@ -39,7 +39,7 @@ class PilotApi(FakeGitHub):
         """Return provider-shaped workflow/job/check results for refusal tests."""
         if method == "GET" and path.startswith("/compare/"):
             original = super().call(method, path, payload)
-            original.update({"status": "ahead", "total_commits": 1, "commits": [{"sha": self.refs["onecompany-a4-" + self.record["work_unit"].lower()]}]})
+            original.update({"status": "ahead", "total_commits": 1, "commits": [{"sha": self.next_commit}]})
             return original
         if method == "GET" and path == "/":
             original = super().call(method, path, payload)

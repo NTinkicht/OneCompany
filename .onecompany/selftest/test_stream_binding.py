@@ -12,7 +12,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 import lease_core
-from stream_binding import binding_violations
+from stream_binding import binding_violations, duplicate_queue_binding_violations
 
 
 class CanonicalStreamBindingTests(unittest.TestCase):
@@ -47,6 +47,21 @@ class CanonicalStreamBindingTests(unittest.TestCase):
         self.assertEqual(len(problems), 1)
         self.assertIn("lease=lease-winner", problems[0])
         self.assertIn("branch=wu-a:pr=12", problems[0])
+
+    def test_queue_validator_rejects_two_wus_claiming_one_pr_or_branch(self) -> None:
+        queue = [
+            {"id": "WU-A", "branch": "shared", "pr": 42},
+            {"id": "WU-B", "branch": "shared", "pr": 42},
+        ]
+        problems = duplicate_queue_binding_violations(queue)
+        self.assertEqual(len(problems), 2)
+        self.assertTrue(any("canonical PR #42" in x for x in problems))
+        self.assertTrue(any("canonical branch 'shared'" in x for x in problems))
+
+    def test_queue_validator_accepts_independent_wu_streams(self) -> None:
+        self.assertEqual(
+            duplicate_queue_binding_violations(list(self.queue.values())), []
+        )
 
     def test_unknown_or_incomplete_binding_fails_closed(self) -> None:
         self.assertIn(

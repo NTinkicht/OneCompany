@@ -12,13 +12,16 @@ code, grant credentials or raise OneCompany's source L1 autonomy.
 Create a service named `onecompany-github-adapter` in NTinkicht's existing
 Render workspace with Free plan, Frankfurt, Python runtime, source
 `NTinkicht/OneCompany`, branch
-`wu-grok-001-github-app-mcp-adapter`, automatic deploy **off**.
+`wu-grok-001-github-app-mcp-adapter` **only for pre-merge qualification**,
+automatic deploy **off**. After governed merge to main, switch the persistent
+Render service source branch to `main` while keeping automatic deploy off;
+deploy the verified main commit and confirm read-only App identity again.
 
 - Build: `pip install -r services/github_app_adapter/requirements.txt`
 - Start: `PYTHONPATH=services/github_app_adapter uvicorn server:app --host 0.0.0.0 --port $PORT`
 - Liveness: `https://onecompany-github-adapter.onrender.com/health/live`
 - MCP: `https://onecompany-github-adapter.onrender.com/mcp`
-- `ONECOMPANY_ADAPTER_ENABLED=false` until real App/connector tests are ready.
+- `ONECOMPANY_ADAPTER_ENABLED=false` until real App/connector tests are ready; this initial qualification is complete and the installed service currently has it enabled.
 - `ONECOMPANY_PUBLIC_HOST=onecompany-github-adapter.onrender.com`
 
 A `/health/live` response does not prove that GitHub authentication or

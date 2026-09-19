@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — A4 factory qualification (PR #102)
+
+- Reconcile completed planning WU against closed Issue #8 and merged PR #9; track the A4 factory WU as current work.
+- Stage atomic first-PR branch reservation and live PR reconciliation, disabled project-local workflow, and two-installation replay/isolation tests.
+- Actual unattended disposable-repository execution and independent CI/review/merge proof are acceptance evidence still to be captured; a green source self-test does not substitute for a live trial.
+- VERSION stays 0.3.0 until a distinct release is cut; this section describes unreleased work.
+
 ## 0.3.0 — 2026-09-13
 
 Planning, flow-control and Engineering Excellence release that turns OneCompany from a globally serialized autonomous-delivery loop into a governed **CompanyOS** with strategy-to-execution traceability and conflict-safe parallel work.

@@ -141,9 +141,11 @@ class TestGrokAppAdapter(unittest.TestCase):
                         "base": {"sha": "b" * 40, "ref": "main",
                                  "repo": {"full_name": "owner/disposable"}},
                     }
-                if path.startswith("/repos/owner/disposable/pulls/102/files?"):
-                    return [{"filename": "scripts/test.py", "status": "modified",
-                             "additions": 2, "deletions": 1}]
+                if path == "/repos/owner/disposable/compare/" + "b"*40 + "..." + "a"*40:
+                    return {"status": "ahead", "base_commit": {"sha": "b"*40},
+                            "merge_base_commit": {"sha": "b"*40},
+                            "files": [{"filename": "scripts/test.py", "status": "modified",
+                                       "additions": 2, "deletions": 1}]}
                 return super()._call(method, path, token, payload)
         client = PRClient(settings())
         with self.assertRaisesRegex(AdapterRefused, "head_required"):
@@ -158,6 +160,92 @@ class TestGrokAppAdapter(unittest.TestCase):
         self.assertEqual(result["authenticated_principal"], "onecompany-grok-worker[bot]")
         self.assertEqual(result["changed_files"][0]["path"], "scripts/test.py")
         self.assertFalse(result["review_attestation"])
+
+    def test_pr_snapshot_refuses_head_change_during_files_fetch(self):
+        class RacingPR(FakeClient):
+            def __init__(self, settings):
+                super().__init__(settings)
+                self.pr_reads = 0
+            def _call(self, method, path, token, payload=None):
+                if path == "/repos/owner/disposable/pulls/102":
+                    self.pr_reads += 1
+                    return {"number": 102, "state": "open", "draft": False,
+                            "head": {"sha": ("a" if self.pr_reads == 1 else "b") * 40,
+                                     "ref": "wu-test",
+                                     "repo": {"full_name": "owner/disposable"}},
+                            "base": {"sha": "c" * 40, "ref": "main",
+                                     "repo": {"full_name": "owner/disposable"}}}
+                if path == "/repos/owner/disposable/compare/" + "c"*40 + "..." + "a"*40:
+                    return {"status": "diverged", "base_commit": {"sha": "c"*40},
+                            "merge_base_commit": {"sha": "c"*40},
+                            "files": [{"filename": "scripts/changed.py",
+                                       "status": "modified"}]}
+                return super()._call(method, path, token, payload)
+        c = RacingPR(settings())
+        with self.assertRaisesRegex(AdapterRefused, "pr_changed_during_file_snapshot"):
+            c.pull_request_snapshot(102, "a" * 40)
+        self.assertEqual(c.pr_reads, 2)
+
+    def test_aba_force_push_cannot_mix_immutable_files(self):
+        class ABAPR(FakeClient):
+            def __init__(self, settings):
+                super().__init__(settings)
+                self.pr_reads = 0
+            def _call(self, method, path, token, payload=None):
+                if path == "/repos/owner/disposable/pulls/102":
+                    self.pr_reads += 1
+                    return {"number": 102, "state": "open", "draft": False,
+                            "head": {"sha": "a" * 40, "ref": "wu-test",
+                                     "repo": {"full_name": "owner/disposable"}},
+                            "base": {"sha": "b" * 40, "ref": "main",
+                                     "repo": {"full_name": "owner/disposable"}}}
+                if path.startswith("/repos/owner/disposable/pulls/102/files?"):
+                    raise AssertionError("moving PR file list must never be used")
+                if path == "/repos/owner/disposable/compare/" + "b"*40 + "..." + "a"*40:
+                    return {"status": "ahead", "base_commit": {"sha": "b"*40},
+                            "merge_base_commit": {"sha": "b"*40},
+                            "files": [{"filename": "scripts/from-a.py",
+                                       "status": "added"}]}
+                return super()._call(method, path, token, payload)
+        c = ABAPR(settings())
+        snapshot = c.pull_request_snapshot(102, "a" * 40)
+        self.assertEqual(c.pr_reads, 2)
+        self.assertEqual(snapshot["changed_files"][0]["path"], "scripts/from-a.py")
+        self.assertEqual(snapshot["comparison"], "immutable_three_dot_base_head")
+        self.assertEqual(snapshot["merge_base_sha"], "b" * 40)
+
+    def test_pr_snapshot_keeps_renamed_source_path(self):
+        class RenamePR(FakeClient):
+            def _call(self, method, path, token, payload=None):
+                if path == "/repos/owner/disposable/pulls/102":
+                    return {"number": 102, "state": "open", "draft": False,
+                            "head": {"sha": "a" * 40, "ref": "wu-test",
+                                     "repo": {"full_name": "owner/disposable"}},
+                            "base": {"sha": "b" * 40, "ref": "main",
+                                     "repo": {"full_name": "owner/disposable"}}}
+                if path == "/repos/owner/disposable/compare/" + "b"*40 + "..." + "a"*40:
+                    return {"status": "ahead", "base_commit": {"sha": "b"*40},
+                            "merge_base_commit": {"sha": "b"*40},
+                            "files": [{"filename": "docs/new.md",
+                                       "previous_filename": "docs/old.md",
+                                       "status": "renamed"}]}
+                return super()._call(method, path, token, payload)
+        result = RenamePR(settings()).pull_request_snapshot(102, "a" * 40)
+        self.assertEqual(result["changed_files"][0]["previous_path"], "docs/old.md")
+
+    def test_deleted_fork_is_a_sanitized_pr_refusal(self):
+        class RemovedFork(FakeClient):
+            def _call(self, method, path, token, payload=None):
+                if path == "/repos/owner/disposable/pulls/102":
+                    return {"number": 102, "state": "open", "draft": False,
+                            "head": {"sha": "a" * 40, "ref": "wu-test", "repo": None},
+                            "base": {"sha": "b" * 40, "ref": "main", "repo": None}}
+                return super()._call(method, path, token, payload)
+        client = RemovedFork(settings())
+        with self.assertRaisesRegex(AdapterRefused, "pr_head_unavailable_or_foreign"):
+            client.pull_request_head(102)
+        with self.assertRaisesRegex(AdapterRefused, "pr_head_or_repository_changed"):
+            client.pull_request_snapshot(102, "a" * 40)
 
     def test_source_excerpt_requires_safe_path_and_pinned_sha(self):
         client = FakeClient(settings())

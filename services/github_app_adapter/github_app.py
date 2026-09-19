@@ -168,11 +168,11 @@ class AppClient:
         )
         if (not isinstance(item, dict) or item.get("number") != pr_number
                 or item.get("state") != "open"
-                or (item.get("head") or {}).get("repo", {}).get("full_name")
+                or ((item.get("head") or {}).get("repo") or {}).get("full_name")
                     != self.settings.repository
                 or not isinstance((item.get("head") or {}).get("sha"), str)
                 or not _SHA.fullmatch(item["head"]["sha"])
-                or (item.get("base") or {}).get("repo", {}).get("full_name")
+                or ((item.get("base") or {}).get("repo") or {}).get("full_name")
                     != self.settings.repository):
             raise AdapterRefused("pr_head_unavailable_or_foreign")
         return {
@@ -207,24 +207,67 @@ class AppClient:
                 or (base.get("repo") or {}).get("full_name") != self.settings.repository
                 or doc.get("state") != "open"):
             raise AdapterRefused("pr_head_or_repository_changed")
-        files = self._stage_call(
-            "pr_files", "GET",
-            f"/repos/{self.settings.repository}/pulls/{pr_number}/files?per_page=100&page=1",
-            token,
+        # GitHub /pulls/{number}/files tracks a MOVING ref: even an A->B->A
+        # force-push could fool two PR metadata reads. The Compare API is
+        # pinned to immutable base AND head SHAs, not the branch name.
+        base_sha = base.get("sha")
+        if not isinstance(base_sha, str) or not _SHA.fullmatch(base_sha):
+            raise AdapterRefused("pr_base_sha_invalid")
+        comparison = self._stage_call(
+            "immutable_pr_compare", "GET",
+            f"/repos/{self.settings.repository}/compare/"
+            f"{base_sha}...{exact_head_sha}", token,
         )
-        # Never present a truncated change list as complete review material.
+        if (not isinstance(comparison, dict)
+                or comparison.get("status") not in {"ahead", "diverged"}
+                or (comparison.get("base_commit") or {}).get("sha") != base_sha
+                or not isinstance(comparison.get("merge_base_commit"), dict)
+                or not isinstance(comparison["merge_base_commit"].get("sha"), str)
+                or not _SHA.fullmatch(comparison["merge_base_commit"]["sha"])):
+            raise AdapterRefused("pr_immutable_comparison_invalid")
+        files = comparison.get("files")
+        # GitHub can cap comparison file lists: never claim to show a whole
+        # PR when a list is absent or near a page/result truncation boundary.
         if not isinstance(files, list) or len(files) >= 100:
             raise AdapterRefused("pr_file_list_unbounded_or_incomplete")
         output = []
         for file in files:
             if not isinstance(file, dict) or not isinstance(file.get("filename"), str):
                 raise AdapterRefused("pr_file_metadata_invalid")
-            output.append({
+            projected = {
                 "path": file["filename"],
                 "status": file.get("status"),
                 "additions": file.get("additions"),
                 "deletions": file.get("deletions"),
-            })
+            }
+            if file.get("status") == "renamed":
+                previous = file.get("previous_filename")
+                if (not isinstance(previous, str)
+                        or not previous or len(previous) > 1024):
+                    raise AdapterRefused("renamed_pr_source_path_missing")
+                projected["previous_path"] = previous
+            output.append(projected)
+        # GitHub's /pulls/{number}/files follows a MOVING PR head. A push
+        # between initial identity validation and this read would otherwise
+        # mislabel a newer diff as the caller-supplied immutable head SHA.
+        after = self._stage_call(
+            "pr_snapshot_recheck", "GET",
+            f"/repos/{self.settings.repository}/pulls/{pr_number}", token,
+        )
+        if (not isinstance(after, dict) or after.get("number") != pr_number
+                or after.get("state") != "open"
+                or after.get("draft") != doc.get("draft")
+                or not isinstance(after.get("head"), dict)
+                or not isinstance(after.get("base"), dict)
+                or (after["head"].get("repo") or {}).get("full_name")
+                    != self.settings.repository
+                or (after["base"].get("repo") or {}).get("full_name")
+                    != self.settings.repository
+                or after["head"].get("sha") != exact_head_sha
+                or after["head"].get("ref") != head.get("ref")
+                or after["base"].get("sha") != base.get("sha")
+                or after["base"].get("ref") != base.get("ref")):
+            raise AdapterRefused("pr_changed_during_file_snapshot")
         return {
             "repository": self.settings.repository,
             "pr_number": pr_number,
@@ -235,6 +278,8 @@ class AppClient:
             "base_sha": base.get("sha"),
             "base_branch": base.get("ref"),
             "changed_files": output,
+            "comparison": "immutable_three_dot_base_head",
+            "merge_base_sha": comparison["merge_base_commit"]["sha"],
             "authenticated_principal": slug + "[bot]",
             "read_only": True,
             "review_attestation": False,

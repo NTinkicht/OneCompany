@@ -100,6 +100,31 @@ class ExactRefWriterTests(unittest.TestCase):
         self.assertEqual(refs[0][2],{"sha":NEW,"force":False})
         self.assertEqual(client.current,NEW)
 
+    def test_deleted_fork_refuses_without_git_object_mutation(self):
+        class DeletedHead(WriterFake):
+            def _call(self, method, path, token, payload=None):
+                if path == f"/repos/{REPO}/pulls/106":
+                    return {"head": {"sha": HEAD, "ref": "wu-grok-smoke",
+                                     "repo": None},
+                            "base": {"sha": BASE, "ref": "main",
+                                     "repo": {"full_name": REPO}}}
+                return super()._call(method, path, token, payload)
+        client = DeletedHead()
+        writer = ExactRefWriter(client)
+        with patch.object(writer.authority, "inspect", return_value={
+            "branch": "wu-grok-smoke", "expected_head_sha": HEAD,
+            "main_sha": BASE,
+        }):
+            with patch.dict(os.environ, {"ONECOMPANY_GROK_WRITE_ENABLED": "true"}):
+                with self.assertRaisesRegex(
+                    WriteRefused, "writer_canonical_branch_changed",
+                ):
+                    writer.submit(request(), "d" * 40)
+        self.assertFalse(
+            any(path.endswith("/git/blobs") or method == "PATCH"
+                for method, path, _ in client.calls)
+        )
+
     def test_wrong_blob_or_stale_head_prevents_ref_mutation(self):
         for changed in (False,True):
             client=WriterFake()

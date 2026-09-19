@@ -144,9 +144,12 @@ inferred from installation-level permissions.
 `onecompany_read_document` accepts only allowlisted README/AGENTS/docs Markdown
 at the **current main commit SHA**, independently resolved by the server
 immediately before the GitHub contents request. It rejects historical or
-feature-branch SHA reads. This phase does not grant project-wide source or
-candidate-PR file access. Future PR/source inspection is a distinct,
-separately reviewed Work Unit (#105 / PR #106).
+feature-branch SHA reads for **this specific tool**. Following reviewed
+WU-GROK-002 (#105 / merged PR #106), three additional read-only tools
+support bounded candidate-PR metadata and immutable, allowlisted source
+excerpts (including feature-branch SHAs); the GitHub installation token
+remains restricted to NTinkicht/OneCompany, and no write or final-review
+attestation tool is available.
 
 The OAuth POST handler enforces an 8 KiB cap on the **actual streamed bytes**
 before decoding the bounded URL-encoded form, including chunked/no-Length
@@ -154,3 +157,19 @@ requests. CI and Render install the same exactly pinned dependency versions
 from `services/github_app_adapter/requirements.txt`; upgrades require a new
 reviewed commit and exact-head validation. This preserves the existing public
 OAuth callback and unchanged connector credentials.
+
+## PR snapshot and write qualification boundary (2026-09-20)
+
+The read-only PR snapshot uses GitHub's **immutable three-dot base/head SHA
+comparison** for the file list (never moving `/pulls/{number}/files`) and
+rechecks PR identity before returning, failing closed if head/base changes. Rename entries preserve `previous_path`.
+Deleted/foreign fork repositories are sanitized refusals, not traceback data.
+The adapter never treats this read-only snapshot as independent final review.
+
+Grok can inspect OneCompany under `onecompany-grok-worker[bot]`, but full
+interactive bot-written WU contributions remain **unqualified**. The merged
+internal writer is not an MCP write tool; it is sealed by default and still
+requires exact native WU lease authority, OAuth write-scope separation,
+owner-approved GitHub App permissions and a live bot-authored smoke test.
+See Issue #105. Do not expand App permissions to Tabibi or Veritas-Atlas to
+qualify the OneCompany-only adapter. The source autonomy level is still L1.

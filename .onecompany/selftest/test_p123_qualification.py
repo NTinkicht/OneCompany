@@ -295,8 +295,12 @@ class NativeAuthorityTests(unittest.TestCase):
         with (
             patch("ledger_lib.ledger_enabled", return_value=True),
             patch("lease_lifecycle.coordination_view",
-                  return_value={"active_leases": [lease],
-                                "lifecycle_rejected_claims": []}) as view,
+                  return_value={
+                      "active_leases": [lease],
+                      "lifecycle_rejected_claims": [],
+                      "integrity_conflicts": [], "conflicts": [],
+                      "rejected_claims": [],
+                  }) as view,
         ):
             self.assertEqual(repair._native_lease(**params), "lease-1")
             for field, value in (("actor", "foreign-actor"),
@@ -308,6 +312,8 @@ class NativeAuthorityTests(unittest.TestCase):
                     view.return_value = {
                         "active_leases": [mutated],
                         "lifecycle_rejected_claims": [],
+                        "integrity_conflicts": [], "conflicts": [],
+                        "rejected_claims": [],
                     }
                     with self.assertRaisesRegex(
                         producer.Refused,
@@ -316,9 +322,37 @@ class NativeAuthorityTests(unittest.TestCase):
                         repair._native_lease(**params)
             view.return_value = {
                 "active_leases": [], "lifecycle_rejected_claims": [],
+                "integrity_conflicts": [], "conflicts": [],
+                "rejected_claims": [],
             }
             with self.assertRaisesRegex(
                 producer.Refused, "durable_canonical_implementation_lease_missing",
+            ):
+                repair._native_lease(**params)
+            for field in (
+                "integrity_conflicts", "conflicts",
+                "rejected_claims", "lifecycle_rejected_claims",
+            ):
+                with self.subTest(conflict=field):
+                    view.return_value = {
+                        "active_leases": [lease],
+                        "lifecycle_rejected_claims": [],
+                        "integrity_conflicts": [], "conflicts": [],
+                        "rejected_claims": [],
+                    }
+                    view.return_value[field] = [{"reason": "ambiguous"}]
+                    with self.assertRaisesRegex(
+                        producer.Refused, "durable_lease_replay_rejected",
+                    ):
+                        repair._native_lease(**params)
+            view.return_value = {
+                "active_leases": [lease],
+                "lifecycle_rejected_claims": [],
+                "integrity_conflicts": None, "conflicts": [],
+                "rejected_claims": [],
+            }
+            with self.assertRaisesRegex(
+                producer.Refused, "durable_lease_replay_rejected",
             ):
                 repair._native_lease(**params)
 
@@ -327,19 +361,21 @@ class NativeAuthorityTests(unittest.TestCase):
         import datetime as dt
         start = dt.datetime(2026, 9, 19, 22, 0, tzinfo=dt.timezone.utc)
         end = start + dt.timedelta(minutes=2)
+        assignment = {
+            "type": "ROLE_LEASE_ASSIGNED", "event_id": "lease-origin-1",
+            "payload": {"lease_id": "lease-1"},
+            "github_created_at": "2026-09-19T21:59:00Z",
+        }
         lease = {
             "id": "lease-1", "role": "implementation", "status": "active",
             "actor": ACTOR, "work_unit": WU,
             "branch": producer.branch_for(WU), "pr": 1,
-            "start_head": CLAIM,
+            "start_head": CLAIM, "event": assignment,
             "admission_snapshot": {"trusted_ref": BASE},
-        }
-        assignment = {
-            "type": "ROLE_LEASE_ASSIGNED",
-            "github_created_at": "2026-09-19T21:59:00Z",
         }
         release = {
             "type": "ROLE_LEASE_RELEASED",
+            "payload": {"lease_id": "lease-1"},
             "github_created_at": "2026-09-19T22:01:00Z",
         }
         params = {
@@ -358,6 +394,9 @@ class NativeAuthorityTests(unittest.TestCase):
                         e["type"] == "ROLE_LEASE_RELEASED" for e in events
                     )
                 ) else [],
+                "lifecycle_rejected_claims": [],
+                "integrity_conflicts": [], "conflicts": [],
+                "rejected_claims": [],
             }
         with (
             patch("ledger_lib._repository", return_value=REPO),
@@ -372,7 +411,7 @@ class NativeAuthorityTests(unittest.TestCase):
             )
             events.return_value = [assignment, release]
             with self.assertRaisesRegex(
-                producer.Refused, "repair_historical_lease_missing",
+                producer.Refused, "repair_lease_interrupted_during_job",
             ):
                 campaign._historical_repair_lease(**params)
             events.return_value = [{

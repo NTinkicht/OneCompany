@@ -55,10 +55,24 @@ previous release. A bare 'live' or generic green CI status is not enough.
    migrations; capture a real recoverability point for any separately approved
    schema change. A Neon temporary schema test or history retention alone
    is not proof that lossless recovery was rehearsed.
-5. Confirm the JWT/database/bootstrap credentials reside only in protected
-   environment configuration or password manager; document revision
-   identifiers, **never** their values or bearer tokens.
-6. Freeze new scope if an emergency stop, reviewer/capacity failure, competing
+5. The initial staging Neon role password and bootstrap administrator
+   password appeared in chat during setup. Require an operator's non-secret
+   **rotation/revocation receipt** for both: Neon role password reset,
+   `ConnectionStrings__DefaultConnection` updated in the Veritas API Render
+   environment, `Auth__Bootstrap__Password` replaced, and resulting API
+   deployment/config revision verified. The owner reported both rotated, but
+   this runbook must capture current non-secret evidence before its next
+   release. A value already sitting in a protected setting is **not** proof
+   that an exposed old value was revoked. Never paste old or new values,
+   full connection strings, JWTs or bearer tokens into issues/logs/evidence.
+6. Reconcile the **actual candidate's** backend/frontend dependency audit
+   and known advisories. The first staging build reported a high-severity
+   API `Microsoft.OpenApi` advisory and eight high-severity frontend npm
+   advisories. A routine release is blocked until those findings are
+   remediated and verified, or the owner explicitly records a scoped,
+   time-bound staging-only risk acceptance with impact, mitigation and
+   expiry. Passing build/lint/smoke tests alone does not waive advisories.
+7. Freeze new scope if an emergency stop, reviewer/capacity failure, competing
    writer, stale head, red check, unexpected paid resource or schema drift
    appears. Read-only status and diagnosis may continue.
 
@@ -113,11 +127,13 @@ disable or alter unrelated HUMAN or lego-teddy resources.
 
 ## Exit evidence still needed for H8
 
-Actual operator-authenticated and DB-backed end-to-end smoke; reviewed
-service rollback/recovery drill; immutable artifact/config revision; scoped
-operator/writer inventory including non-connected hosting; exact-head
-protected-main GitHub administration evidence; a reviewed migration
-compatibility/backup strategy and RPO/RTO. Only OneCompany's trusted
+Actual operator-authenticated and DB-backed end-to-end smoke; non-secret
+receipts proving exposed Neon/bootstrap credentials were rotated and revoked;
+verified remediation or owner-authorized staging-only acceptance of current
+high-severity dependency advisories; reviewed service rollback/recovery drill;
+immutable artifact/config revision; scoped operator/writer inventory including
+non-connected hosting; exact-head protected-main GitHub administration
+evidence; a reviewed migration compatibility/backup strategy and RPO/RTO. Only OneCompany's trusted
 policy authority can transition H8 after this evidence is independently
 reviewed. A human authorization to release one application commit is not an
 autonomy-level increase.

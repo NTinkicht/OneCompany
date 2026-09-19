@@ -44,7 +44,8 @@ class RepairGitHub(FakeGitHub):
         super().__init__(REPO)
         self.failed_run = {
             "event": "workflow_dispatch", "head_sha": CLAIM,
-            "conclusion": "failure", "path": repair.CI_PATH,
+            "status": "completed", "conclusion": "failure",
+            "path": repair.CI_PATH,
             "repository": {"full_name": REPO},
         }
         self.writes = 0
@@ -57,6 +58,12 @@ class RepairGitHub(FakeGitHub):
             return {"type": "file", "sha": repair.CI_BLOB}
         if method == "GET" and path == "/actions/runs/42":
             return self.failed_run
+        if method == "GET" and path == "/actions/runs/42/jobs?per_page=100":
+            return {"jobs": [{
+                "id": 420, "name": repair.CI_JOB, "status": "completed",
+                "conclusion": "failure",
+                "steps": [{"name": repair.CI_STEP, "conclusion": "failure"}],
+            }]}
         if method == "GET" and path == "/git/commits/" + CLAIM:
             return {"tree": {"sha": "e" * 40},
                     "parents": [{"sha": BASE}]}
@@ -89,7 +96,11 @@ class SamePRRepairTests(unittest.TestCase):
         return api, options
 
     def invoke(self, api, options):
-        with patch.object(repair, "_native_lease", return_value="lease-test"):
+        with (
+            patch.object(repair, "_native_lease", return_value="lease-test"),
+            patch("a4_qualify._job_log",
+                  return_value=repair.FAILURE_MARKER),
+        ):
             return repair.repair(
                 api, **options, number=1, initial=CLAIM,
                 failed_run_id=42,
@@ -157,6 +168,53 @@ class SamePRRepairTests(unittest.TestCase):
         ):
             self.invoke(api, options)
         self.assertEqual(api.writes, 0)
+
+    def test_transient_ci_failure_never_writes_a_repair(self):
+        for variant in ("failed_checkout", "unrelated_step", "no_marker",
+                        "missing_job", "job_not_completed"):
+            with self.subTest(variant=variant):
+                api, options = self.setup_pilot()
+                original = api.call
+                def modified(method, path, payload=None):
+                    output = original(method, path, payload)
+                    if path == "/actions/runs/42/jobs?per_page=100":
+                        if variant == "missing_job":
+                            output["jobs"] = []
+                        elif variant == "job_not_completed":
+                            output["jobs"][0]["status"] = "in_progress"
+                        elif variant in {"failed_checkout", "unrelated_step"}:
+                            output["jobs"][0]["steps"][0]["conclusion"] = "success"
+                    return output
+                api.call = modified
+                with (
+                    patch.object(repair, "_native_lease",
+                                 return_value="lease-test"),
+                    patch("a4_qualify._job_log",
+                          return_value="" if variant == "no_marker"
+                          else repair.FAILURE_MARKER),
+                ):
+                    with self.assertRaises(producer.Refused):
+                        repair.repair(
+                            api, **options, number=1, initial=CLAIM,
+                            failed_run_id=42,
+                        )
+                self.assertEqual(api.writes, 0)
+                self.assertNotIn(SECOND, api.parents)
+
+    def test_dispatch_without_capabilities_fails_closed(self):
+        for missing in (True, False):
+            with self.subTest(missing=missing):
+                api, options = self.setup_pilot()
+                mechanism = options["dispatch"]["actors"][0]["mechanisms"][1]
+                if missing:
+                    mechanism.pop("capabilities")
+                else:
+                    mechanism["capabilities"] = []
+                with self.assertRaisesRegex(
+                    producer.Refused, "l2_remediation_route_unverified",
+                ):
+                    self.invoke(api, options)
+                self.assertEqual(api.writes, 0)
 
     def test_wrong_source_workflow_refuses(self):
         api, options = self.setup_pilot()

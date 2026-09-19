@@ -35,7 +35,7 @@
       "mistral-vibe",
       "github-copilot",
       "gemini-cli",
-      "grok-4.6-interactive",
+      "grok-4-6-interactive",
       "human-owner"
     ],
     "ci_remediation": [
@@ -53,13 +53,13 @@
       "gemini-cli",
       "mistral-vibe",
       "github-copilot",
-      "grok-4.6-interactive",
+      "grok-4-6-interactive",
       "human-owner"
     ],
     "security_review": [
       "claude",
       "chatgpt",
-      "grok-4.6-interactive",
+      "grok-4-6-interactive",
       "human-owner"
     ],
     "repository_intelligence": [
@@ -69,7 +69,7 @@
       "claude",
       "mistral-vibe",
       "github-copilot",
-      "grok-4.6-interactive",
+      "grok-4-6-interactive",
       "human-owner"
     ],
     "regression_scouting": [
@@ -83,7 +83,7 @@
       "codex",
       "github-copilot",
       "gemini-cli",
-      "grok-4.6-interactive",
+      "grok-4-6-interactive",
       "human-owner"
     ],
     "test_design": [
@@ -93,7 +93,7 @@
       "gemini-cli",
       "chatgpt",
       "codex",
-      "grok-4.6-interactive",
+      "grok-4-6-interactive",
       "human-owner"
     ],
     "documentation": [
@@ -103,7 +103,7 @@
       "claude",
       "codex",
       "github-copilot",
-      "grok-4.6-interactive",
+      "grok-4-6-interactive",
       "human-owner"
     ],
     "research": [
@@ -111,7 +111,7 @@
       "chatgpt",
       "claude",
       "mistral-vibe",
-      "grok-4.6-interactive",
+      "grok-4-6-interactive",
       "human-owner"
     ],
     "merge_execution": [

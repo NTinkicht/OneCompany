@@ -246,7 +246,7 @@
       "evidence": []
     },
     {
-      "actor_id": "grok-4.6-interactive",
+      "actor_id": "grok-4-6-interactive",
       "setup_state": "not_started",
       "verified_surfaces": [],
       "verified_capabilities": [],

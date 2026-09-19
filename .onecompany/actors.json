@@ -224,7 +224,7 @@
       "may_independently_gate_own_material_authorship": false
     },
     {
-      "id": "grok-4.6-interactive",
+      "id": "grok-4-6-interactive",
       "display_name": "Grok 4.6 (GitHub App pilot)",
       "enabled": false,
       "configured": false,

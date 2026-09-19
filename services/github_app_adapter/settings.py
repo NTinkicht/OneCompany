@@ -17,7 +17,7 @@ class Settings:
     private_key_path: Path
     repository: str
     public_host: str
-    actor: str = "grok-4.6-interactive"
+    actor: str = "grok-4-6-interactive"
 
     @classmethod
     def from_environment(cls) -> "Settings":

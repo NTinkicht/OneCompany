@@ -58,7 +58,7 @@ If it does not, stop; do not put credentials in the URL or disable auth.
 A separately reviewed OAuth integration can be built subsequently.
 
 Invoke `onecompany_actor_identity`. It should identify logical actor
-`grok-4.6-interactive` separately from the GitHub App principal
+`grok-4-6-interactive` separately from the GitHub App principal
 `<app-slug>[bot]`, confirm the one approved repository, and state that
 writing and independent review remain disabled. The GitHub connector
 running under `NTinkicht` is a *different* execution identity and must

@@ -319,7 +319,7 @@
       ]
     },
     {
-      "actor_id": "grok-4.6-interactive",
+      "actor_id": "grok-4-6-interactive",
       "mechanisms": [
         {
           "id": "grok-github-app-mcp-readonly",

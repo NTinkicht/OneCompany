@@ -94,11 +94,13 @@ class FakeGitHub:
         self.next_commit = CLAIM
         self.lose_pr_response = False
         self.extra_diff = False
+        self.visibility = "public"
+        self.private = False
 
     def call(self, method: str, path: str, payload=None):
         """Model GitHub reads, atomic ref creation and PR mutation for race tests."""
         if method == "GET" and path == "/":
-            return {"default_branch": "main"}
+            return {"default_branch": "main", "private": self.private, "visibility": self.visibility}
         if method == "GET" and path.startswith("/git/ref/heads/"):
             branch = path.split("/git/ref/heads/", 1)[1]
             if branch not in self.refs:
@@ -388,6 +390,20 @@ class FirstPRProducerTests(unittest.TestCase):
         write.assert_not_called()
         process.assert_not_called()
         self.assertIn("immutable_github_run_identity_missing", stderr.getvalue())
+
+    def test_nonpublic_runner_denied_before_any_write(self):
+        """Avoid private Actions charges even when project policy is permissive."""
+        inputs = installation()
+        for visibility, private in (("private", True), (None, False)):
+            with self.subTest(visibility=visibility):
+                api = FakeGitHub(REPO)
+                api.visibility = visibility
+                api.private = private
+                with self.assertRaisesRegex(
+                    producer.Refused, "public_disposable_runner"
+                ):
+                    producer.produce(api, **inputs)
+                self.assertEqual(api.created_refs, 0)
 
     def test_pre_pr_binding_and_exact_fixture_only(self):
         """Require an unbound READY WU and precisely one fixture path."""

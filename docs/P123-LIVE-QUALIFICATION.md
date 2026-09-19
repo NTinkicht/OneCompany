@@ -100,7 +100,8 @@ The reviewed worker:
 2. Rejects foreign/stale/ambiguous refs, nonfailure CI, changed base, unrelated
    files, absent remediation capacity or unexpected client input.
 3. Proves the failure came from the exact named fixture-validation step and
-   its GitHub-hosted log marker; unrelated checkout/setup failures cannot
+   its single emitted GitHub-hosted log marker (not an echoed source line);
+   unrelated checkout/setup failures cannot
    trigger a repair. Appends **only** `Repair: complete\n` to the exact fixture;
    uses one Git blob/tree/commit and a non-force ref update. It cannot merge.
 4. Reads back exact PR/ref/content. A duplicate dispatch reconciles the same

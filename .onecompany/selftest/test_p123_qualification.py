@@ -171,7 +171,7 @@ class SamePRRepairTests(unittest.TestCase):
 
     def test_transient_ci_failure_never_writes_a_repair(self):
         for variant in ("failed_checkout", "unrelated_step", "no_marker",
-                        "missing_job", "job_not_completed"):
+                        "echoed_source", "missing_job", "job_not_completed"):
             with self.subTest(variant=variant):
                 api, options = self.setup_pilot()
                 original = api.call
@@ -190,8 +190,10 @@ class SamePRRepairTests(unittest.TestCase):
                     patch.object(repair, "_native_lease",
                                  return_value="lease-test"),
                     patch("a4_qualify._job_log",
-                          return_value="" if variant == "no_marker"
-                          else repair.FAILURE_MARKER),
+                          return_value=("" if variant == "no_marker"
+                          else ('print("' + repair.FAILURE_MARKER + '")')
+                          if variant == "echoed_source"
+                          else repair.FAILURE_MARKER)),
                 ):
                     with self.assertRaises(producer.Refused):
                         repair.repair(
@@ -726,6 +728,31 @@ class L2LiveWitnessTests(unittest.TestCase):
                         wu=WU, actor=ACTOR, base=BASE,
                         initial=CLAIM, repaired=SECOND, failed_id=80,
                     )
+
+    def test_echoed_marker_in_source_cannot_prove_ci_failure(self):
+        api, entry = self.setup_witness()
+        record = {
+            "status": "L2_REPAIR_COMMITTED", "repository": api.repository,
+            "work_unit": WU, "actor": ACTOR, "pr": 7,
+            "initial": CLAIM, "repaired": SECOND, "base": BASE,
+            "failed_ci_run_id": 80, "lease_id": "lease-1",
+            "run_id": 82, "run_attempt": 1, "already_applied": False,
+        }
+        def log(_api, job_id):
+            if job_id == 820:
+                return repair.EVIDENCE_PREFIX + json.dumps(record)
+            return 'print("' + repair.FAILURE_MARKER + '")'
+        with (
+            patch.object(campaign, "_job_log", side_effect=log),
+            patch.object(campaign, "_historical_repair_lease",
+                         return_value=None),
+        ):
+            with self.assertRaisesRegex(
+                producer.Refused, "l2_intentional_fixture_failure_not_proven",
+            ):
+                campaign.verify_l2(
+                    entry, "read-only", factory=lambda repo, token: api,
+                )
 
     def test_review_self_author_refuses(self):
         api, entry = self.setup_witness()

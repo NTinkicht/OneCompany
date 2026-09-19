@@ -443,6 +443,10 @@ def initialize_control_plane(
                 and mechanism.get("kind") == "manual"
             )
             mechanism["evidence"] = []
+            if actor.get("actor_id") == "human-owner" and mechanism.get("kind") == "manual":
+                # Only the bootstrap-selected human may perform this minimal
+                # read-only capability. No inherited write/review/merge proof.
+                mechanism["capabilities"] = ["repository_intelligence"]
     write_json(dispatch_path, dispatch)
 
     ledger_path = target / ".onecompany" / "ledger.json"

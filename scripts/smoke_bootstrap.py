@@ -192,6 +192,11 @@ def main() -> int:
                 "framework self-tests not installed",
             )
             require(
+                (target / ".onecompany" / "selftest" / "fixtures" / "conflicted-target.json").exists()
+                and (target / ".onecompany" / "selftest" / "fixtures" / "idle-blocked-target.json").exists(),
+                "generic regression fixtures not installed",
+            )
+            require(
                 (
                     target
                     / ".onecompany"

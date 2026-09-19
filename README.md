@@ -6,6 +6,8 @@ OneCompany is a reusable **CompanyOS** for running a software company from a Git
 
 It uses provider-neutral capability routing, deterministic engineering evidence, strict budget limits, failover safety, and exact-head review discipline. It is not configured for any particular application, customer, or deployment.
 
+[Product boundary](docs/PRODUCT-BOUNDARY.md): the reusable engine never ships a target project's live evidence, hosting identifiers, deployment approvals or backlog. Each adopting project owns those records and supplies its own configuration.
+
 ## Start here
 
 For a new **or existing** repository, the primary experience is one read-only-first command:

@@ -53,7 +53,7 @@ jobs:
           A4_ACTOR: ${{ github.event.client_payload.actor || inputs.actor }}
           A4_LEASE_ID: ${{ github.event.client_payload.lease_id || inputs.lease_id }}
         run: |
-          python onecompany.py dispatch-execute \
+          python onecompany.py execute-dispatch \
             --actor "$A4_ACTOR" \
             --capability implementation \
             --mechanism github-actions-fixture-writer \

@@ -30,6 +30,13 @@ def require(condition: bool, message: str) -> None:
 
 def main() -> int:
     try:
+        # Product source must never become a customer deployment/evidence ledger.
+        # Only synthetic cases belong in the reusable selftest fixture namespace.
+        for source_only in ("source-evidence", "evidence"):
+            require(
+                not (ROOT / source_only).exists(),
+                f"generic product source contains target-specific {source_only}/",
+            )
         with tempfile.TemporaryDirectory(prefix="onecompany-bootstrap-") as temp:
             target = Path(temp) / "acme-product"
             target.mkdir()

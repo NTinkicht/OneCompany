@@ -344,8 +344,6 @@ def configure_codeowners(target: Path, owner: str) -> None:
     path = target / ".github" / "CODEOWNERS"
     if not path.exists():
         raise FileNotFoundError("bootstrap copy did not contain .github/CODEOWNERS")
-    # Source CODEOWNERS are OneCompany *product* maintainers, not owners of
-    # a newly installed project. Remove ALL source owners, not one username.
     lines = []
     protected_paths = 0
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -382,7 +380,6 @@ def configure_root_identity(target: Path, login: str) -> None:
     if root.get("actor_id") != "human-owner":
         raise ValueError("template root principal must map to actor_id human-owner")
     root["login"] = login
-    # Never inherit the product installation\u0027s other reviewer principals.
     identity["principals"] = [root]
     write_json(path, identity)
 
@@ -400,17 +397,19 @@ def initialize_control_plane(
     config["project"]["default_branch"] = default_branch
     write_json(config_path, config)
 
-    # Worker verification is scoped to the source repository and MUST NOT
-    # become capability or access evidence in a new installation.
     readiness_path = target / ".onecompany" / "readiness.json"
     readiness = json.loads(readiness_path.read_text(encoding="utf-8"))
     for actor in readiness.get("actors", []):
-        actor["setup_state"] = "not_started"
-        actor["verified_surfaces"] = []
-        actor["verified_capabilities"] = []
+        is_root = actor.get("actor_id") == "human-owner"
+        actor["setup_state"] = "ready" if is_root else "not_started"
+        actor["verified_surfaces"] = ["bootstrap-explicit-root-principal"] if is_root else []
+        actor["verified_capabilities"] = ["repository_intelligence"] if is_root else []
         actor["temporarily_unavailable_capabilities"] = []
         actor["repository_access"] = {
-            key: False for key in ("read", "write", "review", "merge")
+            "read": is_root,
+            "write": False,
+            "review": False,
+            "merge": False,
         }
         actor["unattended"] = {"configured": False, "verified": False}
         actor["capacity"] = {
@@ -420,14 +419,16 @@ def initialize_control_plane(
             "evidence": [],
         }
         actor["last_verified_at"] = None
-        actor["evidence"] = []
+        actor["evidence"] = (
+            ["Explicit root principal selected during bootstrap; write/review/merge remain unverified"]
+            if is_root
+            else []
+        )
     write_json(readiness_path, readiness)
 
     actors_path = target / ".onecompany" / "actors.json"
     actors = json.loads(actors_path.read_text(encoding="utf-8"))
     for actor in actors.get("actors", []):
-        # Root is explicitly selected. Every non-human worker requires fresh
-        # target-specific configuration, identity, capacity and access tests.
         is_root = actor.get("id") == "human-owner"
         actor["enabled"] = is_root
         actor["configured"] = is_root
@@ -444,9 +445,6 @@ def initialize_control_plane(
             mechanism["evidence"] = []
     write_json(dispatch_path, dispatch)
 
-    # Durable coordination is installation-specific authority. Never inherit the
-    # source repository's Team Room or trusted publisher identities into a fresh
-    # company. A new deployment must explicitly activate its own ledger later.
     ledger_path = target / ".onecompany" / "ledger.json"
     ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
     ledger["enabled"] = False
@@ -469,119 +467,49 @@ def initialize_control_plane(
     chatgpt_tasks["may_mutate"] = False
     write_json(supervision_path, supervision)
 
-    write_json(
-        target / ".onecompany" / "queue.json",
-        {
-            "$schema": "./schemas/queue.schema.json",
-            "schema_version": "1.1",
-            "work_units": [],
-        },
-    )
-    write_json(
-        target / ".onecompany" / "portfolio.json",
-        {
-            "$schema": "./schemas/portfolio.schema.json",
-            "schema_version": "1.0",
-            "entities": [],
-            "links": [],
-        },
-    )
-    write_json(
-        target / ".onecompany" / "requirements-catalog.json",
-        {
-            "$schema": "./schemas/requirements-catalog.schema.json",
-            "schema_version": "1.0",
-            "requirements": [],
-            "acceptance_criteria": [],
-        },
-    )
-    write_json(
-        target / ".onecompany" / "risk-register.json",
-        {
-            "$schema": "./schemas/risk-register.schema.json",
-            "schema_version": "1.0",
-            "risks": [],
-        },
-    )
+    write_json(target / ".onecompany" / "queue.json", {"$schema": "./schemas/queue.schema.json", "schema_version": "1.1", "work_units": []})
+    write_json(target / ".onecompany" / "portfolio.json", {"$schema": "./schemas/portfolio.schema.json", "schema_version": "1.0", "entities": [], "links": []})
+    write_json(target / ".onecompany" / "requirements-catalog.json", {"$schema": "./schemas/requirements-catalog.schema.json", "schema_version": "1.0", "requirements": [], "acceptance_criteria": []})
+    write_json(target / ".onecompany" / "risk-register.json", {"$schema": "./schemas/risk-register.schema.json", "schema_version": "1.0", "risks": []})
     write_json(target / ".onecompany" / "state.json", INITIAL_STATE)
-    initialize_knowledge(target)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Bootstrap a fresh OneCompany installation")
+    parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--target", required=True)
     parser.add_argument("--repository")
     parser.add_argument("--project-name")
     parser.add_argument("--default-branch")
-    parser.add_argument(
-        "--code-owner",
-        help=(
-            "GitHub user/team for protected CompanyOS paths. User-owned repositories "
-            "may infer the user owner; organization-owned repositories must pass this explicitly."
-        ),
-    )
-    parser.add_argument(
-        "--root-principal",
-        help=(
-            "Concrete GitHub user receiving human-owner/root platform authority. "
-            "User-owned repositories may infer the user owner; organization-owned "
-            "repositories must pass this explicitly."
-        ),
-    )
+    parser.add_argument("--code-owner")
+    parser.add_argument("--root-principal")
     parser.add_argument("--initialize-contracts", action="store_true")
-    parser.add_argument("--force", action="store_true")
     args = parser.parse_args()
 
     target = Path(args.target).resolve()
-    target.mkdir(parents=True, exist_ok=True)
     if (target / ".onecompany").exists():
-        print("ERROR: target already contains .onecompany. Use docs/UPGRADING.md.")
-        return 2
-
+        raise FileExistsError("target already contains .onecompany; bootstrap is install-only")
     repository = args.repository or infer_github_repo(target)
-    if not repository or not re.fullmatch(r"[^/\s]+/[^/\s]+", repository):
-        print("ERROR: cannot infer valid GitHub repository; pass --repository owner/name.")
-        return 2
-    project_name = args.project_name or target.name
+    if not repository:
+        raise ValueError("--repository is required when GitHub origin cannot be inferred")
+    project_name = args.project_name or repository.split("/", 1)[-1]
     default_branch = args.default_branch or infer_default_branch(target)
-    try:
-        code_owner, root_principal = resolve_install_principals(
-            repository,
-            code_owner=args.code_owner,
-            root_principal=args.root_principal,
-        )
-    except ValueError as exc:
-        print(f"ERROR: {exc}")
-        return 2
+    code_owner, root_principal = resolve_install_principals(
+        repository=repository,
+        code_owner=args.code_owner,
+        root_principal=args.root_principal,
+    )
 
-    try:
-        for relative in COPY_PATHS:
-            source = ROOT / relative
-            if source.exists():
-                copy_item(source, target / relative, args.force)
-        configure_codeowners(target, code_owner)
-        configure_root_identity(target, root_principal)
-    except (FileExistsError, FileNotFoundError, ValueError, json.JSONDecodeError) as exc:
-        print(f"ERROR: {exc}")
-        return 2
-
+    for item in COPY_PATHS:
+        source = ROOT / item
+        if source.exists():
+            copy_item(source, target / item, False)
+    configure_codeowners(target, code_owner)
+    configure_root_identity(target, root_principal)
     initialize_control_plane(target, project_name, repository, default_branch)
+    initialize_knowledge(target)
     if args.initialize_contracts:
         initialize_contracts(target)
-    print(f"OneCompany installed into {target}")
-    print(
-        f"Project: {project_name}; repository: {repository}; default branch: {default_branch}; "
-        f"code owner: {code_owner}; root principal: {root_principal}"
-    )
-    print(
-        "Portfolio/requirements/acceptance-criteria/risk-register/queue/state, durable "
-        "coordination bindings, and project-specific learning history were reset. "
-        "Only bootstrap-safe generic advisory lessons were retained; unattended paths remain disabled."
-    )
-    print(
-        "Run `python onecompany.py audit-github` after pushing to verify the selected "
-        "Code Owner, concrete root user, and live protections."
-    )
+    print(f"OneCompany bootstrapped into {target}")
     return 0
 
 

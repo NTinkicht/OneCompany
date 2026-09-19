@@ -7,10 +7,29 @@
       "display_name": "Human Owner",
       "enabled": true,
       "configured": true,
-      "execution_modes": ["human_github"],
+      "execution_modes": [
+        "human_github"
+      ],
       "cost_class": "HUMAN",
-      "permissions": ["owner_defined"],
-      "capabilities": ["architecture", "planning", "implementation", "repository_intelligence", "regression_scouting", "ci_remediation", "code_review", "security_review", "test_design", "failure_analysis", "documentation", "research", "state_reconciliation", "merge_execution"],
+      "permissions": [
+        "owner_defined"
+      ],
+      "capabilities": [
+        "architecture",
+        "planning",
+        "implementation",
+        "repository_intelligence",
+        "regression_scouting",
+        "ci_remediation",
+        "code_review",
+        "security_review",
+        "test_design",
+        "failure_analysis",
+        "documentation",
+        "research",
+        "state_reconciliation",
+        "merge_execution"
+      ],
       "may_independently_gate_own_material_authorship": false
     },
     {
@@ -18,10 +37,30 @@
       "display_name": "ChatGPT",
       "enabled": true,
       "configured": true,
-      "execution_modes": ["interactive", "connector"],
+      "execution_modes": [
+        "interactive",
+        "connector"
+      ],
       "cost_class": "INCLUDED_SUBSCRIPTION",
-      "permissions": ["read", "write_if_connected"],
-      "capabilities": ["architecture", "planning", "implementation", "repository_intelligence", "ci_remediation", "code_review", "security_review", "test_design", "failure_analysis", "documentation", "research", "state_reconciliation", "merge_execution"],
+      "permissions": [
+        "read",
+        "write_if_connected"
+      ],
+      "capabilities": [
+        "architecture",
+        "planning",
+        "implementation",
+        "repository_intelligence",
+        "ci_remediation",
+        "code_review",
+        "security_review",
+        "test_design",
+        "failure_analysis",
+        "documentation",
+        "research",
+        "state_reconciliation",
+        "merge_execution"
+      ],
       "may_independently_gate_own_material_authorship": false
     },
     {
@@ -29,10 +68,16 @@
       "display_name": "OneCompany Local Worker",
       "enabled": true,
       "configured": true,
-      "execution_modes": ["github_action"],
+      "execution_modes": [
+        "github_action"
+      ],
       "cost_class": "FREE_ALLOWANCE",
-      "permissions": ["read"],
-      "capabilities": ["repository_intelligence"],
+      "permissions": [
+        "read"
+      ],
+      "capabilities": [
+        "repository_intelligence"
+      ],
       "may_independently_gate_own_material_authorship": false
     },
     {
@@ -40,10 +85,28 @@
       "display_name": "Codex",
       "enabled": false,
       "configured": false,
-      "execution_modes": ["github_native", "cloud_workspace", "local_cli_if_available"],
+      "execution_modes": [
+        "github_native",
+        "cloud_workspace",
+        "local_cli_if_available"
+      ],
       "cost_class": "INCLUDED_SUBSCRIPTION",
-      "permissions": ["read", "write_if_connected"],
-      "capabilities": ["planning", "implementation", "repository_intelligence", "ci_remediation", "code_review", "test_design", "failure_analysis", "documentation", "state_reconciliation", "merge_execution"],
+      "permissions": [
+        "read",
+        "write_if_connected"
+      ],
+      "capabilities": [
+        "planning",
+        "implementation",
+        "repository_intelligence",
+        "ci_remediation",
+        "code_review",
+        "test_design",
+        "failure_analysis",
+        "documentation",
+        "state_reconciliation",
+        "merge_execution"
+      ],
       "may_independently_gate_own_material_authorship": false
     },
     {
@@ -51,10 +114,31 @@
       "display_name": "Claude",
       "enabled": false,
       "configured": false,
-      "execution_modes": ["interactive", "local_cli", "github_action_if_configured"],
+      "execution_modes": [
+        "interactive",
+        "local_cli",
+        "github_action_if_configured"
+      ],
       "cost_class": "INCLUDED_SUBSCRIPTION",
-      "permissions": ["read", "write_if_connected"],
-      "capabilities": ["architecture", "planning", "implementation", "repository_intelligence", "ci_remediation", "code_review", "security_review", "test_design", "failure_analysis", "documentation", "research", "state_reconciliation", "merge_execution"],
+      "permissions": [
+        "read",
+        "write_if_connected"
+      ],
+      "capabilities": [
+        "architecture",
+        "planning",
+        "implementation",
+        "repository_intelligence",
+        "ci_remediation",
+        "code_review",
+        "security_review",
+        "test_design",
+        "failure_analysis",
+        "documentation",
+        "research",
+        "state_reconciliation",
+        "merge_execution"
+      ],
       "may_independently_gate_own_material_authorship": false
     },
     {
@@ -62,10 +146,28 @@
       "display_name": "GitHub Copilot",
       "enabled": false,
       "configured": false,
-      "execution_modes": ["github_native", "cloud_agent_if_enabled", "ide", "cli_if_available"],
+      "execution_modes": [
+        "github_native",
+        "cloud_agent_if_enabled",
+        "ide",
+        "cli_if_available"
+      ],
       "cost_class": "INCLUDED_SUBSCRIPTION",
-      "permissions": ["read", "write_if_connected"],
-      "capabilities": ["implementation", "repository_intelligence", "ci_remediation", "code_review", "test_design", "failure_analysis", "documentation", "state_reconciliation", "merge_execution"],
+      "permissions": [
+        "read",
+        "write_if_connected"
+      ],
+      "capabilities": [
+        "implementation",
+        "repository_intelligence",
+        "ci_remediation",
+        "code_review",
+        "test_design",
+        "failure_analysis",
+        "documentation",
+        "state_reconciliation",
+        "merge_execution"
+      ],
       "may_independently_gate_own_material_authorship": false
     },
     {
@@ -73,10 +175,25 @@
       "display_name": "Gemini CLI",
       "enabled": false,
       "configured": false,
-      "execution_modes": ["local_cli", "unattended_if_configured"],
+      "execution_modes": [
+        "local_cli",
+        "unattended_if_configured"
+      ],
       "cost_class": "FREE_ALLOWANCE",
-      "permissions": ["read", "write_if_connected"],
-      "capabilities": ["repository_intelligence", "regression_scouting", "implementation", "code_review", "test_design", "failure_analysis", "documentation", "research"],
+      "permissions": [
+        "read",
+        "write_if_connected"
+      ],
+      "capabilities": [
+        "repository_intelligence",
+        "regression_scouting",
+        "implementation",
+        "code_review",
+        "test_design",
+        "failure_analysis",
+        "documentation",
+        "research"
+      ],
       "may_independently_gate_own_material_authorship": false
     },
     {
@@ -84,10 +201,51 @@
       "display_name": "Mistral Vibe",
       "enabled": false,
       "configured": false,
-      "execution_modes": ["local_cli", "interactive", "unattended_if_configured"],
+      "execution_modes": [
+        "local_cli",
+        "interactive",
+        "unattended_if_configured"
+      ],
       "cost_class": "INCLUDED_SUBSCRIPTION",
-      "permissions": ["read", "write_if_connected"],
-      "capabilities": ["implementation", "repository_intelligence", "ci_remediation", "code_review", "test_design", "failure_analysis", "documentation", "research"],
+      "permissions": [
+        "read",
+        "write_if_connected"
+      ],
+      "capabilities": [
+        "implementation",
+        "repository_intelligence",
+        "ci_remediation",
+        "code_review",
+        "test_design",
+        "failure_analysis",
+        "documentation",
+        "research"
+      ],
+      "may_independently_gate_own_material_authorship": false
+    },
+    {
+      "id": "grok-4.6-interactive",
+      "display_name": "Grok 4.6 (GitHub App pilot)",
+      "enabled": false,
+      "configured": false,
+      "execution_modes": [
+        "interactive",
+        "connector"
+      ],
+      "cost_class": "INCLUDED_SUBSCRIPTION",
+      "permissions": [
+        "read"
+      ],
+      "capabilities": [
+        "implementation",
+        "repository_intelligence",
+        "code_review",
+        "security_review",
+        "test_design",
+        "failure_analysis",
+        "documentation",
+        "research"
+      ],
       "may_independently_gate_own_material_authorship": false
     }
   ]

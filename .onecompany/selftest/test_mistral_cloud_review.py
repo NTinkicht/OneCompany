@@ -33,7 +33,7 @@ def fake_api(route):
                      "repo": {"full_name": target.REPO}},
         }
     if "/pulls/137/commits?" in route:
-        return [{"author": {"login": "NTinkicht"}, "commit": {
+        return [{"sha": HEAD, "author": {"login": "NTinkicht"}, "commit": {
             "message": "fix: bounded change\n\nMaterial-Author: chatgpt"}}]
     if "/actions/runs?" in route:
         return {"workflow_runs": [
@@ -68,7 +68,7 @@ class MistralCloudReviewTests(unittest.TestCase):
 
     def test_no_mistral_self_review_even_when_owner_is_commit_publisher(self):
         with patch.object(target, "github_json", side_effect=fake_api):
-            self.assertTrue(target.independent_material_authors(137))
+            self.assertTrue(target.independent_material_authors(137, HEAD))
         for login, trailer in (
             ("mistral-vibe", "chatgpt"),
             ("NTinkicht", "mistral-vibe"),
@@ -76,12 +76,22 @@ class MistralCloudReviewTests(unittest.TestCase):
         ):
             def self_author(route):
                 if "/commits?" in route:
-                    return [{"author": {"login": login},
+                    return [{"sha": HEAD, "author": {"login": login},
                              "commit": {"message": f"feat\n\nMaterial-Author: {trailer}"}}]
                 return fake_api(route)
             with patch.object(target, "github_json", side_effect=self_author):
                 with self.assertRaises(ValueError):
-                    target.independent_material_authors(137)
+                    target.independent_material_authors(137, HEAD)
+
+    def test_provenance_response_must_end_at_exact_head(self):
+        def lagging(route):
+            result = fake_api(route)
+            if "/commits?" in route:
+                result[0]["sha"] = BASE
+            return result
+        with patch.object(target, "github_json", side_effect=lagging):
+            with self.assertRaisesRegex(ValueError, "COMMIT_PROVENANCE_STALE"):
+                target.independent_material_authors(137, HEAD)
 
     def test_latest_failed_or_running_ci_cannot_be_hidden_by_old_green(self):
         with patch.object(target, "github_json", side_effect=fake_api):

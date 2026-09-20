@@ -13,6 +13,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 import urllib.parse
 
 from a4_pr_producer import (
@@ -92,6 +93,35 @@ def _check_repaired(api: GitHub, base: str, initial: str,
         raise Refused("repair_fixture_invalid") from None
     if body != expected:
         raise Refused("repair_fixture_mismatch")
+
+
+def _confirm_published_repair(
+    api: GitHub, *, default: str, base: str, branch: str,
+    number: int, repo: str, proposed: str, initial: str,
+    target: str, expected: str,
+) -> bool:
+    """Read-only confirmation after a possibly indeterminate Git ref update.
+
+    GitHub may commit a non-force PATCH but lose its response or show a stale
+    PR read immediately afterward. Never issue the PATCH again. Declare success
+    only when the trusted base, canonical branch, PR head, commit parent, and
+    entire one-file fixture are all independently confirmed. Otherwise refuse.
+    """
+    for attempt in range(5):
+        try:
+            published = (
+                _api_branch(api, default) == base
+                and _api_branch(api, branch) == proposed
+                and _head(api, number, repo, branch, base, default) == proposed
+            )
+        except Refused:
+            published = False
+        if published:
+            _check_repaired(api, base, initial, proposed, target, expected)
+            return True
+        if attempt < 4:
+            time.sleep(0.25 * (attempt + 1))
+    return False
 
 
 def _native_lease(*, number: int, wu: str, actor: str,
@@ -321,16 +351,19 @@ def repair(api: GitHub, *, config: dict, queue: dict, readiness: dict,
         initial=initial, base=base,
     ) != lease_id:
         raise Refused("durable_lease_changed_before_ref")
-    # An uncertain PATCH is not retried. The NEXT run reconciles exact content.
+    # The ONE write may land even when GitHub loses the HTTP response.
+    # Read-only bounded convergence can confirm it, but never PATCH twice.
     try:
         api.call("PATCH", "/git/refs/heads/" + branch,
                  {"sha": proposed, "force": False})
     except Refused:
-        raise Refused("repair_ref_indeterminate_reconcile_no_retry") from None
-    if (_api_branch(api, branch) != proposed
-            or _head(api, number, repo, branch, base, default) != proposed):
+        pass
+    if not _confirm_published_repair(
+        api, default=default, base=base, branch=branch,
+        number=number, repo=repo, proposed=proposed, initial=initial,
+        target=target, expected=body,
+    ):
         raise Refused("repair_ref_indeterminate_reconcile_no_retry")
-    _check_repaired(api, base, initial, proposed, target, body)
     return {
         "status": "L2_REPAIR_COMMITTED", "repository": repo,
         "work_unit": wu, "pr": number, "initial": initial,

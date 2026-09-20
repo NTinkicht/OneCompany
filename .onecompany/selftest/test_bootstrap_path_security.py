@@ -50,6 +50,24 @@ class BootstrapPathSecurityTests(unittest.TestCase):
                 )
             self.assertFalse((outside / "escape.md").exists())
 
+    def test_source_planning_exclusions_do_not_collide_with_target_files(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp)
+            for name in bootstrap.SOURCE_ONLY_PLANNING_FILES:
+                destination = target / name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_text("target owns this file\\n", encoding="utf-8")
+                bootstrap.copy_item(ROOT / name, destination, False, target)
+                self.assertEqual(destination.read_text(encoding="utf-8"), "target owns this file\\n")
+            bootstrap.preflight_copy_paths(target)
+
+    def test_recursive_docs_bootstrap_excludes_source_strategy(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp)
+            bootstrap.copy_item(ROOT / "docs", target / "docs", False, target)
+            self.assertFalse((target / "docs" / "ROADMAP.md").exists())
+            self.assertFalse((target / "docs" / "MASTER-EVOLUTION-ROADMAP-2026.md").exists())
+
     def test_descriptor_copy_never_overwrites_existing_file(self):
         with tempfile.TemporaryDirectory() as temp:
             target = Path(temp)

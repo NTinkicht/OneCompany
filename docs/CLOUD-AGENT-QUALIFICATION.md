@@ -80,19 +80,36 @@ it does not provide an unattended Grok model process. The Tabibi Codespace
 subscriber is explicitly **not an acceptable deployment architecture**.
 
 Cloud inference qualification is [#131](https://github.com/NTinkicht/OneCompany/issues/131).
-Research official Grok Build subscription support on ephemeral GitHub Actions
-and provider-hosted Grok Automations as two independent experiments. Official
-Grok Build docs describe cached account credentials and headless flows but
-do **not** prove an unattended, self-renewing SuperGrok session on ephemeral
-runners under this owner's billing/privacy restrictions. Do **not** transfer
+**Preferred: officially documented Grok Bot**, not a private Codespace or an
+exported browser session. [Provider overview](https://docs.x.ai/grok-bot/overview)
+says Bot runs on a persistent provider cloud computer that keeps working when
+your laptop and app close. [Owner onboarding](https://docs.x.ai/grok-bot/get-started)
+requires a Cursor account linked to the eligible individual SuperGrok plan;
+[Skills/routines](https://docs.x.ai/grok-bot/skills-routines-and-automations)
+describes event-triggered routines from GitHub notifications where available.
+[FAQ](https://docs.x.ai/grok-bot/faq) states weekly included usage and
+**optional separately metered on-demand usage**.
+
+Owner must verify Grok Bot access, link existing SuperGrok, disable any optional
+on-demand/auto-topup or enforce zero additional spend, and review its required
+cloud-data-storage privacy mode. The Bot's connector/plugins are not
+automatically identical to the existing Grok chat's OneCompany MCP. Configure
+only a single OneCompany read-only GitHub scope initially. Prove a narrow
+GitHub notification event wakes that Grok Bot and publishes a durable result
+while all owner machines are off. Neither availability of the UI nor a routine
+created in Grok proves delivery to GitHub without a live response.
+
+Alternative experiment: official Grok Build CLI subscription auth on ephemeral
+GitHub Actions. Official docs cover headless scripting and cached auth, but do
+**not** prove a secure, renewable SuperGrok session on a brand-new ephemeral
+runner without owner reauthentication. Do **not** transfer
 `~/.grok/auth.json` or refresh tokens into Actions for a speculative smoke;
 do not create `XAI_API_KEY`, use metered xAI API, install a third-party
 GitHub Action holding the subscription session, or grant App write permissions.
-Grok Automations must demonstrate a real GitHub-event consumer; do not invent
-a native GitHub trigger. If neither secure existing-plan cloud path works,
-mark unattended Grok capacity `CAPACITY_BLOCKED` with the precise provider
-limitation, and use other eligible workers rather than demanding a live
-Codespace. Never classify an owner-OAuth GitHub write as bot-authored Grok code.
+If neither existing-plan cloud path can be qualified, mark unattended Grok
+capacity `CAPACITY_BLOCKED` with a specific provider limitation, and use
+other eligible workers rather than demand a Codespace. Never classify an
+owner-OAuth GitHub write as bot-authored Grok code.
 
 The later [#136](https://github.com/NTinkicht/OneCompany/issues/136)
 qualifies developer, independent exact-head reviewer and tester **only after**

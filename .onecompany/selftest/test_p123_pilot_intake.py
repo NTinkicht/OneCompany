@@ -1,7 +1,9 @@
 """Regression tests for read-only three-target A4/L2 pilot intake."""
 from __future__ import annotations
 
+import ast
 import base64
+import textwrap
 import copy
 import json
 import sys
@@ -132,6 +134,16 @@ class PilotIntakeTests(unittest.TestCase):
             actual[".onecompany/templates/workflows/onecompany-l2-fixture-validation.yml.disabled"],
             intake.CI_BLOB,
         )
+
+    def test_l2_validation_embedded_python_compiles(self):
+        # Live Actions failure 35507892719 was a SyntaxError, not fixture repair.
+        path = ROOT / ".onecompany/templates/workflows/onecompany-l2-fixture-validation.yml.disabled"
+        workflow = path.read_text(encoding="utf-8")
+        start = "          python - <<'PY'\n"
+        self.assertEqual(workflow.count(start), 1)
+        snippet = workflow.split(start, 1)[1].split("\n          PY", 1)[0]
+        ast.parse(textwrap.dedent(snippet), filename=str(path))
+        self.assertIn("L2_FIXTURE_INTENTIONAL_FAILURE:fixture_ci_repair_not_complete", snippet)
 
     def test_stale_worker_pin_fails_even_when_synthetic_api_says_ready(self):
         with patch.object(intake, "REPAIR_SCRIPT_BLOB", "0" * 40):

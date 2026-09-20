@@ -17,7 +17,8 @@ jobs:
       github.event.issue.number == 130 &&
       github.event.issue.pull_request == null &&
       github.actor == 'NTinkicht' &&
-      contains(github.event.comment.body, '@mistral-vibe')
+      contains(github.event.comment.body, '@mistral-vibe') &&
+      !contains(github.event.comment.body, 'MISTRAL_REVIEW_V1')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:

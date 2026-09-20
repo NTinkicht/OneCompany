@@ -171,7 +171,7 @@ class MistralCloudReviewTests(unittest.TestCase):
     def test_owner_wake_and_review_are_disjoint_source_only(self):
         regular = WAKE.read_text(encoding="utf-8")
         review = WORKFLOW.read_text(encoding="utf-8")
-        self.assertIn("!contains(github.event.comment.body, 'MISTRAL_REVIEW_V1')", regular)
+        self.assertIn("contains(github.event.comment.body, 'MISTRAL_REVIEW_V1') == false", regular)
         self.assertIn("contains(github.event.comment.body, 'MISTRAL_REVIEW_V1')", review)
         self.assertIn("github.actor == 'NTinkicht'", review)
         self.assertIn("github.event.issue.number == 130", review)

@@ -81,6 +81,68 @@ class PostWriteReconciliationTests(unittest.TestCase):
         diff.assert_not_called()
         self.assertEqual(pause.call_count, 4)
 
+    def test_full_verification_retries_transient_github_503(self):
+        api = Mock()
+        with (
+            patch.object(repair, "_api_branch",
+                         side_effect=[BASE, PROPOSED, BASE, PROPOSED]),
+            patch.object(repair, "_head", return_value=PROPOSED),
+            patch.object(repair, "_check_repaired",
+                         side_effect=[repair.ApiFailure(503), None]) as diff,
+            patch.object(repair.time, "sleep") as pause,
+        ):
+            self.assertTrue(verify(api))
+        self.assertEqual(diff.call_count, 2)
+        pause.assert_called_once()
+
+    def test_full_verification_retries_uncertain_transport(self):
+        api = Mock()
+        with (
+            patch.object(repair, "_api_branch",
+                         side_effect=[BASE, PROPOSED, BASE, PROPOSED]),
+            patch.object(repair, "_head", return_value=PROPOSED),
+            patch.object(repair, "_check_repaired",
+                         side_effect=[
+                             repair.Refused("github_result_uncertain_reconcile_before_retry"),
+                             None,
+                         ]) as diff,
+            patch.object(repair.time, "sleep") as pause,
+        ):
+            self.assertTrue(verify(api))
+        self.assertEqual(diff.call_count, 2)
+        pause.assert_called_once()
+
+    def test_full_verification_deterministic_api_error_fails_immediately(self):
+        api = Mock()
+        with (
+            patch.object(repair, "_api_branch",
+                         side_effect=[BASE, PROPOSED]),
+            patch.object(repair, "_head", return_value=PROPOSED),
+            patch.object(repair, "_check_repaired",
+                         side_effect=repair.ApiFailure(403)) as diff,
+            patch.object(repair.time, "sleep") as pause,
+        ):
+            with self.assertRaises(repair.ApiFailure):
+                verify(api)
+        diff.assert_called_once()
+        pause.assert_not_called()
+
+    def test_full_verification_exhausts_transient_reads_without_retry_write(self):
+        api = Mock()
+        with (
+            patch.object(repair, "_api_branch",
+                         side_effect=lambda api, branch:
+                         BASE if branch == "main" else PROPOSED),
+            patch.object(repair, "_head", return_value=PROPOSED),
+            patch.object(repair, "_check_repaired",
+                         side_effect=repair.ApiFailure(503)) as diff,
+            patch.object(repair.time, "sleep") as pause,
+        ):
+            self.assertFalse(verify(api))
+        self.assertEqual(diff.call_count, 5)
+        self.assertEqual(pause.call_count, 4)
+
+
     def test_wrong_fixture_cannot_pass_even_when_both_heads_match(self):
         api = Mock()
         with (

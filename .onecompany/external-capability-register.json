@@ -1,4 +1,5 @@
 {
+  "$schema": "./schemas/external-capability-register.schema.json",
   "schema_version": "0.1-planning",
   "register_id": "ONECOMPANY-EVOLUTION-2026-09-20",
   "source": "Owner master evolution directive (2026-09-20), tracked in GitHub issue #123",

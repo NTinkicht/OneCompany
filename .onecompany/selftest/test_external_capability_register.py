@@ -49,6 +49,41 @@ class ExternalCapabilityRegisterTests(unittest.TestCase):
         errors = self.check(changed)
         self.assertTrue(any("duplicate" in e and "candidate_assessment_task" in e for e in errors), errors)
 
+    def test_swapping_urls_cannot_misattribute_candidate(self):
+        changed = copy.deepcopy(REGISTER)
+        changed["candidates"][0]["candidate_url"], changed["candidates"][1]["candidate_url"] = (
+            changed["candidates"][1]["candidate_url"], changed["candidates"][0]["candidate_url"]
+        )
+        errors = self.check(changed)
+        self.assertTrue(any("candidate_url" in e and "identity" in e for e in errors), errors)
+
+    def test_swapping_ids_does_not_reassign_repository_or_work_unit(self):
+        changed = copy.deepcopy(REGISTER)
+        changed["candidates"][0]["capability_id"], changed["candidates"][1]["capability_id"] = (
+            changed["candidates"][1]["capability_id"], changed["candidates"][0]["capability_id"]
+        )
+        errors = self.check(changed)
+        self.assertTrue(any("repository_or_project" in e and "identity" in e for e in errors), errors)
+
+    def test_unique_but_wrong_assessment_task_is_rejected(self):
+        changed = copy.deepcopy(REGISTER)
+        changed["candidates"][-1]["candidate_assessment_task"] = "ASSESS-EXT-999"
+        errors = self.check(changed)
+        self.assertTrue(any("candidate_assessment_task" in e and "identity" in e for e in errors), errors)
+
+    def test_work_unit_mapping_cannot_be_misattributed(self):
+        changed = copy.deepcopy(REGISTER)
+        changed["candidates"][0]["work_unit_mappings"] = ["WU-P2-HAR-001"]
+        errors = self.check(changed)
+        self.assertTrue(any("work_unit_mappings" in e and "identity" in e for e in errors), errors)
+
+    def test_all_eleven_group_workstreams_are_required(self):
+        changed = copy.deepcopy(REGISTER)
+        changed["group_workstreams"][-1] = copy.deepcopy(changed["group_workstreams"][0])
+        errors = self.check(changed)
+        self.assertTrue(any("duplicate" in e and ".key" in e for e in errors), errors)
+        self.assertTrue(any("missing required key" in e for e in errors), errors)
+
     def test_missing_candidate_cannot_pass_with_correct_length(self):
         changed = copy.deepcopy(REGISTER)
         changed["candidates"][-1] = copy.deepcopy(changed["candidates"][0])

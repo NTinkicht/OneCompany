@@ -46,6 +46,32 @@ def validate(value: Any, schema: dict[str, Any], path: str, errors: list[str]) -
         if schema.get("uniqueItems"):
             encoded = [json.dumps(item, sort_keys=True, ensure_ascii=False) for item in value]
             if len(encoded) != len(set(encoded)): errors.append(f"{path}: items must be unique")
+        # OneCompany extension: key-level uniqueness and complete enum coverage for
+        # inventories whose full records legitimately have distinct metadata. JSON
+        # Schema uniqueItems alone does not enforce unique IDs on object arrays.
+        for key in schema.get("x-uniqueByProperties", []):
+            seen: dict[str, int] = {}
+            for index, item in enumerate(value):
+                if not isinstance(item, dict) or key not in item:
+                    continue  # Standard required/type validation reports the missing key.
+                encoded = json.dumps(item[key], sort_keys=True, ensure_ascii=False)
+                if encoded in seen:
+                    errors.append(f"{path}[{index}].{key}: duplicate of {path}[{seen[encoded]}].{key}")
+                else:
+                    seen[encoded] = index
+        for key in schema.get("x-requireEnumCoverage", []):
+            item_schema = schema.get("items", {})
+            prop_schema = item_schema.get("properties", {}).get(key, {}) if isinstance(item_schema, dict) else {}
+            allowed = prop_schema.get("enum")
+            if not isinstance(allowed, list):
+                errors.append(f"{path}: x-requireEnumCoverage requires items.properties.{key}.enum")
+                continue
+            present = {json.dumps(item[key], sort_keys=True, ensure_ascii=False)
+                       for item in value if isinstance(item, dict) and key in item}
+            missing = [entry for entry in allowed
+                       if json.dumps(entry, sort_keys=True, ensure_ascii=False) not in present]
+            if missing:
+                errors.append(f"{path}: missing required {key} enum value(s): {missing!r}")
         if isinstance(schema.get("items"), dict):
             for index, item in enumerate(value): validate(item, schema["items"], f"{path}[{index}]", errors)
     if isinstance(value, str):

@@ -72,13 +72,14 @@ def current_pr(number: int, head: str, base: str) -> dict:
     return pr
 
 
-def independent_material_authors(number: int) -> bool:
+def independent_material_authors(number: int, expected_head: str) -> bool:
     """Fail closed for any explicit Mistral material authorship.
 
     Without exhaustive actor provenance, this lane can only be ADVISORY;
     GitHub OAuth author names alone cannot establish model independence.
     """
     count = 0
+    last_sha = None
     for page in range(1, 6):
         commits = github_json(
             f"repos/{REPO}/pulls/{number}/commits?per_page=100&page={page}"
@@ -87,6 +88,9 @@ def independent_material_authors(number: int) -> bool:
             raise ValueError("COMMIT_PROVENANCE_UNAVAILABLE")
         for item in commits:
             count += 1
+            last_sha = item.get("sha")
+            if not SHA.fullmatch(last_sha or ""):
+                raise ValueError("COMMIT_PROVENANCE_SHA_INVALID")
             message = item.get("commit", {}).get("message", "")
             tags = MATERIAL_AUTHOR.findall(message)
             if len(tags) > 1 or any(t.lower() in MISTRAL_ALIASES for t in tags):
@@ -95,6 +99,8 @@ def independent_material_authors(number: int) -> bool:
             if account in MISTRAL_ALIASES:
                 raise ValueError("MISTRAL_SELF_REVIEW_BLOCKED")
         if len(commits) < 100:
+            if last_sha != expected_head:
+                raise ValueError("COMMIT_PROVENANCE_STALE")
             return count > 0
     raise ValueError("COMMIT_PROVENANCE_OVER_LIMIT")
 
@@ -141,7 +147,7 @@ def prepare() -> None:
             raise ValueError("FOREIGN_REVIEW_REPOSITORY")
         number, head, base = parse_dispatch(os.environ["DISPATCH_BODY"])
         current_pr(number, head, base)
-        if not independent_material_authors(number):
+        if not independent_material_authors(number, head):
             raise ValueError("REVIEW_HAS_NO_COMMITS")
         if not latest_ci_green(head):
             raise ValueError("REVIEW_CI_NOT_GREEN")
@@ -160,7 +166,7 @@ def evidence() -> None:
         if not SHA.fullmatch(head) or not SHA.fullmatch(base):
             raise ValueError("REVIEW_SHA_INVALID")
         current_pr(number, head, base)
-        if not independent_material_authors(number) or not latest_ci_green(head):
+        if not independent_material_authors(number, head) or not latest_ci_green(head):
             raise ValueError("REVIEW_TARGET_STALE")
         actual_head = subprocess.check_output(
             ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, timeout=10

@@ -116,6 +116,86 @@ def contracts(target: Path) -> dict[str, bool]:
     return {name: (target / name).exists() for name in names}
 
 
+def guided_journey(report: dict[str, Any]) -> dict[str, Any]:
+    """Return a safe, editable intake projection; never approve or mutate work.
+
+    Discovery facts are kept distinct from the owner's as-yet-unknown intent.
+    This is a view of existing onboarding truth, not a second planning store.
+    """
+    mode = report["mode"]
+    new = mode == "NEW_PROJECT"
+    adoption = mode in {"ADOPT_EXISTING", "TEMPLATE_COPY", "INSTALLED"}
+    project = report["project_name"]
+    known_stack = [item for item in report["stack"]
+                   if item != "Unknown / repository-agnostic"]
+    questions = [
+        {"id": "audience", "question": "Who will use this product?",
+         "required": True, "answer": None},
+        {"id": "outcome", "question": "What should they be able to accomplish first?",
+         "required": True, "answer": None},
+        {"id": "first_slice", "question": "What is the smallest useful first feature?",
+         "required": True, "answer": None},
+        {"id": "constraints", "question": "Any privacy, data, accessibility or platform constraints?",
+         "required": False, "answer": None},
+    ]
+    phases = [
+        ("choose", "Choose Create or Adopt",
+         "complete" if new or adoption else "blocked"),
+        ("discover", "Discover project and existing assets",
+         "complete" if report["repository"] and not report["blockers"]
+         else "needs_attention"),
+        ("brief", "Review and edit a proposed Product Brief", "needs_input"),
+        ("approve", "Approve bounded objectives and work", "not_started"),
+        ("team", "Qualify one eligible implementer and independent reviewer",
+         "not_started"),
+        ("build", "Build one canonical Work Unit", "not_started"),
+        ("quality", "Test, independently review and verify evidence", "not_started"),
+        ("preview", "Inspect app preview where supported", "not_started"),
+        ("mission", "Operate from Mission Control", "not_started"),
+    ]
+    return {
+        "version": 1,
+        "source": "read_only_onboard_assessment",
+        "proposed_only": True,
+        "application_authorized": False,
+        "actor_qualified": False,
+        "write_lease_granted": False,
+        "path": "create" if new else "adopt" if adoption else "blocked",
+        "steps": [
+            {"id": key, "title": title, "status": status}
+            for key, title, status in phases
+        ],
+        "product_brief_draft": {
+            "status": "DRAFT_NOT_APPROVED",
+            "project_name": project,
+            "repository": report.get("repository"),
+            "branch": report["default_branch"],
+            "origin": "new_idea" if new else "existing_repository",
+            "known_stack": known_stack,
+            "existing_tests": list(report["tests"]),
+            "existing_ci": list(report["ci"]),
+            "known_contracts": sorted(
+                name for name, present in report["contracts"].items()
+                if present
+            ),
+            "audience": None,
+            "problem": None,
+            "first_valuable_outcome": None,
+            "first_feature": None,
+            "acceptance_criteria": [],
+            "approved": False,
+        },
+        "clarifying_questions": questions,
+        "next_action": (
+            "Resolve the reported safety blockers, then reassess; do not apply."
+            if report["blockers"]
+            else "Review the Product Brief draft and answer the three required "
+                 "product questions before approving any implementation."
+        ),
+        "safety_blockers": list(report["blockers"]),
+    }
+
+
 def analyze(target: Path, repository: str | None = None, project_name: str | None = None, default_branch: str | None = None) -> dict[str, Any]:
     # Assessment is intentionally non-mutating. A missing target path represents
     # a NEW_PROJECT plan; the directory is created only during --apply/bootstrap.
@@ -155,6 +235,7 @@ def analyze(target: Path, repository: str | None = None, project_name: str | Non
         result["next"] = ["rerun this command with --apply", "then run python onecompany.py doctor", "then run python onecompany.py validate", "then populate objective/requirements/work or use GitHub issue templates"]
     else:
         result["next"] = ["resolve blockers and rerun onboarding"]
+    result["journey"] = guided_journey(result)
     return result
 
 
@@ -181,6 +262,13 @@ def print_human(report: dict[str, Any]) -> None:
     print("\nSafe starting posture:")
     print("  L1 autonomy | zero extra AI spend | workers disabled | unattended automation disabled")
     print("  Parallel work is admitted only after dependency/scope/lock/risk/capacity checks.")
+    journey = report["journey"]
+    print("\nYour path: " + journey["path"].replace("_", " ").title())
+    print("  Product Brief: DRAFT (no work approved)")
+    print("  First three questions:")
+    for question in journey["clarifying_questions"][:3]:
+        print("  - " + question["question"])
+    print("  Next: " + journey["next_action"])
     print("\nNext:")
     for item in report.get("next", []): print(f"  - {item}")
 

@@ -313,7 +313,30 @@
             "documentation",
             "research"
           ],
-          "invocation_hint": "Use the reviewed read-only wake template; PAYG remains disabled unless budget policy explicitly changes.",
+          "invocation_hint": "GitHub-hosted source-only workflow .github/workflows/onecompany-mistral-vibe-wake.yml consumes owner-authored @mistral-vibe comments on #130; no Codespace. Configured remains false until owner privately provisions subscription key+PAYG-off var and a real run proves inference/publication; advisory only.",
+          "evidence": []
+        },
+        {
+          "id": "vibe-exact-head-review",
+          "kind": "github_action",
+          "configured": false,
+          "unattended": true,
+          "capabilities": [
+            "code_review"
+          ],
+          "invocation_hint": "Planned #134: cloud reviewer with exact head/base CI and non-author qualification; no binding review until identity and trusted publisher/evidence proven.",
+          "evidence": []
+        },
+        {
+          "id": "vibe-lease-implementation",
+          "kind": "github_action",
+          "configured": false,
+          "unattended": true,
+          "capabilities": [
+            "implementation",
+            "ci_remediation"
+          ],
+          "invocation_hint": "Planned #133: only through native platform-validated live lease, canonical PR/branch, expected head, scoped workspace and parent-controlled non-force push; no model GitHub credentials.",
           "evidence": []
         }
       ]
@@ -334,6 +357,21 @@
             "Owner-provided Grok end-to-end tool results: App 5003121 installation 163077002, onecompany-grok-worker[bot], NTinkicht/OneCompany, read_only.",
             "Render successful App identity probe: dep-dane5fmk1f9s738e5tig (2026-09-19T19:30:59Z)."
           ]
+        },
+        {
+          "id": "grok-supergrok-cloud-wake",
+          "kind": "github_action",
+          "configured": false,
+          "unattended": true,
+          "capabilities": [
+            "repository_intelligence",
+            "test_design",
+            "failure_analysis",
+            "code_review",
+            "implementation"
+          ],
+          "invocation_hint": "Research-only #131/#136: NO qualified SuperGrok GitHub-hosted inference or Automations wake; no Codespace allowed; no XAI_API_KEY/PAYG/session-file copying. Fail CAPACITY_BLOCKED until live provider-entitlement/auth and security smoke.",
+          "evidence": []
         }
       ]
     }

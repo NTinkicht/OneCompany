@@ -109,6 +109,19 @@ class HarnessContractTests(unittest.TestCase):
                           provider_configuration={"native": True}
                           ).code, "PROVIDER_NOT_CONFIGURED"
         )
+        self.assertEqual(
+            assess_intent(replace(intent, provider_seam="memory"),
+                          trusted).code, "PROVIDER_NOT_CONFIGURED"
+        )
+        self.assertEqual(
+            assess_intent(replace(intent, provider_seam="memory"), trusted,
+                          provider_configuration={"memory": 1}
+                          ).code, "PROVIDER_NOT_CONFIGURED"
+        )
+        self.assertTrue(
+            assess_intent(replace(intent, provider_seam="memory"), trusted,
+                          provider_configuration={"memory": True}).permitted
+        )
 
     def test_write_and_merge_cannot_be_self_granted(self):
         intent, trusted = case()

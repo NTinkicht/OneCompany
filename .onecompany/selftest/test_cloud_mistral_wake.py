@@ -126,22 +126,31 @@ class MistralCloudWakeTests(unittest.TestCase):
         actors = {item["actor_id"]: item["mechanisms"] for item in dispatch["actors"]}
         mistral = {m["id"]: m for m in actors["mistral-vibe"]}
         grok = {m["id"]: m for m in actors["grok-4-6-interactive"]}
+        self.assertTrue(mistral["vibe-readonly-wake"]["configured"])
+        self.assertEqual(
+            mistral["vibe-readonly-wake"]["capabilities"],
+            ["repository_intelligence", "test_design"],
+        )
+        self.assertIn("35540501655", " ".join(mistral["vibe-readonly-wake"]["evidence"]))
         for mechanism in (
-            mistral["vibe-readonly-wake"],
             mistral["vibe-exact-head-review"],
             mistral["vibe-lease-implementation"],
             grok["grok-supergrok-cloud-wake"],
         ):
             self.assertFalse(mechanism["configured"])
-        self.assertEqual(mistral["vibe-readonly-wake"]["capabilities"],
-                         ["repository_intelligence", "test_design", "failure_analysis", "documentation", "research"])
 
     def test_readiness_not_inflated_by_workflow_presence(self):
         readiness = json.loads(READINESS.read_text(encoding="utf-8"))
         by_actor = {a["actor_id"]: a for a in readiness["actors"]}
         mistral = by_actor["mistral-vibe"]
-        self.assertEqual(mistral["verified_capabilities"], [])
-        self.assertFalse(mistral["unattended"]["verified"])
+        self.assertEqual(mistral["verified_capabilities"],
+                         ["repository_intelligence", "test_design"])
+        self.assertTrue(mistral["unattended"]["verified"])
+        self.assertTrue(mistral["repository_access"]["read"])
+        for prohibited in ("write", "review", "merge"):
+            self.assertFalse(mistral["repository_access"][prohibited])
+        self.assertEqual(mistral["capacity"]["implementation_streams"], 0)
+        self.assertIn("35540501655", " ".join(mistral["evidence"]))
         grok = by_actor["grok-4-6-interactive"]
         self.assertEqual(grok["verified_capabilities"], ["repository_intelligence"])
         self.assertFalse(grok["unattended"]["verified"])

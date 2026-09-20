@@ -15,6 +15,26 @@ TRUSTED_REF = "b" * 40
 
 
 class DurableLeasePreflightTests(unittest.TestCase):
+    def test_native_durable_dependency_hook_accepts_three_arguments(self):
+        # Live Pilot C lease acquire exposed an old two-arg wrapper hooked into
+        # the core's three-arg seam. Confirm both zero-dependency and complete
+        # transitive dependency paths before any durable event may be emitted.
+        work_map = {
+            "WU-A": {"id": "WU-A", "dependencies": ["WU-B"]},
+            "WU-B": {"id": "WU-B", "dependencies": ["WU-C"]},
+            "WU-C": {"id": "WU-C", "dependencies": []},
+        }
+        candidate = dict(work_map["WU-A"])
+        candidate["dependency_closure"] = ["WU-B", "WU-C"]
+        check = lease._durable_dependency_check
+        self.assertEqual(check(work_map["WU-C"], work_map, set()), (True, []))
+        self.assertEqual(check(candidate, work_map, set()), (False, ["WU-B", "WU-C"]))
+        self.assertEqual(check(candidate, work_map, {"WU-B"}), (False, ["WU-C"]))
+        self.assertEqual(check(candidate, work_map, {"WU-B", "WU-C"}), (True, []))
+        # Even an incomplete frozen snapshot cannot bypass the protected map.
+        candidate["dependency_closure"] = []
+        self.assertEqual(check(candidate, work_map, {"WU-B"}), (False, ["WU-C"]))
+
     def test_queue_done_dependency_without_durable_merge_is_rejected_before_append(self):
         state = {"active_leases": [], "active_streams": []}
         queue = {

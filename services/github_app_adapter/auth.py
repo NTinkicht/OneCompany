@@ -36,19 +36,26 @@ class BearerGuard:
             scheme, supplied = headers[0].decode("ascii").split(" ", 1)
         except (UnicodeError, ValueError):
             scheme, supplied = "", ""
-        authorized = (
+        owner_password = (
             scheme.lower() == "bearer"
-            and (
-                hmac.compare_digest(
-                    supplied.encode("utf-8"),
-                    self.settings.connector_secret.encode("utf-8"),
-                )
-                or self.oauth.valid_token(supplied)
+            and hmac.compare_digest(
+                supplied.encode("utf-8"),
+                self.settings.connector_secret.encode("utf-8"),
             )
         )
-        if not authorized:
+        consent = (
+            self.oauth.token_scope(supplied)
+            if scheme.lower() == "bearer" else None
+        )
+        if not owner_password and consent is None:
             await PlainTextResponse("unauthorized", status_code=401)(
                 scope, receive, send
             )
             return
+        # A future write tool MUST read this request-local trusted field AND
+        # run the native WU/lease gate. The connector password is READ ONLY.
+        # Never derive write scope from a bearer supplied as an MCP argument.
+        scope["onecompany.oauth_scope"] = (
+            "onecompany:read" if owner_password else consent
+        )
         await self.app(scope, receive, send)

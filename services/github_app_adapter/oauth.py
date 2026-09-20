@@ -1,8 +1,9 @@
-"""Single-owner, read-only OAuth2 + PKCE bridge for Grok web custom connectors.
+"""Single-owner, scoped OAuth2 + PKCE bridge for Grok web custom connectors.
 
 This service does NOT authenticate GitHub users. The owner unlocks the OAuth
 consent once using the existing Render-side ONECOMPANY_CONNECTOR_BEARER.
-All issued credentials are audience-bound HMAC tokens signed with that secret.
+All issued credentials are audience-bound, explicitly scope-bound HMAC tokens.
+Optional write consent does NOT add any MCP write tool or GitHub permissions.
 Rotating it immediately revokes all sessions. No GitHub key or installation
 token is returned by this authorization server.
 """
@@ -13,6 +14,7 @@ import hashlib
 import hmac
 import html
 import json
+import os
 import re
 import secrets
 import time
@@ -25,6 +27,7 @@ from settings import Settings
 
 CLIENT_ID = "onecompany-grok-web"
 SCOPE = "onecompany:read"
+WRITE_SCOPE = "onecompany:write"
 _ACCESS_TTL = 3600
 _REFRESH_TTL = 30 * 86400
 _CODE_TTL = 300
@@ -56,12 +59,21 @@ class OwnerOAuth:
         self.settings = settings
         self.codes: dict[str, dict] = {}
 
+    @staticmethod
+    def _write_consent_ready() -> bool:
+        # Consent is an independent switch. It never exposes a writer,
+        # creates an App permission or substitutes for native lease checks.
+        return os.environ.get("ONECOMPANY_GROK_OAUTH_WRITE_ENABLED") == "true"
+
     def _valid_request(self, args) -> bool:
+        scope = args.get("scope", SCOPE)
         return (
             args.get("client_id") == CLIENT_ID
             and args.get("redirect_uri") in _ALLOWED_REDIRECTS
             and args.get("response_type") == "code"
-            and args.get("scope", SCOPE) == SCOPE
+            and (scope == SCOPE or (
+                scope == WRITE_SCOPE and self._write_consent_ready()
+            ))
             and args.get("code_challenge_method") == "S256"
             and isinstance(args.get("code_challenge"), str)
             and bool(_CHALLENGE.fullmatch(args["code_challenge"]))
@@ -69,9 +81,12 @@ class OwnerOAuth:
             and len(args.get("state", "")) > 0
         )
 
-    def _sign(self, kind: str, ttl: int) -> str:
+    def _sign(self, kind: str, ttl: int, scope: str = SCOPE) -> str:
+        if scope not in {SCOPE, WRITE_SCOPE}:
+            raise ValueError("unknown_oauth_scope")
         body = {
             "t": kind,
+            "scope": scope,
             "aud": "onecompany-grok-mcp",
             "exp": int(time.time()) + ttl,
             "nonce": secrets.token_urlsafe(16),
@@ -83,26 +98,50 @@ class OwnerOAuth:
         ))
         return packed + "." + digest
 
-    def valid_token(self, token: str, kind: str = "access") -> bool:
-        if not self.settings.auth_ready() or len(token) > 4096:
-            return False
+    def token_scope(self, token: str, kind: str = "access") -> str | None:
+        """Return signed consent scope only; legacy tokens are READ ONLY.
+
+        Static connector bearer is deliberately not an OAuth access token and
+        can never acquire the future write scope by password equivalence.
+        """
+        if (not isinstance(token, str)
+                or not self.settings.auth_ready() or len(token) > 4096):
+            return None
         try:
             packed, sig = token.split(".", 1)
             correct = _b64(hmac.digest(
-                self.settings.connector_secret.encode(), packed.encode(), "sha256",
+                self.settings.connector_secret.encode(), packed.encode(),
+                "sha256",
             ))
             if not hmac.compare_digest(correct, sig):
-                return False
+                return None
             body = json.loads(_unb64(packed))
-            return (
-                isinstance(body, dict) and body.get("t") == kind
-                and body.get("aud") == "onecompany-grok-mcp"
-                and body.get("actor") == self.settings.actor
-                and isinstance(body.get("exp"), int)
-                and body["exp"] > time.time()
-            )
+            if (not isinstance(body, dict)
+                    or body.get("t") != kind
+                    or body.get("aud") != "onecompany-grok-mcp"
+                    or body.get("actor") != self.settings.actor
+                    or not isinstance(body.get("exp"), int)
+                    or isinstance(body["exp"], bool)
+                    or body["exp"] <= time.time()):
+                return None
+            scope = body.get("scope", SCOPE)  # pre-upgrade read tokens
+            if scope not in {SCOPE, WRITE_SCOPE}:
+                return None
+            if scope == WRITE_SCOPE and not self._write_consent_ready():
+                return None
+            return scope
         except (ValueError, UnicodeError, TypeError, AttributeError):
+            return None
+
+    def valid_token(self, token: str, kind: str = "access",
+                    required_scope: str = SCOPE) -> bool:
+        """Write authority is never inferred from read-only OAuth consent."""
+        if required_scope not in {SCOPE, WRITE_SCOPE}:
             return False
+        actual = self.token_scope(token, kind)
+        return actual == required_scope or (
+            required_scope == SCOPE and actual == WRITE_SCOPE
+        )
 
     async def _bounded_form(self, request: Request) -> dict[str, str] | None:
         """Bound the bytes ACTUALLY received, even without Content-Length."""
@@ -153,11 +192,14 @@ class OwnerOAuth:
             page = (
                 "<!doctype html><html lang='en'><meta charset='utf-8'>"
                 "<meta name='viewport' content='width=device-width,initial-scale=1'>"
-                "<title>Authorize OneCompany read-only connector</title>"
+                "<title>Authorize OneCompany connector</title>"
                 "<main style='max-width:500px;margin:10vh auto;font:16px system-ui'>"
                 "<h1>Connect Grok to OneCompany</h1>"
-                "<p>Authorize READ-ONLY access to NTinkicht/OneCompany. "
-                "This cannot modify branches, approve reviews or merge PRs.</p>"
+                "<p>Authorize the requested OneCompany connector scope: "
+                + html.escape(args.get("scope", SCOPE), quote=True)
+                + ". OAuth consent alone cannot modify branches, approve "
+                "reviews or merge PRs; native lease and GitHub App gates "
+                "remain mandatory.</p>"
                 "<p>Enter the existing OneCompany connector password "
                 "you saved in Render (not your GitHub private key).</p>"
                 "<form method='post' action='/oauth/authorize'>"
@@ -165,7 +207,7 @@ class OwnerOAuth:
                 + "<label>OneCompany connector password "
                 "<input type='password' name='owner_password' required "
                 "autocomplete='off'></label><p><button type='submit'>"
-                "Authorize read-only connector</button></p></form></main></html>"
+                "Authorize this connector scope</button></p></form></main></html>"
             )
             return HTMLResponse(
                 page, headers={
@@ -188,6 +230,7 @@ class OwnerOAuth:
         code = secrets.token_urlsafe(32)
         self.codes[hashlib.sha256(code.encode()).hexdigest()] = {
             "exp": now + _CODE_TTL,
+            "scope": args.get("scope", SCOPE),
             "client_id": args["client_id"],
             "redirect_uri": args["redirect_uri"],
             "challenge": args["code_challenge"],
@@ -221,18 +264,25 @@ class OwnerOAuth:
             challenge = _b64(hashlib.sha256(verifier.encode()).digest())
             if not hmac.compare_digest(challenge, entry["challenge"]):
                 return _response("invalid_grant", 400)
+            granted_scope = entry["scope"]
         elif grant == "refresh_token":
-            if not self.valid_token(args.get("refresh_token", ""), "refresh"):
+            granted_scope = self.token_scope(
+                args.get("refresh_token", ""), "refresh",
+            )
+            if granted_scope is None:
                 return _response("invalid_grant", 400)
         else:
             return _response("unsupported_grant_type", 400)
+        if args.get("scope") not in (None, granted_scope):
+            # A refresh or code exchange may never upgrade READ -> WRITE.
+            return _response("invalid_scope", 400)
         return JSONResponse(
             {
-                "access_token": self._sign("access", _ACCESS_TTL),
-                "refresh_token": self._sign("refresh", _REFRESH_TTL),
+                "access_token": self._sign("access", _ACCESS_TTL, granted_scope),
+                "refresh_token": self._sign("refresh", _REFRESH_TTL, granted_scope),
                 "token_type": "Bearer",
                 "expires_in": _ACCESS_TTL,
-                "scope": SCOPE,
+                "scope": granted_scope,
             },
             headers={"Cache-Control": "no-store", "Pragma": "no-cache"},
         )

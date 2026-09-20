@@ -2,9 +2,13 @@
 from __future__ import annotations
 import asyncio
 import hashlib
+import hmac
+import json
+import os
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
 import httpx
@@ -14,7 +18,7 @@ from starlette.routing import Route
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from auth import BearerGuard
-from oauth import CLIENT_ID, OwnerOAuth, SCOPE, _b64
+from oauth import CLIENT_ID, OwnerOAuth, SCOPE, WRITE_SCOPE, _b64
 from settings import Settings
 
 CALLBACK = "https://grok.com/connectors-oauth-exchange-code/"
@@ -39,8 +43,11 @@ class TestGrokOAuth(unittest.IsolatedAsyncioTestCase):
                      "NTinkicht/OneCompany",
                      "onecompany-github-adapter.onrender.com")
         self.oauth = OwnerOAuth(s)
-        async def protected(_request):
-            return JSONResponse({"approved": True})
+        async def protected(request):
+            return JSONResponse({
+                "approved": True,
+                "scope": request.scope.get("onecompany.oauth_scope"),
+            })
         inner = Starlette(routes=[
             Route("/oauth/authorize", self.oauth.authorize,
                   methods=["GET", "POST"]),
@@ -106,7 +113,9 @@ class TestGrokOAuth(unittest.IsolatedAsyncioTestCase):
             "/mcp",
             headers={"Authorization": "Bearer " + tokens["access_token"]},
         )
-        self.assertEqual(ok.json(), {"approved": True})
+        self.assertEqual(ok.json(), {
+            "approved": True, "scope": SCOPE,
+        })
         self.assertEqual(
             (await self.client.post("/oauth/token", data=body)).status_code, 400
         )
@@ -119,6 +128,98 @@ class TestGrokOAuth(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.oauth.valid_token(
             refreshed.json()["access_token"]
         ))
+
+    async def test_write_requires_separate_consent_never_read_token_upgrade(self):
+        args = {**oauth_args(), "scope": WRITE_SCOPE}
+        # Existing Grok connections cannot accidentally request write.
+        self.assertEqual(
+            (await self.client.get("/oauth/authorize", params=args)).status_code,
+            400,
+        )
+        read_code = await self.authorize()
+        read_exchange = await self.client.post("/oauth/token", data={
+            "client_id": CLIENT_ID,
+            "grant_type": "authorization_code",
+            "redirect_uri": CALLBACK,
+            "code": read_code,
+            "code_verifier": VERIFIER,
+        })
+        read_tokens = read_exchange.json()
+        self.assertEqual(read_tokens["scope"], SCOPE)
+        self.assertFalse(self.oauth.valid_token(
+            read_tokens["access_token"], required_scope=WRITE_SCOPE,
+        ))
+        self.assertIsNone(self.oauth.token_scope(SECRET))
+        with patch.dict(os.environ, {
+            "ONECOMPANY_GROK_OAUTH_WRITE_ENABLED": "true",
+        }):
+            write_code = await self.authorize(args)
+            write_exchange = await self.client.post("/oauth/token", data={
+                "client_id": CLIENT_ID,
+                "grant_type": "authorization_code",
+                "redirect_uri": CALLBACK,
+                "code": write_code,
+                "code_verifier": VERIFIER,
+            })
+            self.assertEqual(write_exchange.status_code, 200)
+            write_tokens = write_exchange.json()
+            self.assertEqual(write_tokens["scope"], WRITE_SCOPE)
+            self.assertTrue(self.oauth.valid_token(
+                write_tokens["access_token"], required_scope=WRITE_SCOPE,
+            ))
+            self.assertEqual((await self.client.get(
+                "/mcp", headers={
+                    "Authorization": "Bearer " + write_tokens["access_token"],
+                },
+            )).json()["scope"], WRITE_SCOPE)
+            refreshed = await self.client.post("/oauth/token", data={
+                "client_id": CLIENT_ID, "grant_type": "refresh_token",
+                "refresh_token": write_tokens["refresh_token"],
+            })
+            self.assertEqual(refreshed.status_code, 200)
+            self.assertEqual(refreshed.json()["scope"], WRITE_SCOPE)
+            upgraded = await self.client.post("/oauth/token", data={
+                "client_id": CLIENT_ID, "grant_type": "refresh_token",
+                "refresh_token": read_tokens["refresh_token"],
+                "scope": WRITE_SCOPE,
+            })
+            self.assertEqual(upgraded.status_code, 400)
+            self.assertFalse(self.oauth.valid_token(
+                read_tokens["refresh_token"], "refresh", WRITE_SCOPE,
+            ))
+        # Turning off optional write consent immediately invalidates the
+        # write token (including refresh); read tokens remain functional.
+        self.assertFalse(self.oauth.valid_token(
+            write_tokens["access_token"], required_scope=WRITE_SCOPE,
+        ))
+        self.assertFalse(self.oauth.valid_token(
+            write_tokens["refresh_token"], "refresh",
+        ))
+        self.assertTrue(self.oauth.valid_token(read_tokens["access_token"]))
+        self.assertEqual((await self.client.get(
+            "/mcp", headers={"Authorization": "Bearer " + SECRET},
+        )).json()["scope"], SCOPE)
+
+    async def test_read_only_legacy_token_never_inherits_write_scope(self):
+        import time
+        body = {
+            "t": "access", "aud": "onecompany-grok-mcp",
+            "exp": int(time.time()) + 200,
+            "nonce": "prior-read-only-token", "actor": "grok-4-6-interactive",
+        }
+        packed = _b64(json.dumps(body).encode("utf-8"))
+        sig = _b64(hmac.digest(
+            SECRET.encode(), packed.encode(), "sha256",
+        ))
+        legacy = packed + "." + sig
+        with patch.dict(os.environ, {
+            "ONECOMPANY_GROK_OAUTH_WRITE_ENABLED": "true",
+        }):
+            self.assertTrue(self.oauth.valid_token(legacy))
+            self.assertFalse(self.oauth.valid_token(
+                legacy, required_scope=WRITE_SCOPE,
+            ))
+            self.assertEqual(self.oauth.token_scope(legacy), SCOPE)
 
     async def test_unbounded_or_chunked_oauth_form_is_refused_before_parsing(self):
         async def oversized():

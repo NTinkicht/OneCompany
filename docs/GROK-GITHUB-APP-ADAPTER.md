@@ -173,3 +173,33 @@ requires exact native WU lease authority, OAuth write-scope separation,
 owner-approved GitHub App permissions and a live bot-authored smoke test.
 See Issue #105. Do not expand App permissions to Tabibi or Veritas-Atlas to
 qualify the OneCompany-only adapter. The source autonomy level is still L1.
+
+## Pre-change OAuth consent split — WU-PRECHANGE-001
+
+Existing Grok web connections remain `onecompany:read`. The bridge now signs
+the granted scope into both access and refresh tokens and exposes the
+request-local verified value to the MCP transport as
+`onecompany.oauth_scope`. Legacy unscoped tokens remain **read-only**.
+Refreshing an existing read token never upgrades it to write, and the static
+Render connector bearer is read-only even if the write-consent flag is set.
+
+The separate `onecompany:write` consent request is **disabled by default**
+and is accepted only after the owner deliberately configures
+`ONECOMPANY_GROK_OAUTH_WRITE_ENABLED=true` on the existing Render service.
+This is a *consent switch*, not the writer execution switch, and it cannot
+enable GitHub writes by itself. A future write MCP tool must explicitly
+require `onecompany.oauth_scope == "onecompany:write"` from the trusted
+request context, independently verify OneCompany's native durable WU lease
+and unchanged branch/PR scope, recheck the E-stop, and use the narrow
+installation-token CAS writer. Do not trust model-supplied bearer strings
+or lease dicts. The current server deliberately registers **no write tool**,
+and `ONECOMPANY_GROK_WRITE_ENABLED` must stay unset/false until the native
+kernel implementation is independently tested and reviewed.
+
+**Live proof still required:** owner restricts the App installation to
+OneCompany only before granting Contents:write + Issues:read + PR:read, then
+authorizes one existing canonical low-risk PR/lease and verifies an actual
+App-authenticated `onecompany-grok-worker[bot]` commit, exact-head CI and
+independent non-author review. This write smoke does not establish unattended
+capacity or full L2 factory qualification. No new key, Render service, paid
+provider or named human reviewer is required for routine technical PRs.

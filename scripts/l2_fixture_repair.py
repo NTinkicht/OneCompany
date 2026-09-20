@@ -17,7 +17,7 @@ import time
 import urllib.parse
 
 from a4_pr_producer import (
-    GitHub, Refused, SHA, _api_branch, _matching_pulls, _verify_claim,
+    ApiFailure, GitHub, Refused, SHA, _api_branch, _matching_pulls, _verify_claim,
     branch_for, fixture_body, preflight,
 )
 from onecompany_lib import CONTROL, load_json
@@ -95,6 +95,16 @@ def _check_repaired(api: GitHub, base: str, initial: str,
         raise Refused("repair_fixture_mismatch")
 
 
+def _transient_confirmation_read(exc: Refused) -> bool:
+    """Retry only bounded GitHub transport/server failures, not bad content."""
+    if isinstance(exc, ApiFailure):
+        return exc.status in {408, 429} or 500 <= exc.status < 600
+    return (
+        type(exc) is Refused
+        and str(exc) == "github_result_uncertain_reconcile_before_retry"
+    )
+
+
 def _confirm_published_repair(
     api: GitHub, *, default: str, base: str, branch: str,
     number: int, repo: str, proposed: str, initial: str,
@@ -117,8 +127,15 @@ def _confirm_published_repair(
         except Refused:
             published = False
         if published:
-            _check_repaired(api, base, initial, proposed, target, expected)
-            return True
+            try:
+                _check_repaired(api, base, initial, proposed, target, expected)
+            except Refused as exc:
+                if not _transient_confirmation_read(exc):
+                    raise
+                # A newly visible PR/ref may precede its Git object/content
+                # reads. Retry read-only verification; NEVER repeat PATCH.
+            else:
+                return True
         if attempt < 4:
             time.sleep(0.25 * (attempt + 1))
     return False

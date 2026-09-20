@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import copy
 import os
+import tempfile
 from contextlib import redirect_stderr
 from io import StringIO
 from unittest.mock import patch
@@ -518,6 +519,15 @@ class FirstPRProducerTests(unittest.TestCase):
                 producer.GitHub(REPO, "synthetic-token").call(
                     "POST", "/git/blobs", {"content": "no"},
                 )
+        with tempfile.TemporaryDirectory() as folder:
+            sentinel = Path(folder) / "operator-stop"
+            sentinel.touch()
+            with patch.dict(os.environ, {
+                "ONECOMPANY_EMERGENCY_STOP": "",
+                "ONECOMPANY_EMERGENCY_STOP_FILE": str(sentinel),
+            }):
+                with self.assertRaisesRegex(producer.Refused, "emergency_stop"):
+                    producer.produce(FakeGitHub(REPO), **installation())
         # Missing config stop state is not interpreted as permission.
         inputs = installation()
         del inputs["config"]["safety"]["emergency_stop"]

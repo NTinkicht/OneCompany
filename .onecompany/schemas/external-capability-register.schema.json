@@ -40,7 +40,7 @@
     },
     "group_workstreams": {
       "type": "array",
-      "minItems": 1,
+      "minItems": 11,
       "items": {
         "type": "object",
         "required": [
@@ -54,7 +54,20 @@
         ],
         "properties": {
           "key": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "MEM",
+              "INF",
+              "HAR",
+              "COM",
+              "SPEC",
+              "PROD",
+              "QUAL",
+              "UI",
+              "DES",
+              "OBS",
+              "OPS"
+            ]
           },
           "epic": {
             "type": "string"
@@ -84,6 +97,75 @@
           }
         },
         "additionalProperties": false
+      },
+      "maxItems": 11,
+      "x-uniqueByProperties": [
+        "key",
+        "wu",
+        "epic"
+      ],
+      "x-requireEnumCoverage": [
+        "key"
+      ],
+      "x-expectedRowsByKey": {
+        "key": "key",
+        "values": {
+          "MEM": {
+            "epic": "EPIC-EVOL-MEM",
+            "wu": "WU-P2-MEM-001",
+            "phase": "P2"
+          },
+          "INF": {
+            "epic": "EPIC-EVOL-INF",
+            "wu": "WU-P2-INF-001",
+            "phase": "P2"
+          },
+          "HAR": {
+            "epic": "EPIC-EVOL-HAR",
+            "wu": "WU-P2-HAR-001",
+            "phase": "P2"
+          },
+          "COM": {
+            "epic": "EPIC-EVOL-COM",
+            "wu": "WU-P2-COM-001",
+            "phase": "P2"
+          },
+          "SPEC": {
+            "epic": "EPIC-EVOL-DISC",
+            "wu": "WU-P1-DISCOVERY-001",
+            "phase": "P1"
+          },
+          "PROD": {
+            "epic": "EPIC-EVOL-PROD",
+            "wu": "WU-P2-PRODUCT-001",
+            "phase": "P2"
+          },
+          "QUAL": {
+            "epic": "EPIC-EVOL-QUAL",
+            "wu": "WU-P2-QUALITY-001",
+            "phase": "P2"
+          },
+          "UI": {
+            "epic": "EPIC-EVOL-UI",
+            "wu": "WU-P2-UI-001",
+            "phase": "P2"
+          },
+          "DES": {
+            "epic": "EPIC-EVOL-DES",
+            "wu": "WU-P2-DESIGN-001",
+            "phase": "P2"
+          },
+          "OBS": {
+            "epic": "EPIC-EVOL-OBS",
+            "wu": "WU-P2-OBS-001",
+            "phase": "P2"
+          },
+          "OPS": {
+            "epic": "EPIC-EVOL-OPS",
+            "wu": "WU-P3-OPS-001",
+            "phase": "P3"
+          }
+        }
       }
     },
     "candidates": {
@@ -401,7 +483,564 @@
       "x-requireEnumCoverage": [
         "capability_id",
         "repository_or_project"
-      ]
+      ],
+      "x-expectedRowsByKey": {
+        "key": "capability_id",
+        "values": {
+          "EXT-001": {
+            "repository_or_project": "NTinkicht/supermemory",
+            "candidate_url": "https://github.com/NTinkicht/supermemory",
+            "candidate_assessment_task": "ASSESS-EXT-001",
+            "proposed_epic": "EPIC-EVOL-MEM",
+            "work_unit_mappings": [
+              "WU-P2-SUPERMEMORY-001"
+            ]
+          },
+          "EXT-002": {
+            "repository_or_project": "volcengine/OpenViking",
+            "candidate_url": "https://github.com/volcengine/OpenViking",
+            "candidate_assessment_task": "ASSESS-EXT-002",
+            "proposed_epic": "EPIC-EVOL-MEM",
+            "work_unit_mappings": [
+              "WU-P2-OPENVIKING-001"
+            ]
+          },
+          "EXT-003": {
+            "repository_or_project": "NTinkicht/kserve",
+            "candidate_url": "https://github.com/NTinkicht/kserve",
+            "candidate_assessment_task": "ASSESS-EXT-003",
+            "proposed_epic": "EPIC-EVOL-INF",
+            "work_unit_mappings": [
+              "WU-P2-KSERVE-001"
+            ]
+          },
+          "EXT-004": {
+            "repository_or_project": "BerriAI/litellm",
+            "candidate_url": "https://github.com/BerriAI/litellm",
+            "candidate_assessment_task": "ASSESS-EXT-004",
+            "proposed_epic": "EPIC-EVOL-INF",
+            "work_unit_mappings": [
+              "WU-P2-LITELLM-001"
+            ]
+          },
+          "EXT-005": {
+            "repository_or_project": "lm-sys/RouteLLM",
+            "candidate_url": "https://github.com/lm-sys/RouteLLM",
+            "candidate_assessment_task": "ASSESS-EXT-005",
+            "proposed_epic": "EPIC-EVOL-INF",
+            "work_unit_mappings": [
+              "WU-P2-INF-001"
+            ]
+          },
+          "EXT-006": {
+            "repository_or_project": "aurelio-labs/semantic-router",
+            "candidate_url": "https://github.com/aurelio-labs/semantic-router",
+            "candidate_assessment_task": "ASSESS-EXT-006",
+            "proposed_epic": "EPIC-EVOL-INF",
+            "work_unit_mappings": [
+              "WU-P2-INF-001"
+            ]
+          },
+          "EXT-007": {
+            "repository_or_project": "microsoft/LLMLingua",
+            "candidate_url": "https://github.com/microsoft/LLMLingua",
+            "candidate_assessment_task": "ASSESS-EXT-007",
+            "proposed_epic": "EPIC-EVOL-INF",
+            "work_unit_mappings": [
+              "WU-P2-INF-001"
+            ]
+          },
+          "EXT-008": {
+            "repository_or_project": "OpenHands/software-agent-sdk",
+            "candidate_url": "https://github.com/OpenHands/software-agent-sdk",
+            "candidate_assessment_task": "ASSESS-EXT-008",
+            "proposed_epic": "EPIC-EVOL-HAR",
+            "work_unit_mappings": [
+              "WU-P2-HAR-001"
+            ]
+          },
+          "EXT-009": {
+            "repository_or_project": "openai/openai-agents-python",
+            "candidate_url": "https://github.com/openai/openai-agents-python",
+            "candidate_assessment_task": "ASSESS-EXT-009",
+            "proposed_epic": "EPIC-EVOL-HAR",
+            "work_unit_mappings": [
+              "WU-P2-HAR-001"
+            ]
+          },
+          "EXT-010": {
+            "repository_or_project": "anthropics/claude-agent-sdk-python",
+            "candidate_url": "https://github.com/anthropics/claude-agent-sdk-python",
+            "candidate_assessment_task": "ASSESS-EXT-010",
+            "proposed_epic": "EPIC-EVOL-HAR",
+            "work_unit_mappings": [
+              "WU-P2-HAR-001"
+            ]
+          },
+          "EXT-011": {
+            "repository_or_project": "badlogic/pi-mono",
+            "candidate_url": "https://github.com/badlogic/pi-mono",
+            "candidate_assessment_task": "ASSESS-EXT-011",
+            "proposed_epic": "EPIC-EVOL-HAR",
+            "work_unit_mappings": [
+              "WU-P2-HAR-001"
+            ]
+          },
+          "EXT-012": {
+            "repository_or_project": "strands-agents/harness-sdk",
+            "candidate_url": "https://github.com/strands-agents/harness-sdk",
+            "candidate_assessment_task": "ASSESS-EXT-012",
+            "proposed_epic": "EPIC-EVOL-HAR",
+            "work_unit_mappings": [
+              "WU-P2-HAR-001"
+            ]
+          },
+          "EXT-013": {
+            "repository_or_project": "twaldin/harness",
+            "candidate_url": "https://github.com/twaldin/harness",
+            "candidate_assessment_task": "ASSESS-EXT-013",
+            "proposed_epic": "EPIC-EVOL-HAR",
+            "work_unit_mappings": [
+              "WU-P2-HAR-001"
+            ]
+          },
+          "EXT-014": {
+            "repository_or_project": "AMAP-ML/LongHorizon-Harness",
+            "candidate_url": "https://github.com/AMAP-ML/LongHorizon-Harness",
+            "candidate_assessment_task": "ASSESS-EXT-014",
+            "proposed_epic": "EPIC-EVOL-HAR",
+            "work_unit_mappings": [
+              "WU-P2-HAR-001"
+            ]
+          },
+          "EXT-015": {
+            "repository_or_project": "langchain-ai/open-swe",
+            "candidate_url": "https://github.com/langchain-ai/open-swe",
+            "candidate_assessment_task": "ASSESS-EXT-015",
+            "proposed_epic": "EPIC-EVOL-HAR",
+            "work_unit_mappings": [
+              "WU-P2-HAR-001"
+            ]
+          },
+          "EXT-016": {
+            "repository_or_project": "e2b-dev/E2B",
+            "candidate_url": "https://github.com/e2b-dev/E2B",
+            "candidate_assessment_task": "ASSESS-EXT-016",
+            "proposed_epic": "EPIC-EVOL-HAR",
+            "work_unit_mappings": [
+              "WU-P2-HAR-001"
+            ]
+          },
+          "EXT-017": {
+            "repository_or_project": "kubernetes-sigs/agent-sandbox",
+            "candidate_url": "https://github.com/kubernetes-sigs/agent-sandbox",
+            "candidate_assessment_task": "ASSESS-EXT-017",
+            "proposed_epic": "EPIC-EVOL-HAR",
+            "work_unit_mappings": [
+              "WU-P2-HAR-001"
+            ]
+          },
+          "EXT-018": {
+            "repository_or_project": "temporalio/temporal",
+            "candidate_url": "https://github.com/temporalio/temporal",
+            "candidate_assessment_task": "ASSESS-EXT-018",
+            "proposed_epic": "EPIC-EVOL-HAR",
+            "work_unit_mappings": [
+              "WU-P2-HAR-001",
+              "WU-P3-OPS-001"
+            ]
+          },
+          "EXT-019": {
+            "repository_or_project": "a2aproject/A2A",
+            "candidate_url": "https://github.com/a2aproject/A2A",
+            "candidate_assessment_task": "ASSESS-EXT-019",
+            "proposed_epic": "EPIC-EVOL-COM",
+            "work_unit_mappings": [
+              "WU-P2-COM-001"
+            ]
+          },
+          "EXT-020": {
+            "repository_or_project": "nats-io/nats-server",
+            "candidate_url": "https://github.com/nats-io/nats-server",
+            "candidate_assessment_task": "ASSESS-EXT-020",
+            "proposed_epic": "EPIC-EVOL-COM",
+            "work_unit_mappings": [
+              "WU-P2-COM-001"
+            ]
+          },
+          "EXT-021": {
+            "repository_or_project": "ag-ui-protocol/ag-ui",
+            "candidate_url": "https://github.com/ag-ui-protocol/ag-ui",
+            "candidate_assessment_task": "ASSESS-EXT-021",
+            "proposed_epic": "EPIC-EVOL-COM",
+            "work_unit_mappings": [
+              "WU-P2-COM-001"
+            ]
+          },
+          "EXT-022": {
+            "repository_or_project": "agentskills/agentskills",
+            "candidate_url": "https://github.com/agentskills/agentskills",
+            "candidate_assessment_task": "ASSESS-EXT-022",
+            "proposed_epic": "EPIC-EVOL-COM",
+            "work_unit_mappings": [
+              "WU-P2-COM-001"
+            ]
+          },
+          "EXT-023": {
+            "repository_or_project": "modelcontextprotocol/registry",
+            "candidate_url": "https://github.com/modelcontextprotocol/registry",
+            "candidate_assessment_task": "ASSESS-EXT-023",
+            "proposed_epic": "EPIC-EVOL-COM",
+            "work_unit_mappings": [
+              "WU-P2-COM-001"
+            ]
+          },
+          "EXT-024": {
+            "repository_or_project": "github/spec-kit",
+            "candidate_url": "https://github.com/github/spec-kit",
+            "candidate_assessment_task": "ASSESS-EXT-024",
+            "proposed_epic": "EPIC-EVOL-DISC",
+            "work_unit_mappings": [
+              "WU-P1-DISCOVERY-001"
+            ]
+          },
+          "EXT-025": {
+            "repository_or_project": "Fission-AI/OpenSpec",
+            "candidate_url": "https://github.com/Fission-AI/OpenSpec",
+            "candidate_assessment_task": "ASSESS-EXT-025",
+            "proposed_epic": "EPIC-EVOL-DISC",
+            "work_unit_mappings": [
+              "WU-P1-DISCOVERY-001"
+            ]
+          },
+          "EXT-026": {
+            "repository_or_project": "bmad-code-org/BMAD-METHOD",
+            "candidate_url": "https://github.com/bmad-code-org/BMAD-METHOD",
+            "candidate_assessment_task": "ASSESS-EXT-026",
+            "proposed_epic": "EPIC-EVOL-DISC",
+            "work_unit_mappings": [
+              "WU-P1-DISCOVERY-001"
+            ]
+          },
+          "EXT-027": {
+            "repository_or_project": "nrwl/nx",
+            "candidate_url": "https://github.com/nrwl/nx",
+            "candidate_assessment_task": "ASSESS-EXT-027",
+            "proposed_epic": "EPIC-EVOL-PROD",
+            "work_unit_mappings": [
+              "WU-P2-PRODUCT-001"
+            ]
+          },
+          "EXT-028": {
+            "repository_or_project": "sverweij/dependency-cruiser",
+            "candidate_url": "https://github.com/sverweij/dependency-cruiser",
+            "candidate_assessment_task": "ASSESS-EXT-028",
+            "proposed_epic": "EPIC-EVOL-PROD",
+            "work_unit_mappings": [
+              "WU-P2-PRODUCT-001"
+            ]
+          },
+          "EXT-029": {
+            "repository_or_project": "backstage/backstage",
+            "candidate_url": "https://github.com/backstage/backstage",
+            "candidate_assessment_task": "ASSESS-EXT-029",
+            "proposed_epic": "EPIC-EVOL-PROD",
+            "work_unit_mappings": [
+              "WU-P2-PRODUCT-001"
+            ]
+          },
+          "EXT-030": {
+            "repository_or_project": "makeplane/plane",
+            "candidate_url": "https://github.com/makeplane/plane",
+            "candidate_assessment_task": "ASSESS-EXT-030",
+            "proposed_epic": "EPIC-EVOL-PROD",
+            "work_unit_mappings": [
+              "WU-P2-PRODUCT-001"
+            ]
+          },
+          "EXT-031": {
+            "repository_or_project": "opf/openproject",
+            "candidate_url": "https://github.com/opf/openproject",
+            "candidate_assessment_task": "ASSESS-EXT-031",
+            "proposed_epic": "EPIC-EVOL-PROD",
+            "work_unit_mappings": [
+              "WU-P2-PRODUCT-001"
+            ]
+          },
+          "EXT-032": {
+            "repository_or_project": "xyflow/xyflow",
+            "candidate_url": "https://github.com/xyflow/xyflow",
+            "candidate_assessment_task": "ASSESS-EXT-032",
+            "proposed_epic": "EPIC-EVOL-PROD",
+            "work_unit_mappings": [
+              "WU-P2-PRODUCT-001",
+              "WU-P2-OBS-001"
+            ]
+          },
+          "EXT-033": {
+            "repository_or_project": "cytoscape/cytoscape.js",
+            "candidate_url": "https://github.com/cytoscape/cytoscape.js",
+            "candidate_assessment_task": "ASSESS-EXT-033",
+            "proposed_epic": "EPIC-EVOL-PROD",
+            "work_unit_mappings": [
+              "WU-P2-PRODUCT-001"
+            ]
+          },
+          "EXT-034": {
+            "repository_or_project": "mermaid-js/mermaid",
+            "candidate_url": "https://github.com/mermaid-js/mermaid",
+            "candidate_assessment_task": "ASSESS-EXT-034",
+            "proposed_epic": "EPIC-EVOL-PROD",
+            "work_unit_mappings": [
+              "WU-P2-PRODUCT-001"
+            ]
+          },
+          "EXT-035": {
+            "repository_or_project": "microsoft/playwright",
+            "candidate_url": "https://github.com/microsoft/playwright",
+            "candidate_assessment_task": "ASSESS-EXT-035",
+            "proposed_epic": "EPIC-EVOL-QUAL",
+            "work_unit_mappings": [
+              "WU-P1-PLAYWRIGHT-001",
+              "WU-P2-UI-001"
+            ]
+          },
+          "EXT-036": {
+            "repository_or_project": "stryker-mutator/stryker-js",
+            "candidate_url": "https://github.com/stryker-mutator/stryker-js",
+            "candidate_assessment_task": "ASSESS-EXT-036",
+            "proposed_epic": "EPIC-EVOL-QUAL",
+            "work_unit_mappings": [
+              "WU-P2-QUALITY-001"
+            ]
+          },
+          "EXT-037": {
+            "repository_or_project": "schemathesis/schemathesis",
+            "candidate_url": "https://github.com/schemathesis/schemathesis",
+            "candidate_assessment_task": "ASSESS-EXT-037",
+            "proposed_epic": "EPIC-EVOL-QUAL",
+            "work_unit_mappings": [
+              "WU-P2-QUALITY-001"
+            ]
+          },
+          "EXT-038": {
+            "repository_or_project": "HypothesisWorks/hypothesis",
+            "candidate_url": "https://github.com/HypothesisWorks/hypothesis",
+            "candidate_assessment_task": "ASSESS-EXT-038",
+            "proposed_epic": "EPIC-EVOL-QUAL",
+            "work_unit_mappings": [
+              "WU-P2-QUALITY-001"
+            ]
+          },
+          "EXT-039": {
+            "repository_or_project": "pact-foundation/pact-js",
+            "candidate_url": "https://github.com/pact-foundation/pact-js",
+            "candidate_assessment_task": "ASSESS-EXT-039",
+            "proposed_epic": "EPIC-EVOL-QUAL",
+            "work_unit_mappings": [
+              "WU-P2-QUALITY-001"
+            ]
+          },
+          "EXT-040": {
+            "repository_or_project": "grafana/k6",
+            "candidate_url": "https://github.com/grafana/k6",
+            "candidate_assessment_task": "ASSESS-EXT-040",
+            "proposed_epic": "EPIC-EVOL-QUAL",
+            "work_unit_mappings": [
+              "WU-P2-QUALITY-001"
+            ]
+          },
+          "EXT-041": {
+            "repository_or_project": "dequelabs/axe-core",
+            "candidate_url": "https://github.com/dequelabs/axe-core",
+            "candidate_assessment_task": "ASSESS-EXT-041",
+            "proposed_epic": "EPIC-EVOL-QUAL",
+            "work_unit_mappings": [
+              "WU-P2-QUALITY-001"
+            ]
+          },
+          "EXT-042": {
+            "repository_or_project": "aquasecurity/trivy",
+            "candidate_url": "https://github.com/aquasecurity/trivy",
+            "candidate_assessment_task": "ASSESS-EXT-042",
+            "proposed_epic": "EPIC-EVOL-QUAL",
+            "work_unit_mappings": [
+              "WU-P2-QUALITY-001"
+            ]
+          },
+          "EXT-043": {
+            "repository_or_project": "semgrep/semgrep",
+            "candidate_url": "https://github.com/semgrep/semgrep",
+            "candidate_assessment_task": "ASSESS-EXT-043",
+            "proposed_epic": "EPIC-EVOL-QUAL",
+            "work_unit_mappings": [
+              "WU-P2-QUALITY-001"
+            ]
+          },
+          "EXT-044": {
+            "repository_or_project": "OWASP/ASVS",
+            "candidate_url": "https://github.com/OWASP/ASVS",
+            "candidate_assessment_task": "ASSESS-EXT-044",
+            "proposed_epic": "EPIC-EVOL-QUAL",
+            "work_unit_mappings": [
+              "WU-P2-QUALITY-001"
+            ]
+          },
+          "EXT-045": {
+            "repository_or_project": "confident-ai/deepeval",
+            "candidate_url": "https://github.com/confident-ai/deepeval",
+            "candidate_assessment_task": "ASSESS-EXT-045",
+            "proposed_epic": "EPIC-EVOL-QUAL",
+            "work_unit_mappings": [
+              "WU-P2-QUALITY-001"
+            ]
+          },
+          "EXT-046": {
+            "repository_or_project": "promptfoo/promptfoo",
+            "candidate_url": "https://github.com/promptfoo/promptfoo",
+            "candidate_assessment_task": "ASSESS-EXT-046",
+            "proposed_epic": "EPIC-EVOL-QUAL",
+            "work_unit_mappings": [
+              "WU-P2-QUALITY-001"
+            ]
+          },
+          "EXT-047": {
+            "repository_or_project": "google/artemis",
+            "candidate_url": "https://github.com/google/artemis",
+            "candidate_assessment_task": "ASSESS-EXT-047",
+            "proposed_epic": "EPIC-EVOL-UI",
+            "work_unit_mappings": [
+              "WU-P2-ARTEMIS-001"
+            ]
+          },
+          "EXT-048": {
+            "repository_or_project": "browserbase/stagehand",
+            "candidate_url": "https://github.com/browserbase/stagehand",
+            "candidate_assessment_task": "ASSESS-EXT-048",
+            "proposed_epic": "EPIC-EVOL-UI",
+            "work_unit_mappings": [
+              "WU-P2-UI-001"
+            ]
+          },
+          "EXT-049": {
+            "repository_or_project": "mobile-dev-inc/Maestro",
+            "candidate_url": "https://github.com/mobile-dev-inc/Maestro",
+            "candidate_assessment_task": "ASSESS-EXT-049",
+            "proposed_epic": "EPIC-EVOL-UI",
+            "work_unit_mappings": [
+              "WU-P2-UI-001"
+            ]
+          },
+          "EXT-050": {
+            "repository_or_project": "lost-pixel/lost-pixel",
+            "candidate_url": "https://github.com/lost-pixel/lost-pixel",
+            "candidate_assessment_task": "ASSESS-EXT-050",
+            "proposed_epic": "EPIC-EVOL-UI",
+            "work_unit_mappings": [
+              "WU-P2-UI-001"
+            ]
+          },
+          "EXT-051": {
+            "repository_or_project": "penpot/penpot",
+            "candidate_url": "https://github.com/penpot/penpot",
+            "candidate_assessment_task": "ASSESS-EXT-051",
+            "proposed_epic": "EPIC-EVOL-DES",
+            "work_unit_mappings": [
+              "WU-P2-DESIGN-001"
+            ]
+          },
+          "EXT-052": {
+            "repository_or_project": "storybookjs/storybook",
+            "candidate_url": "https://github.com/storybookjs/storybook",
+            "candidate_assessment_task": "ASSESS-EXT-052",
+            "proposed_epic": "EPIC-EVOL-DES",
+            "work_unit_mappings": [
+              "WU-P2-DESIGN-001"
+            ]
+          },
+          "EXT-053": {
+            "repository_or_project": "shadcn-ui/ui",
+            "candidate_url": "https://github.com/shadcn-ui/ui",
+            "candidate_assessment_task": "ASSESS-EXT-053",
+            "proposed_epic": "EPIC-EVOL-DES",
+            "work_unit_mappings": [
+              "WU-P2-DESIGN-001"
+            ]
+          },
+          "EXT-054": {
+            "repository_or_project": "langfuse/langfuse",
+            "candidate_url": "https://github.com/langfuse/langfuse",
+            "candidate_assessment_task": "ASSESS-EXT-054",
+            "proposed_epic": "EPIC-EVOL-OBS",
+            "work_unit_mappings": [
+              "WU-P2-OBS-001"
+            ]
+          },
+          "EXT-055": {
+            "repository_or_project": "open-telemetry/opentelemetry-python",
+            "candidate_url": "https://github.com/open-telemetry/opentelemetry-python",
+            "candidate_assessment_task": "ASSESS-EXT-055",
+            "proposed_epic": "EPIC-EVOL-OBS",
+            "work_unit_mappings": [
+              "WU-P2-OBS-001"
+            ]
+          },
+          "EXT-056": {
+            "repository_or_project": "CopilotKit/CopilotKit",
+            "candidate_url": "https://github.com/CopilotKit/CopilotKit",
+            "candidate_assessment_task": "ASSESS-EXT-056",
+            "proposed_epic": "EPIC-EVOL-OBS",
+            "work_unit_mappings": [
+              "WU-P2-OBS-001"
+            ]
+          },
+          "EXT-057": {
+            "repository_or_project": "assistant-ui/assistant-ui",
+            "candidate_url": "https://github.com/assistant-ui/assistant-ui",
+            "candidate_assessment_task": "ASSESS-EXT-057",
+            "proposed_epic": "EPIC-EVOL-OBS",
+            "work_unit_mappings": [
+              "WU-P2-OBS-001"
+            ]
+          },
+          "EXT-058": {
+            "repository_or_project": "renovatebot/renovate",
+            "candidate_url": "https://github.com/renovatebot/renovate",
+            "candidate_assessment_task": "ASSESS-EXT-058",
+            "proposed_epic": "EPIC-EVOL-OPS",
+            "work_unit_mappings": [
+              "WU-P3-OPS-001"
+            ]
+          },
+          "EXT-059": {
+            "repository_or_project": "argoproj/argo-cd",
+            "candidate_url": "https://github.com/argoproj/argo-cd",
+            "candidate_assessment_task": "ASSESS-EXT-059",
+            "proposed_epic": "EPIC-EVOL-OPS",
+            "work_unit_mappings": [
+              "WU-P3-OPS-001"
+            ]
+          },
+          "EXT-060": {
+            "repository_or_project": "chaos-mesh/chaos-mesh",
+            "candidate_url": "https://github.com/chaos-mesh/chaos-mesh",
+            "candidate_assessment_task": "ASSESS-EXT-060",
+            "proposed_epic": "EPIC-EVOL-OPS",
+            "work_unit_mappings": [
+              "WU-P3-OPS-001"
+            ]
+          },
+          "EXT-061": {
+            "repository_or_project": "github/gh-aw",
+            "candidate_url": "https://github.com/github/gh-aw",
+            "candidate_assessment_task": "ASSESS-EXT-061",
+            "proposed_epic": "EPIC-EVOL-OPS",
+            "work_unit_mappings": [
+              "WU-P3-OPS-001"
+            ]
+          }
+        }
+      }
     },
     "protected_future_commitments": {
       "type": "object",

@@ -93,6 +93,20 @@ class MistralCloudReviewTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "COMMIT_PROVENANCE_STALE"):
                 target.independent_material_authors(137, HEAD)
 
+    def test_git_subprocess_environment_ignores_inherited_repository_override(self):
+        with patch.dict(os.environ, {
+            "GIT_DIR": "/tmp/attacker-repo",
+            "GIT_WORK_TREE": "/tmp/attacker-tree",
+            "GIT_INDEX_FILE": "/tmp/attacker-index",
+            "GIT_CONFIG_COUNT": "1",
+            "GIT_CONFIG_KEY_0": "core.worktree",
+            "GIT_CONFIG_VALUE_0": "/tmp/attacker-tree",
+            "ONECOMPANY_REVIEW_TEST_MARKER": "kept",
+        }):
+            cleaned = target.clean_git_env()
+            self.assertTrue(all(not key.startswith("GIT_") for key in cleaned))
+            self.assertEqual(cleaned["ONECOMPANY_REVIEW_TEST_MARKER"], "kept")
+
     def test_latest_failed_or_running_ci_cannot_be_hidden_by_old_green(self):
         with patch.object(target, "github_json", side_effect=fake_api):
             self.assertTrue(target.latest_ci_green(HEAD))

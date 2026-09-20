@@ -1,4 +1,4 @@
-"""Authenticated, read-only OneCompany Streamable HTTP MCP endpoint."""
+"""Authenticated OneCompany Streamable HTTP MCP endpoint (tools read-only)."""
 from __future__ import annotations
 import asyncio
 import logging

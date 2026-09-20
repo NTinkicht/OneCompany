@@ -49,6 +49,7 @@ SOURCE_INSTALLATION_SELFTESTS = frozenset({
     ".onecompany/selftest/test_qualification_executor.py",
     ".onecompany/selftest/test_zero_spend_router.py",
     ".onecompany/selftest/test_external_capability_register.py",
+    ".onecompany/selftest/test_cloud_mistral_wake.py",
 })
 
 # The source company's strategic plan must never become another company's
@@ -58,6 +59,7 @@ SOURCE_ONLY_PLANNING_FILES = frozenset({
     ".onecompany/schemas/external-capability-register.schema.json",
     "docs/MASTER-EVOLUTION-ROADMAP-2026.md",
     "docs/ROADMAP.md",
+    "docs/CLOUD-AGENT-QUALIFICATION.md",
 })
 SOURCE_INSTALLATION_EXCLUSIONS = SOURCE_INSTALLATION_SELFTESTS | SOURCE_ONLY_PLANNING_FILES
 

@@ -392,7 +392,16 @@
         },
         "additionalProperties": false
       },
-      "maxItems": 61
+      "maxItems": 61,
+      "x-uniqueByProperties": [
+        "capability_id",
+        "repository_or_project",
+        "candidate_assessment_task"
+      ],
+      "x-requireEnumCoverage": [
+        "capability_id",
+        "repository_or_project"
+      ]
     },
     "protected_future_commitments": {
       "type": "object",

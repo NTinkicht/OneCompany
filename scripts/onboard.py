@@ -189,6 +189,8 @@ def guided_journey(report: dict[str, Any]) -> dict[str, Any]:
         "next_action": (
             "Resolve the reported safety blockers, then reassess; do not apply."
             if report["blockers"]
+            else "Provide or repair the configured repository, then reassess."
+            if not report.get("repository")
             else "Review the Product Brief draft and answer the three required "
                  "product questions before approving any implementation."
         ),

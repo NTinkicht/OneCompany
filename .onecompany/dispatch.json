@@ -360,7 +360,7 @@
         },
         {
           "id": "grok-supergrok-cloud-wake",
-          "kind": "github_action",
+          "kind": "event_trigger",
           "configured": false,
           "unattended": true,
           "capabilities": [
@@ -370,7 +370,7 @@
             "code_review",
             "implementation"
           ],
-          "invocation_hint": "Research-only #131/#136: NO qualified SuperGrok GitHub-hosted inference or Automations wake; no Codespace allowed; no XAI_API_KEY/PAYG/session-file copying. Fail CAPACITY_BLOCKED until live provider-entitlement/auth and security smoke.",
+          "invocation_hint": "Preferred investigation #131/#136: Grok Bot provider cloud computer linked to owner's existing SuperGrok through Cursor, GitHub-notification event routine if available. No Codespace or session-file export, no API PAYG. Until a real cloud inference and durable GitHub result smoke, `configured=false` and CAPACITY_BLOCKED.",
           "evidence": []
         }
       ]

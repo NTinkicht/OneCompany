@@ -25,7 +25,7 @@ class InteractiveActivationTests(unittest.TestCase):
         actors = load("actors.json")["actors"]
         enabled = {item["id"] for item in actors if item.get("enabled")}
         configured = {item["id"] for item in actors if item.get("configured")}
-        expected = {"human-owner", "chatgpt", "onecompany-local", "grok-4-6-interactive"}
+        expected = {"human-owner", "chatgpt", "onecompany-local", "grok-4-6-interactive", "mistral-vibe"}
         self.assertEqual(enabled, expected)
         self.assertEqual(configured, expected)
 
@@ -73,8 +73,19 @@ class InteractiveActivationTests(unittest.TestCase):
         self.assertTrue(grok["capacity"]["evidence"])
         self.assertTrue(grok["evidence"])
 
+        mistral = readiness["mistral-vibe"]
+        self.assertEqual(mistral["setup_state"], "ready")
+        self.assertEqual(mistral["verified_capabilities"],
+                         ["repository_intelligence", "test_design"])
+        self.assertTrue(mistral["repository_access"]["read"])
+        for prohibited in ("write", "review", "merge"):
+            self.assertFalse(mistral["repository_access"][prohibited])
+        self.assertEqual(mistral["capacity"]["implementation_streams"], 0)
+        self.assertIn("35540501655", " ".join(mistral["evidence"]))
+        self.assertTrue(mistral["unattended"]["verified"])
+
         for actor_id, actor in actors.items():
-            if actor_id in {"human-owner", "chatgpt", "onecompany-local", "grok-4-6-interactive"}:
+            if actor_id in {"human-owner", "chatgpt", "onecompany-local", "grok-4-6-interactive", "mistral-vibe"}:
                 continue
             self.assertFalse(actor["enabled"], actor_id)
             self.assertFalse(actor["configured"], actor_id)
@@ -158,7 +169,7 @@ class InteractiveActivationTests(unittest.TestCase):
 
         for actor_id, record in readiness.items():
             unattended = record["unattended"]
-            if actor_id == "onecompany-local":
+            if actor_id in {"onecompany-local", "mistral-vibe"}:
                 self.assertTrue(unattended["configured"])
                 self.assertTrue(unattended["verified"])
             else:
@@ -173,7 +184,10 @@ class InteractiveActivationTests(unittest.TestCase):
         ]
         self.assertEqual(
             configured_unattended,
-            [("onecompany-local", "onecompany-actions-readonly")],
+            [
+                ("onecompany-local", "onecompany-actions-readonly"),
+                ("mistral-vibe", "vibe-readonly-wake"),
+            ],
         )
 
     def test_chatgpt_interactive_implementation_dispatch_is_ready(self):

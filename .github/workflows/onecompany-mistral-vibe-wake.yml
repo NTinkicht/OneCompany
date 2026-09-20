@@ -182,7 +182,7 @@ jobs:
             code=70
             status="EXECUTION_FAILED"
             reason="Mistral Vibe returned no usable result"
-          elif [[ "$code" == "124" ]]; then
+          elif [[ "$code" == "124" || "$code" == "137" ]]; then
             status="WAKE_TIMEOUT"
             reason="Mistral Vibe exceeded the 10-minute actor time limit"
           elif [[ "$code" != "0" ]]; then

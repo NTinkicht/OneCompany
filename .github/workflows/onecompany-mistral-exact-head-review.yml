@@ -44,6 +44,7 @@ jobs:
           mkdir -m 700 -p /tmp/onecompany-mistral-trusted
           cp AGENTS.md /tmp/onecompany-mistral-trusted/AGENTS.md
           cp docs/CLOUD-AGENT-QUALIFICATION.md /tmp/onecompany-mistral-trusted/CLOUD-AGENT-QUALIFICATION.md
+          cp .github/workflows/onecompany-ledger-read-smoke.yml /tmp/onecompany-mistral-trusted/ledger-workflow.yml
           python /tmp/onecompany-mistral-review-trusted.py prepare
 
       - name: Checkout the validated same-repository PR head

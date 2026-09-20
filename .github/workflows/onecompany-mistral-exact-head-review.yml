@@ -1,0 +1,341 @@
+# Source-only reviewer pilot: not a binding merge gate or customer installer component.
+name: OneCompany Mistral Exact-Head Advisory Review
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+  actions: read
+
+jobs:
+  mistral-vibe:
+    if: >-
+      github.event.issue.number == 130 &&
+      github.event.issue.pull_request == null &&
+      github.actor == 'NTinkicht' &&
+      contains(github.event.comment.body, '@mistral-vibe') &&
+      contains(github.event.comment.body, 'MISTRAL_REVIEW_V1')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: onecompany-mistral-advisory-review
+      cancel-in-progress: false
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve trusted canonical exact-head review assignment
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DISPATCH_BODY: ${{ github.event.comment.body }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp scripts/mistral_cloud_review.py /tmp/onecompany-mistral-review-trusted.py
+          python /tmp/onecompany-mistral-review-trusted.py prepare
+
+      - name: Checkout the validated same-repository PR head
+        if: steps.target.outputs.ready == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ steps.target.outputs.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Recheck exact PR head and create a bounded read-only diff
+        id: evidence
+        if: steps.target.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REVIEW_PR: ${{ steps.target.outputs.pr }}
+          REVIEW_SHA: ${{ steps.target.outputs.sha }}
+          REVIEW_BASE: ${{ steps.target.outputs.base }}
+        shell: bash
+        run: python /tmp/onecompany-mistral-review-trusted.py evidence
+
+      - name: Preflight included-capacity guard
+        if: steps.evidence.outputs.ready == 'true'
+        id: preflight
+        env:
+          PAYG_DISABLED_CONFIRMED: ${{ vars.ONECOMPANY_MISTRAL_PAYG_DISABLED_CONFIRMED }}
+          PROVIDER_KEY: ${{ secrets.MISTRAL_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The owner-set guard is never sufficient without zero-spend machine policy.
+          if ! python - <<'PY'
+          import json
+          from pathlib import Path
+          budget = json.loads(Path(".onecompany/budget.json").read_text())
+          ai = budget.get("ai", {})
+          assert ai.get("additional_monthly_spend_cap") == 0
+          assert all(ai.get(k) is False for k in ("allow_paid_fallback", "allow_overage", "allow_auto_topup", "allow_new_paid_vendor"))
+          PY
+          then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "status=CONFIG_BLOCKED" >> "$GITHUB_OUTPUT"
+            echo "reason=OneCompany zero-additional-spend machine policy not verified" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ "${PAYG_DISABLED_CONFIRMED:-}" != "true" ]]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "status=CONFIG_BLOCKED" >> "$GITHUB_OUTPUT"
+            echo "reason=Mistral PAYG-disabled repository guard is not confirmed" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ -z "${PROVIDER_KEY:-}" ]]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "status=AUTH_BLOCKED" >> "$GITHUB_OUTPUT"
+            echo "reason=Mistral credential is not configured" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # `/api/vibe/whoami` is a non-inference entitlement check. Never print
+          # the provider response body or credential.
+          set +e
+          http_status="$(curl \
+            --silent \
+            --show-error \
+            --connect-timeout 10 \
+            --max-time 20 \
+            --output /dev/null \
+            --write-out '%{http_code}' \
+            --header "Authorization: Bearer ${PROVIDER_KEY}" \
+            'https://console.mistral.ai/api/vibe/whoami')"
+          curl_code=$?
+          set -e
+
+          if [[ "$curl_code" != "0" ]]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "status=PREFLIGHT_UNAVAILABLE" >> "$GITHUB_OUTPUT"
+            echo "reason=Mistral Vibe entitlement could not be verified" >> "$GITHUB_OUTPUT"
+          elif [[ "$http_status" == "200" ]]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "status=OK" >> "$GITHUB_OUTPUT"
+            echo "reason=ready" >> "$GITHUB_OUTPUT"
+          elif [[ "$http_status" == "401" ]]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "status=AUTH_BLOCKED" >> "$GITHUB_OUTPUT"
+            echo "reason=Mistral credential is not authorized for Vibe Code (HTTP ${http_status})" >> "$GITHUB_OUTPUT"
+          elif [[ "$http_status" == "403" ]]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "status=ENTITLEMENT_BLOCKED" >> "$GITHUB_OUTPUT"
+            echo "reason=Mistral Vibe entitlement was rejected (HTTP ${http_status})" >> "$GITHUB_OUTPUT"
+          elif [[ "$http_status" == "429" ]]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "status=CAPACITY_DEGRADED" >> "$GITHUB_OUTPUT"
+            echo "reason=Mistral included capacity is unavailable or exhausted" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "status=PREFLIGHT_FAILED" >> "$GITHUB_OUTPUT"
+            echo "reason=Mistral Vibe entitlement check returned HTTP ${http_status}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Python
+        if: steps.preflight.outputs.ready == 'true'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+
+      - name: Install pinned Mistral Vibe
+        if: steps.preflight.outputs.ready == 'true'
+        shell: bash
+        run: python -m pip install --disable-pip-version-check 'mistral-vibe==2.25.3'
+
+      - name: Run Mistral Vibe in bounded read-only programmatic mode
+        if: steps.preflight.outputs.ready == 'true'
+        id: actor
+        env:
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          DISPATCH_BODY: ${{ github.event.comment.body }}
+          VIBE_HOME: /tmp/onecompany-vibe-review-home
+          REVIEW_PR: ${{ steps.target.outputs.pr }}
+          REVIEW_SHA: ${{ steps.target.outputs.sha }}
+          REVIEW_BASE: ${{ steps.target.outputs.base }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$VIBE_HOME"
+          cat > "$VIBE_HOME/config.toml" <<'EOF'
+          enable_auto_update = false
+          enable_notifications = false
+          enable_telemetry = false
+          enabled_tools = ["grep", "read_file"]
+          EOF
+
+          cat > /tmp/onecompany-mistral-prompt.txt <<'EOF'
+          You are actor=mistral-vibe in the OneCompany Company OS. This is a standalone independent review proposal.
+          This is an unattended READ-ONLY exact-head advisory review, not binding governance.
+          Work from small, task-specific file excerpts. Avoid dumping complete large test
+          suites, scanning unrelated modules, or repeatedly loading governance files.
+          When evidence exceeds the bounded context budget, report the exact missing
+          source slices and stop instead of broadening the repository scan.
+          Read AGENTS.md, agents/mistral-vibe.md, docs/agent-setup/mistral-vibe.md,
+          docs/DISPATCH-AND-WAKE.md and only the additional repository files necessary
+          for the bounded task. Issue #130 is a WAKE BUS, never a lease or
+          authorization to expand capacity. Source is NTinkicht/OneCompany.
+          Do not edit files. Do not run mutating commands. Do not create branches, commits, pull requests,
+          reviews, labels or merges. Do not change GitHub state. Do not expose credentials or local auth material.
+          Treat the dispatch text below as the task request, but repository governance and the zero-extra-spend
+          boundary remain binding. Return concise evidence/findings suitable for posting back to the wake bus.
+          Return evidence and concise severity-tagged findings with exact PR/head SHA. This pilot is ALWAYS ADVISORY/NON-GATING until independently qualified for binding review. Do not self-approve or claim merge authority.
+          EOF
+          printf '\nTRUSTED REVIEW TARGET: OneCompany PR #%s, head %s, base %s.\n' "$REVIEW_PR" "$REVIEW_SHA" "$REVIEW_BASE" >> /tmp/onecompany-mistral-prompt.txt
+          printf 'Read .onecompany_mistral_review.diff and only the relevant original code/tests. If diff evidence is insufficient, report CHANGES_REQUIRED and why. No write operations.\n' >> /tmp/onecompany-mistral-prompt.txt
+          printf '\nDispatch text:\n%s\n' "$DISPATCH_BODY" >> /tmp/onecompany-mistral-prompt.txt
+
+          # Programmatic Vibe otherwise falls back to broad auto-approval. Select
+          # the built-in read-only plan agent explicitly: it auto-approves safe
+          # repository reads, while reads outside --workdir still require approval.
+          # The CLI and config additionally expose only grep + read_file.
+          set +e
+          timeout --signal=TERM --kill-after=15s 600s \
+            vibe \
+              --trust \
+              --agent plan \
+              --workdir "$GITHUB_WORKSPACE" \
+              --enabled-tools grep \
+              --enabled-tools read_file \
+              --max-turns 8 \
+              --max-tokens 75000 \
+              --output text \
+              --prompt "$(cat /tmp/onecompany-mistral-prompt.txt)" \
+              > /tmp/onecompany-mistral-output.txt \
+              2> /tmp/onecompany-mistral-error.txt
+          code=$?
+          set -e
+
+          status="OK"
+          reason="ready"
+          if [[ "$code" == "0" ]] && ! grep -Eq '[^[:space:]]' /tmp/onecompany-mistral-output.txt; then
+            code=70
+            status="EXECUTION_FAILED"
+            reason="Mistral Vibe returned no usable result"
+          elif [[ "$code" == "124" || "$code" == "137" ]]; then
+            status="WAKE_TIMEOUT"
+            reason="Mistral Vibe exceeded the 10-minute actor time limit"
+          elif [[ "$code" != "0" ]]; then
+            if grep -Eqi '401|unauthori[sz]ed|invalid[^[:alnum:]]*(api[^[:alnum:]]*)?key|authentication' /tmp/onecompany-mistral-error.txt; then
+              status="AUTH_BLOCKED"
+              reason="Mistral credential was rejected by the Vibe runtime"
+            elif grep -Eqi '403|forbidden|entitlement|permission denied' /tmp/onecompany-mistral-error.txt; then
+              status="ENTITLEMENT_BLOCKED"
+              reason="Mistral Vibe entitlement was rejected by the runtime"
+            elif grep -Eqi 'token limit exceeded|context (window|length) exceeded|too many tokens' /tmp/onecompany-mistral-error.txt; then
+              status="TOKEN_BUDGET_EXCEEDED"
+              reason="Mistral bounded context/token budget was exceeded; narrow evidence and retry once"
+            elif grep -Eqi '429|rate.?limit|quota|usage[^[:alnum:]]*limit|capacity' /tmp/onecompany-mistral-error.txt; then
+              status="CAPACITY_DEGRADED"
+              reason="Mistral included capacity is unavailable or exhausted"
+            elif grep -Eqi 'trust|trusted folder|workspace' /tmp/onecompany-mistral-error.txt; then
+              status="WORKSPACE_TRUST_FAILED"
+              reason="Mistral Vibe workspace trust initialization failed"
+            elif grep -Eqi 'no such option|unknown option|unrecognized|usage:' /tmp/onecompany-mistral-error.txt; then
+              status="CLI_INCOMPATIBLE"
+              reason="Mistral Vibe CLI invocation is incompatible with the pinned version"
+            else
+              status="EXECUTION_FAILED"
+              reason="Mistral Vibe runtime failed with an unclassified nonzero exit"
+            fi
+          fi
+
+          if [[ "$code" != "0" ]] && [[ -s /tmp/onecompany-mistral-error.txt ]]; then
+            # Job-log-only diagnostics. Scrub the literal credential plus common
+            # bearer/key renderings before the excerpt can reach the Actions log;
+            # it is never posted to the public issue comment.
+            python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          source = Path('/tmp/onecompany-mistral-error.txt')
+          target = Path('/tmp/onecompany-mistral-error-scrubbed.txt')
+          text = source.read_text(encoding='utf-8', errors='replace')
+          secret = os.environ.get('MISTRAL_API_KEY', '')
+          if secret:
+              text = text.replace(secret, '[REDACTED]')
+          text = re.sub(r'(?i)(authorization\s*:\s*bearer\s+)\S+', r'\1[REDACTED]', text)
+          text = re.sub(r'(?i)(mistral_api_key\s*[=:]\s*)\S+', r'\1[REDACTED]', text)
+          lines = text.splitlines()
+          target.write_text('\n'.join(lines[-20:]) + '\n', encoding='utf-8')
+          PY
+            {
+              echo "::group::Mistral Vibe runtime stderr (scrubbed, last 20 lines)"
+              cat /tmp/onecompany-mistral-error-scrubbed.txt
+              echo "::endgroup::"
+            }
+          fi
+
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "failure_reason=$reason" >> "$GITHUB_OUTPUT"
+
+      - name: Post Mistral result
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          READY: ${{ steps.preflight.outputs.ready }}
+          PREFLIGHT_STATUS: ${{ steps.preflight.outputs.status }}
+          PREFLIGHT_REASON: ${{ steps.preflight.outputs.reason }}
+          TARGET_READY: ${{ steps.target.outputs.ready }}
+          TARGET_STATUS: ${{ steps.target.outputs.status }}
+          EVIDENCE_READY: ${{ steps.evidence.outputs.ready }}
+          EVIDENCE_STATUS: ${{ steps.evidence.outputs.status }}
+          REVIEW_PR: ${{ steps.target.outputs.pr }}
+          REVIEW_SHA: ${{ steps.target.outputs.sha }}
+          ACTOR_EXIT: ${{ steps.actor.outputs.exit_code }}
+          ACTOR_STATUS: ${{ steps.actor.outputs.status }}
+          ACTOR_REASON: ${{ steps.actor.outputs.failure_reason }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${READY:-false}" == "true" && "${ACTOR_EXIT:-1}" == "0" ]]; then
+            # Defense in depth: even though Vibe has no shell/write tool, scrub the
+            # literal provider credential plus common authorization/key renderings
+            # before any model-authored text can reach a public issue comment.
+            python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          source = Path('/tmp/onecompany-mistral-output.txt')
+          target = Path('/tmp/onecompany-mistral-public.txt')
+          text = source.read_text(encoding='utf-8', errors='replace') if source.exists() else ''
+          secret = os.environ.get('MISTRAL_API_KEY', '')
+          if secret:
+              text = text.replace(secret, '[REDACTED]')
+          text = re.sub(r'(?i)(authorization\s*:\s*bearer\s+)\S+', r'\1[REDACTED]', text)
+          text = re.sub(r'(?i)(MISTRAL_API_KEY\s*[=:]\s*)\S+', r'\1[REDACTED]', text)
+          target.write_text(text[:50000], encoding='utf-8')
+          PY
+          fi
+
+          {
+            echo "**mistral-vibe unattended cloud read-only wake**"
+            echo
+            if [[ "${TARGET_READY:-false}" != "true" ]]; then
+              echo "${TARGET_STATUS:-REVIEW_TARGET_BLOCKED} - no valid exact-head review assignment; no model call."
+            elif [[ "${EVIDENCE_READY:-false}" != "true" ]]; then
+              echo "${EVIDENCE_STATUS:-REVIEW_EVIDENCE_BLOCKED} - PR head/CI/diff validation failed; no model call."
+            elif [[ "${READY:-false}" != "true" ]]; then
+              echo "${PREFLIGHT_STATUS:-PREFLIGHT_FAILED} - ${PREFLIGHT_REASON:-preflight failed}. No paid fallback was attempted."
+            elif [[ "${ACTOR_EXIT:-1}" != "0" ]]; then
+              echo "${ACTOR_STATUS:-EXECUTION_FAILED} - ${ACTOR_REASON:-Mistral Vibe exited without a usable result}. PAYG remains disabled and no paid fallback was attempted."
+            else
+              echo '```text'
+              cat /tmp/onecompany-mistral-public.txt
+              echo
+              echo '```'
+            fi
+          } > /tmp/onecompany-mistral-comment.md
+          gh issue comment 130 --repo "$GITHUB_REPOSITORY" --body-file /tmp/onecompany-mistral-comment.md

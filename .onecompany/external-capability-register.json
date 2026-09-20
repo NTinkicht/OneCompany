@@ -2688,5 +2688,11 @@
       "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
       "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
     }
-  ]
+  ],
+  "protected_future_commitments": {
+    "NTinkicht/kserve": "WU-P2-KSERVE-001",
+    "NTinkicht/supermemory": "WU-P2-SUPERMEMORY-001",
+    "volcengine/OpenViking": "WU-P2-OPENVIKING-001",
+    "google/artemis": "WU-P2-ARTEMIS-001"
+  }
 }

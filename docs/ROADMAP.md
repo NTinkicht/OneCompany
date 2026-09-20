@@ -1,5 +1,7 @@
 # OneCompany Roadmap
 
+> **2026-09-20 trajectory change:** The [Master Evolution Roadmap](MASTER-EVOLUTION-ROADMAP-2026.md) and [external capability register](../.onecompany/external-capability-register.json) are the current strategic target and Phase 0 coverage baseline (tracked by #123). This older CLI/provider-layer sketch remains historical context, not an alternative roadmap. Proposed future WUs are not admitted implementation leases; preserve existing portable factory and Execution Core.
+
 The repository already defines a usable file-based control plane. Future product layers should preserve the same contracts.
 
 ## Foundation — current

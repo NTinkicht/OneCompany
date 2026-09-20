@@ -48,7 +48,18 @@ SOURCE_INSTALLATION_SELFTESTS = frozenset({
     ".onecompany/selftest/test_multi_project_isolation.py",
     ".onecompany/selftest/test_qualification_executor.py",
     ".onecompany/selftest/test_zero_spend_router.py",
+    ".onecompany/selftest/test_external_capability_register.py",
 })
+
+# The source company's strategic plan must never become another company's
+# approved installation baseline merely because bootstrap copies whole trees.
+SOURCE_ONLY_PLANNING_FILES = frozenset({
+    ".onecompany/external-capability-register.json",
+    ".onecompany/schemas/external-capability-register.schema.json",
+    "docs/MASTER-EVOLUTION-ROADMAP-2026.md",
+    "docs/ROADMAP.md",
+})
+SOURCE_INSTALLATION_EXCLUSIONS = SOURCE_INSTALLATION_SELFTESTS | SOURCE_ONLY_PLANNING_FILES
 
 CONTRACTS = {
     "PRODUCT.md.template": "PRODUCT.md",
@@ -119,7 +130,7 @@ def copy_item(source: Path, target: Path, force: bool, target_root: Path) -> Non
     symlink. Exclusive descriptor-relative creation avoids following target
     parents or an attacker-supplied destination leaf.
     """
-    if source.relative_to(ROOT).as_posix() in SOURCE_INSTALLATION_SELFTESTS:
+    if source.relative_to(ROOT).as_posix() in SOURCE_INSTALLATION_EXCLUSIONS:
         return
     if source.is_dir():
         for child in source.rglob("*"):
@@ -173,7 +184,7 @@ def preflight_copy_paths(target: Path) -> None:
         )
         for leaf in leaves:
             relative = leaf.relative_to(ROOT).as_posix()
-            if relative in SOURCE_INSTALLATION_SELFTESTS:
+            if relative in SOURCE_INSTALLATION_EXCLUSIONS:
                 continue
             destination = target / relative
             if destination.exists() or destination.is_symlink():

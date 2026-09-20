@@ -1,0 +1,2698 @@
+{
+  "$schema": "./schemas/external-capability-register.schema.json",
+  "schema_version": "0.1-planning",
+  "register_id": "ONECOMPANY-EVOLUTION-2026-09-20",
+  "source": "Owner master evolution directive (2026-09-20), tracked in GitHub issue #123",
+  "as_of_date": "2026-09-20",
+  "authority": "Proposed roadmap; does not admit WUs, change policy, grant leases, deploy providers or authorize spending.",
+  "planning_rules": {
+    "candidate_presence_is_not_runtime_adoption": true,
+    "all_assessments_proposed_not_verified": true,
+    "implementation_requires_evidence_and_existing_governance": true,
+    "canonical_fallbacks_required": true,
+    "owner_budget_USD_additional_monthly": 0,
+    "registry_next_step": "Validate schema and reconcile portfolio/queue under bounded Phase 0 WU before execution."
+  },
+  "group_workstreams": [
+    {
+      "key": "MEM",
+      "epic": "EPIC-EVOL-MEM",
+      "phase": "P2",
+      "purpose": "Persistent, scoped organizational memory and hierarchical context",
+      "wu": "WU-P2-MEM-001",
+      "deps": [
+        "WU-P1-FOUNDATIONS-001",
+        "WU-P1-VERTICAL-001"
+      ],
+      "status": "PROPOSED"
+    },
+    {
+      "key": "INF",
+      "epic": "EPIC-EVOL-INF",
+      "phase": "P2",
+      "purpose": "Provider-neutral economical inference including optional self-hosting",
+      "wu": "WU-P2-INF-001",
+      "deps": [
+        "WU-P1-FOUNDATIONS-001",
+        "WU-P1-VERTICAL-001"
+      ],
+      "status": "PROPOSED"
+    },
+    {
+      "key": "HAR",
+      "epic": "EPIC-EVOL-HAR",
+      "phase": "P2",
+      "purpose": "Reliable bounded agent harness and isolated execution",
+      "wu": "WU-P2-HAR-001",
+      "deps": [
+        "WU-P1-FOUNDATIONS-001",
+        "WU-P1-VERTICAL-001"
+      ],
+      "status": "PROPOSED"
+    },
+    {
+      "key": "COM",
+      "epic": "EPIC-EVOL-COM",
+      "phase": "P2",
+      "purpose": "Interoperable, observable agent handoffs and versioned tools",
+      "wu": "WU-P2-COM-001",
+      "deps": [
+        "WU-P1-FOUNDATIONS-001"
+      ],
+      "status": "PROPOSED"
+    },
+    {
+      "key": "SPEC",
+      "epic": "EPIC-EVOL-DISC",
+      "phase": "P1",
+      "purpose": "Guided idea discovery and change-controlled specifications",
+      "wu": "WU-P1-DISCOVERY-001",
+      "deps": [
+        "WU-P1-FOUNDATIONS-001"
+      ],
+      "status": "PROPOSED"
+    },
+    {
+      "key": "PROD",
+      "epic": "EPIC-EVOL-PROD",
+      "phase": "P2",
+      "purpose": "Dependency-aware product and portfolio intelligence",
+      "wu": "WU-P2-PRODUCT-001",
+      "deps": [
+        "WU-P1-DISCOVERY-001",
+        "WU-P1-MISSION-001"
+      ],
+      "status": "PROPOSED"
+    },
+    {
+      "key": "QUAL",
+      "epic": "EPIC-EVOL-QUAL",
+      "phase": "P2",
+      "purpose": "Requirement-traced comprehensive engineering assurance",
+      "wu": "WU-P2-QUALITY-001",
+      "deps": [
+        "WU-P1-VERTICAL-001"
+      ],
+      "status": "PROPOSED"
+    },
+    {
+      "key": "UI",
+      "epic": "EPIC-EVOL-UI",
+      "phase": "P2",
+      "purpose": "Deterministic real browser and mobile runtime validation",
+      "wu": "WU-P2-UI-001",
+      "deps": [
+        "WU-P1-RUNTIME-001",
+        "WU-P1-QUALITY-001"
+      ],
+      "status": "PROPOSED"
+    },
+    {
+      "key": "DES",
+      "epic": "EPIC-EVOL-DES",
+      "phase": "P2",
+      "purpose": "Consistent accessible design systems and preview",
+      "wu": "WU-P2-DESIGN-001",
+      "deps": [
+        "WU-P1-DISCOVERY-001",
+        "WU-P1-RUNTIME-001"
+      ],
+      "status": "PROPOSED"
+    },
+    {
+      "key": "OBS",
+      "epic": "EPIC-EVOL-OBS",
+      "phase": "P2",
+      "purpose": "Tracing, outcome monitoring and intuitive Mission Control",
+      "wu": "WU-P2-OBS-001",
+      "deps": [
+        "WU-P1-MISSION-001"
+      ],
+      "status": "PROPOSED"
+    },
+    {
+      "key": "OPS",
+      "epic": "EPIC-EVOL-OPS",
+      "phase": "P3",
+      "purpose": "Governed autonomous release, incident response and maintenance at scale",
+      "wu": "WU-P3-OPS-001",
+      "deps": [
+        "WU-P1-VERTICAL-001",
+        "WU-P2-OBS-001"
+      ],
+      "status": "PROPOSED"
+    }
+  ],
+  "candidates": [
+    {
+      "capability_id": "EXT-001",
+      "repository_or_project": "NTinkicht/supermemory",
+      "candidate_url": "https://github.com/NTinkicht/supermemory",
+      "capability_categories": [
+        "MEM"
+      ],
+      "strategic_purpose": "Persistent, scoped organizational memory and hierarchical context",
+      "problem_addressed": "Loss of verified knowledge across worker sessions and excessive context",
+      "onecompany_component": "Learning Plane / ContextProvider",
+      "existing_equivalent": ".onecompany/knowledge/current plus existing learning and OpenViking spike #47",
+      "proposed_integration_approach": "Assess independently of OpenViking, with optional historical semantic indexing of validated lessons and outage-safe native fallback.",
+      "required_provider_interface_contract": "MemoryProvider/ContextProvider with exact source revision, project scope, authority label, TTL, budget, redaction and native fallback",
+      "dependencies": [
+        "WU-P1-FOUNDATIONS-001",
+        "WU-P1-VERTICAL-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Persistent, scoped organizational memory and hierarchical context",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "Upstream supermemoryai/supermemory MIT per upstream LICENSE; verify fork, dependencies and exact deployment.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-MEM",
+      "work_unit_mappings": [
+        "WU-P2-SUPERMEMORY-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-001",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-002",
+      "repository_or_project": "volcengine/OpenViking",
+      "candidate_url": "https://github.com/volcengine/OpenViking",
+      "capability_categories": [
+        "MEM"
+      ],
+      "strategic_purpose": "Persistent, scoped organizational memory and hierarchical context",
+      "problem_addressed": "Loss of verified knowledge across worker sessions and excessive context",
+      "onecompany_component": "Learning Plane / ContextProvider",
+      "existing_equivalent": ".onecompany/knowledge/current plus existing learning and OpenViking spike #47",
+      "proposed_integration_approach": "Reuse existing #47; assess viking:// hierarchical L0/L1/L2 navigation against Supermemory and native knowledge using fixed tenant-isolated retrieval cases.",
+      "required_provider_interface_contract": "MemoryProvider/ContextProvider with exact source revision, project scope, authority label, TTL, budget, redaction and native fallback",
+      "dependencies": [
+        "WU-P1-FOUNDATIONS-001",
+        "WU-P1-VERTICAL-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Persistent, scoped organizational memory and hierarchical context",
+      "cost_implications": "Embedding/VLM providers and hosting may incur costs; local/included-only proof is required.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "Upstream main project AGPL-3.0 with separately licensed subtrees; commercial distribution/network-use assessment required.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-MEM",
+      "work_unit_mappings": [
+        "WU-P2-OPENVIKING-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-002",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-003",
+      "repository_or_project": "NTinkicht/kserve",
+      "candidate_url": "https://github.com/NTinkicht/kserve",
+      "capability_categories": [
+        "INF"
+      ],
+      "strategic_purpose": "Provider-neutral economical inference including optional self-hosting",
+      "problem_addressed": "Vendor lock-in, unbounded inference cost and unavailable worker models",
+      "onecompany_component": "Capability Router / ModelEndpointProvider",
+      "existing_equivalent": ".onecompany/budget.json, routing.json, readiness.json and execution profiles",
+      "proposed_integration_approach": "Phase 0 architecture/CPU-GPU/Kubernetes feasibility and endpoint comparison NOW; Phase 2 smallest approved pilot only if capacity, security and owner budget permit.",
+      "required_provider_interface_contract": "ModelEndpointProvider with model+deployment identity, latency/capacity/readiness, eligibility, cost ledger, privacy scope and fail closed",
+      "dependencies": [
+        "WU-P1-FOUNDATIONS-001",
+        "WU-P1-VERTICAL-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Provider-neutral economical inference including optional self-hosting",
+      "cost_implications": "Kubernetes, GPUs and storage are not free just because the code is open-source.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "Preliminary upstream KServe source Apache-2.0; confirm fork LICENSE, notices, vendored code and deployed version.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-INF",
+      "work_unit_mappings": [
+        "WU-P2-KSERVE-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-003",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "DEFER IMPLEMENTATION",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-004",
+      "repository_or_project": "BerriAI/litellm",
+      "candidate_url": "https://github.com/BerriAI/litellm",
+      "capability_categories": [
+        "INF"
+      ],
+      "strategic_purpose": "Provider-neutral economical inference including optional self-hosting",
+      "problem_addressed": "Vendor lock-in, unbounded inference cost and unavailable worker models",
+      "onecompany_component": "Capability Router / ModelEndpointProvider",
+      "existing_equivalent": ".onecompany/budget.json, routing.json, readiness.json and execution profiles",
+      "proposed_integration_approach": "Gateway only if provider-neutral routing and cost instrumentation outperform existing router; never conflate an inference endpoint with worker authority.",
+      "required_provider_interface_contract": "ModelEndpointProvider with model+deployment identity, latency/capacity/readiness, eligibility, cost ledger, privacy scope and fail closed",
+      "dependencies": [
+        "WU-P1-FOUNDATIONS-001",
+        "WU-P1-VERTICAL-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Provider-neutral economical inference including optional self-hosting",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "Source LICENSE states MIT outside enterprise/ and separately licensed enterprise/; validate editions/plugins and deployed version.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-INF",
+      "work_unit_mappings": [
+        "WU-P2-LITELLM-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-004",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-005",
+      "repository_or_project": "lm-sys/RouteLLM",
+      "candidate_url": "https://github.com/lm-sys/RouteLLM",
+      "capability_categories": [
+        "INF"
+      ],
+      "strategic_purpose": "Provider-neutral economical inference including optional self-hosting",
+      "problem_addressed": "Vendor lock-in, unbounded inference cost and unavailable worker models",
+      "onecompany_component": "Capability Router / ModelEndpointProvider",
+      "existing_equivalent": ".onecompany/budget.json, routing.json, readiness.json and execution profiles",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct INF capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "ModelEndpointProvider with model+deployment identity, latency/capacity/readiness, eligibility, cost ledger, privacy scope and fail closed",
+      "dependencies": [
+        "WU-P1-FOUNDATIONS-001",
+        "WU-P1-VERTICAL-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Provider-neutral economical inference including optional self-hosting",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-INF",
+      "work_unit_mappings": [
+        "WU-P2-INF-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-005",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-006",
+      "repository_or_project": "aurelio-labs/semantic-router",
+      "candidate_url": "https://github.com/aurelio-labs/semantic-router",
+      "capability_categories": [
+        "INF"
+      ],
+      "strategic_purpose": "Provider-neutral economical inference including optional self-hosting",
+      "problem_addressed": "Vendor lock-in, unbounded inference cost and unavailable worker models",
+      "onecompany_component": "Capability Router / ModelEndpointProvider",
+      "existing_equivalent": ".onecompany/budget.json, routing.json, readiness.json and execution profiles",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct INF capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "ModelEndpointProvider with model+deployment identity, latency/capacity/readiness, eligibility, cost ledger, privacy scope and fail closed",
+      "dependencies": [
+        "WU-P1-FOUNDATIONS-001",
+        "WU-P1-VERTICAL-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Provider-neutral economical inference including optional self-hosting",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-INF",
+      "work_unit_mappings": [
+        "WU-P2-INF-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-006",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-007",
+      "repository_or_project": "microsoft/LLMLingua",
+      "candidate_url": "https://github.com/microsoft/LLMLingua",
+      "capability_categories": [
+        "INF"
+      ],
+      "strategic_purpose": "Provider-neutral economical inference including optional self-hosting",
+      "problem_addressed": "Vendor lock-in, unbounded inference cost and unavailable worker models",
+      "onecompany_component": "Capability Router / ModelEndpointProvider",
+      "existing_equivalent": ".onecompany/budget.json, routing.json, readiness.json and execution profiles",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct INF capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "ModelEndpointProvider with model+deployment identity, latency/capacity/readiness, eligibility, cost ledger, privacy scope and fail closed",
+      "dependencies": [
+        "WU-P1-FOUNDATIONS-001",
+        "WU-P1-VERTICAL-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Provider-neutral economical inference including optional self-hosting",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-INF",
+      "work_unit_mappings": [
+        "WU-P2-INF-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-007",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-008",
+      "repository_or_project": "OpenHands/software-agent-sdk",
+      "candidate_url": "https://github.com/OpenHands/software-agent-sdk",
+      "capability_categories": [
+        "HAR"
+      ],
+      "strategic_purpose": "Reliable bounded agent harness and isolated execution",
+      "problem_addressed": "Brittle long-running tool use, worker failures and environment differences",
+      "onecompany_component": "Existing Execution Core / RuntimeCapabilityProvider / WorkspaceProvider",
+      "existing_equivalent": "docs/EXECUTION-CORE.md, native RunKey generation fencing, lease kernel and qualification harness",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct HAR capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Existing AgentRuntimeAdapter extension; RunKey; explicit argv; bounded time/context; environment allowlist; isolated workspace; recovery evidence",
+      "dependencies": [
+        "WU-P1-FOUNDATIONS-001",
+        "WU-P1-VERTICAL-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Reliable bounded agent harness and isolated execution",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-HAR",
+      "work_unit_mappings": [
+        "WU-P2-HAR-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-008",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-009",
+      "repository_or_project": "openai/openai-agents-python",
+      "candidate_url": "https://github.com/openai/openai-agents-python",
+      "capability_categories": [
+        "HAR"
+      ],
+      "strategic_purpose": "Reliable bounded agent harness and isolated execution",
+      "problem_addressed": "Brittle long-running tool use, worker failures and environment differences",
+      "onecompany_component": "Existing Execution Core / RuntimeCapabilityProvider / WorkspaceProvider",
+      "existing_equivalent": "docs/EXECUTION-CORE.md, native RunKey generation fencing, lease kernel and qualification harness",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct HAR capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Existing AgentRuntimeAdapter extension; RunKey; explicit argv; bounded time/context; environment allowlist; isolated workspace; recovery evidence",
+      "dependencies": [
+        "WU-P1-FOUNDATIONS-001",
+        "WU-P1-VERTICAL-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Reliable bounded agent harness and isolated execution",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-HAR",
+      "work_unit_mappings": [
+        "WU-P2-HAR-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-009",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-010",
+      "repository_or_project": "anthropics/claude-agent-sdk-python",
+      "candidate_url": "https://github.com/anthropics/claude-agent-sdk-python",
+      "capability_categories": [
+        "HAR"
+      ],
+      "strategic_purpose": "Reliable bounded agent harness and isolated execution",
+      "problem_addressed": "Brittle long-running tool use, worker failures and environment differences",
+      "onecompany_component": "Existing Execution Core / RuntimeCapabilityProvider / WorkspaceProvider",
+      "existing_equivalent": "docs/EXECUTION-CORE.md, native RunKey generation fencing, lease kernel and qualification harness",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct HAR capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Existing AgentRuntimeAdapter extension; RunKey; explicit argv; bounded time/context; environment allowlist; isolated workspace; recovery evidence",
+      "dependencies": [
+        "WU-P1-FOUNDATIONS-001",
+        "WU-P1-VERTICAL-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Reliable bounded agent harness and isolated execution",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-HAR",
+      "work_unit_mappings": [
+        "WU-P2-HAR-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-010",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-011",
+      "repository_or_project": "badlogic/pi-mono",
+      "candidate_url": "https://github.com/badlogic/pi-mono",
+      "capability_categories": [
+        "HAR"
+      ],
+      "strategic_purpose": "Reliable bounded agent harness and isolated execution",
+      "problem_addressed": "Brittle long-running tool use, worker failures and environment differences",
+      "onecompany_component": "Existing Execution Core / RuntimeCapabilityProvider / WorkspaceProvider",
+      "existing_equivalent": "docs/EXECUTION-CORE.md, native RunKey generation fencing, lease kernel and qualification harness",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct HAR capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Existing AgentRuntimeAdapter extension; RunKey; explicit argv; bounded time/context; environment allowlist; isolated workspace; recovery evidence",
+      "dependencies": [
+        "WU-P1-FOUNDATIONS-001",
+        "WU-P1-VERTICAL-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Reliable bounded agent harness and isolated execution",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-HAR",
+      "work_unit_mappings": [
+        "WU-P2-HAR-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-011",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-012",
+      "repository_or_project": "strands-agents/harness-sdk",
+      "candidate_url": "https://github.com/strands-agents/harness-sdk",
+      "capability_categories": [
+        "HAR"
+      ],
+      "strategic_purpose": "Reliable bounded agent harness and isolated execution",
+      "problem_addressed": "Brittle long-running tool use, worker failures and environment differences",
+      "onecompany_component": "Existing Execution Core / RuntimeCapabilityProvider / WorkspaceProvider",
+      "existing_equivalent": "docs/EXECUTION-CORE.md, native RunKey generation fencing, lease kernel and qualification harness",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct HAR capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Existing AgentRuntimeAdapter extension; RunKey; explicit argv; bounded time/context; environment allowlist; isolated workspace; recovery evidence",
+      "dependencies": [
+        "WU-P1-FOUNDATIONS-001",
+        "WU-P1-VERTICAL-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Reliable bounded agent harness and isolated execution",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-HAR",
+      "work_unit_mappings": [
+        "WU-P2-HAR-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-012",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-013",
+      "repository_or_project": "twaldin/harness",
+      "candidate_url": "https://github.com/twaldin/harness",
+      "capability_categories": [
+        "HAR"
+      ],
+      "strategic_purpose": "Reliable bounded agent harness and isolated execution",
+      "problem_addressed": "Brittle long-running tool use, worker failures and environment differences",
+      "onecompany_component": "Existing Execution Core / RuntimeCapabilityProvider / WorkspaceProvider",
+      "existing_equivalent": "docs/EXECUTION-CORE.md, native RunKey generation fencing, lease kernel and qualification harness",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct HAR capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Existing AgentRuntimeAdapter extension; RunKey; explicit argv; bounded time/context; environment allowlist; isolated workspace; recovery evidence",
+      "dependencies": [
+        "WU-P1-FOUNDATIONS-001",
+        "WU-P1-VERTICAL-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Reliable bounded agent harness and isolated execution",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-HAR",
+      "work_unit_mappings": [
+        "WU-P2-HAR-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-013",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-014",
+      "repository_or_project": "AMAP-ML/LongHorizon-Harness",
+      "candidate_url": "https://github.com/AMAP-ML/LongHorizon-Harness",
+      "capability_categories": [
+        "HAR"
+      ],
+      "strategic_purpose": "Reliable bounded agent harness and isolated execution",
+      "problem_addressed": "Brittle long-running tool use, worker failures and environment differences",
+      "onecompany_component": "Existing Execution Core / RuntimeCapabilityProvider / WorkspaceProvider",
+      "existing_equivalent": "docs/EXECUTION-CORE.md, native RunKey generation fencing, lease kernel and qualification harness",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct HAR capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Existing AgentRuntimeAdapter extension; RunKey; explicit argv; bounded time/context; environment allowlist; isolated workspace; recovery evidence",
+      "dependencies": [
+        "WU-P1-FOUNDATIONS-001",
+        "WU-P1-VERTICAL-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Reliable bounded agent harness and isolated execution",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-HAR",
+      "work_unit_mappings": [
+        "WU-P2-HAR-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-014",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-015",
+      "repository_or_project": "langchain-ai/open-swe",
+      "candidate_url": "https://github.com/langchain-ai/open-swe",
+      "capability_categories": [
+        "HAR"
+      ],
+      "strategic_purpose": "Reliable bounded agent harness and isolated execution",
+      "problem_addressed": "Brittle long-running tool use, worker failures and environment differences",
+      "onecompany_component": "Existing Execution Core / RuntimeCapabilityProvider / WorkspaceProvider",
+      "existing_equivalent": "docs/EXECUTION-CORE.md, native RunKey generation fencing, lease kernel and qualification harness",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct HAR capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Existing AgentRuntimeAdapter extension; RunKey; explicit argv; bounded time/context; environment allowlist; isolated workspace; recovery evidence",
+      "dependencies": [
+        "WU-P1-FOUNDATIONS-001",
+        "WU-P1-VERTICAL-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Reliable bounded agent harness and isolated execution",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-HAR",
+      "work_unit_mappings": [
+        "WU-P2-HAR-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-015",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-016",
+      "repository_or_project": "e2b-dev/E2B",
+      "candidate_url": "https://github.com/e2b-dev/E2B",
+      "capability_categories": [
+        "HAR"
+      ],
+      "strategic_purpose": "Reliable bounded agent harness and isolated execution",
+      "problem_addressed": "Brittle long-running tool use, worker failures and environment differences",
+      "onecompany_component": "Existing Execution Core / RuntimeCapabilityProvider / WorkspaceProvider",
+      "existing_equivalent": "docs/EXECUTION-CORE.md, native RunKey generation fencing, lease kernel and qualification harness",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct HAR capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Existing AgentRuntimeAdapter extension; RunKey; explicit argv; bounded time/context; environment allowlist; isolated workspace; recovery evidence",
+      "dependencies": [
+        "WU-P1-FOUNDATIONS-001",
+        "WU-P1-VERTICAL-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Reliable bounded agent harness and isolated execution",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-HAR",
+      "work_unit_mappings": [
+        "WU-P2-HAR-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-016",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-017",
+      "repository_or_project": "kubernetes-sigs/agent-sandbox",
+      "candidate_url": "https://github.com/kubernetes-sigs/agent-sandbox",
+      "capability_categories": [
+        "HAR"
+      ],
+      "strategic_purpose": "Reliable bounded agent harness and isolated execution",
+      "problem_addressed": "Brittle long-running tool use, worker failures and environment differences",
+      "onecompany_component": "Existing Execution Core / RuntimeCapabilityProvider / WorkspaceProvider",
+      "existing_equivalent": "docs/EXECUTION-CORE.md, native RunKey generation fencing, lease kernel and qualification harness",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct HAR capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Existing AgentRuntimeAdapter extension; RunKey; explicit argv; bounded time/context; environment allowlist; isolated workspace; recovery evidence",
+      "dependencies": [
+        "WU-P1-FOUNDATIONS-001",
+        "WU-P1-VERTICAL-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Reliable bounded agent harness and isolated execution",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-HAR",
+      "work_unit_mappings": [
+        "WU-P2-HAR-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-017",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-018",
+      "repository_or_project": "temporalio/temporal",
+      "candidate_url": "https://github.com/temporalio/temporal",
+      "capability_categories": [
+        "HAR",
+        "OPS"
+      ],
+      "strategic_purpose": "Reliable bounded agent harness and isolated execution",
+      "problem_addressed": "Brittle long-running tool use, worker failures and environment differences",
+      "onecompany_component": "Existing Execution Core / RuntimeCapabilityProvider / WorkspaceProvider",
+      "existing_equivalent": "docs/EXECUTION-CORE.md, native RunKey generation fencing, lease kernel and qualification harness",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct HAR capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Existing AgentRuntimeAdapter extension; RunKey; explicit argv; bounded time/context; environment allowlist; isolated workspace; recovery evidence",
+      "dependencies": [
+        "WU-P1-FOUNDATIONS-001",
+        "WU-P1-VERTICAL-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Reliable bounded agent harness and isolated execution",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-HAR",
+      "work_unit_mappings": [
+        "WU-P2-HAR-001",
+        "WU-P3-OPS-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-018",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-019",
+      "repository_or_project": "a2aproject/A2A",
+      "candidate_url": "https://github.com/a2aproject/A2A",
+      "capability_categories": [
+        "COM"
+      ],
+      "strategic_purpose": "Interoperable, observable agent handoffs and versioned tools",
+      "problem_addressed": "Lost handoffs and ad hoc agent-to-agent communication",
+      "onecompany_component": "Team Room / SkillProvider / events",
+      "existing_equivalent": "Durable ledger, docs/COORDINATION-BUS.md, lease authority",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct COM capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Versioned, idempotent message schema carrying provenance and RunKey; event transport cannot grant authority",
+      "dependencies": [
+        "WU-P1-FOUNDATIONS-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Interoperable, observable agent handoffs and versioned tools",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-COM",
+      "work_unit_mappings": [
+        "WU-P2-COM-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-019",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-020",
+      "repository_or_project": "nats-io/nats-server",
+      "candidate_url": "https://github.com/nats-io/nats-server",
+      "capability_categories": [
+        "COM"
+      ],
+      "strategic_purpose": "Interoperable, observable agent handoffs and versioned tools",
+      "problem_addressed": "Lost handoffs and ad hoc agent-to-agent communication",
+      "onecompany_component": "Team Room / SkillProvider / events",
+      "existing_equivalent": "Durable ledger, docs/COORDINATION-BUS.md, lease authority",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct COM capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Versioned, idempotent message schema carrying provenance and RunKey; event transport cannot grant authority",
+      "dependencies": [
+        "WU-P1-FOUNDATIONS-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Interoperable, observable agent handoffs and versioned tools",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-COM",
+      "work_unit_mappings": [
+        "WU-P2-COM-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-020",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-021",
+      "repository_or_project": "ag-ui-protocol/ag-ui",
+      "candidate_url": "https://github.com/ag-ui-protocol/ag-ui",
+      "capability_categories": [
+        "COM"
+      ],
+      "strategic_purpose": "Interoperable, observable agent handoffs and versioned tools",
+      "problem_addressed": "Lost handoffs and ad hoc agent-to-agent communication",
+      "onecompany_component": "Team Room / SkillProvider / events",
+      "existing_equivalent": "Durable ledger, docs/COORDINATION-BUS.md, lease authority",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct COM capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Versioned, idempotent message schema carrying provenance and RunKey; event transport cannot grant authority",
+      "dependencies": [
+        "WU-P1-FOUNDATIONS-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Interoperable, observable agent handoffs and versioned tools",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-COM",
+      "work_unit_mappings": [
+        "WU-P2-COM-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-021",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-022",
+      "repository_or_project": "agentskills/agentskills",
+      "candidate_url": "https://github.com/agentskills/agentskills",
+      "capability_categories": [
+        "COM"
+      ],
+      "strategic_purpose": "Interoperable, observable agent handoffs and versioned tools",
+      "problem_addressed": "Lost handoffs and ad hoc agent-to-agent communication",
+      "onecompany_component": "Team Room / SkillProvider / events",
+      "existing_equivalent": "Durable ledger, docs/COORDINATION-BUS.md, lease authority",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct COM capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Versioned, idempotent message schema carrying provenance and RunKey; event transport cannot grant authority",
+      "dependencies": [
+        "WU-P1-FOUNDATIONS-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Interoperable, observable agent handoffs and versioned tools",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-COM",
+      "work_unit_mappings": [
+        "WU-P2-COM-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-022",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-023",
+      "repository_or_project": "modelcontextprotocol/registry",
+      "candidate_url": "https://github.com/modelcontextprotocol/registry",
+      "capability_categories": [
+        "COM"
+      ],
+      "strategic_purpose": "Interoperable, observable agent handoffs and versioned tools",
+      "problem_addressed": "Lost handoffs and ad hoc agent-to-agent communication",
+      "onecompany_component": "Team Room / SkillProvider / events",
+      "existing_equivalent": "Durable ledger, docs/COORDINATION-BUS.md, lease authority",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct COM capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Versioned, idempotent message schema carrying provenance and RunKey; event transport cannot grant authority",
+      "dependencies": [
+        "WU-P1-FOUNDATIONS-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Interoperable, observable agent handoffs and versioned tools",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-COM",
+      "work_unit_mappings": [
+        "WU-P2-COM-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-023",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-024",
+      "repository_or_project": "github/spec-kit",
+      "candidate_url": "https://github.com/github/spec-kit",
+      "capability_categories": [
+        "SPEC"
+      ],
+      "strategic_purpose": "Guided idea discovery and change-controlled specifications",
+      "problem_addressed": "New users must guess requirements, scope, architecture and dependency order",
+      "onecompany_component": "Existing requirements-catalog, planning contracts and onboarding",
+      "existing_equivalent": "docs/ONBOARDING.md, requirements-catalog.json, portfolio.json",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct SPEC capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "ProductBrief, Specification, ArchitectureDecision and ChangeImpact mapping into ONE canonical requirements system",
+      "dependencies": [
+        "WU-P1-FOUNDATIONS-001"
+      ],
+      "target_implementation_phase": "P1",
+      "user_visible_benefit": "Guided idea discovery and change-controlled specifications",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-DISC",
+      "work_unit_mappings": [
+        "WU-P1-DISCOVERY-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-024",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-025",
+      "repository_or_project": "Fission-AI/OpenSpec",
+      "candidate_url": "https://github.com/Fission-AI/OpenSpec",
+      "capability_categories": [
+        "SPEC"
+      ],
+      "strategic_purpose": "Guided idea discovery and change-controlled specifications",
+      "problem_addressed": "New users must guess requirements, scope, architecture and dependency order",
+      "onecompany_component": "Existing requirements-catalog, planning contracts and onboarding",
+      "existing_equivalent": "docs/ONBOARDING.md, requirements-catalog.json, portfolio.json",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct SPEC capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "ProductBrief, Specification, ArchitectureDecision and ChangeImpact mapping into ONE canonical requirements system",
+      "dependencies": [
+        "WU-P1-FOUNDATIONS-001"
+      ],
+      "target_implementation_phase": "P1",
+      "user_visible_benefit": "Guided idea discovery and change-controlled specifications",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-DISC",
+      "work_unit_mappings": [
+        "WU-P1-DISCOVERY-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-025",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-026",
+      "repository_or_project": "bmad-code-org/BMAD-METHOD",
+      "candidate_url": "https://github.com/bmad-code-org/BMAD-METHOD",
+      "capability_categories": [
+        "SPEC"
+      ],
+      "strategic_purpose": "Guided idea discovery and change-controlled specifications",
+      "problem_addressed": "New users must guess requirements, scope, architecture and dependency order",
+      "onecompany_component": "Existing requirements-catalog, planning contracts and onboarding",
+      "existing_equivalent": "docs/ONBOARDING.md, requirements-catalog.json, portfolio.json",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct SPEC capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "ProductBrief, Specification, ArchitectureDecision and ChangeImpact mapping into ONE canonical requirements system",
+      "dependencies": [
+        "WU-P1-FOUNDATIONS-001"
+      ],
+      "target_implementation_phase": "P1",
+      "user_visible_benefit": "Guided idea discovery and change-controlled specifications",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-DISC",
+      "work_unit_mappings": [
+        "WU-P1-DISCOVERY-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-026",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-027",
+      "repository_or_project": "nrwl/nx",
+      "candidate_url": "https://github.com/nrwl/nx",
+      "capability_categories": [
+        "PROD"
+      ],
+      "strategic_purpose": "Dependency-aware product and portfolio intelligence",
+      "problem_addressed": "Roadmap and affected features not visible to end users",
+      "onecompany_component": "Existing portfolio / planning and Mission Control projection",
+      "existing_equivalent": ".onecompany/portfolio.json, queue.json, docs/WORK-UNITS.md",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct PROD capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Read-only graph projection of canonical planning; stable IDs, dependency and scope impact, no UI-authored authority",
+      "dependencies": [
+        "WU-P1-DISCOVERY-001",
+        "WU-P1-MISSION-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Dependency-aware product and portfolio intelligence",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-PROD",
+      "work_unit_mappings": [
+        "WU-P2-PRODUCT-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-027",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-028",
+      "repository_or_project": "sverweij/dependency-cruiser",
+      "candidate_url": "https://github.com/sverweij/dependency-cruiser",
+      "capability_categories": [
+        "PROD"
+      ],
+      "strategic_purpose": "Dependency-aware product and portfolio intelligence",
+      "problem_addressed": "Roadmap and affected features not visible to end users",
+      "onecompany_component": "Existing portfolio / planning and Mission Control projection",
+      "existing_equivalent": ".onecompany/portfolio.json, queue.json, docs/WORK-UNITS.md",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct PROD capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Read-only graph projection of canonical planning; stable IDs, dependency and scope impact, no UI-authored authority",
+      "dependencies": [
+        "WU-P1-DISCOVERY-001",
+        "WU-P1-MISSION-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Dependency-aware product and portfolio intelligence",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-PROD",
+      "work_unit_mappings": [
+        "WU-P2-PRODUCT-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-028",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-029",
+      "repository_or_project": "backstage/backstage",
+      "candidate_url": "https://github.com/backstage/backstage",
+      "capability_categories": [
+        "PROD"
+      ],
+      "strategic_purpose": "Dependency-aware product and portfolio intelligence",
+      "problem_addressed": "Roadmap and affected features not visible to end users",
+      "onecompany_component": "Existing portfolio / planning and Mission Control projection",
+      "existing_equivalent": ".onecompany/portfolio.json, queue.json, docs/WORK-UNITS.md",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct PROD capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Read-only graph projection of canonical planning; stable IDs, dependency and scope impact, no UI-authored authority",
+      "dependencies": [
+        "WU-P1-DISCOVERY-001",
+        "WU-P1-MISSION-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Dependency-aware product and portfolio intelligence",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-PROD",
+      "work_unit_mappings": [
+        "WU-P2-PRODUCT-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-029",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-030",
+      "repository_or_project": "makeplane/plane",
+      "candidate_url": "https://github.com/makeplane/plane",
+      "capability_categories": [
+        "PROD"
+      ],
+      "strategic_purpose": "Dependency-aware product and portfolio intelligence",
+      "problem_addressed": "Roadmap and affected features not visible to end users",
+      "onecompany_component": "Existing portfolio / planning and Mission Control projection",
+      "existing_equivalent": ".onecompany/portfolio.json, queue.json, docs/WORK-UNITS.md",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct PROD capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Read-only graph projection of canonical planning; stable IDs, dependency and scope impact, no UI-authored authority",
+      "dependencies": [
+        "WU-P1-DISCOVERY-001",
+        "WU-P1-MISSION-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Dependency-aware product and portfolio intelligence",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-PROD",
+      "work_unit_mappings": [
+        "WU-P2-PRODUCT-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-030",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-031",
+      "repository_or_project": "opf/openproject",
+      "candidate_url": "https://github.com/opf/openproject",
+      "capability_categories": [
+        "PROD"
+      ],
+      "strategic_purpose": "Dependency-aware product and portfolio intelligence",
+      "problem_addressed": "Roadmap and affected features not visible to end users",
+      "onecompany_component": "Existing portfolio / planning and Mission Control projection",
+      "existing_equivalent": ".onecompany/portfolio.json, queue.json, docs/WORK-UNITS.md",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct PROD capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Read-only graph projection of canonical planning; stable IDs, dependency and scope impact, no UI-authored authority",
+      "dependencies": [
+        "WU-P1-DISCOVERY-001",
+        "WU-P1-MISSION-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Dependency-aware product and portfolio intelligence",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-PROD",
+      "work_unit_mappings": [
+        "WU-P2-PRODUCT-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-031",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-032",
+      "repository_or_project": "xyflow/xyflow",
+      "candidate_url": "https://github.com/xyflow/xyflow",
+      "capability_categories": [
+        "PROD",
+        "OBS"
+      ],
+      "strategic_purpose": "Dependency-aware product and portfolio intelligence",
+      "problem_addressed": "Roadmap and affected features not visible to end users",
+      "onecompany_component": "Existing portfolio / planning and Mission Control projection",
+      "existing_equivalent": ".onecompany/portfolio.json, queue.json, docs/WORK-UNITS.md",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct PROD capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Read-only graph projection of canonical planning; stable IDs, dependency and scope impact, no UI-authored authority",
+      "dependencies": [
+        "WU-P1-DISCOVERY-001",
+        "WU-P1-MISSION-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Dependency-aware product and portfolio intelligence",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-PROD",
+      "work_unit_mappings": [
+        "WU-P2-PRODUCT-001",
+        "WU-P2-OBS-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-032",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-033",
+      "repository_or_project": "cytoscape/cytoscape.js",
+      "candidate_url": "https://github.com/cytoscape/cytoscape.js",
+      "capability_categories": [
+        "PROD"
+      ],
+      "strategic_purpose": "Dependency-aware product and portfolio intelligence",
+      "problem_addressed": "Roadmap and affected features not visible to end users",
+      "onecompany_component": "Existing portfolio / planning and Mission Control projection",
+      "existing_equivalent": ".onecompany/portfolio.json, queue.json, docs/WORK-UNITS.md",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct PROD capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Read-only graph projection of canonical planning; stable IDs, dependency and scope impact, no UI-authored authority",
+      "dependencies": [
+        "WU-P1-DISCOVERY-001",
+        "WU-P1-MISSION-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Dependency-aware product and portfolio intelligence",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-PROD",
+      "work_unit_mappings": [
+        "WU-P2-PRODUCT-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-033",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-034",
+      "repository_or_project": "mermaid-js/mermaid",
+      "candidate_url": "https://github.com/mermaid-js/mermaid",
+      "capability_categories": [
+        "PROD"
+      ],
+      "strategic_purpose": "Dependency-aware product and portfolio intelligence",
+      "problem_addressed": "Roadmap and affected features not visible to end users",
+      "onecompany_component": "Existing portfolio / planning and Mission Control projection",
+      "existing_equivalent": ".onecompany/portfolio.json, queue.json, docs/WORK-UNITS.md",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct PROD capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Read-only graph projection of canonical planning; stable IDs, dependency and scope impact, no UI-authored authority",
+      "dependencies": [
+        "WU-P1-DISCOVERY-001",
+        "WU-P1-MISSION-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Dependency-aware product and portfolio intelligence",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-PROD",
+      "work_unit_mappings": [
+        "WU-P2-PRODUCT-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-034",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-035",
+      "repository_or_project": "microsoft/playwright",
+      "candidate_url": "https://github.com/microsoft/playwright",
+      "capability_categories": [
+        "QUAL",
+        "UI"
+      ],
+      "strategic_purpose": "Requirement-traced comprehensive engineering assurance",
+      "problem_addressed": "Source passing unit tests does not prove real application, API, security, accessibility or AI behavior",
+      "onecompany_component": "OCES / Evidence Registry / Completion Gate",
+      "existing_equivalent": "Exact-head CI/review, assurance validation, Execution Core evidence",
+      "proposed_integration_approach": "Primary deterministic browser e2e smoke for vertical slice; expand to visual/trace evidence in Phase 2.",
+      "required_provider_interface_contract": "AssuranceProvider with environment/build/head/base identity, AC links, artifact hash, severity and expiry",
+      "dependencies": [
+        "WU-P1-VERTICAL-001"
+      ],
+      "target_implementation_phase": "P1",
+      "user_visible_benefit": "Requirement-traced comprehensive engineering assurance",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-QUAL",
+      "work_unit_mappings": [
+        "WU-P1-PLAYWRIGHT-001",
+        "WU-P2-UI-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-035",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-036",
+      "repository_or_project": "stryker-mutator/stryker-js",
+      "candidate_url": "https://github.com/stryker-mutator/stryker-js",
+      "capability_categories": [
+        "QUAL"
+      ],
+      "strategic_purpose": "Requirement-traced comprehensive engineering assurance",
+      "problem_addressed": "Source passing unit tests does not prove real application, API, security, accessibility or AI behavior",
+      "onecompany_component": "OCES / Evidence Registry / Completion Gate",
+      "existing_equivalent": "Exact-head CI/review, assurance validation, Execution Core evidence",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct QUAL capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "AssuranceProvider with environment/build/head/base identity, AC links, artifact hash, severity and expiry",
+      "dependencies": [
+        "WU-P1-VERTICAL-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Requirement-traced comprehensive engineering assurance",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-QUAL",
+      "work_unit_mappings": [
+        "WU-P2-QUALITY-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-036",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-037",
+      "repository_or_project": "schemathesis/schemathesis",
+      "candidate_url": "https://github.com/schemathesis/schemathesis",
+      "capability_categories": [
+        "QUAL"
+      ],
+      "strategic_purpose": "Requirement-traced comprehensive engineering assurance",
+      "problem_addressed": "Source passing unit tests does not prove real application, API, security, accessibility or AI behavior",
+      "onecompany_component": "OCES / Evidence Registry / Completion Gate",
+      "existing_equivalent": "Exact-head CI/review, assurance validation, Execution Core evidence",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct QUAL capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "AssuranceProvider with environment/build/head/base identity, AC links, artifact hash, severity and expiry",
+      "dependencies": [
+        "WU-P1-VERTICAL-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Requirement-traced comprehensive engineering assurance",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-QUAL",
+      "work_unit_mappings": [
+        "WU-P2-QUALITY-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-037",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-038",
+      "repository_or_project": "HypothesisWorks/hypothesis",
+      "candidate_url": "https://github.com/HypothesisWorks/hypothesis",
+      "capability_categories": [
+        "QUAL"
+      ],
+      "strategic_purpose": "Requirement-traced comprehensive engineering assurance",
+      "problem_addressed": "Source passing unit tests does not prove real application, API, security, accessibility or AI behavior",
+      "onecompany_component": "OCES / Evidence Registry / Completion Gate",
+      "existing_equivalent": "Exact-head CI/review, assurance validation, Execution Core evidence",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct QUAL capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "AssuranceProvider with environment/build/head/base identity, AC links, artifact hash, severity and expiry",
+      "dependencies": [
+        "WU-P1-VERTICAL-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Requirement-traced comprehensive engineering assurance",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-QUAL",
+      "work_unit_mappings": [
+        "WU-P2-QUALITY-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-038",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-039",
+      "repository_or_project": "pact-foundation/pact-js",
+      "candidate_url": "https://github.com/pact-foundation/pact-js",
+      "capability_categories": [
+        "QUAL"
+      ],
+      "strategic_purpose": "Requirement-traced comprehensive engineering assurance",
+      "problem_addressed": "Source passing unit tests does not prove real application, API, security, accessibility or AI behavior",
+      "onecompany_component": "OCES / Evidence Registry / Completion Gate",
+      "existing_equivalent": "Exact-head CI/review, assurance validation, Execution Core evidence",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct QUAL capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "AssuranceProvider with environment/build/head/base identity, AC links, artifact hash, severity and expiry",
+      "dependencies": [
+        "WU-P1-VERTICAL-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Requirement-traced comprehensive engineering assurance",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-QUAL",
+      "work_unit_mappings": [
+        "WU-P2-QUALITY-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-039",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-040",
+      "repository_or_project": "grafana/k6",
+      "candidate_url": "https://github.com/grafana/k6",
+      "capability_categories": [
+        "QUAL"
+      ],
+      "strategic_purpose": "Requirement-traced comprehensive engineering assurance",
+      "problem_addressed": "Source passing unit tests does not prove real application, API, security, accessibility or AI behavior",
+      "onecompany_component": "OCES / Evidence Registry / Completion Gate",
+      "existing_equivalent": "Exact-head CI/review, assurance validation, Execution Core evidence",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct QUAL capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "AssuranceProvider with environment/build/head/base identity, AC links, artifact hash, severity and expiry",
+      "dependencies": [
+        "WU-P1-VERTICAL-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Requirement-traced comprehensive engineering assurance",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-QUAL",
+      "work_unit_mappings": [
+        "WU-P2-QUALITY-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-040",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-041",
+      "repository_or_project": "dequelabs/axe-core",
+      "candidate_url": "https://github.com/dequelabs/axe-core",
+      "capability_categories": [
+        "QUAL"
+      ],
+      "strategic_purpose": "Requirement-traced comprehensive engineering assurance",
+      "problem_addressed": "Source passing unit tests does not prove real application, API, security, accessibility or AI behavior",
+      "onecompany_component": "OCES / Evidence Registry / Completion Gate",
+      "existing_equivalent": "Exact-head CI/review, assurance validation, Execution Core evidence",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct QUAL capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "AssuranceProvider with environment/build/head/base identity, AC links, artifact hash, severity and expiry",
+      "dependencies": [
+        "WU-P1-VERTICAL-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Requirement-traced comprehensive engineering assurance",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-QUAL",
+      "work_unit_mappings": [
+        "WU-P2-QUALITY-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-041",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-042",
+      "repository_or_project": "aquasecurity/trivy",
+      "candidate_url": "https://github.com/aquasecurity/trivy",
+      "capability_categories": [
+        "QUAL"
+      ],
+      "strategic_purpose": "Requirement-traced comprehensive engineering assurance",
+      "problem_addressed": "Source passing unit tests does not prove real application, API, security, accessibility or AI behavior",
+      "onecompany_component": "OCES / Evidence Registry / Completion Gate",
+      "existing_equivalent": "Exact-head CI/review, assurance validation, Execution Core evidence",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct QUAL capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "AssuranceProvider with environment/build/head/base identity, AC links, artifact hash, severity and expiry",
+      "dependencies": [
+        "WU-P1-VERTICAL-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Requirement-traced comprehensive engineering assurance",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-QUAL",
+      "work_unit_mappings": [
+        "WU-P2-QUALITY-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-042",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-043",
+      "repository_or_project": "semgrep/semgrep",
+      "candidate_url": "https://github.com/semgrep/semgrep",
+      "capability_categories": [
+        "QUAL"
+      ],
+      "strategic_purpose": "Requirement-traced comprehensive engineering assurance",
+      "problem_addressed": "Source passing unit tests does not prove real application, API, security, accessibility or AI behavior",
+      "onecompany_component": "OCES / Evidence Registry / Completion Gate",
+      "existing_equivalent": "Exact-head CI/review, assurance validation, Execution Core evidence",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct QUAL capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "AssuranceProvider with environment/build/head/base identity, AC links, artifact hash, severity and expiry",
+      "dependencies": [
+        "WU-P1-VERTICAL-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Requirement-traced comprehensive engineering assurance",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-QUAL",
+      "work_unit_mappings": [
+        "WU-P2-QUALITY-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-043",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-044",
+      "repository_or_project": "OWASP/ASVS",
+      "candidate_url": "https://github.com/OWASP/ASVS",
+      "capability_categories": [
+        "QUAL"
+      ],
+      "strategic_purpose": "Requirement-traced comprehensive engineering assurance",
+      "problem_addressed": "Source passing unit tests does not prove real application, API, security, accessibility or AI behavior",
+      "onecompany_component": "OCES / Evidence Registry / Completion Gate",
+      "existing_equivalent": "Exact-head CI/review, assurance validation, Execution Core evidence",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct QUAL capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "AssuranceProvider with environment/build/head/base identity, AC links, artifact hash, severity and expiry",
+      "dependencies": [
+        "WU-P1-VERTICAL-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Requirement-traced comprehensive engineering assurance",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-QUAL",
+      "work_unit_mappings": [
+        "WU-P2-QUALITY-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-044",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-045",
+      "repository_or_project": "confident-ai/deepeval",
+      "candidate_url": "https://github.com/confident-ai/deepeval",
+      "capability_categories": [
+        "QUAL"
+      ],
+      "strategic_purpose": "Requirement-traced comprehensive engineering assurance",
+      "problem_addressed": "Source passing unit tests does not prove real application, API, security, accessibility or AI behavior",
+      "onecompany_component": "OCES / Evidence Registry / Completion Gate",
+      "existing_equivalent": "Exact-head CI/review, assurance validation, Execution Core evidence",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct QUAL capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "AssuranceProvider with environment/build/head/base identity, AC links, artifact hash, severity and expiry",
+      "dependencies": [
+        "WU-P1-VERTICAL-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Requirement-traced comprehensive engineering assurance",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-QUAL",
+      "work_unit_mappings": [
+        "WU-P2-QUALITY-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-045",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-046",
+      "repository_or_project": "promptfoo/promptfoo",
+      "candidate_url": "https://github.com/promptfoo/promptfoo",
+      "capability_categories": [
+        "QUAL"
+      ],
+      "strategic_purpose": "Requirement-traced comprehensive engineering assurance",
+      "problem_addressed": "Source passing unit tests does not prove real application, API, security, accessibility or AI behavior",
+      "onecompany_component": "OCES / Evidence Registry / Completion Gate",
+      "existing_equivalent": "Exact-head CI/review, assurance validation, Execution Core evidence",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct QUAL capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "AssuranceProvider with environment/build/head/base identity, AC links, artifact hash, severity and expiry",
+      "dependencies": [
+        "WU-P1-VERTICAL-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Requirement-traced comprehensive engineering assurance",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-QUAL",
+      "work_unit_mappings": [
+        "WU-P2-QUALITY-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-046",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-047",
+      "repository_or_project": "google/artemis",
+      "candidate_url": "https://github.com/google/artemis",
+      "capability_categories": [
+        "UI"
+      ],
+      "strategic_purpose": "Deterministic real browser and mobile runtime validation",
+      "problem_addressed": "Functional code may still fail visible user workflows and device use",
+      "onecompany_component": "Application Environment / UIAssuranceProvider",
+      "existing_equivalent": "Existing UI quality guidance and acceptance/evidence contracts",
+      "proposed_integration_approach": "Runtime adapter only, not second orchestration; real-device/e2e and emulator tests distinct; exclusive device ownership, reset and RunKey-to-build evidence.",
+      "required_provider_interface_contract": "Build ID + RunKey + exclusive device lock + privacy-safe screenshots,traces and stale-evidence rejection",
+      "dependencies": [
+        "WU-P1-RUNTIME-001",
+        "WU-P1-QUALITY-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Deterministic real browser and mobile runtime validation",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "Upstream source files Apache-2.0; verify repository-wide LICENSE, third-party licenses and distribution.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-UI",
+      "work_unit_mappings": [
+        "WU-P2-ARTEMIS-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-047",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-048",
+      "repository_or_project": "browserbase/stagehand",
+      "candidate_url": "https://github.com/browserbase/stagehand",
+      "capability_categories": [
+        "UI"
+      ],
+      "strategic_purpose": "Deterministic real browser and mobile runtime validation",
+      "problem_addressed": "Functional code may still fail visible user workflows and device use",
+      "onecompany_component": "Application Environment / UIAssuranceProvider",
+      "existing_equivalent": "Existing UI quality guidance and acceptance/evidence contracts",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct UI capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Build ID + RunKey + exclusive device lock + privacy-safe screenshots,traces and stale-evidence rejection",
+      "dependencies": [
+        "WU-P1-RUNTIME-001",
+        "WU-P1-QUALITY-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Deterministic real browser and mobile runtime validation",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-UI",
+      "work_unit_mappings": [
+        "WU-P2-UI-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-048",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-049",
+      "repository_or_project": "mobile-dev-inc/Maestro",
+      "candidate_url": "https://github.com/mobile-dev-inc/Maestro",
+      "capability_categories": [
+        "UI"
+      ],
+      "strategic_purpose": "Deterministic real browser and mobile runtime validation",
+      "problem_addressed": "Functional code may still fail visible user workflows and device use",
+      "onecompany_component": "Application Environment / UIAssuranceProvider",
+      "existing_equivalent": "Existing UI quality guidance and acceptance/evidence contracts",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct UI capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Build ID + RunKey + exclusive device lock + privacy-safe screenshots,traces and stale-evidence rejection",
+      "dependencies": [
+        "WU-P1-RUNTIME-001",
+        "WU-P1-QUALITY-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Deterministic real browser and mobile runtime validation",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-UI",
+      "work_unit_mappings": [
+        "WU-P2-UI-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-049",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-050",
+      "repository_or_project": "lost-pixel/lost-pixel",
+      "candidate_url": "https://github.com/lost-pixel/lost-pixel",
+      "capability_categories": [
+        "UI"
+      ],
+      "strategic_purpose": "Deterministic real browser and mobile runtime validation",
+      "problem_addressed": "Functional code may still fail visible user workflows and device use",
+      "onecompany_component": "Application Environment / UIAssuranceProvider",
+      "existing_equivalent": "Existing UI quality guidance and acceptance/evidence contracts",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct UI capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Build ID + RunKey + exclusive device lock + privacy-safe screenshots,traces and stale-evidence rejection",
+      "dependencies": [
+        "WU-P1-RUNTIME-001",
+        "WU-P1-QUALITY-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Deterministic real browser and mobile runtime validation",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-UI",
+      "work_unit_mappings": [
+        "WU-P2-UI-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-050",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-051",
+      "repository_or_project": "penpot/penpot",
+      "candidate_url": "https://github.com/penpot/penpot",
+      "capability_categories": [
+        "DES"
+      ],
+      "strategic_purpose": "Consistent accessible design systems and preview",
+      "problem_addressed": "Generated UI can be inconsistent, inaccessible and difficult to maintain",
+      "onecompany_component": "Product Discovery / design tokens / preview",
+      "existing_equivalent": "docs/UI-AND-EXPERIENCE-QUALITY.md",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct DES capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Design tokens, component inventory, visual evidence and accessible acceptance criteria tied to specification",
+      "dependencies": [
+        "WU-P1-DISCOVERY-001",
+        "WU-P1-RUNTIME-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Consistent accessible design systems and preview",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-DES",
+      "work_unit_mappings": [
+        "WU-P2-DESIGN-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-051",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-052",
+      "repository_or_project": "storybookjs/storybook",
+      "candidate_url": "https://github.com/storybookjs/storybook",
+      "capability_categories": [
+        "DES"
+      ],
+      "strategic_purpose": "Consistent accessible design systems and preview",
+      "problem_addressed": "Generated UI can be inconsistent, inaccessible and difficult to maintain",
+      "onecompany_component": "Product Discovery / design tokens / preview",
+      "existing_equivalent": "docs/UI-AND-EXPERIENCE-QUALITY.md",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct DES capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Design tokens, component inventory, visual evidence and accessible acceptance criteria tied to specification",
+      "dependencies": [
+        "WU-P1-DISCOVERY-001",
+        "WU-P1-RUNTIME-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Consistent accessible design systems and preview",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-DES",
+      "work_unit_mappings": [
+        "WU-P2-DESIGN-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-052",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-053",
+      "repository_or_project": "shadcn-ui/ui",
+      "candidate_url": "https://github.com/shadcn-ui/ui",
+      "capability_categories": [
+        "DES"
+      ],
+      "strategic_purpose": "Consistent accessible design systems and preview",
+      "problem_addressed": "Generated UI can be inconsistent, inaccessible and difficult to maintain",
+      "onecompany_component": "Product Discovery / design tokens / preview",
+      "existing_equivalent": "docs/UI-AND-EXPERIENCE-QUALITY.md",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct DES capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Design tokens, component inventory, visual evidence and accessible acceptance criteria tied to specification",
+      "dependencies": [
+        "WU-P1-DISCOVERY-001",
+        "WU-P1-RUNTIME-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Consistent accessible design systems and preview",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-DES",
+      "work_unit_mappings": [
+        "WU-P2-DESIGN-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-053",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-054",
+      "repository_or_project": "langfuse/langfuse",
+      "candidate_url": "https://github.com/langfuse/langfuse",
+      "capability_categories": [
+        "OBS"
+      ],
+      "strategic_purpose": "Tracing, outcome monitoring and intuitive Mission Control",
+      "problem_addressed": "Users cannot follow decisions, cost, execution, failures and releases",
+      "onecompany_component": "TelemetryProvider / Mission Control read model",
+      "existing_equivalent": "docs/OBSERVABILITY.md, durable ledger, execution journal, readiness, budget",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct OBS capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Tenant-scoped read projection with source provenance, redaction and independent control-plane enforcement",
+      "dependencies": [
+        "WU-P1-MISSION-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Tracing, outcome monitoring and intuitive Mission Control",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-OBS",
+      "work_unit_mappings": [
+        "WU-P2-OBS-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-054",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-055",
+      "repository_or_project": "open-telemetry/opentelemetry-python",
+      "candidate_url": "https://github.com/open-telemetry/opentelemetry-python",
+      "capability_categories": [
+        "OBS"
+      ],
+      "strategic_purpose": "Tracing, outcome monitoring and intuitive Mission Control",
+      "problem_addressed": "Users cannot follow decisions, cost, execution, failures and releases",
+      "onecompany_component": "TelemetryProvider / Mission Control read model",
+      "existing_equivalent": "docs/OBSERVABILITY.md, durable ledger, execution journal, readiness, budget",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct OBS capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Tenant-scoped read projection with source provenance, redaction and independent control-plane enforcement",
+      "dependencies": [
+        "WU-P1-MISSION-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Tracing, outcome monitoring and intuitive Mission Control",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-OBS",
+      "work_unit_mappings": [
+        "WU-P2-OBS-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-055",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-056",
+      "repository_or_project": "CopilotKit/CopilotKit",
+      "candidate_url": "https://github.com/CopilotKit/CopilotKit",
+      "capability_categories": [
+        "OBS"
+      ],
+      "strategic_purpose": "Tracing, outcome monitoring and intuitive Mission Control",
+      "problem_addressed": "Users cannot follow decisions, cost, execution, failures and releases",
+      "onecompany_component": "TelemetryProvider / Mission Control read model",
+      "existing_equivalent": "docs/OBSERVABILITY.md, durable ledger, execution journal, readiness, budget",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct OBS capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Tenant-scoped read projection with source provenance, redaction and independent control-plane enforcement",
+      "dependencies": [
+        "WU-P1-MISSION-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Tracing, outcome monitoring and intuitive Mission Control",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-OBS",
+      "work_unit_mappings": [
+        "WU-P2-OBS-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-056",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-057",
+      "repository_or_project": "assistant-ui/assistant-ui",
+      "candidate_url": "https://github.com/assistant-ui/assistant-ui",
+      "capability_categories": [
+        "OBS"
+      ],
+      "strategic_purpose": "Tracing, outcome monitoring and intuitive Mission Control",
+      "problem_addressed": "Users cannot follow decisions, cost, execution, failures and releases",
+      "onecompany_component": "TelemetryProvider / Mission Control read model",
+      "existing_equivalent": "docs/OBSERVABILITY.md, durable ledger, execution journal, readiness, budget",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct OBS capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Tenant-scoped read projection with source provenance, redaction and independent control-plane enforcement",
+      "dependencies": [
+        "WU-P1-MISSION-001"
+      ],
+      "target_implementation_phase": "P2",
+      "user_visible_benefit": "Tracing, outcome monitoring and intuitive Mission Control",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-OBS",
+      "work_unit_mappings": [
+        "WU-P2-OBS-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-057",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-058",
+      "repository_or_project": "renovatebot/renovate",
+      "candidate_url": "https://github.com/renovatebot/renovate",
+      "capability_categories": [
+        "OPS"
+      ],
+      "strategic_purpose": "Governed autonomous release, incident response and maintenance at scale",
+      "problem_addressed": "Product delivery stops at merge and operational recovery is manual",
+      "onecompany_component": "DeploymentProvider / operational supervisor",
+      "existing_equivalent": "Existing release/recovery docs, emergency stop, budget and Team Room",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct OPS capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Deployment and incident operations under owner-scoped release policies; rollback and blast-radius evidence",
+      "dependencies": [
+        "WU-P1-VERTICAL-001",
+        "WU-P2-OBS-001"
+      ],
+      "target_implementation_phase": "P3",
+      "user_visible_benefit": "Governed autonomous release, incident response and maintenance at scale",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-OPS",
+      "work_unit_mappings": [
+        "WU-P3-OPS-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-058",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-059",
+      "repository_or_project": "argoproj/argo-cd",
+      "candidate_url": "https://github.com/argoproj/argo-cd",
+      "capability_categories": [
+        "OPS"
+      ],
+      "strategic_purpose": "Governed autonomous release, incident response and maintenance at scale",
+      "problem_addressed": "Product delivery stops at merge and operational recovery is manual",
+      "onecompany_component": "DeploymentProvider / operational supervisor",
+      "existing_equivalent": "Existing release/recovery docs, emergency stop, budget and Team Room",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct OPS capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Deployment and incident operations under owner-scoped release policies; rollback and blast-radius evidence",
+      "dependencies": [
+        "WU-P1-VERTICAL-001",
+        "WU-P2-OBS-001"
+      ],
+      "target_implementation_phase": "P3",
+      "user_visible_benefit": "Governed autonomous release, incident response and maintenance at scale",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-OPS",
+      "work_unit_mappings": [
+        "WU-P3-OPS-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-059",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-060",
+      "repository_or_project": "chaos-mesh/chaos-mesh",
+      "candidate_url": "https://github.com/chaos-mesh/chaos-mesh",
+      "capability_categories": [
+        "OPS"
+      ],
+      "strategic_purpose": "Governed autonomous release, incident response and maintenance at scale",
+      "problem_addressed": "Product delivery stops at merge and operational recovery is manual",
+      "onecompany_component": "DeploymentProvider / operational supervisor",
+      "existing_equivalent": "Existing release/recovery docs, emergency stop, budget and Team Room",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct OPS capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Deployment and incident operations under owner-scoped release policies; rollback and blast-radius evidence",
+      "dependencies": [
+        "WU-P1-VERTICAL-001",
+        "WU-P2-OBS-001"
+      ],
+      "target_implementation_phase": "P3",
+      "user_visible_benefit": "Governed autonomous release, incident response and maintenance at scale",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-OPS",
+      "work_unit_mappings": [
+        "WU-P3-OPS-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-060",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    },
+    {
+      "capability_id": "EXT-061",
+      "repository_or_project": "github/gh-aw",
+      "candidate_url": "https://github.com/github/gh-aw",
+      "capability_categories": [
+        "OPS"
+      ],
+      "strategic_purpose": "Governed autonomous release, incident response and maintenance at scale",
+      "problem_addressed": "Product delivery stops at merge and operational recovery is manual",
+      "onecompany_component": "DeploymentProvider / operational supervisor",
+      "existing_equivalent": "Existing release/recovery docs, emergency stop, budget and Team Room",
+      "proposed_integration_approach": "Assess and integrate only the smallest distinct OPS capability; prefer adapter or architectural patterns to copying another orchestration system.",
+      "required_provider_interface_contract": "Deployment and incident operations under owner-scoped release policies; rollback and blast-radius evidence",
+      "dependencies": [
+        "WU-P1-VERTICAL-001",
+        "WU-P2-OBS-001"
+      ],
+      "target_implementation_phase": "P3",
+      "user_visible_benefit": "Governed autonomous release, incident response and maintenance at scale",
+      "cost_implications": "Measure setup, operating, model/API and reviewer costs; enforce existing zero-additional-spend default.",
+      "infrastructure_implications": "Inventory runtime, local vs hosted availability, storage, isolation, observability and recovery before activation.",
+      "privacy_security_implications": "Review permissions, prompt/data retention, tenant boundaries, secret scrubbing, supply chain, and advisory-only authority.",
+      "license_commercial_use_assessment": "NOT VERIFIED: inspect exact upstream/fork LICENSE, transitive code/assets, SaaS terms and distribution/network obligations before adoption.",
+      "validation_proof_of_value": "Reproducible fixed baseline comparison, success/failure/adversarial cases, privacy checks, measurable user-visible benefit and no authority regression.",
+      "acceptance_criteria": [
+        "No new control-plane authority or duplicate writer",
+        "Document exact-version license, commercial and cost verdict",
+        "Prove isolated bounded adapter/pattern against native baseline",
+        "Record failing/outage and recovery evidence",
+        "Link result to canonical roadmap and measurable outcome"
+      ],
+      "proposed_epic": "EPIC-EVOL-OPS",
+      "work_unit_mappings": [
+        "WU-P3-OPS-001"
+      ],
+      "candidate_assessment_task": "ASSESS-EXT-061",
+      "assessment_task_status": "PROPOSED_NOT_ADMITTED",
+      "adoption_decision": "EXPERIMENT",
+      "adoption_status": "PLANNED_NOT_INSTALLED",
+      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
+    }
+  ],
+  "protected_future_commitments": {
+    "NTinkicht/kserve": "WU-P2-KSERVE-001",
+    "NTinkicht/supermemory": "WU-P2-SUPERMEMORY-001",
+    "volcengine/OpenViking": "WU-P2-OPENVIKING-001",
+    "google/artemis": "WU-P2-ARTEMIS-001"
+  }
+}

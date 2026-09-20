@@ -1,6 +1,6 @@
 # OneCompany: master evolution roadmap and Phase 0 handoff
 
-**Directive date:** 2026-09-20. **Tracking WU:** #123 (WU-STRATEGY-001). **Product parent:** #92 and #36. **Inventory:** [versioned external capability register](../../.onecompany/external-capability-register.json).
+**Directive date:** 2026-09-20. **Tracking WU:** #123 (WU-STRATEGY-001). **Product parent:** #92 and #36. **Inventory:** [versioned external capability register](../.onecompany/external-capability-register.json).
 
 > ONE HUMAN. ONE COMPANY. A COMPLETE AI-POWERED SOFTWARE ORGANIZATION.
 
@@ -125,7 +125,7 @@ Track first-run user effort; time to useful brief; correct feature/AC coverage; 
 
 ## 8. Traceability and work-start protocol
 
-The [register](../../.onecompany/external-capability-register.json) is the coverage ledger for all candidates; issue #123 is the Phase 0 WU; existing #47 is the OpenViking evaluation. Proposed `WU-P*` and `ASSESS-EXT-*` IDs are **not** live leases, READY queue entries or a license to open duplicate PRs. Next reviewed planning increment should add validated portfolio entities, requirement AC links and admitted nonconflicting WUs using the existing schemas; preserve the original backlog history and consult GitHub live state every time.
+The [register](../.onecompany/external-capability-register.json) is the coverage ledger for all candidates; issue #123 is the Phase 0 WU; existing #47 is the OpenViking evaluation. Proposed `WU-P*` and `ASSESS-EXT-*` IDs are **not** live leases, READY queue entries or a license to open duplicate PRs. Next reviewed planning increment should add validated portfolio entities, requirement AC links and admitted nonconflicting WUs using the existing schemas; preserve the original backlog history and consult GitHub live state every time.
 
 **First executable vertical slice:** disposable new full-stack application, basic sign-inless CRUD flow and safe local database fixture; user describes intended capability; receive and edit brief; approve bounded WU; harness implements on one canonical PR; application starts; Playwright + essential API/security checks collect exact-build evidence; independent non-author review; authorized merge; human-visible preview; Mission Control reports evidence, elapsed time and next dependency-ready WU. No real patient, payment, credential or production data.
 

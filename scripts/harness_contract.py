@@ -142,9 +142,13 @@ def assess_intent(
         return deny("UNKNOWN_PROVIDER_SEAM")
     if not snapshot.provider_available:
         return deny("PROVIDER_UNAVAILABLE")
-    if provider_configuration is not None and not provider_configuration.get(
-        intent.provider_seam, False
-    ):
+    # Native is the only default. Optional providers must be explicitly
+    # configured by the trusted parent; a missing map cannot activate them.
+    configured = (
+        {"native": True}
+        if provider_configuration is None else provider_configuration
+    )
+    if configured.get(intent.provider_seam) is not True:
         return deny("PROVIDER_NOT_CONFIGURED")
     return HarnessAdmission(True, "ADMITTED_FOR_TRUSTED_PARENT", (
         "candidate matches current supplied snapshot; parent must still "

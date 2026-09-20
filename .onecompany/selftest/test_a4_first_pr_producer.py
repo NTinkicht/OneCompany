@@ -535,5 +535,27 @@ class FirstPRProducerTests(unittest.TestCase):
             producer.produce(FakeGitHub(REPO), **inputs)
 
 
+    def test_mutating_runner_templates_receive_out_of_band_stop(self):
+        """Owner variable skips new hosted jobs and reaches Python worker."""
+        source = ROOT / ".onecompany" / "templates" / "workflows"
+        for name in (
+            "onecompany-a4-pr-producer.yml.disabled",
+            "onecompany-a4-fixture-pr.yml.disabled",
+            "onecompany-l2-fixture-repair.yml.disabled",
+        ):
+            with self.subTest(name=name):
+                body = (source / name).read_text(encoding="utf-8")
+                self.assertIn(
+                    "(vars.ONECOMPANY_EMERGENCY_STOP == '' || "
+                    "vars.ONECOMPANY_EMERGENCY_STOP == 'false') &&",
+                    body,
+                )
+                self.assertIn(
+                    "ONECOMPANY_EMERGENCY_STOP: "
+                    "${{ vars.ONECOMPANY_EMERGENCY_STOP }}",
+                    body,
+                )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -222,28 +222,39 @@
     },
     {
       "actor_id": "mistral-vibe",
-      "setup_state": "not_started",
-      "verified_surfaces": [],
-      "verified_capabilities": [],
+      "setup_state": "ready",
+      "verified_surfaces": [
+        "github-actions-onecompany-mistral-vibe-readonly"
+      ],
+      "verified_capabilities": [
+        "repository_intelligence",
+        "test_design"
+      ],
       "temporarily_unavailable_capabilities": [],
       "repository_access": {
-        "read": false,
+        "read": true,
         "write": false,
         "review": false,
         "merge": false
       },
       "unattended": {
-        "configured": false,
-        "verified": false
+        "configured": true,
+        "verified": true
       },
       "capacity": {
         "implementation_streams": 0,
-        "measured": false,
-        "observed_at": null,
-        "evidence": []
+        "measured": true,
+        "observed_at": "2026-09-20T22:04:57Z",
+        "evidence": [
+          "Live GitHub-hosted Actions run 35540501655; Vibe included entitlement check and actual inference succeeded without Codespace, no paid fallback"
+        ]
       },
-      "last_verified_at": null,
-      "evidence": []
+      "last_verified_at": "2026-09-20T22:04:57Z",
+      "evidence": [
+        "https://github.com/NTinkicht/OneCompany/actions/runs/35540501655",
+        "https://github.com/NTinkicht/OneCompany/issues/130#issuecomment-5753004827",
+        "Model-generated evidence correctly reported protected main 9834c646eaa6ffb16b5471583ec4a554e14a5331, zero spend, no lease and bounded review test idea; no write/review/merge capability established"
+      ]
     },
     {
       "actor_id": "grok-4-6-interactive",

@@ -76,7 +76,15 @@ state.
   as `.github/workflows/onecompany-l2-fixture-repair.yml`, unchanged.
 
 The validation workflow's reviewed Git blob is pinned in both worker and
-verifier. Its initial A4 first-PR fixture **fails intentionally** because
+verifier.
+Live pilot run `35507892719` exposed a pre-existing Python syntax error in
+the originally pinned L2 validation template. That failure is **not** proof
+of the intended missing-repair marker and must not be supplied as
+`failed_run_id`. The corrected validation template now has a compile-time
+regression test. Install its reviewed exact Git blob, start a fresh canonical
+fixture PR from the new trusted base, and collect a NEW failing Actions job
+whose GitHub-hosted runtime log contains exactly one
+`L2_FIXTURE_INTENTIONAL_FAILURE:fixture_ci_repair_not_complete` marker. Its initial A4 first-PR fixture **fails intentionally** because
 `Repair: complete` is absent. It becomes green only after the bounded repair.
 Record the failed run ID at the exact initial PR head.
 

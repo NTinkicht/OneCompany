@@ -16,6 +16,7 @@ import bootstrap
 WORKFLOW = ROOT / ".github/workflows/onecompany-mistral-vibe-wake.yml"
 DISPATCH = ROOT / ".onecompany/dispatch.json"
 READINESS = ROOT / ".onecompany/readiness.json"
+ROUTING = ROOT / ".onecompany/routing.json"
 
 
 class MistralCloudWakeTests(unittest.TestCase):
@@ -138,6 +139,23 @@ class MistralCloudWakeTests(unittest.TestCase):
             grok["grok-supergrok-cloud-wake"],
         ):
             self.assertFalse(mechanism["configured"])
+
+    def test_active_actor_only_routes_live_capabilities(self):
+        routing = json.loads(ROUTING.read_text(encoding="utf-8"))
+        dispatch = json.loads(DISPATCH.read_text(encoding="utf-8"))
+        mistral = next(x for x in dispatch["actors"] if x["actor_id"] == "mistral-vibe")
+        configured = [m for m in mistral["mechanisms"] if m["configured"]]
+        self.assertEqual(len(configured), 1)
+        self.assertEqual(configured[0]["id"], "vibe-readonly-wake")
+        self.assertEqual(configured[0]["capabilities"],
+                         ["repository_intelligence", "test_design"])
+        for mechanism in mistral["mechanisms"]:
+            self.assertTrue(set(mechanism["capabilities"]).issubset(
+                {"repository_intelligence", "test_design"}
+            ))
+        for capability, actor_ids in routing["preference_by_capability"].items():
+            if "mistral-vibe" in actor_ids:
+                self.assertIn(capability, {"repository_intelligence", "test_design"})
 
     def test_readiness_not_inflated_by_workflow_presence(self):
         readiness = json.loads(READINESS.read_text(encoding="utf-8"))

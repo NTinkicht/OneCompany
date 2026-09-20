@@ -132,6 +132,13 @@ def latest_ci_green(head: str) -> bool:
     return True
 
 
+def clean_git_env() -> dict[str, str]:
+    """Pin each Git read to this checked-out repository, not inherited overrides."""
+    return {key: value for key, value in os.environ.items()
+            if not key.startswith("GIT_")}
+
+
+
 def output(**fields: object) -> None:
     path = os.environ["GITHUB_OUTPUT"]
     with open(path, "a", encoding="utf-8") as stream:
@@ -169,14 +176,14 @@ def evidence() -> None:
         if not independent_material_authors(number, head) or not latest_ci_green(head):
             raise ValueError("REVIEW_TARGET_STALE")
         actual_head = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, timeout=10
+            ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, timeout=10, env=clean_git_env()
         ).decode("ascii").strip()
         if actual_head != head:
             raise ValueError("REVIEW_CHECKOUT_STALE")
         diff = subprocess.check_output(
             ["git", "diff", "--no-ext-diff", "--no-textconv",
              "--no-color", "--no-renames", f"{base}...{head}", "--"],
-            stderr=subprocess.DEVNULL, timeout=20,
+            stderr=subprocess.DEVNULL, timeout=20, env=clean_git_env(),
         )
         if not diff or len(diff) > MAX_DIFF_BYTES:
             raise ValueError("REVIEW_DIFF_BOUND_EXCEEDED")
@@ -210,7 +217,7 @@ def stage_review(
         if not independent_material_authors(number, head) or not latest_ci_green(head):
             raise ValueError("REVIEW_TARGET_STALE")
         current = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, timeout=10
+            ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, timeout=10, env=clean_git_env()
         ).decode("ascii").strip()
         if current != head:
             raise ValueError("REVIEW_CHECKOUT_STALE")
@@ -223,7 +230,7 @@ def stage_review(
         names = subprocess.check_output(
             ["git", "diff", "--name-only", "-z", "--diff-filter=ACMR",
              f"{base}...{head}", "--"],
-            stderr=subprocess.DEVNULL, timeout=20,
+            stderr=subprocess.DEVNULL, timeout=20, env=clean_git_env(),
         ).split(b"\0")
         names = [n.decode("utf-8") for n in names if n]
         if not names or len(names) > 16:

@@ -6,6 +6,7 @@ The model gets read-only tools; no model output authorizes merging or writing.
 """
 from __future__ import annotations
 
+import fnmatch
 import json
 import os
 import re
@@ -20,9 +21,14 @@ PR_NUMBER = re.compile(r"[1-9][0-9]{0,5}\Z")
 FIELD = re.compile(r"(?m)^([a-z_]+):[ \t]*([^\r\n]*?)[ \t]*$")
 REQUIRED_CI = frozenset({
     "OneCompany Validate",
-    "OneCompany Ledger Read Smoke",
     "OneCompany Handoff Supervision",
 })
+LEDGER_CHECK = "OneCompany Ledger Read Smoke"
+TRUSTED_LEDGER_WORKFLOW = Path(os.environ.get(
+    "ONECOMPANY_LEDGER_RULES_FILE",
+    str(Path(__file__).resolve().parents[1] /
+        ".github/workflows/onecompany-ledger-read-smoke.yml"),
+))
 MISTRAL_ALIASES = frozenset({"mistral", "mistral-vibe", "mistral_vibe"})
 MATERIAL_AUTHOR = re.compile(r"(?im)^Material-Author:[ \t]*([a-z0-9_-]+)[ \t]*$")
 DIFF_NAME = ".onecompany_mistral_review.diff"
@@ -105,12 +111,83 @@ def independent_material_authors(number: int, expected_head: str) -> bool:
     raise ValueError("COMMIT_PROVENANCE_OVER_LIMIT")
 
 
-def latest_ci_green(head: str) -> bool:
+def ledger_trigger_paths(
+    source: Path = TRUSTED_LEDGER_WORKFLOW,
+) -> frozenset[str]:
+    """Read exact PR path filters from a *protected-main* workflow snapshot.
+
+    Do not parse this rule from the untrusted candidate PR checkout.
+    Fail closed if the trusted path filter cannot be unambiguously extracted.
+    """
+    lines = source.read_text(encoding="utf-8").splitlines()
+    in_on = in_pr = in_paths = False
+    paths: list[str] = []
+    for line in lines:
+        if line == "on:":
+            in_on = True
+            in_pr = in_paths = False
+            continue
+        if in_on and line and not line[0].isspace():
+            in_on = in_pr = in_paths = False
+        if in_on and line == "  pull_request:":
+            in_pr = True
+            in_paths = False
+            continue
+        if in_pr and line.startswith("  ") and not line.startswith("    ") and line.strip():
+            in_pr = in_paths = False
+        if in_pr and line == "    paths:":
+            if in_paths:
+                raise ValueError("REPEATED_LEDGER_PATH_FILTER")
+            in_paths = True
+            continue
+        if in_paths and line.startswith("      - "):
+            name = line[len("      - "):].strip().strip("'\"")
+            if not name or name.startswith(("/", "../", "!")) or "\\" in name:
+                raise ValueError("UNSAFE_LEDGER_PATH_FILTER")
+            paths.append(name)
+        elif in_paths and line.strip() and not line.strip().startswith("#"):
+            in_paths = False
+    if not paths or len(paths) != len(set(paths)):
+        raise ValueError("LEDGER_PATH_FILTER_UNAVAILABLE")
+    return frozenset(paths)
+
+
+def changed_pr_paths(number: int) -> frozenset[str]:
+    """Fail closed on truncated or malformed GitHub PR-file pagination."""
+    paths: set[str] = set()
+    for page in range(1, 7):
+        items = github_json(
+            f"repos/{REPO}/pulls/{number}/files?per_page=100&page={page}"
+        )
+        if not isinstance(items, list):
+            raise ValueError("REVIEW_FILES_UNAVAILABLE")
+        for item in items:
+            filename = item.get("filename") if isinstance(item, dict) else None
+            if not isinstance(filename, str) or not filename or filename.startswith("/"):
+                raise ValueError("REVIEW_FILENAME_INVALID")
+            paths.add(filename)
+        if len(items) < 100:
+            if not paths:
+                raise ValueError("REVIEW_FILES_EMPTY")
+            return frozenset(paths)
+    raise ValueError("REVIEW_FILES_OVER_LIMIT")
+
+
+def latest_ci_green(number: int, head: str) -> bool:
+    changed = changed_pr_paths(number)
+    patterns = ledger_trigger_paths()
+    required = set(REQUIRED_CI)
+    if any(
+        fnmatch.fnmatchcase(path, pattern)
+        for path in changed
+        for pattern in patterns
+    ):
+        required.add(LEDGER_CHECK)
     result = github_json(
         f"repos/{REPO}/actions/runs?head_sha={head}&event=pull_request&per_page=100"
     )
     runs = result.get("workflow_runs", [])
-    for name in REQUIRED_CI:
+    for name in required:
         matching = [
             r for r in runs
             if r.get("head_sha") == head
@@ -130,6 +207,7 @@ def latest_ci_green(head: str) -> bool:
         if last.get("status") != "completed" or last.get("conclusion") != "success":
             return False
     return True
+
 
 
 def clean_git_env() -> dict[str, str]:
@@ -156,7 +234,7 @@ def prepare() -> None:
         current_pr(number, head, base)
         if not independent_material_authors(number, head):
             raise ValueError("REVIEW_HAS_NO_COMMITS")
-        if not latest_ci_green(head):
+        if not latest_ci_green(number, head):
             raise ValueError("REVIEW_CI_NOT_GREEN")
     except (ValueError, subprocess.CalledProcessError, subprocess.TimeoutExpired, KeyError):
         # No untrusted input or token is echoed to Actions outputs.
@@ -173,7 +251,7 @@ def evidence() -> None:
         if not SHA.fullmatch(head) or not SHA.fullmatch(base):
             raise ValueError("REVIEW_SHA_INVALID")
         current_pr(number, head, base)
-        if not independent_material_authors(number, head) or not latest_ci_green(head):
+        if not independent_material_authors(number, head) or not latest_ci_green(number, head):
             raise ValueError("REVIEW_TARGET_STALE")
         actual_head = subprocess.check_output(
             ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, timeout=10, env=clean_git_env()
@@ -214,7 +292,7 @@ def stage_review(
         number = int(os.environ["REVIEW_PR"])
         head, base = os.environ["REVIEW_SHA"], os.environ["REVIEW_BASE"]
         current_pr(number, head, base)
-        if not independent_material_authors(number, head) or not latest_ci_green(head):
+        if not independent_material_authors(number, head) or not latest_ci_green(number, head):
             raise ValueError("REVIEW_TARGET_STALE")
         current = subprocess.check_output(
             ["git", "rev-parse", "HEAD"], stderr=subprocess.DEVNULL, timeout=10, env=clean_git_env()

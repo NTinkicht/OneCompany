@@ -35,6 +35,8 @@ def fake_api(route):
     if "/pulls/137/commits?" in route:
         return [{"sha": HEAD, "author": {"login": "NTinkicht"}, "commit": {
             "message": "fix: bounded change\n\nMaterial-Author: chatgpt"}}]
+    if "/pulls/137/files?" in route:
+        return [{"filename": "scripts/onboard.py"}]
     if "/actions/runs?" in route:
         return {"workflow_runs": [
             {"name": name, "head_sha": HEAD, "event": "pull_request",
@@ -109,7 +111,7 @@ class MistralCloudReviewTests(unittest.TestCase):
 
     def test_latest_failed_or_running_ci_cannot_be_hidden_by_old_green(self):
         with patch.object(target, "github_json", side_effect=fake_api):
-            self.assertTrue(target.latest_ci_green(HEAD))
+            self.assertTrue(target.latest_ci_green(137, HEAD))
         def stale_ci(route):
             data = fake_api(route)
             if "/actions/runs?" in route:
@@ -120,7 +122,62 @@ class MistralCloudReviewTests(unittest.TestCase):
                 })
             return data
         with patch.object(target, "github_json", side_effect=stale_ci):
-            self.assertFalse(target.latest_ci_green(HEAD))
+            self.assertFalse(target.latest_ci_green(137, HEAD))
+
+    def test_ledger_smoke_only_required_for_trusted_matching_pr_paths(self):
+        from unittest.mock import patch as override
+        self.assertIn(
+            ".onecompany/ledger.json",
+            target.ledger_trigger_paths(
+                ROOT / ".github/workflows/onecompany-ledger-read-smoke.yml"
+            ),
+        )
+        with override.object(target, "github_json", side_effect=fake_api):
+            self.assertTrue(target.latest_ci_green(137, HEAD))
+        def ledger_changed(route):
+            if "/pulls/137/files?" in route:
+                return [{"filename": ".onecompany/ledger.json"}]
+            return fake_api(route)
+        with override.object(target, "github_json", side_effect=ledger_changed):
+            self.assertFalse(target.latest_ci_green(137, HEAD))
+        def ledger_green(route):
+            result = ledger_changed(route)
+            if "/actions/runs?" in route:
+                result["workflow_runs"].append({
+                    "name": target.LEDGER_CHECK,
+                    "head_sha": HEAD, "event": "pull_request",
+                    "id": 80, "run_number": 3, "run_attempt": 1,
+                    "status": "completed", "conclusion": "success",
+                })
+            return result
+        with override.object(target, "github_json", side_effect=ledger_green):
+            self.assertTrue(target.latest_ci_green(137, HEAD))
+        def ledger_new_red(route):
+            result = ledger_green(route)
+            if "/actions/runs?" in route:
+                result["workflow_runs"].append({
+                    "name": target.LEDGER_CHECK,
+                    "head_sha": HEAD, "event": "pull_request",
+                    "id": 90, "run_number": 4, "run_attempt": 1,
+                    "status": "completed", "conclusion": "failure",
+                })
+            return result
+        with override.object(target, "github_json", side_effect=ledger_new_red):
+            self.assertFalse(target.latest_ci_green(137, HEAD))
+
+    def test_pr_file_api_fails_closed_on_missing_data(self):
+        def bad_files(route):
+            if "/pulls/137/files?" in route:
+                return [{"unexpected_field": "unsafe"}]
+            return fake_api(route)
+        with patch.object(target, "github_json", side_effect=bad_files):
+            with self.assertRaisesRegex(ValueError, "REVIEW_FILENAME_INVALID"):
+                target.changed_pr_paths(137)
+        with self.assertRaisesRegex(ValueError, "LEDGER_PATH_FILTER_UNAVAILABLE"):
+            with tempfile.TemporaryDirectory() as temp:
+                bad = Path(temp) / "ledger.yml"
+                bad.write_text("on:\n  pull_request:\n    branches: [main]\n")
+                target.ledger_trigger_paths(bad)
 
     def test_prepare_never_promotes_invalid_dispatch(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -247,6 +304,8 @@ class MistralCloudReviewTests(unittest.TestCase):
         self.assertIn("--workdir /tmp/onecompany-mistral-review-stage", review)
         self.assertIn("steps.stage.outputs.ready == 'true'", review)
         self.assertIn("cp AGENTS.md /tmp/onecompany-mistral-trusted", review)
+        self.assertIn("cp .github/workflows/onecompany-ledger-read-smoke.yml", review)
+        self.assertIn("ONECOMPANY_LEDGER_RULES_FILE:", review)
         self.assertNotIn('--workdir "$GITHUB_WORKSPACE"', review)
         self.assertNotIn("contents: write", review)
         self.assertNotIn("pull-requests: write", review)

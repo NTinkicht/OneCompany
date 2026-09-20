@@ -22,6 +22,12 @@ Observed source-repository snapshot 2026-09-20: `main` at `8f92e0ed278b2c71e904e
 
 **Transition rule:** do not create a duplicate WU writer. Phase 0 documentation and dependency-independent design can proceed now; target-writing work requires a verified clean handoff. OneCompany source must remain free of any named target's live operational records. Never reuse Pilot C or other disposable evidence as production/customer qualification.
 
+### Phase 0 legacy wind-down checkpoint (2026-09-20; WU-P0-RECONCILE-001 / #128)
+
+This updates the provisional checkpoint above **without rewriting historical evidence**. Source PR #102 merged useful A4 factory code; source PR #122 merged recovery code. Pilot A PR #3, Pilot B PR #2 and Pilot C PR #9 were all verified **closed without merge**. Pilot C's original native implementation lease `88ac3910-759b-4247-90d9-d0dea6e54e70` has a matching owner-published [ROLE_LEASE_RELEASED](https://github.com/NTinkicht/onecompany-pilot-c/issues/1#issuecomment-5750297646) in the archived Team Room #1. C demonstrated a real same-PR bot repair and green repaired-head CI, but initial worker success, strict independent platform review and governed P3 merge were **not** established.
+
+The source `WU-A4-FACTORY-001` queue item is `CANCELLED` as an **archived/superseded qualification campaign**, not `DONE` and not a claim that the merged implementation vanished. No old-pilot writer may be inferred from that item. The owner reported that the Pilot C repair opt-in was disabled; the available connector cannot independently read the target Actions variable, so the report is not represented as a fresh API verification. No new legacy pilot is required before the new trajectory.
+
 ## 1. Product outcome and simple first-time journey
 
 A new person should be able to say “build this idea” or “connect this repository.” OneCompany assesses the project read-only, asks only consequential clarifications, drafts an editable Product Brief, shows proposed features/dependencies and acceptance criteria, and obtains bounded permission to proceed. It then configures **one eligible worker**, creates one canonical WU, runs the *actual application* where supported, tests what the person can see and use, records evidence and independent non-author review, merges eligible changes, offers a preview, and explains what happened and what comes next.

@@ -52,7 +52,7 @@
       "id": "WU-A4-FACTORY-001",
       "title": "Generic first-PR producer and isolated qualification",
       "work_kind": "ENABLER",
-      "status": "IN_PROGRESS",
+      "status": "CANCELLED",
       "priority": 100,
       "dependencies": [
         "WU-PFC-001"
@@ -90,7 +90,17 @@
         "lower": 8,
         "upper": 21,
         "unit": "relative_points"
-      }
+      },
+      "closure_reason": "Legacy A4/P1–P3 disposable qualification campaign archived after owner trajectory change. PR #102 merged useful factory code, but strict end-to-end pilot qualification was NOT established; do not treat this cancelled planning item as DONE, READY or a lease.",
+      "closure_evidence": [
+        "NTinkicht/OneCompany PR #102 merged (useful source implementation)",
+        "NTinkicht/onecompany-pilot-a PR #3 closed unmerged",
+        "kaporal159/onecompany-pilot-b PR #2 closed unmerged",
+        "NTinkicht/onecompany-pilot-c PR #9 closed unmerged",
+        "NTinkicht/onecompany-pilot-c issue #1 ROLE_LEASE_RELEASED comment 5750297646 for lease 88ac3910-759b-4247-90d9-d0dea6e54e70",
+        "NTinkicht/OneCompany issue #92 wind-down record; no strict initial L2_REPAIR_COMMITTED/review/MERGED proof",
+        "NTinkicht/OneCompany issue #128 transition WU"
+      ]
     }
   ]
 }

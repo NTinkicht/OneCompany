@@ -484,5 +484,46 @@ class FirstPRProducerTests(unittest.TestCase):
             producer.produce(FakeGitHub(REPO), **inputs)
 
 
+    def test_actual_rest_root_url_has_no_trailing_slash(self):
+        """The real client must GET /repos/owner/name, never /name/."""
+        class Reply:
+            def __enter__(self):
+                return self
+            def __exit__(self, *unused):
+                return False
+            def read(self):
+                return b'{"full_name":"owner/disposable-a"}'
+        with patch.object(
+            producer.urllib.request, "urlopen", return_value=Reply(),
+        ) as call:
+            result = producer.GitHub(REPO, "synthetic-token").call("GET", "/")
+        self.assertEqual(result["full_name"], REPO)
+        request = call.call_args.args[0]
+        self.assertEqual(
+            request.full_url, "https://api.github.com/repos/" + REPO,
+        )
+        with self.assertRaisesRegex(producer.Refused, "invalid_api_path"):
+            producer.GitHub(REPO, "synthetic-token").call("POST", "/", {})
+
+    def test_external_stop_refuses_preflight_and_each_api_mutation(self):
+        """A stop outside the target config freezes all GitHub mutations."""
+        api = FakeGitHub(REPO)
+        with patch.dict(os.environ, {"ONECOMPANY_EMERGENCY_STOP": "true"}):
+            with self.assertRaisesRegex(producer.Refused, "emergency_stop"):
+                producer.produce(api, **installation())
+            self.assertEqual(api.created_refs, 0)
+            with self.assertRaisesRegex(
+                producer.Refused, "out_of_band_emergency_stop_active",
+            ):
+                producer.GitHub(REPO, "synthetic-token").call(
+                    "POST", "/git/blobs", {"content": "no"},
+                )
+        # Missing config stop state is not interpreted as permission.
+        inputs = installation()
+        del inputs["config"]["safety"]["emergency_stop"]
+        with self.assertRaisesRegex(producer.Refused, "emergency_stop"):
+            producer.produce(FakeGitHub(REPO), **inputs)
+
+
 if __name__ == "__main__":
     unittest.main()

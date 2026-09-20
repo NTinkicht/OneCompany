@@ -20,6 +20,8 @@ jobs:
       contains(github.event.comment.body, '@mistral-vibe') &&
       contains(github.event.comment.body, 'MISTRAL_REVIEW_V1')
     runs-on: ubuntu-latest
+    env:
+      ONECOMPANY_LEDGER_RULES_FILE: /tmp/onecompany-mistral-trusted/ledger-workflow.yml
     timeout-minutes: 15
     concurrency:
       group: onecompany-mistral-advisory-review

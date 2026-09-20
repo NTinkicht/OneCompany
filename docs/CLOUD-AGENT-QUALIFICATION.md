@@ -15,7 +15,7 @@ the USD 0 extra-spend source budget. A blocked actor does not block unrelated
 qualified team members; authority for a *single canonical WU/PR* may be
 transferred only through the native verified lease lifecycle.
 
-## Live read-only Mistral qualification (2026-09-21)
+## Live read-only Mistral qualification (2026-09-20 UTC / 2026-09-21 Asia/Dubai)
 
 **Verified, narrow scope only:** GitHub-hosted owner-authorized read-only
 `@mistral-vibe` wake on #130 executed authentic model inference on protected

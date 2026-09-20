@@ -78,6 +78,21 @@ class OnboardTests(unittest.TestCase):
             self.assertIsNone(draft["audience"])
             self.assertFalse((target / ".onecompany").exists())
 
+    def test_installed_project_missing_repository_gets_specific_recovery(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp) / "installed"; target.mkdir()
+            control = target / ".onecompany"; control.mkdir()
+            (control / "config.json").write_text(
+                '{"project":{"repository":null}}', encoding="utf-8"
+            )
+            report = onboard.analyze(target)
+            self.assertEqual(report["mode"], "INSTALLED")
+            self.assertEqual(report["journey"]["steps"][1]["status"],
+                             "needs_attention")
+            self.assertIn("repair the configured repository",
+                          report["journey"]["next_action"])
+            self.assertFalse(report["journey"]["application_authorized"])
+
     def test_missing_repository_or_collision_stays_blocked_without_fake_approval(self):
         with tempfile.TemporaryDirectory() as temp:
             target = Path(temp) / "existing"; target.mkdir()

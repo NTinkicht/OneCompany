@@ -54,7 +54,7 @@ class MistralCloudWakeTests(unittest.TestCase):
     def test_effective_wake_structure_and_every_external_action_sha(self):
         # Check active YAML lines rather than matching strings in comments.
         content = WORKFLOW.read_text(encoding="utf-8")
-        active = "\\n".join(
+        active = "\n".join(
             line for line in content.splitlines()
             if line.strip() and not line.lstrip().startswith("#")
         )
@@ -71,8 +71,8 @@ class MistralCloudWakeTests(unittest.TestCase):
         ):
             self.assertIn(expected, active.splitlines())
         guard = re.search(
-            r"(?m)^    if: >-\\n((?:      [^\\n]+\\n)+)",
-            active + "\\n",
+            r"(?m)^    if: >-\n((?:      [^\n]+\n)+)",
+            active + "\n",
         )
         self.assertIsNotNone(guard)
         condition = guard.group(1)
@@ -84,11 +84,11 @@ class MistralCloudWakeTests(unittest.TestCase):
         ):
             self.assertIn(expected, condition)
         self.assertEqual(len(re.findall(r"(?m)^    if: >-$", active)), 1)
-        uses = re.findall(r"(?m)^\\s+-?\\s*uses:\\s*(\\S+)\\s*$", active)
+        uses = re.findall(r"(?m)^\s+-?\s*uses:\s*(\S+)\s*$", active)
         self.assertEqual(len(uses), 2, uses)
         for reference in uses:
             self.assertRegex(reference, r"^actions/[a-z0-9-]+@[0-9a-f]{40}$")
-        self.assertNotRegex(active, r"(?m)^\\s+(?:contents|pull-requests): write$")
+        self.assertNotRegex(active, r"(?m)^\s+(?:contents|pull-requests): write$")
         self.assertNotRegex(active, r"(?m)^  pull_request_target:")
 
     def test_read_only_model_tools_and_cost_guards(self):

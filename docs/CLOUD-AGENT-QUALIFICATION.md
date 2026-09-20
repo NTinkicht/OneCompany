@@ -15,6 +15,23 @@ the USD 0 extra-spend source budget. A blocked actor does not block unrelated
 qualified team members; authority for a *single canonical WU/PR* may be
 transferred only through the native verified lease lifecycle.
 
+## Live read-only Mistral qualification (2026-09-21)
+
+**Verified, narrow scope only:** GitHub-hosted owner-authorized read-only
+`@mistral-vibe` wake on #130 executed authentic model inference on protected
+`main@9834c646eaa6ffb16b5471583ec4a554e14a5331` in
+[run 35540501655](https://github.com/NTinkicht/OneCompany/actions/runs/35540501655);
+the [github-actions[bot] result](https://github.com/NTinkicht/OneCompany/issues/130#issuecomment-5753004827)
+correctly identified the commit, no-extra-spend budget, wake ≠ lease, and
+a relevant deterministic test idea. This followed the negative preflight
+runs 35539354626 (`CONFIG_BLOCKED`) and 35539634038 (`AUTH_BLOCKED HTTP 401`).
+The owner corrected the private Vibe key and the zero-spend variable before
+the positive run. `vibe-readonly-wake` alone is configured and the
+`repository_intelligence` and `test_design` capabilities have live evidence;
+this does **not** verify a lease-bound developer, a binding independent
+reviewer, a model-authored test commit, a PR merge, or Grok Bot unattended
+execution. Do not send the key to an issue or another actor.
+
 ## Mistral Vibe (source repo only)
 
 The baseline copied/adapted from
@@ -42,7 +59,7 @@ Never paste the key, billing/session files, auth.json or PEM into issues/chats.
 A Vibe `whoami` success is an entitlement probe, **not** evidence that PAYG is
 disabled; verify billing in the provider console separately.
 
-**Initial real smoke (after the reviewed workflow is on main):**
+**Repeatable positive smoke (originally completed as run 35540501655):**
 owner posts `@mistral-vibe Read AGENTS.md and identify the actor's read-only
 permissions in 3 sentences; do not mutate files.` on issue #130. Check the
 `OneCompany Mistral Vibe Wake` run and its `github-actions[bot]` issue reply.
@@ -51,9 +68,9 @@ source repository, no secret, correct issue, Codespace/laptop off. Negative
 evidence: untrusted issue/author/comment skips, missing key/PAYG var reports
 `AUTH_BLOCKED`/`CONFIG_BLOCKED` without inference or paid fallback.
 
-**Readiness policy:** until the positive run, `mistral-vibe` remains disabled,
-configured=false and verified_capabilities empty; the wake dispatch mechanism
-remains configured=false. Do not infer eligibility from source code or
+**Readiness policy:** the positive run establishes only read-only repository
+intelligence and test design. The wake mechanism is now configured=true while
+code-writing, binding review and merge mechanisms remain configured=false. Do not infer eligibility from source code or
 Tabibi's run history. After a successful independent verification, a separate
 reviewed registry update may qualify *read-only* analysis/test-design; it must
 not turn on implementation or binding review by association.

@@ -40,6 +40,7 @@ jobs:
         run: |
           set -euo pipefail
           cp scripts/mistral_cloud_review.py /tmp/onecompany-mistral-review-trusted.py
+          cp .onecompany/budget.json /tmp/onecompany-budget-trusted.json
           python /tmp/onecompany-mistral-review-trusted.py prepare
 
       - name: Checkout the validated same-repository PR head
@@ -74,7 +75,7 @@ jobs:
           if ! python - <<'PY'
           import json
           from pathlib import Path
-          budget = json.loads(Path(".onecompany/budget.json").read_text())
+          budget = json.loads(Path("/tmp/onecompany-budget-trusted.json").read_text())
           ai = budget.get("ai", {})
           assert ai.get("additional_monthly_spend_cap") == 0
           assert all(ai.get(k) is False for k in ("allow_paid_fallback", "allow_overage", "allow_auto_topup", "allow_new_paid_vendor"))
@@ -321,7 +322,8 @@ jobs:
           fi
 
           {
-            echo "**mistral-vibe unattended cloud read-only wake**"
+            echo "**mistral-vibe cloud exact-head ADVISORY review (non-binding)**"
+            echo "PR #${REVIEW_PR:-not-admitted}; exact head ${REVIEW_SHA:-not-admitted}"
             echo
             if [[ "${TARGET_READY:-false}" != "true" ]]; then
               echo "${TARGET_STATUS:-REVIEW_TARGET_BLOCKED} - no valid exact-head review assignment; no model call."

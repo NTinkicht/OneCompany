@@ -49,6 +49,27 @@ def validate(value: Any, schema: dict[str, Any], path: str, errors: list[str]) -
         # OneCompany extension: key-level uniqueness and complete enum coverage for
         # inventories whose full records legitimately have distinct metadata. JSON
         # Schema uniqueItems alone does not enforce unique IDs on object arrays.
+        identity = schema.get("x-expectedRowsByKey")
+        if identity is not None:
+            key = identity["key"]
+            expected_rows = identity["values"]
+            if not isinstance(expected_rows, dict):
+                errors.append(f"{path}: invalid x-expectedRowsByKey values")
+            else:
+                item_schema = schema.get("items", {})
+                prop_schema = item_schema.get("properties", {}).get(key, {}) if isinstance(item_schema, dict) else {}
+                allowed = prop_schema.get("enum")
+                if isinstance(allowed, list) and set(expected_rows) != set(allowed):
+                    errors.append(f"{path}: x-expectedRowsByKey identities differ from {key} enum")
+                for index, item in enumerate(value):
+                    if not isinstance(item, dict) or item.get(key) not in expected_rows:
+                        continue  # Existing type/required/enum checks cover absent and unknown keys.
+                    for field, expected_value in expected_rows[item[key]].items():
+                        if item.get(field) != expected_value:
+                            errors.append(
+                                f"{path}[{index}].{field}: identity {item[key]!r} must map to "
+                                f"{expected_value!r}, got {item.get(field)!r}"
+                            )
         for key in schema.get("x-uniqueByProperties", []):
             seen: dict[str, int] = {}
             for index, item in enumerate(value):

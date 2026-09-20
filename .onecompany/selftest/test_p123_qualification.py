@@ -185,18 +185,43 @@ class SamePRRepairTests(unittest.TestCase):
             self.invoke(api, options)
         self.assertEqual(api.writes, 0)
 
-    def test_uncertain_ref_update_never_retries_or_rewrites(self):
+    def test_uncertain_ref_update_is_confirmed_without_repeated_write(self):
         api, options = self.setup_pilot()
         api.lose_patch_response = True
-        with self.assertRaisesRegex(
-            producer.Refused, "repair_ref_indeterminate_reconcile_no_retry"
-        ):
-            self.invoke(api, options)
+        # GitHub committed the exact single-file change, but its PATCH
+        # response was lost. A verified post-write read is sufficient to
+        # identify the action; a second Git ref PATCH remains forbidden.
+        first = self.invoke(api, options)
+        self.assertEqual(first["status"], "L2_REPAIR_COMMITTED")
+        self.assertFalse(first["already_applied"])
         self.assertEqual(api.writes, 1)
         self.assertEqual(api.created_prs, 1)
         api.lose_patch_response = False
         self.assertTrue(self.invoke(api, options)["already_applied"])
         self.assertEqual(api.writes, 1)
+
+    def test_uncertain_ref_update_without_publication_fails_closed(self):
+        api, options = self.setup_pilot()
+        previous = api.call
+        patch_calls = []
+
+        def dropped_before_update(method, path, payload=None):
+            if method == "PATCH" and path == (
+                "/git/refs/heads/" + producer.branch_for(WU)
+            ):
+                patch_calls.append((method, path))
+                raise producer.ApiFailure(503)
+            return previous(method, path, payload)
+
+        api.call = dropped_before_update
+        with patch.object(repair.time, "sleep"):
+            with self.assertRaisesRegex(
+                producer.Refused, "repair_ref_indeterminate_reconcile_no_retry"
+            ):
+                self.invoke(api, options)
+        self.assertEqual(len(patch_calls), 1)
+        self.assertEqual(api.writes, 0)
+        self.assertEqual(api.refs[producer.branch_for(WU)], CLAIM)
 
     def test_no_successful_ci_is_pretended_failed(self):
         api, options = self.setup_pilot()

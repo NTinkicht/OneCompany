@@ -175,7 +175,7 @@ def evidence() -> None:
             raise ValueError("REVIEW_CHECKOUT_STALE")
         diff = subprocess.check_output(
             ["git", "diff", "--no-ext-diff", "--no-textconv",
-             "--no-color", "--no-renames", base, head, "--"],
+             "--no-color", "--no-renames", f"{base}...{head}", "--"],
             stderr=subprocess.DEVNULL, timeout=20,
         )
         if not diff or len(diff) > MAX_DIFF_BYTES:

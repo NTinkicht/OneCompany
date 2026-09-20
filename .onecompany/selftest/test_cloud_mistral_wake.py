@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+import tempfile
 import sys
 import unittest
 from pathlib import Path
@@ -20,7 +21,17 @@ READINESS = ROOT / ".onecompany/readiness.json"
 class MistralCloudWakeTests(unittest.TestCase):
     def test_wake_is_source_only_and_not_in_fresh_installation(self):
         self.assertIn("docs/CLOUD-AGENT-QUALIFICATION.md", bootstrap.SOURCE_ONLY_PLANNING_FILES)
-        self.assertNotIn(str(WORKFLOW.relative_to(ROOT)), bootstrap.COPY_PATHS)
+        workflow_path = str(WORKFLOW.relative_to(ROOT))
+        self.assertIn(workflow_path, bootstrap.SOURCE_INSTALLATION_EXCLUSIONS)
+        self.assertNotIn(workflow_path, bootstrap.COPY_PATHS)
+        with tempfile.TemporaryDirectory() as dirname:
+            destination = Path(dirname)
+            (destination / ".github" / "workflows").mkdir(parents=True)
+            bootstrap.copy_item(
+                ROOT / ".github" / "workflows", destination / ".github" / "workflows",
+                False, destination,
+            )
+            self.assertFalse((destination / workflow_path).exists())
 
     def test_actions_wake_is_owner_and_issue_bound(self):
         content = WORKFLOW.read_text(encoding="utf-8")
@@ -38,6 +49,47 @@ class MistralCloudWakeTests(unittest.TestCase):
         self.assertNotIn("pull_request_target:", content)
         self.assertNotIn("write-all", content)
         self.assertNotIn("XAI_API_KEY", content)
+
+
+    def test_effective_wake_structure_and_every_external_action_sha(self):
+        # Check active YAML lines rather than matching strings in comments.
+        content = WORKFLOW.read_text(encoding="utf-8")
+        active = "\\n".join(
+            line for line in content.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        )
+        for expected in (
+            "on:",
+            "  issue_comment:",
+            "    types: [created]",
+            "permissions:",
+            "  contents: read",
+            "  issues: write",
+            "  pull-requests: read",
+            "  actions: read",
+            "  mistral-vibe:",
+        ):
+            self.assertIn(expected, active.splitlines())
+        guard = re.search(
+            r"(?m)^    if: >-\\n((?:      [^\\n]+\\n)+)",
+            active + "\\n",
+        )
+        self.assertIsNotNone(guard)
+        condition = guard.group(1)
+        for expected in (
+            "github.event.issue.number == 130",
+            "github.event.issue.pull_request == null",
+            "github.actor == 'NTinkicht'",
+            "contains(github.event.comment.body, '@mistral-vibe')",
+        ):
+            self.assertIn(expected, condition)
+        self.assertEqual(len(re.findall(r"(?m)^    if: >-$", active)), 1)
+        uses = re.findall(r"(?m)^\\s+-?\\s*uses:\\s*(\\S+)\\s*$", active)
+        self.assertEqual(len(uses), 2, uses)
+        for reference in uses:
+            self.assertRegex(reference, r"^actions/[a-z0-9-]+@[0-9a-f]{40}$")
+        self.assertNotRegex(active, r"(?m)^\\s+(?:contents|pull-requests): write$")
+        self.assertNotRegex(active, r"(?m)^  pull_request_target:")
 
     def test_read_only_model_tools_and_cost_guards(self):
         content = WORKFLOW.read_text(encoding="utf-8")
@@ -60,6 +112,7 @@ class MistralCloudWakeTests(unittest.TestCase):
             "CONFIG_BLOCKED",
             "CAPACITY_DEGRADED",
             "TOKEN_BUDGET_EXCEEDED",
+            'elif [[ "$code" == "124" || "$code" == "137" ]]; then',
             "[REDACTED]",
             "gh issue comment 130",
         ):

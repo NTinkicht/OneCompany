@@ -168,6 +168,57 @@ class MistralCloudReviewTests(unittest.TestCase):
             finally:
                 os.chdir(current)
 
+    def test_trusted_stage_contains_only_bounded_untrusted_data(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            old = Path.cwd()
+            try:
+                os.chdir(root)
+                trusted = root / "trusted"
+                trusted.mkdir()
+                (trusted / "AGENTS.md").write_text("main protected policy")
+                (trusted / "CLOUD-AGENT-QUALIFICATION.md").write_text("main policy")
+                (root / target.DIFF_NAME).write_text("candidate review diff")
+                (root / "scripts").mkdir()
+                (root / "scripts" / "demo.py").write_text("untrusted candidate source")
+                def fake_git(args, **kwargs):
+                    if args[1:3] == ["rev-parse", "HEAD"]:
+                        return (HEAD + "\n").encode("ascii")
+                    if args[1] == "diff" and "--name-only" in args:
+                        return b"scripts/demo.py\0"
+                    raise AssertionError(args)
+                with patch.dict(os.environ, {
+                    "GITHUB_OUTPUT": str(root / "out"),
+                    "REVIEW_PR": "137", "REVIEW_SHA": HEAD, "REVIEW_BASE": BASE,
+                }), patch.object(target, "github_json", side_effect=fake_api), patch.object(
+                    target.subprocess, "check_output", side_effect=fake_git
+                ):
+                    target.stage_review(stage=root / "stage", trusted=trusted)
+                self.assertIn("ready=true", (root / "out").read_text())
+                stage = root / "stage"
+                self.assertIn("main protected policy",
+                              (stage / "_onecompany_trusted/AGENTS.md").read_text())
+                self.assertIn("candidate review diff", (stage / "review.diff").read_text())
+                self.assertIn("untrusted candidate",
+                              (stage / "review_sources/scripts/demo.py").read_text())
+                self.assertFalse((stage / ".git").exists())
+                self.assertFalse((stage / ".vibe").exists())
+                # A model must never be able to read the actual PR checkout from
+                # its trusted working directory through an artifact symlink.
+                (root / "scripts" / "demo.py").unlink()
+                (root / "scripts" / "demo.py").symlink_to(trusted / "AGENTS.md")
+                (root / "out").write_text("")
+                with patch.dict(os.environ, {
+                    "GITHUB_OUTPUT": str(root / "out"),
+                    "REVIEW_PR": "137", "REVIEW_SHA": HEAD, "REVIEW_BASE": BASE,
+                }), patch.object(target, "github_json", side_effect=fake_api), patch.object(
+                    target.subprocess, "check_output", side_effect=fake_git
+                ):
+                    target.stage_review(stage=root / "stage-symlink", trusted=trusted)
+                self.assertIn("REVIEW_STAGE_BLOCKED", (root / "out").read_text())
+            finally:
+                os.chdir(old)
+
     def test_owner_wake_and_review_are_disjoint_source_only(self):
         regular = WAKE.read_text(encoding="utf-8")
         review = WORKFLOW.read_text(encoding="utf-8")
@@ -179,6 +230,10 @@ class MistralCloudReviewTests(unittest.TestCase):
         self.assertIn("/tmp/onecompany-budget-trusted.json", review)
         self.assertIn("cp scripts/mistral_cloud_review.py /tmp/", review)
         self.assertIn("ADVISORY review (non-binding)", review)
+        self.assertIn("--workdir /tmp/onecompany-mistral-review-stage", review)
+        self.assertIn("steps.stage.outputs.ready == 'true'", review)
+        self.assertIn("cp AGENTS.md /tmp/onecompany-mistral-trusted", review)
+        self.assertNotIn('--workdir "$GITHUB_WORKSPACE"', review)
         self.assertNotIn("contents: write", review)
         self.assertNotIn("pull-requests: write", review)
         self.assertNotIn("gh pr merge", review)

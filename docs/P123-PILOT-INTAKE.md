@@ -53,6 +53,24 @@ For L2-C, install **both A4 workflows and both L2 workflows**:
 
 No workflow becomes enabled in the source repository simply by merging this WU.
 
+
+### Out-of-band stop for GitHub-hosted pilot workers
+
+In **each** disposable target, leave the Actions repository variable
+`ONECOMPANY_EMERGENCY_STOP` absent/empty or explicitly `false` for a
+normal run. Setting it to `true` (or any unrecognized non-false value) skips
+**new** mutating GitHub Actions pilot jobs before runner allocation. The
+reviewed workflow also passes the value to the Python worker, which checks
+it before GitHub writes; a separately injected
+`ONECOMPANY_EMERGENCY_STOP_FILE` remains available for managed hosts.
+GitHub repository variables are read as a job snapshot, however, so changing
+this variable cannot be represented as immediate cancellation of an **already
+running** hosted job. Cancel that job via GitHub Actions in an incident; do
+not claim the variable itself instantly terminates in-flight API calls.
+Do not enable a producer/repair workflow merely because the stop variable is
+false: the separate explicit worker enablement, exact WU, owner authorization,
+reviewed source, and zero-spend preflights remain mandatory.
+
 ## Read-only intake
 
 From the clean, reviewed OneCompany checkout, prepare a local

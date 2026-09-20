@@ -264,7 +264,948 @@
           }
         },
         "additionalProperties": false
-      }
+      },
+      "allOf": [
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project",
+              "work_unit_mappings"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "NTinkicht/supermemory"
+              },
+              "work_unit_mappings": {
+                "contains": {
+                  "const": "WU-P2-SUPERMEMORY-001"
+                }
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project",
+              "work_unit_mappings"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "volcengine/OpenViking"
+              },
+              "work_unit_mappings": {
+                "contains": {
+                  "const": "WU-P2-OPENVIKING-001"
+                }
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project",
+              "work_unit_mappings"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "NTinkicht/kserve"
+              },
+              "work_unit_mappings": {
+                "contains": {
+                  "const": "WU-P2-KSERVE-001"
+                }
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "BerriAI/litellm"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "lm-sys/RouteLLM"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "aurelio-labs/semantic-router"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "microsoft/LLMLingua"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "OpenHands/software-agent-sdk"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "openai/openai-agents-python"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "anthropics/claude-agent-sdk-python"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "badlogic/pi-mono"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "strands-agents/harness-sdk"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "twaldin/harness"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "AMAP-ML/LongHorizon-Harness"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "langchain-ai/open-swe"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "e2b-dev/E2B"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "kubernetes-sigs/agent-sandbox"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "temporalio/temporal"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "a2aproject/A2A"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "nats-io/nats-server"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "ag-ui-protocol/ag-ui"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "agentskills/agentskills"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "modelcontextprotocol/registry"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "github/spec-kit"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "Fission-AI/OpenSpec"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "bmad-code-org/BMAD-METHOD"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "nrwl/nx"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "sverweij/dependency-cruiser"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "backstage/backstage"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "makeplane/plane"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "opf/openproject"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "xyflow/xyflow"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "cytoscape/cytoscape.js"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "mermaid-js/mermaid"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "microsoft/playwright"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "stryker-mutator/stryker-js"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "schemathesis/schemathesis"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "HypothesisWorks/hypothesis"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "pact-foundation/pact-js"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "grafana/k6"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "dequelabs/axe-core"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "aquasecurity/trivy"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "semgrep/semgrep"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "OWASP/ASVS"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "confident-ai/deepeval"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "promptfoo/promptfoo"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project",
+              "work_unit_mappings"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "google/artemis"
+              },
+              "work_unit_mappings": {
+                "contains": {
+                  "const": "WU-P2-ARTEMIS-001"
+                }
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "browserbase/stagehand"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "mobile-dev-inc/Maestro"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "lost-pixel/lost-pixel"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "penpot/penpot"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "storybookjs/storybook"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "shadcn-ui/ui"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "langfuse/langfuse"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "open-telemetry/opentelemetry-python"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "CopilotKit/CopilotKit"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "assistant-ui/assistant-ui"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "renovatebot/renovate"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "argoproj/argo-cd"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "chaos-mesh/chaos-mesh"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "type": "object",
+            "required": [
+              "repository_or_project"
+            ],
+            "properties": {
+              "repository_or_project": {
+                "const": "github/gh-aw"
+              }
+            }
+          },
+          "minContains": 1,
+          "maxContains": 1
+        }
+      ]
     }
   },
   "additionalProperties": false

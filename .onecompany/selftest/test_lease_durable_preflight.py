@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import io
 import sys
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -117,8 +119,11 @@ class DurableLeasePreflightTests(unittest.TestCase):
             patch.object(lease, "post_event") as post_event,
             patch.object(lease, "save_json") as save_json,
         ):
-            result = lease.acquire(args)
+            output = io.StringIO()
+            with redirect_stdout(output):
+                result = lease.acquire(args)
 
+        self.assertIn("lacks durable MERGED dependency evidence", output.getvalue())
         self.assertEqual(result, 2)
         post_event.assert_not_called()
         save_json.assert_not_called()

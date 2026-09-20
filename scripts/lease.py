@@ -66,12 +66,26 @@ def trusted_admission_context(*args, **kwargs):
 
 
 def _durable_dependency_check(
-    candidate: dict, durable_done: set[str]
+    candidate: dict,
+    work_map: dict[str, dict[str, Any]],
+    durable_done: set[str],
 ) -> tuple[bool, list[str]]:
-    closure = candidate.get("dependency_closure")
-    values = closure if isinstance(closure, list) else candidate.get("dependencies", [])
-    required = sorted({str(value) for value in values if value})
-    unsatisfied = sorted(set(required) - durable_done)
+    """Match the core's three-argument admission seam; require durable closure.
+
+    The work map comes from protected-base admission, never from PR-local
+    candidate policy. Retain the frozen transitive closure as an additional
+    guard if that admission snapshot is present.
+    """
+    candidate_id = str(candidate.get("id") or "")
+    required = (
+        dependency_closure(work_map, candidate_id)
+        if candidate_id and candidate_id in work_map
+        else {str(value) for value in candidate.get("dependencies", []) if value}
+    )
+    frozen = candidate.get("dependency_closure")
+    if isinstance(frozen, list):
+        required.update(str(value) for value in frozen if value)
+    unsatisfied = sorted(required - durable_done)
     return not unsatisfied, unsatisfied
 
 

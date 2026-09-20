@@ -26,6 +26,16 @@ class ExternalCapabilityRegisterTests(unittest.TestCase):
         validate(document, SCHEMA, "external-capability-register.json", errors)
         return errors
 
+    def test_planning_guardrails_cannot_be_erased_or_budget_raised(self):
+        for mutation in (
+            lambda d: d.update(authority=""),
+            lambda d: d.update(planning_rules={}),
+            lambda d: d["planning_rules"].update(owner_budget_USD_additional_monthly=999999),
+        ):
+            changed = copy.deepcopy(REGISTER)
+            mutation(changed)
+            self.assertTrue(self.check(changed), changed["planning_rules"])
+
     def test_full_inventory_is_valid(self):
         self.assertEqual([], self.check(REGISTER))
 

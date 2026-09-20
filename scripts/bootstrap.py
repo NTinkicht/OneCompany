@@ -60,6 +60,7 @@ SOURCE_ONLY_PLANNING_FILES = frozenset({
     "docs/MASTER-EVOLUTION-ROADMAP-2026.md",
     "docs/ROADMAP.md",
     "docs/CLOUD-AGENT-QUALIFICATION.md",
+    ".github/workflows/onecompany-mistral-vibe-wake.yml",
 })
 SOURCE_INSTALLATION_EXCLUSIONS = SOURCE_INSTALLATION_SELFTESTS | SOURCE_ONLY_PLANNING_FILES
 

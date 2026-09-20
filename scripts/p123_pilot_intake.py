@@ -27,8 +27,8 @@ from p123_qualify import REPAIR_SCRIPT_BLOB, REPAIR_WORKFLOW_BLOB
 from onecompany_lib import ROOT
 
 # Reviewed source hashes are Git blobs, not raw-file SHA-1 digests.
-A4_PRODUCER_BLOB = "6cb924fa00d1cea3ef3bb2fe5bf0399a4e6bf21f"
-A4_PRODUCER_WORKFLOW_BLOB = "ad594a45887a209515b55d2d85cc150945070a19"
+A4_PRODUCER_BLOB = "5e9d17909f533cf833a9be65e05dd0f77f74df71"
+A4_PRODUCER_WORKFLOW_BLOB = "71990a2f55e0bb3fc73489c6e0c573e6355c8d91"
 ALLOWED_KEYS = {"repository", "base_sha", "wu", "actor", "disposable"}
 CONTROL = ("config", "queue", "readiness", "dispatch", "budget", "actors")
 BASE_FILES = {

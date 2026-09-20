@@ -31,7 +31,7 @@ from l2_fixture_repair import (
 
 # Installed disposable target must run exactly these reviewed base-trusted
 # files, not candidate-selected workflow/script bytes.
-REPAIR_WORKFLOW_BLOB = "3a5f18c5fa08c0a7ac79ccd04dc5da3de4b51aa2"
+REPAIR_WORKFLOW_BLOB = "f9735ee9eecbca5a0eca419970e89054c84986f2"
 REPAIR_SCRIPT_BLOB = "47b76443c397bbb5f7bc9327e393d1975973740d"
 
 MARKER = "<!-- onecompany-ledger-v1 -->"

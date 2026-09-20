@@ -1,8 +1,9 @@
-"""Single-owner, read-only OAuth2 + PKCE bridge for Grok web custom connectors.
+"""Single-owner, scoped OAuth2 + PKCE bridge for Grok web custom connectors.
 
 This service does NOT authenticate GitHub users. The owner unlocks the OAuth
 consent once using the existing Render-side ONECOMPANY_CONNECTOR_BEARER.
-All issued credentials are audience-bound HMAC tokens signed with that secret.
+All issued credentials are audience-bound, explicitly scope-bound HMAC tokens.
+Optional write consent does NOT add any MCP write tool or GitHub permissions.
 Rotating it immediately revokes all sessions. No GitHub key or installation
 token is returned by this authorization server.
 """

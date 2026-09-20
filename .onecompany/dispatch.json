@@ -304,17 +304,16 @@
         {
           "id": "vibe-readonly-wake",
           "kind": "github_action",
-          "configured": false,
+          "configured": true,
           "unattended": true,
           "capabilities": [
             "repository_intelligence",
-            "test_design",
-            "failure_analysis",
-            "documentation",
-            "research"
+            "test_design"
           ],
-          "invocation_hint": "GitHub-hosted source-only workflow .github/workflows/onecompany-mistral-vibe-wake.yml consumes owner-authored @mistral-vibe comments on #130; no Codespace. Configured remains false until owner privately provisions subscription key+PAYG-off var and a real run proves inference/publication; advisory only.",
-          "evidence": []
+          "invocation_hint": "Qualified source-only GitHub-hosted owner-authored @mistral-vibe read-only issue #130 wake, evidence main@9834c646 + Actions 35540501655; advisory only; no review, write or merge authority. PAYG-off repository guard and included-plan key required on every run.",
+          "evidence": [
+            "GitHub Actions run 35540501655 on protected main 9834c646eaa6ffb16b5471583ec4a554e14a5331: whoami entitlement/zero-spend preflight, pinned Vibe model inference, read-only output posted by github-actions[bot] issue #130 comment 5753004827"
+          ]
         },
         {
           "id": "vibe-exact-head-review",

@@ -33,10 +33,17 @@
       "type": "string"
     },
     "authority": {
-      "type": "string"
+      "const": "Proposed roadmap; does not admit WUs, change policy, grant leases, deploy providers or authorize spending."
     },
     "planning_rules": {
-      "type": "object"
+      "const": {
+        "candidate_presence_is_not_runtime_adoption": true,
+        "all_assessments_proposed_not_verified": true,
+        "implementation_requires_evidence_and_existing_governance": true,
+        "canonical_fallbacks_required": true,
+        "owner_budget_USD_additional_monthly": 0,
+        "registry_next_step": "Validate schema and reconcile portfolio/queue under bounded Phase 0 WU before execution."
+      }
     },
     "group_workstreams": {
       "type": "array",

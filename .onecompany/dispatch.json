@@ -289,14 +289,8 @@
           "configured": false,
           "unattended": false,
           "capabilities": [
-            "implementation",
             "repository_intelligence",
-            "ci_remediation",
-            "code_review",
-            "test_design",
-            "failure_analysis",
-            "documentation",
-            "research"
+            "test_design"
           ],
           "invocation_hint": "Run Vibe in the authenticated repository workspace with the approved included-cost path.",
           "evidence": []
@@ -320,9 +314,7 @@
           "kind": "github_action",
           "configured": false,
           "unattended": true,
-          "capabilities": [
-            "code_review"
-          ],
+          "capabilities": [],
           "invocation_hint": "Planned #134: cloud reviewer with exact head/base CI and non-author qualification; no binding review until identity and trusted publisher/evidence proven.",
           "evidence": []
         },
@@ -331,10 +323,7 @@
           "kind": "github_action",
           "configured": false,
           "unattended": true,
-          "capabilities": [
-            "implementation",
-            "ci_remediation"
-          ],
+          "capabilities": [],
           "invocation_hint": "Planned #133: only through native platform-validated live lease, canonical PR/branch, expected head, scoped workspace and parent-controlled non-force push; no model GitHub credentials.",
           "evidence": []
         }

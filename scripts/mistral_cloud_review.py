@@ -24,9 +24,11 @@ REQUIRED_CI = frozenset({
     "OneCompany Handoff Supervision",
 })
 LEDGER_CHECK = "OneCompany Ledger Read Smoke"
-TRUSTED_LEDGER_WORKFLOW = Path(
-    "/tmp/onecompany-mistral-trusted/ledger-workflow.yml"
-)
+TRUSTED_LEDGER_WORKFLOW = Path(os.environ.get(
+    "ONECOMPANY_LEDGER_RULES_FILE",
+    str(Path(__file__).resolve().parents[1] /
+        ".github/workflows/onecompany-ledger-read-smoke.yml"),
+))
 MISTRAL_ALIASES = frozenset({"mistral", "mistral-vibe", "mistral_vibe"})
 MATERIAL_AUTHOR = re.compile(r"(?im)^Material-Author:[ \t]*([a-z0-9_-]+)[ \t]*$")
 DIFF_NAME = ".onecompany_mistral_review.diff"

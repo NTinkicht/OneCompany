@@ -44,6 +44,8 @@ class DurableLeasePreflightTests(unittest.TestCase):
                 {
                     "id": "WU-A",
                     "status": "READY",
+                    "branch": "wu-a",
+                    "pr": 14,
                     "dependencies": ["WU-B"],
                     "write_scope": ["src/a/**"],
                     "resource_locks": [],

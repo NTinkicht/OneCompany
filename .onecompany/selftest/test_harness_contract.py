@@ -27,6 +27,17 @@ class HarnessContractTests(unittest.TestCase):
         for change, code in (({"key": RunKey(KEY.wu_id, KEY.run_id, 2)}, "STALE_GENERATION"), ({"key": RunKey("other", KEY.run_id, 3)}, "STALE_GENERATION"), ({"actor": "injected-bot"}, "WRONG_ACTOR"), ({"capability": "review"}, "CAPABILITY_NOT_LEASED"), ({"project": "other-project"}, "WRONG_PROJECT"), ({"head": BASE}, "NONDISTINCT_REVISIONS"), ({"head": "0" * 40}, "STALE_REVISION"), ({"base": "not-a-sha"}, "INVALID_REVISION")):
             with self.subTest(change=change): self.assertEqual(assess_intent(replace(intent, **change), trusted).code, code)
 
+    def test_non_string_untrusted_revisions_are_refused_not_exceptions(self):
+        intent, trusted = case()
+        for field in ("head", "base"):
+            for malformed in (None, 0, 1, True, False, b"a" * 40, [], {}, object()):
+                with self.subTest(field=field, value=repr(malformed)):
+                    result = assess_intent(
+                        replace(intent, **{field: malformed}), trusted
+                    )
+                    self.assertFalse(result.permitted)
+                    self.assertEqual(result.code, "INVALID_REVISION")
+
     def test_budget_and_entitlement_fail_closed(self):
         intent, trusted = case()
         for changes, code in (({"lease_active": False}, "LEASE_NOT_ACTIVE"), ({"stop_active": True}, "EMERGENCY_STOP"), ({"actor_verified": False}, "ACTOR_NOT_VERIFIED"), ({"actor_cost_class": "UNKNOWN_COST"}, "COST_CLASS_BLOCKED"), ({"actor_cost_class": "METERED_ALLOWED"}, "COST_CLASS_BLOCKED"), ({"extra_spend_cap": 1}, "EXTRA_SPEND_BLOCKED")):

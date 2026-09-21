@@ -87,12 +87,21 @@ def strict_result(raw: str) -> dict:
 
 def prove_pr_and_independence(value: dict) -> dict:
     pr = github(f"repos/{REPO}/pulls/{value['pr']}")
+    if not isinstance(pr, dict):
+        raise ValueError("GROK_PR_UNAVAILABLE")
+    head = pr.get("head") or {}
+    base = pr.get("base") or {}
+    if not isinstance(head, dict) or not isinstance(base, dict):
+        raise ValueError("GROK_PR_UNAVAILABLE")
+    head_repo, base_repo = head.get("repo") or {}, base.get("repo") or {}
+    if not isinstance(head_repo, dict) or not isinstance(base_repo, dict):
+        raise ValueError("GROK_PR_UNAVAILABLE")
     if (pr.get("number") != value["pr"] or pr.get("state") != "open"
-        or pr.get("head", {}).get("sha") != value["head_sha"]
-        or pr.get("base", {}).get("sha") != value["base_sha"]
-        or pr.get("base", {}).get("ref") != "main"
-        or pr.get("head", {}).get("repo", {}).get("full_name") != REPO
-        or pr.get("base", {}).get("repo", {}).get("full_name") != REPO):
+        or head.get("sha") != value["head_sha"]
+        or base.get("sha") != value["base_sha"]
+        or base.get("ref") != "main"
+        or head_repo.get("full_name") != REPO
+        or base_repo.get("full_name") != REPO):
         raise ValueError("GROK_PR_STALE_OR_FOREIGN")
     count = 0
     last = None
@@ -105,8 +114,11 @@ def prove_pr_and_independence(value: dict) -> dict:
             last = item.get("sha")
             if not isinstance(last, str) or not SHA.fullmatch(last):
                 raise ValueError("GROK_AUTHOR_SHA_INVALID")
-            author = ((item.get("author") or {}).get("login") or "").lower()
-            if author in ALIASES:
+            logins = {
+                ((item.get("author") or {}).get("login") or "").lower(),
+                ((item.get("committer") or {}).get("login") or "").lower(),
+            }
+            if any(login in ALIASES for login in logins):
                 raise ValueError("GROK_SELF_REVIEW_BLOCKED")
             message = (item.get("commit") or {}).get("message") or ""
             if any(tag.lower() in ALIASES for tag in AUTHOR_TAG.findall(message)):
@@ -203,8 +215,9 @@ def main() -> int:
                pr=value["pr"], sha=value["head_sha"], base=value["base_sha"])
         Path("/tmp/onecompany-grok-validated.json").write_text(json.dumps(value))
         Path("/tmp/onecompany-grok-public.txt").write_text(comment_text(value))
-    except (ValueError, KeyError, TypeError, json.JSONDecodeError,
-            subprocess.CalledProcessError, subprocess.TimeoutExpired):
+    except (ValueError, KeyError, TypeError, AttributeError, OSError,
+            json.JSONDecodeError, subprocess.CalledProcessError,
+            subprocess.TimeoutExpired):
         output(ready="false", status="GROK_REVIEW_BLOCKED")
     return 0
 

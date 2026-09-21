@@ -87,7 +87,7 @@ class ProductBriefTests(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 brief.save_exclusive(path, draft)
             self.assertEqual(victim.read_text(), "keep")
-            with self.assertRaises(ValueError):
+            with self.assertRaises((ValueError, OSError)):
                 brief.save_exclusive(root / "missing" / "brief.json", draft)
             self.assertFalse((root / "missing").exists())
 

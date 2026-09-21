@@ -115,6 +115,14 @@ class GrokCloudBridgeTests(unittest.TestCase):
         ):
             g.prove_pr_and_independence(BODY)
 
+    def test_nullable_gh_metadata_and_missing_cli_are_safe_failures(self):
+        for malformed in (None, [], {"head": None, "base": None},
+                          {"head": {"repo": None}, "base": {"repo": None}}):
+            with self.subTest(value=repr(malformed)), patch.object(
+                g, "github", return_value=malformed
+            ), self.assertRaisesRegex(ValueError, "GROK_PR_UNAVAILABLE"):
+                g.prove_pr_and_independence(BODY)
+
     def test_model_material_author_cannot_review_self(self):
         for author, trailer in (
             ("onecompany-grok-worker[bot]", "chatgpt"),
@@ -132,6 +140,17 @@ class GrokCloudBridgeTests(unittest.TestCase):
             with patch.object(g, "github", side_effect=self_author), self.assertRaisesRegex(
                 ValueError, "GROK_SELF_REVIEW"
             ):
+                g.prove_pr_and_independence(BODY)
+
+    def test_grok_committer_is_not_independent_even_with_owner_author(self):
+        def committer(route):
+            result = fake_github(route)
+            if "/commits?" in route:
+                result[0]["committer"] = {"login": g.BOT_LOGIN}
+                result[0]["commit"]["message"] = "feat: no trailers"
+            return result
+        with patch.object(g, "github", side_effect=committer):
+            with self.assertRaisesRegex(ValueError, "GROK_SELF_REVIEW_BLOCKED"):
                 g.prove_pr_and_independence(BODY)
 
     def test_duplicate_source_comment_is_idempotently_rejected(self):
@@ -179,6 +198,8 @@ class GrokCloudBridgeTests(unittest.TestCase):
         self.assertNotIn("pull-requests: write", workflow)
         self.assertNotIn("gh pr merge", workflow)
         self.assertNotIn("git push", workflow)
+        self.assertIn("issues/comments/$NEW_COMMENT_ID", workflow)
+        self.assertIn("GROK_ADVISORY_RETRACTED_STALE_HEAD", workflow)
         self.assertIn("GROK_RESULT_V1", workflow)
 
 

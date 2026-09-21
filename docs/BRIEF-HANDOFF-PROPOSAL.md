@@ -3,7 +3,7 @@
 This separate, read-only bridge consumes an **owner-filled saved DRAFT** from `python onecompany.py brief` and creates a candidate for the **existing** trusted planning/Execution Core. It never grants implementation approval, creates a canonical Work Unit, trusts caller-supplied GitHub revisions, invents acceptance criteria, acquires a lease or runs a model.
 
 ```bash
-python scripts/brief_handoff_proposal.py --brief /tmp/owner-brief.json \\
+python scripts/brief_handoff_proposal.py --brief /tmp/owner-brief.json \
   --head <full-40-lowercase-head-sha> --base <full-40-lowercase-base-sha>
 python -m unittest discover -s .onecompany/selftest -p 'test_brief_handoff_proposal.py'
 ```

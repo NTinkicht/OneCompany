@@ -76,9 +76,32 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REVIEW_PR: ${{ steps.verify.outputs.pr }}
+          REVIEW_HEAD: ${{ steps.verify.outputs.sha }}
+          REVIEW_BASE: ${{ steps.verify.outputs.base }}
         shell: bash
         run: |
           set -euo pipefail
-          gh issue comment "$REVIEW_PR" \
-            --repo "$GITHUB_REPOSITORY" \
-            --body-file /tmp/onecompany-grok-public.txt
+          gh api -X POST \
+            "repos/$GITHUB_REPOSITORY/issues/$REVIEW_PR/comments" \
+            --raw-field "body=$(cat /tmp/onecompany-grok-public.txt)" \
+            > /tmp/onecompany-grok-published.json
+          NEW_COMMENT_ID="$(python -c \
+            'import json; print(int(json.load(open("/tmp/onecompany-grok-published.json"))["id"]))')"
+          export REVIEW_PR REVIEW_HEAD REVIEW_BASE
+          if python - <<'PY'
+          import os
+          from scripts import mistral_cloud_review as guard
+          n = int(os.environ["REVIEW_PR"])
+          h, b = os.environ["REVIEW_HEAD"], os.environ["REVIEW_BASE"]
+          guard.current_pr(n, h, b)
+          if not guard.latest_ci_green(n, h):
+              raise ValueError("GROK_CI_MOVED_AFTER_PUBLISH")
+          PY
+          then
+            echo "GROK_ADVISORY_PUBLISHED_CURRENT_HEAD"
+          else
+            gh api -X DELETE \
+              "repos/$GITHUB_REPOSITORY/issues/comments/$NEW_COMMENT_ID"
+            echo "GROK_ADVISORY_RETRACTED_STALE_HEAD"
+            exit 2
+          fi

@@ -29,6 +29,29 @@ It also detects, where possible:
 - existing product/architecture/security/quality/design/operations contracts;
 - path collisions with OneCompany framework files.
 
+## Guided discovery: the first useful product conversation
+
+The read-only `onboard` report now includes a `journey` projection for **Create** and **Adopt**.
+The command shows the next step and three consequential questions in everyday language;
+`--json` contains the complete draft. This is the beginning of the planned
+Welcome → Discovery → Brief → Team → Build → Quality → Preview → Mission Control
+experience, not a claim that the full UI or application runner exists.
+
+The generated `product_brief_draft` reuses observed project/repository/stack/CI
+facts, and **leaves the unknown audience, problem, first outcome and first feature
+empty**. It never invents acceptance criteria or marks owner approval. The
+three required product answers are: who uses it, what they should accomplish
+first, and the smallest useful first feature. Privacy/data/accessibility/platform
+constraints remain an explicit optional question.
+
+A missing repository or a collision prevents apply exactly as before.
+`journey.steps` and `next_action` describe a proposed workflow only:
+`application_authorized=false`, `actor_qualified=false` and
+`write_lease_granted=false` until the existing trusted OneCompany control plane
+records actual evidence. Never use this JSON report as a lease, gate or authority.
+Existing automated clients retain their prior assessment keys and `--apply`
+semantics. It does not contact a provider or add AI spend.
+
 ## The safety contract
 
 Assessment is non-mutating.

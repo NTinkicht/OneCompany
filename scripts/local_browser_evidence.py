@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 import local_preview_evidence as preview
 import local_quality_evidence as quality
 
-SHA = re.compile(r"[0-9a-f]{40}\\Z")
+SHA = re.compile(r"[0-9a-f]{40}\Z")
 
 
 def collect(revision: str, url: str) -> dict[str, object]:

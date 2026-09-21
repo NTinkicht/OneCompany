@@ -77,25 +77,40 @@ def make_draft(assessment: dict[str, Any], answers: dict[str, str | None]) -> di
 
 
 def save_exclusive(path: Path, draft: dict[str, Any]) -> None:
-    """Explicit one-shot non-overwriting user export, never a canonical contract."""
-    parent = path.parent
-    if not parent.exists() or not parent.is_dir() or parent.is_symlink():
-        raise ValueError("save parent must be an existing real directory")
+    """Export through anchored real directory FDs, with no symlink traversal.
+
+    Never derive an authorization or target-repo path from this draft output.
+    POSIX dir_fd + O_NOFOLLOW support is required rather than using unsafe
+    check-then-open fallback on Windows or other unsupported platforms.
+    """
+    if not hasattr(os, "O_DIRECTORY") or not hasattr(os, "O_NOFOLLOW"):
+        raise ValueError("secure export requires O_DIRECTORY/O_NOFOLLOW support")
+    parts = path.parts[1:] if path.is_absolute() else path.parts
+    if not parts or any(part in ("", ".", "..") for part in parts):
+        raise ValueError("invalid draft destination")
     payload = (json.dumps(draft, ensure_ascii=False, indent=2) + "\n").encode("utf-8")
     if len(payload) > 16_384:
         raise ValueError("draft exceeds export size limit")
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    descriptor = os.open(path, flags, 0o600)
+    directory_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
+    created_file = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+    anchor = path.anchor if path.is_absolute() else "."
+    opened: list[int] = [os.open(anchor, directory_flags)]
     try:
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(payload)
-            stream.flush()
-            os.fsync(stream.fileno())
-    except BaseException:
-        path.unlink(missing_ok=True)
-        raise
+        for part in parts[:-1]:
+            opened.append(os.open(part, directory_flags, dir_fd=opened[-1]))
+        leaf = parts[-1]
+        descriptor = os.open(leaf, created_file, 0o600, dir_fd=opened[-1])
+        try:
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(payload)
+                stream.flush()
+                os.fsync(stream.fileno())
+        except BaseException:
+            os.unlink(leaf, dir_fd=opened[-1])
+            raise
+    finally:
+        for descriptor in reversed(opened):
+            os.close(descriptor)
 
 
 def main(argv: list[str] | None = None) -> int:

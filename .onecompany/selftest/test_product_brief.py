@@ -49,7 +49,7 @@ class ProductBriefTests(unittest.TestCase):
             self.assertEqual((target / "PRODUCT.md").read_text(), "existing")
 
     def test_reject_oversized_control_chars_and_nontext(self):
-        for value in ("x" * 501, "hello\\nworld", "a\\x00b"):
+        for value in ("x" * 501, "hello\nworld", "a\x00b"):
             with self.assertRaises(ValueError):
                 clean_answer(value, "audience")
         self.assertIsNone(clean_answer("  ", "audience"))

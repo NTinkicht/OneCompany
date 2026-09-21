@@ -247,7 +247,265 @@ jobs:
             code=70
             status="EXECUTION_FAILED"
             reason="Mistral Vibe returned an empty final answer from the isolated review stage"
-          elif [[ "$code" == "0" ]] && grep -Eqi '^[[:space:]]*INSUFFICIENT_EVIDENCE[[:space:]]* /tmp/onecompany-mistral-output.txt; then
+          elif [[ "$code" == "0" ]] && grep -Eqi '^[[:space:]]*INSUFFICIENT_EVIDENCE[[:space:]]*; then
+            code=71
+            status="INSUFFICIENT_EVIDENCE"
+            reason="Mistral explicitly reported insufficient evidence; not a completed advisory review"
+          elif [[ "$code" == "124" || "$code" == "137" ]]; then
+            status="WAKE_TIMEOUT"
+            reason="Mistral Vibe exceeded the 10-minute actor time limit"
+          elif [[ "$code" != "0" ]]; then
+            if grep -Eqi '401|unauthori[sz]ed|invalid[^[:alnum:]]*(api[^[:alnum:]]*)?key|authentication' /tmp/onecompany-mistral-error.txt; then
+              status="AUTH_BLOCKED"
+              reason="Mistral credential was rejected by the Vibe runtime"
+            elif grep -Eqi '403|forbidden|entitlement|permission denied' /tmp/onecompany-mistral-error.txt; then
+              status="ENTITLEMENT_BLOCKED"
+              reason="Mistral Vibe entitlement was rejected by the runtime"
+            elif grep -Eqi 'token limit exceeded|context (window|length) exceeded|too many tokens' /tmp/onecompany-mistral-error.txt; then
+              status="TOKEN_BUDGET_EXCEEDED"
+              reason="Mistral bounded context/token budget was exceeded; narrow evidence and retry once"
+            elif grep -Eqi '429|rate.?limit|quota|usage[^[:alnum:]]*limit|capacity' /tmp/onecompany-mistral-error.txt; then
+              status="CAPACITY_DEGRADED"
+              reason="Mistral included capacity is unavailable or exhausted"
+            elif grep -Eqi 'trust|trusted folder|workspace' /tmp/onecompany-mistral-error.txt; then
+              status="WORKSPACE_TRUST_FAILED"
+              reason="Mistral Vibe workspace trust initialization failed"
+            elif grep -Eqi 'no such option|unknown option|unrecognized|usage:' /tmp/onecompany-mistral-error.txt; then
+              status="CLI_INCOMPATIBLE"
+              reason="Mistral Vibe CLI invocation is incompatible with the pinned version"
+            else
+              status="EXECUTION_FAILED"
+              reason="Mistral Vibe runtime failed with an unclassified nonzero exit"
+            fi
+          fi
+
+          if [[ "$code" != "0" ]] && [[ -s /tmp/onecompany-mistral-error.txt ]]; then
+            # Job-log-only diagnostics. Scrub the literal credential plus common
+            # bearer/key renderings before the excerpt can reach the Actions log;
+            # it is never posted to the public issue comment.
+            python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          source = Path('/tmp/onecompany-mistral-error.txt')
+          target = Path('/tmp/onecompany-mistral-error-scrubbed.txt')
+          text = source.read_text(encoding='utf-8', errors='replace')
+          secret = os.environ.get('MISTRAL_API_KEY', '')
+          if secret:
+              text = text.replace(secret, '[REDACTED]')
+          text = re.sub(r'(?i)(authorization\s*:\s*bearer\s+)\S+', r'\1[REDACTED]', text)
+          text = re.sub(r'(?i)(mistral_api_key\s*[=:]\s*)\S+', r'\1[REDACTED]', text)
+          lines = text.splitlines()
+          target.write_text('\n'.join(lines[-20:]) + '\n', encoding='utf-8')
+          PY
+            {
+              echo "::group::Mistral Vibe runtime stderr (scrubbed, last 20 lines)"
+              cat /tmp/onecompany-mistral-error-scrubbed.txt
+              echo "::endgroup::"
+            }
+          fi
+
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "failure_reason=$reason" >> "$GITHUB_OUTPUT"
+
+      - name: Post Mistral result
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          READY: ${{ steps.preflight.outputs.ready }}
+          PREFLIGHT_STATUS: ${{ steps.preflight.outputs.status }}
+          PREFLIGHT_REASON: ${{ steps.preflight.outputs.reason }}
+          TARGET_READY: ${{ steps.target.outputs.ready }}
+          TARGET_STATUS: ${{ steps.target.outputs.status }}
+          EVIDENCE_READY: ${{ steps.evidence.outputs.ready }}
+          EVIDENCE_STATUS: ${{ steps.evidence.outputs.status }}
+          STAGE_READY: ${{ steps.stage.outputs.ready }}
+          STAGE_STATUS: ${{ steps.stage.outputs.status }}
+          REVIEW_PR: ${{ steps.target.outputs.pr }}
+          REVIEW_SHA: ${{ steps.target.outputs.sha }}
+          ACTOR_EXIT: ${{ steps.actor.outputs.exit_code }}
+          ACTOR_STATUS: ${{ steps.actor.outputs.status }}
+          ACTOR_REASON: ${{ steps.actor.outputs.failure_reason }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${READY:-false}" == "true" && "${ACTOR_EXIT:-1}" == "0" ]]; then
+            # Defense in depth: even though Vibe has no shell/write tool, scrub the
+            # literal provider credential plus common authorization/key renderings
+            # before any model-authored text can reach a public issue comment.
+            python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          source = Path('/tmp/onecompany-mistral-output.txt')
+          target = Path('/tmp/onecompany-mistral-public.txt')
+          text = source.read_text(encoding='utf-8', errors='replace') if source.exists() else ''
+          secret = os.environ.get('MISTRAL_API_KEY', '')
+          if secret:
+              text = text.replace(secret, '[REDACTED]')
+          text = re.sub(r'(?i)(authorization\s*:\s*bearer\s+)\S+', r'\1[REDACTED]', text)
+          text = re.sub(r'(?i)(MISTRAL_API_KEY\s*[=:]\s*)\S+', r'\1[REDACTED]', text)
+          target.write_text(text[:50000], encoding='utf-8')
+          PY
+          fi
+
+          {
+            echo "**mistral-vibe cloud exact-head ADVISORY review (non-binding)**"
+            echo "PR #${REVIEW_PR:-not-admitted}; exact head ${REVIEW_SHA:-not-admitted}"
+            echo
+            if [[ "${TARGET_READY:-false}" != "true" ]]; then
+              echo "${TARGET_STATUS:-REVIEW_TARGET_BLOCKED} - no valid exact-head review assignment; no model call."
+            elif [[ "${EVIDENCE_READY:-false}" != "true" ]]; then
+              echo "${EVIDENCE_STATUS:-REVIEW_EVIDENCE_BLOCKED} - PR head/CI/diff validation failed; no model call."
+            elif [[ "${STAGE_READY:-false}" != "true" ]]; then
+              echo "${STAGE_STATUS:-REVIEW_STAGE_BLOCKED} - isolated source stage failed; no model call."
+            elif [[ "${READY:-false}" != "true" ]]; then
+              echo "${PREFLIGHT_STATUS:-PREFLIGHT_FAILED} - ${PREFLIGHT_REASON:-preflight failed}. No paid fallback was attempted."
+            elif [[ "${ACTOR_EXIT:-1}" != "0" ]]; then
+              echo "${ACTOR_STATUS:-EXECUTION_FAILED} - ${ACTOR_REASON:-Mistral Vibe exited without a usable result}. PAYG remains disabled and no paid fallback was attempted."
+            else
+              echo '```text'
+              cat /tmp/onecompany-mistral-public.txt
+              echo
+              echo '```'
+            fi
+          } > /tmp/onecompany-mistral-comment.md
+          gh issue comment 130 --repo "$GITHUB_REPOSITORY" --body-file /tmp/onecompany-mistral-comment.md
+ /tmp/onecompany-mistral-output.txt; then
+            code=71
+            status="INSUFFICIENT_EVIDENCE"
+            reason="Mistral explicitly reported insufficient evidence; not a completed advisory review"
+          elif [[ "$code" == "124" || "$code" == "137" ]]; then
+            status="WAKE_TIMEOUT"
+            reason="Mistral Vibe exceeded the 10-minute actor time limit"
+          elif [[ "$code" != "0" ]]; then
+            if grep -Eqi '401|unauthori[sz]ed|invalid[^[:alnum:]]*(api[^[:alnum:]]*)?key|authentication' /tmp/onecompany-mistral-error.txt; then
+              status="AUTH_BLOCKED"
+              reason="Mistral credential was rejected by the Vibe runtime"
+            elif grep -Eqi '403|forbidden|entitlement|permission denied' /tmp/onecompany-mistral-error.txt; then
+              status="ENTITLEMENT_BLOCKED"
+              reason="Mistral Vibe entitlement was rejected by the runtime"
+            elif grep -Eqi 'token limit exceeded|context (window|length) exceeded|too many tokens' /tmp/onecompany-mistral-error.txt; then
+              status="TOKEN_BUDGET_EXCEEDED"
+              reason="Mistral bounded context/token budget was exceeded; narrow evidence and retry once"
+            elif grep -Eqi '429|rate.?limit|quota|usage[^[:alnum:]]*limit|capacity' /tmp/onecompany-mistral-error.txt; then
+              status="CAPACITY_DEGRADED"
+              reason="Mistral included capacity is unavailable or exhausted"
+            elif grep -Eqi 'trust|trusted folder|workspace' /tmp/onecompany-mistral-error.txt; then
+              status="WORKSPACE_TRUST_FAILED"
+              reason="Mistral Vibe workspace trust initialization failed"
+            elif grep -Eqi 'no such option|unknown option|unrecognized|usage:' /tmp/onecompany-mistral-error.txt; then
+              status="CLI_INCOMPATIBLE"
+              reason="Mistral Vibe CLI invocation is incompatible with the pinned version"
+            else
+              status="EXECUTION_FAILED"
+              reason="Mistral Vibe runtime failed with an unclassified nonzero exit"
+            fi
+          fi
+
+          if [[ "$code" != "0" ]] && [[ -s /tmp/onecompany-mistral-error.txt ]]; then
+            # Job-log-only diagnostics. Scrub the literal credential plus common
+            # bearer/key renderings before the excerpt can reach the Actions log;
+            # it is never posted to the public issue comment.
+            python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          source = Path('/tmp/onecompany-mistral-error.txt')
+          target = Path('/tmp/onecompany-mistral-error-scrubbed.txt')
+          text = source.read_text(encoding='utf-8', errors='replace')
+          secret = os.environ.get('MISTRAL_API_KEY', '')
+          if secret:
+              text = text.replace(secret, '[REDACTED]')
+          text = re.sub(r'(?i)(authorization\s*:\s*bearer\s+)\S+', r'\1[REDACTED]', text)
+          text = re.sub(r'(?i)(mistral_api_key\s*[=:]\s*)\S+', r'\1[REDACTED]', text)
+          lines = text.splitlines()
+          target.write_text('\n'.join(lines[-20:]) + '\n', encoding='utf-8')
+          PY
+            {
+              echo "::group::Mistral Vibe runtime stderr (scrubbed, last 20 lines)"
+              cat /tmp/onecompany-mistral-error-scrubbed.txt
+              echo "::endgroup::"
+            }
+          fi
+
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "failure_reason=$reason" >> "$GITHUB_OUTPUT"
+
+      - name: Post Mistral result
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          READY: ${{ steps.preflight.outputs.ready }}
+          PREFLIGHT_STATUS: ${{ steps.preflight.outputs.status }}
+          PREFLIGHT_REASON: ${{ steps.preflight.outputs.reason }}
+          TARGET_READY: ${{ steps.target.outputs.ready }}
+          TARGET_STATUS: ${{ steps.target.outputs.status }}
+          EVIDENCE_READY: ${{ steps.evidence.outputs.ready }}
+          EVIDENCE_STATUS: ${{ steps.evidence.outputs.status }}
+          STAGE_READY: ${{ steps.stage.outputs.ready }}
+          STAGE_STATUS: ${{ steps.stage.outputs.status }}
+          REVIEW_PR: ${{ steps.target.outputs.pr }}
+          REVIEW_SHA: ${{ steps.target.outputs.sha }}
+          ACTOR_EXIT: ${{ steps.actor.outputs.exit_code }}
+          ACTOR_STATUS: ${{ steps.actor.outputs.status }}
+          ACTOR_REASON: ${{ steps.actor.outputs.failure_reason }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${READY:-false}" == "true" && "${ACTOR_EXIT:-1}" == "0" ]]; then
+            # Defense in depth: even though Vibe has no shell/write tool, scrub the
+            # literal provider credential plus common authorization/key renderings
+            # before any model-authored text can reach a public issue comment.
+            python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          source = Path('/tmp/onecompany-mistral-output.txt')
+          target = Path('/tmp/onecompany-mistral-public.txt')
+          text = source.read_text(encoding='utf-8', errors='replace') if source.exists() else ''
+          secret = os.environ.get('MISTRAL_API_KEY', '')
+          if secret:
+              text = text.replace(secret, '[REDACTED]')
+          text = re.sub(r'(?i)(authorization\s*:\s*bearer\s+)\S+', r'\1[REDACTED]', text)
+          text = re.sub(r'(?i)(MISTRAL_API_KEY\s*[=:]\s*)\S+', r'\1[REDACTED]', text)
+          target.write_text(text[:50000], encoding='utf-8')
+          PY
+          fi
+
+          {
+            echo "**mistral-vibe cloud exact-head ADVISORY review (non-binding)**"
+            echo "PR #${REVIEW_PR:-not-admitted}; exact head ${REVIEW_SHA:-not-admitted}"
+            echo
+            if [[ "${TARGET_READY:-false}" != "true" ]]; then
+              echo "${TARGET_STATUS:-REVIEW_TARGET_BLOCKED} - no valid exact-head review assignment; no model call."
+            elif [[ "${EVIDENCE_READY:-false}" != "true" ]]; then
+              echo "${EVIDENCE_STATUS:-REVIEW_EVIDENCE_BLOCKED} - PR head/CI/diff validation failed; no model call."
+            elif [[ "${STAGE_READY:-false}" != "true" ]]; then
+              echo "${STAGE_STATUS:-REVIEW_STAGE_BLOCKED} - isolated source stage failed; no model call."
+            elif [[ "${READY:-false}" != "true" ]]; then
+              echo "${PREFLIGHT_STATUS:-PREFLIGHT_FAILED} - ${PREFLIGHT_REASON:-preflight failed}. No paid fallback was attempted."
+            elif [[ "${ACTOR_EXIT:-1}" != "0" ]]; then
+              echo "${ACTOR_STATUS:-EXECUTION_FAILED} - ${ACTOR_REASON:-Mistral Vibe exited without a usable result}. PAYG remains disabled and no paid fallback was attempted."
+            else
+              echo '```text'
+              cat /tmp/onecompany-mistral-public.txt
+              echo
+              echo '```'
+            fi
+          } > /tmp/onecompany-mistral-comment.md
+          gh issue comment 130 --repo "$GITHUB_REPOSITORY" --body-file /tmp/onecompany-mistral-comment.md
+ /tmp/onecompany-mistral-output.txt; then
             code=71
             status="INSUFFICIENT_EVIDENCE"
             reason="Mistral explicitly reported insufficient evidence; not a completed advisory review"

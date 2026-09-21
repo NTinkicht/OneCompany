@@ -12,7 +12,7 @@ import json
 import re
 from pathlib import Path
 
-SHA = re.compile(r"[0-9a-f]{40}\\Z")
+SHA = re.compile(r"[0-9a-f]{40}\Z")
 REQUIRED = ("audience", "problem", "outcome", "first_feature")
 KNOWN_ASSETS = ("known_stack", "existing_tests", "existing_ci", "known_contracts")
 

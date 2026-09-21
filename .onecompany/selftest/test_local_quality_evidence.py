@@ -1,4 +1,5 @@
 import importlib.util
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -9,15 +10,30 @@ quality = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(quality)
 
 
+def checkout_head():
+    """Return the exact revision exercised by this checkout."""
+    return subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, capture_output=True, check=True
+    ).stdout.strip()
+
+
 class LocalQualityEvidenceTests(unittest.TestCase):
-    """Verify exact-revision evidence comes from the real local HTTP/UI smoke."""
+    """Verify evidence is bound to the clean checkout running the real HTTP/UI smoke."""
 
     def test_non_exact_revision_fails_closed(self):
+        """Reject symbolic or abbreviated revisions."""
         with self.assertRaisesRegex(ValueError, "EXACT_REVISION_REQUIRED"):
             quality.collect("main")
 
+    def test_wrong_exact_revision_fails_closed(self):
+        """Reject a syntactically exact SHA that is not the checkout under test."""
+        wrong = "0" * 40 if checkout_head() != "0" * 40 else "1" * 40
+        with self.assertRaisesRegex(ValueError, "REVISION_CHECKOUT_MISMATCH"):
+            quality.collect(wrong)
+
     def test_real_local_http_ui_quality_is_revision_bound(self):
-        revision = "c" * 40
+        """Bind successful evidence to the exact clean checkout HEAD."""
+        revision = checkout_head()
         evidence = quality.collect(revision)
         self.assertEqual(evidence["revision"], revision)
         self.assertEqual(evidence["status"], "PASS")

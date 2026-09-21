@@ -14,10 +14,31 @@ _SHA = re.compile(r"^[0-9a-f]{40}$")
 TEST = ROOT / ".onecompany" / "selftest" / "test_vertical_slice.py"
 
 
+def _checkout_revision() -> str:
+    """Return the exact clean checkout revision or fail closed."""
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, capture_output=True, check=False
+    )
+    if head.returncode != 0 or not _SHA.fullmatch(head.stdout.strip()):
+        raise ValueError("CHECKOUT_REVISION_UNAVAILABLE")
+    status = subprocess.run(
+        ["git", "status", "--porcelain", "--untracked-files=all"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if status.returncode != 0 or status.stdout.strip():
+        raise ValueError("CLEAN_CHECKOUT_REQUIRED")
+    return head.stdout.strip()
+
+
 def collect(revision: str, timeout: float = 30.0) -> dict[str, object]:
-    """Run the real HTTP/UI quality smoke and bind PASS evidence to one revision."""
+    """Run the real HTTP/UI smoke only when revision equals the clean checkout HEAD."""
     if not isinstance(revision, str) or not _SHA.fullmatch(revision):
         raise ValueError("EXACT_REVISION_REQUIRED")
+    if revision != _checkout_revision():
+        raise ValueError("REVISION_CHECKOUT_MISMATCH")
     if not TEST.is_file():
         raise ValueError("LOCAL_APP_QUALITY_TEST_REQUIRED")
     try:

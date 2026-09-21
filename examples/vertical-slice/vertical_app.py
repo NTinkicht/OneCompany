@@ -29,7 +29,7 @@ class VerticalServer(HTTPServer):
     def __init__(self, host: str = "127.0.0.1", port: int = 0):
         if host != "127.0.0.1":
             raise ValueError("only explicit IPv4 loopback is allowed")
-        self.db = sqlite3.connect(":memory:")
+        self.db = sqlite3.connect(":memory:", check_same_thread=False)  # one synchronous HTTPServer thread; tests construct the fixture in their caller thread
         self.db.execute(
             "CREATE TABLE items (id INTEGER PRIMARY KEY AUTOINCREMENT,"
             " title TEXT NOT NULL, done INTEGER NOT NULL DEFAULT 0)"
@@ -207,7 +207,7 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Local-only disposable OneCompany app demo")
+    parser = argparse.ArgumentParser(description="Loopback-only disposable OneCompany app demo")
     parser.add_argument("--port", type=int, default=8765, help="0 for ephemeral OS-chosen port")
     args = parser.parse_args()
     if not 0 <= args.port <= 65535:

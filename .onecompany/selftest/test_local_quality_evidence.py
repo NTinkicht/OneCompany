@@ -2,6 +2,8 @@ import importlib.util
 import subprocess
 import unittest
 from unittest.mock import patch
+
+ORIGINAL_SUBPROCESS_RUN = subprocess.run
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -27,7 +29,7 @@ def quality_run_with_clean_ci_fixture(command, **kwargs):
     """
     if command[:3] == ["git", "status", "--porcelain"]:
         return subprocess.CompletedProcess(command, 0, "", "")
-    return subprocess.run(command, **kwargs)
+    return ORIGINAL_SUBPROCESS_RUN(command, **kwargs)
 
 
 
@@ -55,7 +57,7 @@ class LocalQualityEvidenceTests(unittest.TestCase):
             side_effect=lambda command, **kwargs: (
                 subprocess.CompletedProcess(command, 0, "?? suspicious.py\\n", "")
                 if command[:3] == ["git", "status", "--porcelain"]
-                else subprocess.run(command, **kwargs)
+                else ORIGINAL_SUBPROCESS_RUN(command, **kwargs)
             ),
         ):
             with self.assertRaisesRegex(ValueError, "CLEAN_CHECKOUT_REQUIRED"):

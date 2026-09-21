@@ -31,15 +31,11 @@ class HarnessContractTests(unittest.TestCase):
         intent, trusted = case()
         for generation in (True, False, 1.0, 3.0):
             malformed = RunKey(KEY.wu_id, KEY.run_id, generation)
-            with self.subTest(side="intent", generation=repr(generation)):
-                self.assertEqual(assess_intent(replace(intent, key=malformed), trusted).code, "INVALID_RUN_KEY")
-            with self.subTest(side="snapshot", generation=repr(generation)):
-                self.assertEqual(assess_intent(intent, replace(trusted, key=malformed)).code, "INVALID_RUN_KEY")
+            with self.subTest(side="intent", generation=repr(generation)): self.assertEqual(assess_intent(replace(intent, key=malformed), trusted).code, "INVALID_RUN_KEY")
+            with self.subTest(side="snapshot", generation=repr(generation)): self.assertEqual(assess_intent(intent, replace(trusted, key=malformed)).code, "INVALID_RUN_KEY")
         for malformed in (None, object(), (KEY.wu_id, KEY.run_id, 3), {"generation": 3}):
-            with self.subTest(side="intent", key=repr(malformed)):
-                self.assertEqual(assess_intent(replace(intent, key=malformed), trusted).code, "INVALID_RUN_KEY")
-            with self.subTest(side="snapshot", key=repr(malformed)):
-                self.assertEqual(assess_intent(intent, replace(trusted, key=malformed)).code, "INVALID_RUN_KEY")
+            with self.subTest(side="intent", key=repr(malformed)): self.assertEqual(assess_intent(replace(intent, key=malformed), trusted).code, "INVALID_RUN_KEY")
+            with self.subTest(side="snapshot", key=repr(malformed)): self.assertEqual(assess_intent(intent, replace(trusted, key=malformed)).code, "INVALID_RUN_KEY")
 
     def test_non_string_untrusted_revisions_are_refused_not_exceptions(self):
         intent, trusted = case()
@@ -55,6 +51,22 @@ class HarnessContractTests(unittest.TestCase):
             with self.subTest(changes=changes): self.assertEqual(assess_intent(intent, replace(trusted, **changes)).code, code)
         for spend in (-1, 1, True, 0.01): self.assertEqual(assess_intent(replace(intent, requested_extra_spend=spend), trusted).code, "EXTRA_SPEND_BLOCKED")
 
+    def test_resource_ceilings_are_exact_typed_bounded_and_parent_matched(self):
+        intent, trusted = case()
+        fields = ("max_tokens", "max_seconds", "max_output_bytes", "max_errors", "stall_seconds")
+        for field in fields:
+            for malformed in (True, 1.0, "1", None):
+                with self.subTest(field=field, malformed=repr(malformed), side="intent"):
+                    self.assertEqual(assess_intent(replace(intent, **{field: malformed}), trusted).code, "INVALID_RESOURCE_CEILINGS")
+                with self.subTest(field=field, malformed=repr(malformed), side="snapshot"):
+                    self.assertEqual(assess_intent(intent, replace(trusted, **{field: malformed})).code, "INVALID_RESOURCE_CEILINGS")
+        for field in ("max_tokens", "max_seconds", "max_output_bytes", "stall_seconds"):
+            self.assertEqual(assess_intent(replace(intent, **{field: 0}), replace(trusted, **{field: 0})).code, "INVALID_RESOURCE_CEILINGS")
+        self.assertEqual(assess_intent(replace(intent, max_errors=-1), replace(trusted, max_errors=-1)).code, "INVALID_RESOURCE_CEILINGS")
+        for field in fields:
+            with self.subTest(field=field, mismatch=True):
+                self.assertEqual(assess_intent(replace(intent, **{field: getattr(intent, field) + 1}), trusted).code, "RESOURCE_CEILINGS_MISMATCH")
+
     def test_malformed_actor_tools_and_provider_are_refused(self):
         intent, trusted = case()
         for field, denied in (("project", "WRONG_PROJECT"), ("actor", "WRONG_ACTOR"), ("capability", "CAPABILITY_NOT_LEASED"), ("provider_seam", "UNKNOWN_PROVIDER_SEAM")):
@@ -62,11 +74,9 @@ class HarnessContractTests(unittest.TestCase):
                 with self.subTest(field=field, malformed=repr(malformed)):
                     result = assess_intent(replace(intent, **{field: malformed}), trusted)
                     self.assertFalse(result.permitted); self.assertEqual(result.code, denied)
-        for malformed in ([], {}, 1, None):
-            self.assertEqual(assess_intent(intent, replace(trusted, actor_cost_class=malformed)).code, "COST_CLASS_BLOCKED")
+        for malformed in ([], {}, 1, None): self.assertEqual(assess_intent(intent, replace(trusted, actor_cost_class=malformed)).code, "COST_CLASS_BLOCKED")
         for tools in (frozenset({1}), frozenset({None}), frozenset({""}), frozenset({"read_file", 1})):
-            with self.subTest(tools=repr(tools)):
-                self.assertEqual(assess_intent(replace(intent, tools=tools), replace(trusted, permitted_tools=tools)).code, "TOOL_SCOPE_BLOCKED")
+            with self.subTest(tools=repr(tools)): self.assertEqual(assess_intent(replace(intent, tools=tools), replace(trusted, permitted_tools=tools)).code, "TOOL_SCOPE_BLOCKED")
 
     def test_trusted_boolean_flags_require_exact_bool(self):
         intent, trusted = case()
@@ -81,8 +91,7 @@ class HarnessContractTests(unittest.TestCase):
         for malformed in ([], (), "native", 1, True, False, object()):
             with self.subTest(value=repr(malformed)):
                 verdict = assess_intent(intent, trusted, provider_configuration=malformed)
-                self.assertFalse(verdict.permitted)
-                self.assertEqual(verdict.code, "INVALID_PROVIDER_CONFIGURATION")
+                self.assertFalse(verdict.permitted); self.assertEqual(verdict.code, "INVALID_PROVIDER_CONFIGURATION")
 
     def test_unknown_provider_and_optional_outage_never_expand_scope(self):
         intent, trusted = case()

@@ -1,4 +1,5 @@
 import importlib.util
+import os
 import subprocess
 import sys
 import threading
@@ -13,6 +14,7 @@ sys.dont_write_bytecode = True
 
 ROOT = Path(__file__).resolve().parents[2]
 APP_PATH = ROOT / "examples" / "vertical-slice" / "app.py"
+OFFLINE_LEDGER_FIXTURE = os.environ.get("ONECOMPANY_OFFLINE_UNIT_FIXTURE") == "1"
 
 
 def load(path, name):
@@ -38,6 +40,10 @@ class Phase1PreviewBundleTests(unittest.TestCase):
     """Combined evidence must be local, exact-revision, and non-authoritative."""
 
     @unittest.skipUnless(APP_PATH.is_file(), "source-only disposable demo not installed")
+    @unittest.skipIf(
+        OFFLINE_LEDGER_FIXTURE,
+        "CI unit fixture intentionally dirties ledger; exact-checkout evidence runs outside fixture",
+    )
     def test_real_local_bundle_is_exact_revision_and_non_deployable(self):
         """Probe real localhost health and execute actual HTTP/UI smoke."""
         server, store = app.start_server(0)

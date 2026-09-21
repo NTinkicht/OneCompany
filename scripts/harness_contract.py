@@ -95,11 +95,11 @@ def assess_intent(intent: HarnessIntent, snapshot: TrustedHarnessSnapshot, *, pr
         return deny("LEASE_NOT_ACTIVE")
     if intent.key != snapshot.key:
         return deny("STALE_GENERATION")
-    if not intent.project or intent.project != snapshot.project:
+    if not isinstance(intent.project, str) or not intent.project.strip() or intent.project != snapshot.project:
         return deny("WRONG_PROJECT")
-    if not intent.actor or intent.actor != snapshot.lease_actor:
+    if not isinstance(intent.actor, str) or not intent.actor.strip() or intent.actor != snapshot.lease_actor:
         return deny("WRONG_ACTOR")
-    if not intent.capability or intent.capability != snapshot.lease_capability:
+    if not isinstance(intent.capability, str) or not intent.capability.strip() or intent.capability != snapshot.lease_capability:
         return deny("CAPABILITY_NOT_LEASED")
     if (
         not isinstance(intent.head, str)
@@ -114,17 +114,22 @@ def assess_intent(intent: HarnessIntent, snapshot: TrustedHarnessSnapshot, *, pr
         return deny("STALE_REVISION")
     if not snapshot.actor_verified:
         return deny("ACTOR_NOT_VERIFIED")
-    if snapshot.actor_cost_class not in COST_CLASSES:
+    if not isinstance(snapshot.actor_cost_class, str) or snapshot.actor_cost_class not in COST_CLASSES:
         return deny("COST_CLASS_BLOCKED")
     if (type(intent.requested_extra_spend) is not int or type(snapshot.extra_spend_cap) is not int or intent.requested_extra_spend != 0 or snapshot.extra_spend_cap != 0):
         return deny("EXTRA_SPEND_BLOCKED")
     if not isinstance(intent.tools, frozenset) or not isinstance(snapshot.permitted_tools, frozenset):
         return deny("INVALID_TOOL_SCOPE")
-    if not intent.tools or not intent.tools.issubset(snapshot.permitted_tools):
+    if (
+        not intent.tools
+        or any(not isinstance(tool, str) or not tool.strip() for tool in intent.tools)
+        or any(not isinstance(tool, str) or not tool.strip() for tool in snapshot.permitted_tools)
+        or not intent.tools.issubset(snapshot.permitted_tools)
+    ):
         return deny("TOOL_SCOPE_BLOCKED")
     if intent.tools & FORBIDDEN_TOOLS:
         return deny("GOVERNANCE_TOOL_BLOCKED")
-    if intent.provider_seam not in SEAMS:
+    if not isinstance(intent.provider_seam, str) or intent.provider_seam not in SEAMS:
         return deny("UNKNOWN_PROVIDER_SEAM")
     if not snapshot.provider_available:
         return deny("PROVIDER_UNAVAILABLE")

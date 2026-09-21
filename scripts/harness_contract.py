@@ -123,7 +123,12 @@ def assess_intent(intent: HarnessIntent, snapshot: TrustedHarnessSnapshot, *, pr
         return deny("UNKNOWN_PROVIDER_SEAM")
     if not snapshot.provider_available:
         return deny("PROVIDER_UNAVAILABLE")
-    configured = {"native": True} if provider_configuration is None else provider_configuration
+    if provider_configuration is None:
+        configured: Mapping[str, bool] = {"native": True}
+    elif not isinstance(provider_configuration, Mapping):
+        return deny("INVALID_PROVIDER_CONFIGURATION")
+    else:
+        configured = provider_configuration
     if configured.get(intent.provider_seam) is not True:
         return deny("PROVIDER_NOT_CONFIGURED")
     return HarnessAdmission(True, "ADMITTED_FOR_TRUSTED_PARENT", "candidate matches current supplied snapshot; parent must still enforce real lease, permissions and budget at execution time")

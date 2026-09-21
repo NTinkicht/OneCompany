@@ -5,12 +5,28 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
+from pathlib import Path
 from urllib.parse import urlsplit
 
 import local_preview_evidence as preview
-import local_quality_evidence as quality
 
 SHA = re.compile(r"[0-9a-f]{40}\Z")
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def _checkout_revision() -> str:
+    """Fail closed unless the actual git checkout is at a clean full SHA."""
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT,
+                          capture_output=True, text=True, check=False)
+    if head.returncode != 0 or not SHA.fullmatch(head.stdout.strip()):
+        raise ValueError("CHECKOUT_REVISION_UNAVAILABLE")
+    status = subprocess.run(["git", "status", "--porcelain", "--untracked-files=all"],
+                            cwd=ROOT, capture_output=True, text=True, check=False)
+    if status.returncode != 0 or status.stdout.strip():
+        raise ValueError("CLEAN_CHECKOUT_REQUIRED")
+    return head.stdout.strip()
 
 
 def collect(revision: str, url: str) -> dict[str, object]:
@@ -22,7 +38,7 @@ def collect(revision: str, url: str) -> dict[str, object]:
     if not isinstance(revision, str) or not SHA.fullmatch(revision):
         raise ValueError("EXACT_REVISION_REQUIRED")
     root = preview.validate_local_url(url)
-    if quality._checkout_revision() != revision:
+    if _checkout_revision() != revision:
         raise ValueError("REVISION_CHECKOUT_MISMATCH")
     health = preview.collect(revision, root)
     if health.get("revision") != revision or health.get("health") != "PASS":

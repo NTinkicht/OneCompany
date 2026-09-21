@@ -23,7 +23,10 @@ explicitly a JSON draft export, **not** the canonical PRODUCT.md or an approved
 queue item. It creates no parent folders, uses restrictive file permissions, and
 refuses to overwrite any existing file or follow a destination symlink. Missing
 required answers prohibit exporting a misleading completed brief. Without
-`--save-to`, onboarding and brief generation are non-mutating.
+`--save-to`, **brief generation** is non-mutating; onboarding is non-mutating
+unless `onboard --apply` is explicitly selected. Secure brief export requires
+POSIX `O_DIRECTORY`/`O_NOFOLLOW` support and refuses unsupported-platform
+fallbacks instead of following intermediate symlinks.
 
 Next phase: the user edits the proposed feature/acceptance criteria through
 existing trusted planning/requirements schemas, reviews the resulting bounded

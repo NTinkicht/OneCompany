@@ -8,6 +8,10 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[2]
 APP_PATH = ROOT / "examples" / "vertical-slice" / "app.py"
 ORIGINAL_RUN = subprocess.run
+TRANSIENT_CACHE_PATHS = {
+    ".onecompany/selftest/__pycache__/",
+    "scripts/__pycache__/",
+}
 
 
 def load(path, name):
@@ -30,10 +34,21 @@ def checkout_head():
 
 
 def isolate_unrelated_selftest_caches(command, **kwargs):
-    """Filter CI's other tests' untracked caches, but execute the real app tests."""
-    if command[:3] == ["git", "status", "--porcelain"]:
-        return subprocess.CompletedProcess(command, 0, "", "")
-    return ORIGINAL_RUN(command, **kwargs)
+    """Filter only known transient caches while preserving real Git status evidence."""
+    result = ORIGINAL_RUN(command, **kwargs)
+    if command == ["git", "status", "--porcelain", "--untracked-files=all"]:
+        kept = []
+        for line in result.stdout.splitlines():
+            path = line[3:] if len(line) > 3 else ""
+            if not any(path.startswith(cache) for cache in TRANSIENT_CACHE_PATHS):
+                kept.append(line)
+        stdout = "\n".join(kept)
+        if kept and result.stdout.endswith("\n"):
+            stdout += "\n"
+        return subprocess.CompletedProcess(
+            result.args, result.returncode, stdout, result.stderr
+        )
+    return result
 
 
 class Phase1PreviewBundleTests(unittest.TestCase):
@@ -80,12 +95,16 @@ class Phase1PreviewBundleTests(unittest.TestCase):
         with patch.object(
             bundle.preview, "collect",
             return_value={"revision": revision, "health": "PASS"},
-        ), patch.object(
+        ) as preview_collect, patch.object(
             bundle.quality, "collect",
             return_value={"revision": wrong, "status": "PASS"},
-        ):
+        ) as quality_collect:
             with self.assertRaisesRegex(ValueError, "EXACT_REVISION_EVIDENCE_MISMATCH"):
                 bundle.collect(revision, "http://127.0.0.1:8765/")
+            preview_collect.assert_called_once_with(
+                revision, "http://127.0.0.1:8765/"
+            )
+            quality_collect.assert_called_once_with(revision)
 
     def test_failed_quality_refused_not_published_as_bundle(self):
         revision = checkout_head()

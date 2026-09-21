@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -289,6 +290,24 @@ class MistralCloudReviewTests(unittest.TestCase):
                 self.assertIn("REVIEW_STAGE_BLOCKED", (root / "out").read_text())
             finally:
                 os.chdir(old)
+
+    def test_insufficient_evidence_uses_a_valid_standalone_marker(self):
+        """A prose mention is not a terminal marker; an isolated marker is."""
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        pattern = r"^[[:space:]]*INSUFFICIENT_EVIDENCE[[:space:]]*$"
+        self.assertIn("grep -Eqi '" + pattern + "' /tmp/onecompany-mistral-output.txt", workflow)
+        for output, accepted in (
+            ("INSUFFICIENT_EVIDENCE\\n", True),
+            ("   INSUFFICIENT_EVIDENCE   \\n", True),
+            ("The result is not INSUFFICIENT_EVIDENCE\\n", False),
+            ("CHANGES_REQUIRED because of a confirmed defect\\n", False),
+        ):
+            with self.subTest(output=output):
+                result = subprocess.run(
+                    ["grep", "-Eqi", pattern], input=output, text=True,
+                    capture_output=True, check=False,
+                )
+                self.assertEqual(result.returncode == 0, accepted)
 
     def test_owner_wake_and_review_are_disjoint_source_only(self):
         regular = WAKE.read_text(encoding="utf-8")

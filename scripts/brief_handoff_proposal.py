@@ -70,11 +70,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--head", required=True)
     parser.add_argument("--base", required=True)
     args = parser.parse_args(argv)
-    if not args.brief.is_file() or args.brief.stat().st_size > 16384:
+    if not args.brief.is_file():
         parser.error("bounded saved Product Brief required")
     try:
-        candidate = propose(json.loads(args.brief.read_text(encoding="utf-8")), args.head, args.base)
-    except (ValueError, TypeError, UnicodeError) as exc:
+        with args.brief.open("rb") as source:
+            raw_brief = source.read(16_385)
+        if len(raw_brief) > 16_384:
+            parser.error("bounded saved Product Brief required")
+        candidate = propose(json.loads(raw_brief), args.head, args.base)
+    except (OSError, ValueError, TypeError, UnicodeError) as exc:
         parser.error(str(exc))
     print(json.dumps(candidate, sort_keys=True))
     return 0

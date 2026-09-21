@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OneCompany local app demo</title>
+<style>
+body { font: 1rem system-ui, sans-serif; max-width: 42rem; margin: 2rem auto; padding: 0 1rem; line-height: 1.5; }
+li { padding: .5rem 0; } button { margin-left: .5rem; } input { padding: .5rem; }
+small { display: block; } #message { min-height: 1.5rem; }
+</style>
+</head>
+<body>
+<main>
+<h1>Local task demo</h1>
+<p>Real, disposable CRUD application. Data stays in memory and disappears when the server stops.</p>
+<form id="create"><label for="title">Task title</label> <input id="title" maxlength="120" required> <button>Add task</button></form>
+<p id="message" role="status" aria-live="polite"></p>
+<ul id="items" aria-label="Tasks"></ul>
+<small>OneCompany has not deployed this demo or approved a project automatically.</small>
+</main>
+<script defer src="/app.js"></script>
+</body>
+</html>

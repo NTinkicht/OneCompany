@@ -31,7 +31,9 @@ TICKET = {
 }
 
 
-def fake_pr(*_args):
+def fake_pr(_number, head, base):
+    if head != H or base != B:
+        raise ValueError("STALE_PR")
     return {"head": {"ref": BRANCH, "sha": H}, "number": 99,
             "state": "open"}
 

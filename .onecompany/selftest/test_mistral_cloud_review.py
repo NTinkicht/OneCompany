@@ -297,10 +297,10 @@ class MistralCloudReviewTests(unittest.TestCase):
         pattern = r"^[[:space:]]*INSUFFICIENT_EVIDENCE[[:space:]]*$"
         self.assertIn("grep -Eqi '" + pattern + "' /tmp/onecompany-mistral-output.txt", workflow)
         for output, accepted in (
-            ("INSUFFICIENT_EVIDENCE\\n", True),
-            ("   INSUFFICIENT_EVIDENCE   \\n", True),
-            ("The result is not INSUFFICIENT_EVIDENCE\\n", False),
-            ("CHANGES_REQUIRED because of a confirmed defect\\n", False),
+            ("INSUFFICIENT_EVIDENCE\n", True),
+            ("   INSUFFICIENT_EVIDENCE   \n", True),
+            ("The result is not INSUFFICIENT_EVIDENCE\n", False),
+            ("CHANGES_REQUIRED because of a confirmed defect\n", False),
         ):
             with self.subTest(output=output):
                 result = subprocess.run(

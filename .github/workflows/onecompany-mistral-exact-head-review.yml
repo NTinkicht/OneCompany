@@ -247,6 +247,10 @@ jobs:
             code=70
             status="EXECUTION_FAILED"
             reason="Mistral Vibe returned an empty final answer from the isolated review stage"
+          elif [[ "$code" == "0" ]] && grep -Eqi '(^|[^[:alnum:]_])INSUFFICIENT_EVIDENCE([^[:alnum:]_]|$)' /tmp/onecompany-mistral-output.txt; then
+            code=71
+            status="INSUFFICIENT_EVIDENCE"
+            reason="Mistral explicitly reported insufficient evidence; not a completed advisory review"
           elif [[ "$code" == "124" || "$code" == "137" ]]; then
             status="WAKE_TIMEOUT"
             reason="Mistral Vibe exceeded the 10-minute actor time limit"

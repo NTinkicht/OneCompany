@@ -151,7 +151,7 @@ def git_file(head: str, path: str) -> bytes | None:
         # Missing paths are allowed as explicit WU-scoped NEW files. Fail
         # instead of treating all repo/API errors as a missing file.
         check = subprocess.run(
-            ["git", "cat-file", "-e", f"{head}^{chr(58)}"],
+            ["git", "cat-file", "-e", head],
             capture_output=True, timeout=15, check=False,
         )
         if check.returncode != 0:
@@ -192,7 +192,10 @@ def stage_files(ticket: dict, *, stage: Path = STAGE,
         "No runtime shell, Git, network, secrets, merge or approval.\n",
         encoding="utf-8",
     )
-    manifest.write_text(json.dumps({"ticket": ticket, "files": records}))
+    manifest.write_text(json.dumps({"ticket": ticket, "files": records,
+                                    "task_sha256": hashlib.sha256(
+                                        (stage / "task.txt").read_bytes()
+                                    ).hexdigest()}))
     return {"ticket": ticket, "files": records}
 
 
@@ -201,6 +204,9 @@ def planned_edits(*, stage: Path = STAGE,
     """Read only exact declared files; reject symlink, unlisted and empty edits."""
     trusted = json.loads(manifest.read_text(encoding="utf-8"))
     allowed = {row["path"]: row for row in trusted["files"]}
+    if (hashlib.sha256((stage / "task.txt").read_bytes()).hexdigest()
+        != trusted["task_sha256"]):
+        raise ValueError("MODEL_CHANGED_WORK_ORDER")
     actual: set[str] = set()
     for path in stage.rglob("*"):
         if path.is_symlink():

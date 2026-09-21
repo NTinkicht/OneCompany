@@ -10,15 +10,19 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SPEC = importlib.util.spec_from_file_location(
-    "onecompany_local_app", ROOT / "examples" / "vertical-slice" / "app.py"
-)
-assert SPEC and SPEC.loader
-app = importlib.util.module_from_spec(SPEC)
-sys.modules[SPEC.name] = app
-SPEC.loader.exec_module(app)
+APP_PATH = ROOT / "examples" / "vertical-slice" / "app.py"
+# Bootstrap installs governance/tests into customer repos but deliberately
+# excludes this source-only disposable demo. Skip ONLY when it is absent;
+# exercise real HTTP endpoints when running in the OneCompany source tree.
+if APP_PATH.is_file():
+    SPEC = importlib.util.spec_from_file_location("onecompany_local_app", APP_PATH)
+    assert SPEC and SPEC.loader
+    app = importlib.util.module_from_spec(SPEC)
+    sys.modules[SPEC.name] = app
+    SPEC.loader.exec_module(app)
 
 
+@unittest.skipUnless(APP_PATH.is_file(), "source-only disposable demo not installed")
 class LocalVerticalSliceTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:

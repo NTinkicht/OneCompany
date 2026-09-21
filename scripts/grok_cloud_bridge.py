@@ -89,11 +89,11 @@ def prove_pr_and_independence(value: dict) -> dict:
     pr = github(f"repos/{REPO}/pulls/{value['pr']}")
     if not isinstance(pr, dict):
         raise ValueError("GROK_PR_UNAVAILABLE")
-    head = pr.get("head") or {}
-    base = pr.get("base") or {}
+    head = pr.get("head")
+    base = pr.get("base")
     if not isinstance(head, dict) or not isinstance(base, dict):
         raise ValueError("GROK_PR_UNAVAILABLE")
-    head_repo, base_repo = head.get("repo") or {}, base.get("repo") or {}
+    head_repo, base_repo = head.get("repo"), base.get("repo")
     if not isinstance(head_repo, dict) or not isinstance(base_repo, dict):
         raise ValueError("GROK_PR_UNAVAILABLE")
     if (pr.get("number") != value["pr"] or pr.get("state") != "open"

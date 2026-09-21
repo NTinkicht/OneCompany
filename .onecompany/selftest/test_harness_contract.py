@@ -44,6 +44,37 @@ class HarnessContractTests(unittest.TestCase):
             with self.subTest(changes=changes): self.assertEqual(assess_intent(intent, replace(trusted, **changes)).code, code)
         for spend in (-1, 1, True, 0.01): self.assertEqual(assess_intent(replace(intent, requested_extra_spend=spend), trusted).code, "EXTRA_SPEND_BLOCKED")
 
+    def test_malformed_actor_tools_and_provider_are_refused(self):
+        intent, trusted = case()
+        for field, denied in (
+            ("project", "WRONG_PROJECT"),
+            ("actor", "WRONG_ACTOR"),
+            ("capability", "CAPABILITY_NOT_LEASED"),
+            ("provider_seam", "UNKNOWN_PROVIDER_SEAM"),
+        ):
+            for malformed in ([], {}, 1, None, True):
+                with self.subTest(field=field, malformed=repr(malformed)):
+                    result = assess_intent(
+                        replace(intent, **{field: malformed}), trusted
+                    )
+                    self.assertFalse(result.permitted)
+                    self.assertEqual(result.code, denied)
+        for malformed in ([], {}, 1, None):
+            self.assertEqual(
+                assess_intent(
+                    intent, replace(trusted, actor_cost_class=malformed)
+                ).code, "COST_CLASS_BLOCKED"
+            )
+        for tools in (frozenset({1}), frozenset({None}),
+                      frozenset({""}), frozenset({"read_file", 1})):
+            with self.subTest(tools=repr(tools)):
+                self.assertEqual(
+                    assess_intent(
+                        replace(intent, tools=tools),
+                        replace(trusted, permitted_tools=tools),
+                    ).code, "TOOL_SCOPE_BLOCKED"
+                )
+
     def test_trusted_boolean_flags_require_exact_bool(self):
         intent, trusted = case()
         for field in ("stop_active", "lease_active", "actor_verified", "provider_available"):

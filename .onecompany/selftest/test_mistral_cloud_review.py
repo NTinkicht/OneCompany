@@ -301,6 +301,16 @@ class MistralCloudReviewTests(unittest.TestCase):
         self.assertIn("/tmp/onecompany-budget-trusted.json", review)
         self.assertIn("cp scripts/mistral_cloud_review.py /tmp/", review)
         self.assertIn("ADVISORY review (non-binding)", review)
+        self.assertIn("_onecompany_trusted/AGENTS.md", review)
+        self.assertIn("_onecompany_trusted/CLOUD-AGENT-QUALIFICATION.md", review)
+        self.assertIn("First read review-target.txt and review.diff.", review)
+        self.assertIn("relevant review_sources/", review)
+        self.assertIn("--max-turns 14", review)
+        self.assertNotIn(
+            "Read AGENTS.md, agents/mistral-vibe.md, docs/agent-setup/",
+            review,
+        )
+        self.assertNotIn("read files in $GITHUB_WORKSPACE", review)
         self.assertIn("--workdir /tmp/onecompany-mistral-review-stage", review)
         self.assertIn("steps.stage.outputs.ready == 'true'", review)
         self.assertIn("cp AGENTS.md /tmp/onecompany-mistral-trusted", review)

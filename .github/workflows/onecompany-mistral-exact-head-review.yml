@@ -199,9 +199,13 @@ jobs:
           suites, scanning unrelated modules, or repeatedly loading governance files.
           When evidence exceeds the bounded context budget, report the exact missing
           source slices and stop instead of broadening the repository scan.
-          Read AGENTS.md, agents/mistral-vibe.md, docs/agent-setup/mistral-vibe.md,
-          docs/DISPATCH-AND-WAKE.md and only the additional repository files necessary
-          for the bounded task. Issue #130 is a WAKE BUS, never a lease or
+          Within this isolated workspace, read only these actual staged paths:
+          _onecompany_trusted/AGENTS.md and
+          _onecompany_trusted/CLOUD-AGENT-QUALIFICATION.md (protected-main policy),
+          review-target.txt (canonical exact-head target), review.diff and the
+          relevant review_sources/ files. Do not search parent paths or assume
+          checkout-root agents/, docs/ or AGENTS.md are present here.
+          Issue #130 is a WAKE BUS, never a lease or
           authorization to expand capacity. Source is NTinkicht/OneCompany.
           Do not edit files. Do not run mutating commands. Do not create branches, commits, pull requests,
           reviews, labels or merges. Do not change GitHub state. Do not expose credentials or local auth material.
@@ -210,7 +214,7 @@ jobs:
           Return evidence and concise severity-tagged findings with exact PR/head SHA. This pilot is ALWAYS ADVISORY/NON-GATING until independently qualified for binding review. Do not self-approve or claim merge authority.
           EOF
           printf '\nTRUSTED REVIEW TARGET: OneCompany PR #%s, head %s, base %s.\n' "$REVIEW_PR" "$REVIEW_SHA" "$REVIEW_BASE" >> /tmp/onecompany-mistral-prompt.txt
-          printf 'Read review.diff and only relevant review_sources/ original code/tests. Consult _onecompany_trusted/AGENTS.md and _onecompany_trusted/CLOUD-AGENT-QUALIFICATION.md. If diff evidence is insufficient, report CHANGES_REQUIRED and why. No write operations.\n' >> /tmp/onecompany-mistral-prompt.txt
+          printf 'First read review-target.txt and review.diff. Then read ONLY relevant review_sources/ original code/tests, bounded to this stage. If diff evidence is insufficient, report CHANGES_REQUIRED and what evidence is missing. Return a concise final review with exact target SHA. No write operations.\n' >> /tmp/onecompany-mistral-prompt.txt
           printf '\nDispatch text:\n%s\n' "$DISPATCH_BODY" >> /tmp/onecompany-mistral-prompt.txt
 
           # Programmatic Vibe otherwise falls back to broad auto-approval. Select
@@ -225,7 +229,7 @@ jobs:
               --workdir /tmp/onecompany-mistral-review-stage \
               --enabled-tools grep \
               --enabled-tools read_file \
-              --max-turns 8 \
+              --max-turns 14 \
               --max-tokens 75000 \
               --output text \
               --prompt "$(cat /tmp/onecompany-mistral-prompt.txt)" \
@@ -239,7 +243,7 @@ jobs:
           if [[ "$code" == "0" ]] && ! grep -Eq '[^[:space:]]' /tmp/onecompany-mistral-output.txt; then
             code=70
             status="EXECUTION_FAILED"
-            reason="Mistral Vibe returned no usable result"
+            reason="Mistral Vibe returned an empty final answer from the isolated review stage"
           elif [[ "$code" == "124" || "$code" == "137" ]]; then
             status="WAKE_TIMEOUT"
             reason="Mistral Vibe exceeded the 10-minute actor time limit"

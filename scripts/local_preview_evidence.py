@@ -11,6 +11,14 @@ from urllib.parse import urlsplit
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
+class _RejectRedirects(urllib.request.HTTPRedirectHandler):
+    """Prevent a localhost probe from following a redirect off the local target."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        """Reject every redirect; preview evidence must come from the selected root."""
+        return None
+
+
 def validate_local_url(url: str) -> str:
     """Return normalized localhost URL or reject any remote/credentialed target."""
     parts = urlsplit(url)
@@ -31,8 +39,9 @@ def collect(revision: str, url: str, timeout: float = 2.0) -> dict[str, object]:
         raise ValueError("EXACT_REVISION_REQUIRED")
     root = validate_local_url(url)
     request = urllib.request.Request(root + "health", headers={"Host": urlsplit(root).netloc})
+    opener = urllib.request.build_opener(_RejectRedirects)
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with opener.open(request, timeout=timeout) as response:
             payload = json.loads(response.read(4096).decode("utf-8"))
             status = response.status
     except Exception as exc:
@@ -50,6 +59,7 @@ def collect(revision: str, url: str, timeout: float = 2.0) -> dict[str, object]:
 
 
 def main() -> int:
+    """Collect and print one exact-revision local preview evidence document."""
     parser = argparse.ArgumentParser(description="Capture exact-revision localhost preview evidence")
     parser.add_argument("--revision", required=True)
     parser.add_argument("--url", required=True)

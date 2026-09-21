@@ -75,6 +75,15 @@ def deny(code: str) -> HarnessAdmission:
 
 def assess_intent(intent: HarnessIntent, snapshot: TrustedHarnessSnapshot, *, provider_configuration: Mapping[str, bool] | None = None) -> HarnessAdmission:
     """Refuse stale or overprivileged requests without invoking a provider."""
+    # RunKey crosses an authorization boundary. Require the canonical type and
+    # exact integer generation so bool/float equality cannot alias a live key.
+    if (
+        type(intent.key) is not RunKey
+        or type(snapshot.key) is not RunKey
+        or type(intent.key.generation) is not int
+        or type(snapshot.key.generation) is not int
+    ):
+        return deny("INVALID_RUN_KEY")
     try:
         intent.key.validate()
         snapshot.key.validate()

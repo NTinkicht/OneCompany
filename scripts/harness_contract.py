@@ -37,6 +37,11 @@ class HarnessIntent:
     tools: frozenset[str]
     provider_seam: str = "native"
     requested_extra_spend: int = 0
+    max_tokens: int = 4096
+    max_seconds: int = 300
+    max_output_bytes: int = 1_000_000
+    max_errors: int = 3
+    stall_seconds: int = 60
 
 
 @dataclass(frozen=True)
@@ -58,6 +63,11 @@ class TrustedHarnessSnapshot:
     stop_active: bool
     extra_spend_cap: int
     provider_available: bool = True
+    max_tokens: int = 4096
+    max_seconds: int = 300
+    max_output_bytes: int = 1_000_000
+    max_errors: int = 3
+    stall_seconds: int = 60
 
 
 @dataclass(frozen=True)
@@ -75,8 +85,6 @@ def deny(code: str) -> HarnessAdmission:
 
 def assess_intent(intent: HarnessIntent, snapshot: TrustedHarnessSnapshot, *, provider_configuration: Mapping[str, bool] | None = None) -> HarnessAdmission:
     """Refuse stale or overprivileged requests without invoking a provider."""
-    # RunKey crosses an authorization boundary. Require the canonical type and
-    # exact integer generation so bool/float equality cannot alias a live key.
     if (
         type(intent.key) is not RunKey
         or type(snapshot.key) is not RunKey
@@ -89,8 +97,6 @@ def assess_intent(intent: HarnessIntent, snapshot: TrustedHarnessSnapshot, *, pr
         snapshot.key.validate()
     except (ValueError, TypeError, AttributeError):
         return deny("INVALID_RUN_KEY")
-    # Trusted flags cross the admission boundary. Type annotations are not
-    # runtime enforcement: reject non-bools before any truthiness decision.
     if any(type(value) is not bool for value in (
         snapshot.stop_active,
         snapshot.lease_active,
@@ -127,6 +133,14 @@ def assess_intent(intent: HarnessIntent, snapshot: TrustedHarnessSnapshot, *, pr
         return deny("COST_CLASS_BLOCKED")
     if (type(intent.requested_extra_spend) is not int or type(snapshot.extra_spend_cap) is not int or intent.requested_extra_spend != 0 or snapshot.extra_spend_cap != 0):
         return deny("EXTRA_SPEND_BLOCKED")
+    intent_limits = (intent.max_tokens, intent.max_seconds, intent.max_output_bytes, intent.max_errors, intent.stall_seconds)
+    trusted_limits = (snapshot.max_tokens, snapshot.max_seconds, snapshot.max_output_bytes, snapshot.max_errors, snapshot.stall_seconds)
+    if any(type(value) is not int for value in intent_limits + trusted_limits):
+        return deny("INVALID_RESOURCE_CEILINGS")
+    if any(value <= 0 for value in (intent.max_tokens, intent.max_seconds, intent.max_output_bytes, intent.stall_seconds, snapshot.max_tokens, snapshot.max_seconds, snapshot.max_output_bytes, snapshot.stall_seconds)) or intent.max_errors < 0 or snapshot.max_errors < 0:
+        return deny("INVALID_RESOURCE_CEILINGS")
+    if intent_limits != trusted_limits:
+        return deny("RESOURCE_CEILINGS_MISMATCH")
     if not isinstance(intent.tools, frozenset) or not isinstance(snapshot.permitted_tools, frozenset):
         return deny("INVALID_TOOL_SCOPE")
     if (
@@ -150,4 +164,4 @@ def assess_intent(intent: HarnessIntent, snapshot: TrustedHarnessSnapshot, *, pr
         configured = provider_configuration
     if configured.get(intent.provider_seam) is not True:
         return deny("PROVIDER_NOT_CONFIGURED")
-    return HarnessAdmission(True, "ADMITTED_FOR_TRUSTED_PARENT", "candidate matches current supplied snapshot; parent must still enforce real lease, permissions and budget at execution time")
+    return HarnessAdmission(True, "ADMITTED_FOR_TRUSTED_PARENT", "candidate matches current supplied snapshot; parent must still enforce real lease, permissions, resource ceilings and budget at execution time")

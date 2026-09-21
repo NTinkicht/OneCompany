@@ -1,0 +1,84 @@
+# Source-only provider-native Grok Bot result bridge. No Bot-origin GitHub code-write or merge.
+name: OneCompany Grok Native Review and Test Evidence
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: read
+  actions: read
+
+jobs:
+  native-result:
+    if: >-
+      github.event.issue.number == 131 &&
+      github.event.issue.pull_request == null &&
+      github.actor == 'onecompany-grok-worker[bot]' &&
+      startsWith(github.event.comment.body, 'GROK_RESULT_V1')
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    concurrency:
+      group: onecompany-grok-native-evidence
+      cancel-in-progress: false
+    steps:
+      - name: Checkout protected main without stored credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Validate authenticated Grok source, PR revision and independent CI
+        id: verify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_ACTOR: ${{ github.actor }}
+          SOURCE_ISSUE: ${{ github.event.issue.number }}
+          SOURCE_COMMENT_ID: ${{ github.event.comment.id }}
+          SOURCE_BODY: ${{ github.event.comment.body }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/grok_cloud_bridge.py
+
+      - name: Revalidate before publishing advisory evidence
+        id: fresh
+        if: steps.verify.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REVIEW_PR: ${{ steps.verify.outputs.pr }}
+          REVIEW_HEAD: ${{ steps.verify.outputs.sha }}
+          REVIEW_BASE: ${{ steps.verify.outputs.base }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import os
+          from scripts import mistral_cloud_review as guard
+          try:
+              n = int(os.environ["REVIEW_PR"])
+              h, b = os.environ["REVIEW_HEAD"], os.environ["REVIEW_BASE"]
+              guard.current_pr(n, h, b)
+              if not guard.latest_ci_green(n, h):
+                  raise ValueError("STALE_GROK_CI")
+          except (ValueError, KeyError, OSError):
+              with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+                  out.write("ready=false\n")
+          else:
+              with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+                  out.write("ready=true\n")
+          PY
+
+      - name: Post bounded non-binding evidence to the exact open PR
+        if: steps.verify.outputs.ready == 'true' && steps.fresh.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REVIEW_PR: ${{ steps.verify.outputs.pr }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh issue comment "$REVIEW_PR" \
+            --repo "$GITHUB_REPOSITORY" \
+            --body-file /tmp/onecompany-grok-public.txt

@@ -171,7 +171,10 @@ class MistralCloudWakeTests(unittest.TestCase):
         self.assertIn("35540501655", " ".join(mistral["evidence"]))
         grok = by_actor["grok-4-6-interactive"]
         self.assertEqual(grok["verified_capabilities"], ["repository_intelligence"])
-        self.assertFalse(grok["unattended"]["verified"])
+        self.assertTrue(grok["unattended"]["verified"])
+        self.assertEqual(grok["capacity"]["implementation_streams"], 0)
+        for prohibited in ("write", "review", "merge"):
+            self.assertFalse(grok["repository_access"][prohibited])
 
 
 if __name__ == "__main__":

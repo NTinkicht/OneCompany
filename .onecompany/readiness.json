@@ -261,7 +261,8 @@
       "setup_state": "ready",
       "verified_surfaces": [
         "grok-web-custom-oauth-pkce-mcp",
-        "render-github-app-onecompany-readonly"
+        "render-github-app-onecompany-readonly",
+        "grok-bot-onecompany-engineer-native-scheduled-readonly"
       ],
       "verified_capabilities": [
         "repository_intelligence"
@@ -274,22 +275,25 @@
         "merge": false
       },
       "unattended": {
-        "configured": false,
-        "verified": false
+        "configured": true,
+        "verified": true
       },
       "capacity": {
         "implementation_streams": 0,
         "measured": true,
         "observed_at": "2026-09-19T19:30:59Z",
         "evidence": [
-          "Read-only bot identity proven; write/lease-bound implementation capacity is zero."
+          "Read-only bot identity proven; write/lease-bound implementation capacity is zero.",
+          "Unattended subscription-linked Bot read-only intake observed in owner screenshot; included-usage balance and per-execution run IDs not independently accessible via GitHub, implementation streams remain zero"
         ]
       },
-      "last_verified_at": "2026-09-19T19:30:59Z",
+      "last_verified_at": "2026-09-21T09:09:28Z",
       "evidence": [
         "Grok web connector returned onecompany_actor_identity and onecompany_repository_status: logical actor grok-4-6-interactive, principal onecompany-grok-worker[bot], App 5003121, installation 163077002, repository NTinkicht/OneCompany, read_only.",
         "Render deployment dep-dane5fmk1f9s738e5tig startup log 2026-09-19T19:30:59Z: verified_read_only_identity; OAuth token issued by same service.",
-        "OneCompany remains source L1; no write, unattended writing, independent review attestation, or merging verified."
+        "OneCompany remains source L1; no write, unattended writing, independent review attestation, or merging verified.",
+        "Owner-supplied Grok Bot OneCompany Engineer screenshot: naturally scheduled provider-cloud read-only reports detected issue #131 marker at 05:21 UTC and fresh protected-main heads a77ca9c, f24d591c and 6936b331c by 09:10 UTC; GitHub independently verified all three commits and marker timeline; audit: https://github.com/NTinkicht/OneCompany/issues/131#issuecomment-5758144418",
+        "LIMITATION: repeated displayed Run ID may identify the routine rather than separate executions; read-only cloud schedule observed in native Bot conversation, not issue-assigned GitHub trigger, model-signed execution attestation, GitHub bot-authored comment, code review or writing"
       ]
     }
   ]

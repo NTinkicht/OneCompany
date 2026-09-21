@@ -90,6 +90,30 @@ Separate role lanes, presently **not qualified**:
   trusted/redacted CI evidence, acceptance criteria and exact head; writing test
   files requires a valid implementation lease on the existing canonical PR.
 
+## Grok Bot scheduled read-only cloud milestone (2026-09-21)
+
+**Owner-observed and GitHub-timeline-verified narrow qualification:** OneCompany
+Engineer native provider-hosted scheduled intake reported `main` at
+`a77ca9c…`, then `f24d591c…`, then `6936b331…`, recognizing
+`ONECOMPANY-GROK-SCHEDULED-SMOKE-WAKE-20260921-0515Z` on #131.
+GitHub independently confirmed the three full commits, their chronology and
+the marker. [Exact evidence and limitations](https://github.com/NTinkicht/OneCompany/issues/131#issuecomment-5758144418).
+The screenshot displayed one repeated Run ID across several posts: it may
+identify the schedule/conversation, **not separate execution IDs**. Native
+provider run-history details, precise remaining included usage and GitHub
+Bot-write publication are not independently available through this connector.
+
+**Verified scope: only read-only scheduled repository intelligence** via
+`grok-supergrok-scheduled-readonly`. No permission change, lease, non-author
+binding review, code authorship, test execution, branch/PR mutation or merge.
+The previous `issue-assigned` event-triggered mechanism
+`grok-supergrok-cloud-wake` remains disabled/unverified. The interactive
+read-only GitHub App mechanism is separately demonstrated; the scheduled
+worker's native conversation output is not an authenticated GitHub bot
+publisher. Owner-configured 10-minute cadence is potentially 1,008 checks
+per week; throttle or pause before included quota exhaustion, never turn on
+PAYG or upgrade authority as a workaround.
+
 ## Grok / SuperGrok (no Codespace route)
 
 The existing OneCompany GitHub App OAuth + read-only MCP is **GitHub I/O only**;

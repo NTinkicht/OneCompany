@@ -351,15 +351,23 @@
           "kind": "event_trigger",
           "configured": false,
           "unattended": true,
-          "capabilities": [
-            "repository_intelligence",
-            "test_design",
-            "failure_analysis",
-            "code_review",
-            "implementation"
-          ],
+          "capabilities": [],
           "invocation_hint": "Preferred investigation #131/#136: Grok Bot provider cloud computer linked to owner's existing SuperGrok through Cursor, GitHub-notification event routine if available. No Codespace or session-file export, no API PAYG. Until a real cloud inference and durable GitHub result smoke, `configured=false` and CAPACITY_BLOCKED.",
           "evidence": []
+        },
+        {
+          "id": "grok-supergrok-scheduled-readonly",
+          "kind": "scheduled_task",
+          "configured": true,
+          "unattended": true,
+          "capabilities": [
+            "repository_intelligence"
+          ],
+          "invocation_hint": "OneCompany Engineer's native provider-cloud scheduled `onecompany-cloud-intake-smoke` read-only GitHub poll, user-observed reports for main SHAs and #131 marker. Native run can report in Bot conversation; no GitHub Bot publication, lease or reviewer/writer authority. Owner-configured 10-minute cadence may exhaust included allowance: throttle/pause when needed, no PAYG.",
+          "evidence": [
+            "Owner screenshot verified against GitHub exact commit timeline on 2026-09-21: https://github.com/NTinkicht/OneCompany/issues/131#issuecomment-5758144418",
+            "OneCompany main commit SHA sequence a77ca9c1985cd51c8e8384f5921c5bb4cbbd31b9 -> f24d591c955890f2690e7a1debb268557d99a6da -> 6936b331a61da7c7ac7e4b3c4e723215933c312d, issue #131 marker from 2026-09-21 05:13 UTC"
+          ]
         }
       ]
     }

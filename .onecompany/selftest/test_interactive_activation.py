@@ -169,7 +169,7 @@ class InteractiveActivationTests(unittest.TestCase):
 
         for actor_id, record in readiness.items():
             unattended = record["unattended"]
-            if actor_id in {"onecompany-local", "mistral-vibe"}:
+            if actor_id in {"onecompany-local", "mistral-vibe", "grok-4-6-interactive"}:
                 self.assertTrue(unattended["configured"])
                 self.assertTrue(unattended["verified"])
             else:
@@ -187,6 +187,7 @@ class InteractiveActivationTests(unittest.TestCase):
             [
                 ("onecompany-local", "onecompany-actions-readonly"),
                 ("mistral-vibe", "vibe-readonly-wake"),
+                ("grok-4-6-interactive", "grok-supergrok-scheduled-readonly"),
             ],
         )
 

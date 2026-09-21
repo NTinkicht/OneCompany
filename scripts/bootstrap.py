@@ -50,6 +50,7 @@ SOURCE_INSTALLATION_SELFTESTS = frozenset({
     ".onecompany/selftest/test_zero_spend_router.py",
     ".onecompany/selftest/test_external_capability_register.py",
     ".onecompany/selftest/test_cloud_mistral_wake.py",
+    ".onecompany/selftest/test_cloud_grok_scheduled.py",
     ".onecompany/selftest/test_mistral_cloud_review.py",
 })
 

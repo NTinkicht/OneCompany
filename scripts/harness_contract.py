@@ -1,0 +1,167 @@
+#!/usr/bin/env python3
+"""Provider-neutral *admission plan* below OneCompany's canonical WU lease.
+
+This is not a new orchestrator, an execution entrypoint or a lease verifier.
+A trusted parent must derive snapshots from the live ledger/current GitHub
+state; never accept model- or PR-supplied snapshots as authorization.
+"""
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass
+from typing import Mapping
+
+from execution_core import RunKey
+
+SHA = re.compile(r"[0-9a-f]{40}\Z")
+SEAMS = frozenset({
+    "native", "memory", "context", "model_endpoint", "runtime_capability",
+    "workspace", "ui_assurance", "telemetry", "skill", "deployment",
+})
+FORBIDDEN_TOOLS = frozenset({
+    "grant_lease", "review_own_code", "approve_pr", "merge_pr",
+    "change_budget", "change_credentials", "deploy_production",
+})
+COST_CLASSES = frozenset({"HUMAN", "INCLUDED_SUBSCRIPTION", "FREE_ALLOWANCE", "LOCAL"})
+
+
+@dataclass(frozen=True)
+class HarnessIntent:
+    """Untrusted candidate invocation request, never a policy grant."""
+    key: RunKey
+    project: str
+    actor: str
+    capability: str
+    head: str
+    base: str
+    tools: frozenset[str]
+    provider_seam: str = "native"
+    requested_extra_spend: int = 0
+    max_tokens: int = 4096
+    max_seconds: int = 300
+    max_output_bytes: int = 1_000_000
+    max_errors: int = 3
+    stall_seconds: int = 60
+
+
+@dataclass(frozen=True)
+class TrustedHarnessSnapshot:
+    """Values the caller must resolve from trusted, current platform evidence.
+
+    Creating this dataclass does NOT establish ledger trust on its own.
+    """
+    key: RunKey
+    project: str
+    head: str
+    base: str
+    lease_actor: str
+    lease_capability: str
+    lease_active: bool
+    permitted_tools: frozenset[str]
+    actor_verified: bool
+    actor_cost_class: str
+    stop_active: bool
+    extra_spend_cap: int
+    provider_available: bool = True
+    max_tokens: int = 4096
+    max_seconds: int = 300
+    max_output_bytes: int = 1_000_000
+    max_errors: int = 3
+    stall_seconds: int = 60
+
+
+@dataclass(frozen=True)
+class HarnessAdmission:
+    """Pure, side-effect-free decision; never substitutes for GitHub/lease gate."""
+    permitted: bool
+    code: str
+    reason: str
+
+
+def deny(code: str) -> HarnessAdmission:
+    """Return a stable non-leaking refusal."""
+    return HarnessAdmission(False, code, code.lower().replace("_", " "))
+
+
+def assess_intent(intent: HarnessIntent, snapshot: TrustedHarnessSnapshot, *, provider_configuration: Mapping[str, bool] | None = None) -> HarnessAdmission:
+    """Refuse stale or overprivileged requests without invoking a provider."""
+    if (
+        type(intent.key) is not RunKey
+        or type(snapshot.key) is not RunKey
+        or type(intent.key.generation) is not int
+        or type(snapshot.key.generation) is not int
+    ):
+        return deny("INVALID_RUN_KEY")
+    try:
+        intent.key.validate()
+        snapshot.key.validate()
+    except (ValueError, TypeError, AttributeError):
+        return deny("INVALID_RUN_KEY")
+    if any(type(value) is not bool for value in (
+        snapshot.stop_active,
+        snapshot.lease_active,
+        snapshot.actor_verified,
+        snapshot.provider_available,
+    )):
+        return deny("INVALID_TRUSTED_SNAPSHOT")
+    if snapshot.stop_active:
+        return deny("EMERGENCY_STOP")
+    if not snapshot.lease_active:
+        return deny("LEASE_NOT_ACTIVE")
+    if intent.key != snapshot.key:
+        return deny("STALE_GENERATION")
+    if not isinstance(intent.project, str) or not intent.project.strip() or intent.project != snapshot.project:
+        return deny("WRONG_PROJECT")
+    if not isinstance(intent.actor, str) or not intent.actor.strip() or intent.actor != snapshot.lease_actor:
+        return deny("WRONG_ACTOR")
+    if not isinstance(intent.capability, str) or not intent.capability.strip() or intent.capability != snapshot.lease_capability:
+        return deny("CAPABILITY_NOT_LEASED")
+    if (
+        not isinstance(intent.head, str)
+        or not isinstance(intent.base, str)
+        or not SHA.fullmatch(intent.head)
+        or not SHA.fullmatch(intent.base)
+    ):
+        return deny("INVALID_REVISION")
+    if intent.head == intent.base:
+        return deny("NONDISTINCT_REVISIONS")
+    if intent.head != snapshot.head or intent.base != snapshot.base:
+        return deny("STALE_REVISION")
+    if not snapshot.actor_verified:
+        return deny("ACTOR_NOT_VERIFIED")
+    if not isinstance(snapshot.actor_cost_class, str) or snapshot.actor_cost_class not in COST_CLASSES:
+        return deny("COST_CLASS_BLOCKED")
+    if (type(intent.requested_extra_spend) is not int or type(snapshot.extra_spend_cap) is not int or intent.requested_extra_spend != 0 or snapshot.extra_spend_cap != 0):
+        return deny("EXTRA_SPEND_BLOCKED")
+    intent_limits = (intent.max_tokens, intent.max_seconds, intent.max_output_bytes, intent.max_errors, intent.stall_seconds)
+    trusted_limits = (snapshot.max_tokens, snapshot.max_seconds, snapshot.max_output_bytes, snapshot.max_errors, snapshot.stall_seconds)
+    if any(type(value) is not int for value in intent_limits + trusted_limits):
+        return deny("INVALID_RESOURCE_CEILINGS")
+    if any(value <= 0 for value in (intent.max_tokens, intent.max_seconds, intent.max_output_bytes, intent.stall_seconds, snapshot.max_tokens, snapshot.max_seconds, snapshot.max_output_bytes, snapshot.stall_seconds)) or intent.max_errors < 0 or snapshot.max_errors < 0:
+        return deny("INVALID_RESOURCE_CEILINGS")
+    if intent_limits != trusted_limits:
+        return deny("RESOURCE_CEILINGS_MISMATCH")
+    if not isinstance(intent.tools, frozenset) or not isinstance(snapshot.permitted_tools, frozenset):
+        return deny("INVALID_TOOL_SCOPE")
+    if (
+        not intent.tools
+        or any(not isinstance(tool, str) or not tool.strip() for tool in intent.tools)
+        or any(not isinstance(tool, str) or not tool.strip() for tool in snapshot.permitted_tools)
+        or not intent.tools.issubset(snapshot.permitted_tools)
+    ):
+        return deny("TOOL_SCOPE_BLOCKED")
+    if intent.tools & FORBIDDEN_TOOLS:
+        return deny("GOVERNANCE_TOOL_BLOCKED")
+    if not isinstance(intent.provider_seam, str) or intent.provider_seam not in SEAMS:
+        return deny("UNKNOWN_PROVIDER_SEAM")
+    if not snapshot.provider_available:
+        return deny("PROVIDER_UNAVAILABLE")
+    if provider_configuration is None:
+        configured: Mapping[str, bool] = {"native": True}
+    elif not isinstance(provider_configuration, Mapping):
+        return deny("INVALID_PROVIDER_CONFIGURATION")
+    else:
+        configured = provider_configuration
+    if configured.get(intent.provider_seam) is not True:
+        return deny("PROVIDER_NOT_CONFIGURED")
+    return HarnessAdmission(True, "ADMITTED_FOR_TRUSTED_PARENT", "candidate matches current supplied snapshot; parent must still enforce real lease, permissions, resource ceilings and budget at execution time")

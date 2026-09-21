@@ -91,6 +91,27 @@ class ProductBriefTests(unittest.TestCase):
                 brief.save_exclusive(root / "missing" / "brief.json", draft)
             self.assertFalse((root / "missing").exists())
 
+    def test_intermediate_symlink_parent_does_not_escape_export(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            draft = brief.make_draft(
+                brief.analyze(self.target(root), repository="demo/future-product"),
+                self.answers(),
+            )
+            real_parent = root / "real"
+            real_parent.mkdir()
+            shortcut = root / "shortcut"
+            shortcut.symlink_to(real_parent, target_is_directory=True)
+            with self.assertRaises(OSError):
+                brief.save_exclusive(shortcut / "draft.json", draft)
+            self.assertFalse((real_parent / "draft.json").exists())
+            nested = root / "nested"
+            nested.mkdir()
+            (nested / "bad").symlink_to(real_parent, target_is_directory=True)
+            with self.assertRaises(OSError):
+                brief.save_exclusive(nested / "bad" / "draft.json", draft)
+            self.assertFalse((real_parent / "draft.json").exists())
+
     def test_incomplete_cli_refuses_save_and_no_target_mutation(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

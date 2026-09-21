@@ -12,7 +12,7 @@ from pathlib import Path
 def render(projection: dict[str, object]) -> bytes:
     """Render a compact, escaped status page without granting authority."""
     revision = html.escape(str(projection.get("revision", "unknown")))
-    ready = projection.get("ready") is True
+    ready = projection.get("readiness") == "READY_FOR_OWNER_PREVIEW"
     status = "READY" if ready else "NOT READY"
     body = f"""<!doctype html><html><head><meta charset='utf-8'><title>OneCompany Mission Control</title></head>
 <body><main><h1>Mission Control</h1><p id='status'>{status}</p><p>Revision: <code>{revision}</code></p>

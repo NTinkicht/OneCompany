@@ -1,18 +1,18 @@
 import importlib.util
 import subprocess
+import sys
 import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+# This self-test exercises the production clean-checkout guard. Prevent Python
+# from manufacturing __pycache__ files in the checkout before that guard runs
+# instead of teaching the test to hide repository status entries.
+sys.dont_write_bytecode = True
+
 ROOT = Path(__file__).resolve().parents[2]
 APP_PATH = ROOT / "examples" / "vertical-slice" / "app.py"
-ORIGINAL_RUN = subprocess.run
-TRANSIENT_CACHE_PATHS = {
-    ".onecompany/selftest/__pycache__/",
-    "examples/vertical-slice/__pycache__/",
-    "scripts/__pycache__/",
-}
 
 
 def load(path, name):
@@ -29,27 +29,9 @@ app = load(APP_PATH, "vertical_slice_app") if APP_PATH.is_file() else None
 
 def checkout_head():
     """Use the actual checked-out commit, not a syntactically valid placeholder."""
-    return ORIGINAL_RUN(
+    return subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, capture_output=True, check=True
     ).stdout.strip()
-
-
-def isolate_unrelated_selftest_caches(command, **kwargs):
-    """Filter only known transient caches while preserving real Git status evidence."""
-    result = ORIGINAL_RUN(command, **kwargs)
-    if command == ["git", "status", "--porcelain", "--untracked-files=all"]:
-        kept = []
-        for line in result.stdout.splitlines():
-            path = line[3:] if len(line) > 3 else ""
-            if not any(path.startswith(cache) for cache in TRANSIENT_CACHE_PATHS):
-                kept.append(line)
-        stdout = "\n".join(kept)
-        if kept and result.stdout.endswith("\n"):
-            stdout += "\n"
-        return subprocess.CompletedProcess(
-            result.args, result.returncode, stdout, result.stderr
-        )
-    return result
 
 
 class Phase1PreviewBundleTests(unittest.TestCase):
@@ -63,13 +45,9 @@ class Phase1PreviewBundleTests(unittest.TestCase):
         thread.start()
         try:
             revision = checkout_head()
-            with patch.object(
-                bundle.quality.subprocess, "run",
-                side_effect=isolate_unrelated_selftest_caches,
-            ):
-                evidence = bundle.collect(
-                    revision, f"http://127.0.0.1:{server.server_port}/"
-                )
+            evidence = bundle.collect(
+                revision, f"http://127.0.0.1:{server.server_port}/"
+            )
             self.assertEqual(evidence["revision"], revision)
             self.assertEqual(evidence["preview"]["revision"], revision)
             self.assertEqual(evidence["quality"]["revision"], revision)

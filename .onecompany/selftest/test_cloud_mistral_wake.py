@@ -16,6 +16,7 @@ import bootstrap
 WORKFLOW = ROOT / ".github/workflows/onecompany-mistral-vibe-wake.yml"
 DISPATCH = ROOT / ".onecompany/dispatch.json"
 READINESS = ROOT / ".onecompany/readiness.json"
+ROUTING = ROOT / ".onecompany/routing.json"
 
 
 class MistralCloudWakeTests(unittest.TestCase):
@@ -126,22 +127,48 @@ class MistralCloudWakeTests(unittest.TestCase):
         actors = {item["actor_id"]: item["mechanisms"] for item in dispatch["actors"]}
         mistral = {m["id"]: m for m in actors["mistral-vibe"]}
         grok = {m["id"]: m for m in actors["grok-4-6-interactive"]}
+        self.assertTrue(mistral["vibe-readonly-wake"]["configured"])
+        self.assertEqual(
+            mistral["vibe-readonly-wake"]["capabilities"],
+            ["repository_intelligence", "test_design"],
+        )
+        self.assertIn("35540501655", " ".join(mistral["vibe-readonly-wake"]["evidence"]))
         for mechanism in (
-            mistral["vibe-readonly-wake"],
             mistral["vibe-exact-head-review"],
             mistral["vibe-lease-implementation"],
             grok["grok-supergrok-cloud-wake"],
         ):
             self.assertFalse(mechanism["configured"])
-        self.assertEqual(mistral["vibe-readonly-wake"]["capabilities"],
-                         ["repository_intelligence", "test_design", "failure_analysis", "documentation", "research"])
+
+    def test_active_actor_only_routes_live_capabilities(self):
+        routing = json.loads(ROUTING.read_text(encoding="utf-8"))
+        dispatch = json.loads(DISPATCH.read_text(encoding="utf-8"))
+        mistral = next(x for x in dispatch["actors"] if x["actor_id"] == "mistral-vibe")
+        configured = [m for m in mistral["mechanisms"] if m["configured"]]
+        self.assertEqual(len(configured), 1)
+        self.assertEqual(configured[0]["id"], "vibe-readonly-wake")
+        self.assertEqual(configured[0]["capabilities"],
+                         ["repository_intelligence", "test_design"])
+        for mechanism in mistral["mechanisms"]:
+            self.assertTrue(set(mechanism["capabilities"]).issubset(
+                {"repository_intelligence", "test_design"}
+            ))
+        for capability, actor_ids in routing["preference_by_capability"].items():
+            if "mistral-vibe" in actor_ids:
+                self.assertIn(capability, {"repository_intelligence", "test_design"})
 
     def test_readiness_not_inflated_by_workflow_presence(self):
         readiness = json.loads(READINESS.read_text(encoding="utf-8"))
         by_actor = {a["actor_id"]: a for a in readiness["actors"]}
         mistral = by_actor["mistral-vibe"]
-        self.assertEqual(mistral["verified_capabilities"], [])
-        self.assertFalse(mistral["unattended"]["verified"])
+        self.assertEqual(mistral["verified_capabilities"],
+                         ["repository_intelligence", "test_design"])
+        self.assertTrue(mistral["unattended"]["verified"])
+        self.assertTrue(mistral["repository_access"]["read"])
+        for prohibited in ("write", "review", "merge"):
+            self.assertFalse(mistral["repository_access"][prohibited])
+        self.assertEqual(mistral["capacity"]["implementation_streams"], 0)
+        self.assertIn("35540501655", " ".join(mistral["evidence"]))
         grok = by_actor["grok-4-6-interactive"]
         self.assertEqual(grok["verified_capabilities"], ["repository_intelligence"])
         self.assertFalse(grok["unattended"]["verified"])

@@ -199,27 +199,18 @@
     {
       "id": "mistral-vibe",
       "display_name": "Mistral Vibe",
-      "enabled": false,
-      "configured": false,
+      "enabled": true,
+      "configured": true,
       "execution_modes": [
-        "local_cli",
-        "interactive",
         "unattended_if_configured"
       ],
       "cost_class": "INCLUDED_SUBSCRIPTION",
       "permissions": [
-        "read",
-        "write_if_connected"
+        "read"
       ],
       "capabilities": [
-        "implementation",
         "repository_intelligence",
-        "ci_remediation",
-        "code_review",
-        "test_design",
-        "failure_analysis",
-        "documentation",
-        "research"
+        "test_design"
       ],
       "may_independently_gate_own_material_authorship": false
     },

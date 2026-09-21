@@ -20,7 +20,7 @@ FIELDS = {
     "outcome": "first_valuable_outcome",
     "first_feature": "first_feature",
 }
-REPOSITORY = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\\Z")
+REPOSITORY = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+\Z")
 
 
 def clean_answer(value: str | None, field: str) -> str | None:
@@ -59,7 +59,7 @@ def draft(report: dict, answers: dict[str, str | None]) -> dict:
 
 def exclusive_save(path: Path, value: dict) -> None:
     """Fail closed rather than overwriting an existing file or following a final symlink."""
-    data = (json.dumps(value, indent=2, ensure_ascii=False) + "\\n").encode("utf-8")
+    data = (json.dumps(value, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
     if hasattr(os, "O_NOFOLLOW"):
         flags |= os.O_NOFOLLOW

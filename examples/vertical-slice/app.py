@@ -11,7 +11,6 @@ import json
 import sqlite3
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
 from urllib.parse import urlsplit
 
 MAX_BODY = 4096
@@ -245,11 +244,10 @@ def make_handler(store: ItemStore) -> type[BaseHTTPRequestHandler]:
             if not isinstance(payload, dict) or set(payload) != {"done"} or type(payload["done"]) is not bool:
                 self.respond(400, {"error": "done must be true or false"})
                 return
-            self.respond(
-                200 if store.set_done(item_id, payload["done"]) else 404,
-                {"ok": True} if item_id in [x["id"] for x in store.list()]
-                else {"error": "item not found"},
-            )
+            updated = store.set_done(item_id, payload["done"])
+            self.respond(200 if updated else 404,
+                         {"ok": True} if updated
+                         else {"error": "item not found"})
 
         def do_DELETE(self) -> None:
             if not self.valid_local_request() or not self.mutation_allowed():

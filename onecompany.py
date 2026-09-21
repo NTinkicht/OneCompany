@@ -9,6 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 COMMANDS = {
     "onboard": ["onboard.py"],
+    "brief": ["product_brief.py"],
     "shadow-migration": ["shadow_migration.py"],
     "cutover-readiness": ["cutover_readiness.py"],
     "doctor": ["doctor.py"], "status": ["status.py"], "check": ["check.py"], "validate": ["validate_all.py"], "schema-validate": ["schema_validate.py"],
@@ -29,6 +30,7 @@ def usage() -> int:
     print("usage: python onecompany.py <command> [args]")
     print("\nStart here:")
     print("  onboard           assess a new/existing repository; read-only unless --apply")
+    print("  brief             draft an editable Product Brief; no write unless --save-to")
     print("  shadow-migration  analyze an external migration snapshot without target mutation")
     print("  cutover-readiness prove quiescent C2b readiness without target mutation")
     print("\nCommands:")

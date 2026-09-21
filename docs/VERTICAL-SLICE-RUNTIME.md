@@ -6,12 +6,12 @@ The previous guided Create/Adopt and harness are *planning/admission* building b
 
 Requires only Python 3.12+; no pip install, paid API, external database, browser service, GitHub credential or cloud resource.
 
-\`\`\`sh
+```sh
 python examples/vertical-slice/vertical_app.py --port 8765
 # Open http://127.0.0.1:8765/ on the same machine
 # Stop with Ctrl+C; in-memory tasks are discarded.
 python -m unittest discover -s .onecompany/selftest -p 'test_vertical_slice.py'
-\`\`\`
+```
 
 The server binds **only 127.0.0.1**, validates the Host header, serves local HTML/JS with a restrictive CSP, never interpolates item titles as HTML, uses parameterized SQLite queries in memory, and accepts bounded JSON bodies and titles. It has GET /healthz and GET/POST /api/items plus GET/PATCH/DELETE /api/items/:id. Create returns 201, mutations return 200/204, invalid data 400, missing items 404. OPTIONS denies cross-origin use. Routes with unexpected query parameters are refused. A port of 0 chooses a local ephemeral port and prints the actual URL.
 

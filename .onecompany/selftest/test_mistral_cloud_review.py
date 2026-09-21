@@ -306,7 +306,7 @@ class MistralCloudReviewTests(unittest.TestCase):
         self.assertIn("First read review-target.txt and review.diff.", review)
         self.assertIn("relevant review_sources/", review)
         self.assertIn("--max-turns 4", review)
-        self.assertIn("--max-tokens 100000", review)
+        self.assertIn("--max-tokens 50000", review)
         self.assertIn("Do not re-read the same file", review)
         self.assertLessEqual(target.MAX_REVIEW_STAGE_DIFF_BYTES, 32_000)
         self.assertLessEqual(target.MAX_REVIEW_STAGE_SOURCE_BYTES, 24_000)

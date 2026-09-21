@@ -15,18 +15,9 @@ from execution_core import RunKey
 
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 SEAMS = frozenset({
-    "native",
-    "memory",
-    "context",
-    "model_endpoint",
-    "runtime_capability",
-    "workspace",
-    "ui_assurance",
-    "telemetry",
-    "skill",
-    "deployment",
+    "native", "memory", "context", "model_endpoint", "runtime_capability",
+    "workspace", "ui_assurance", "telemetry", "skill", "deployment",
 })
-# No provider interface can grant governance authority.
 FORBIDDEN_TOOLS = frozenset({
     "grant_lease", "review_own_code", "approve_pr", "merge_pr",
     "change_budget", "change_credentials", "deploy_production",
@@ -37,7 +28,6 @@ COST_CLASSES = frozenset({"HUMAN", "INCLUDED_SUBSCRIPTION", "FREE_ALLOWANCE", "L
 @dataclass(frozen=True)
 class HarnessIntent:
     """Untrusted candidate invocation request, never a policy grant."""
-
     key: RunKey
     project: str
     actor: str
@@ -55,7 +45,6 @@ class TrustedHarnessSnapshot:
 
     Creating this dataclass does NOT establish ledger trust on its own.
     """
-
     key: RunKey
     project: str
     head: str
@@ -74,7 +63,6 @@ class TrustedHarnessSnapshot:
 @dataclass(frozen=True)
 class HarnessAdmission:
     """Pure, side-effect-free decision; never substitutes for GitHub/lease gate."""
-
     permitted: bool
     code: str
     reason: str
@@ -85,22 +73,22 @@ def deny(code: str) -> HarnessAdmission:
     return HarnessAdmission(False, code, code.lower().replace("_", " "))
 
 
-def assess_intent(
-    intent: HarnessIntent,
-    snapshot: TrustedHarnessSnapshot,
-    *,
-    provider_configuration: Mapping[str, bool] | None = None,
-) -> HarnessAdmission:
-    """Refuse stale or overprivileged requests without invoking a provider.
-
-    Pass only LIVE, parent-validated snapshots. Provider availability is
-    informational; it cannot modify the canonical RunKey or grant write scope.
-    """
+def assess_intent(intent: HarnessIntent, snapshot: TrustedHarnessSnapshot, *, provider_configuration: Mapping[str, bool] | None = None) -> HarnessAdmission:
+    """Refuse stale or overprivileged requests without invoking a provider."""
     try:
         intent.key.validate()
         snapshot.key.validate()
     except (ValueError, TypeError, AttributeError):
         return deny("INVALID_RUN_KEY")
+    # Trusted flags cross the admission boundary. Type annotations are not
+    # runtime enforcement: reject non-bools before any truthiness decision.
+    if any(type(value) is not bool for value in (
+        snapshot.stop_active,
+        snapshot.lease_active,
+        snapshot.actor_verified,
+        snapshot.provider_available,
+    )):
+        return deny("INVALID_TRUSTED_SNAPSHOT")
     if snapshot.stop_active:
         return deny("EMERGENCY_STOP")
     if not snapshot.lease_active:
@@ -123,16 +111,9 @@ def assess_intent(
         return deny("ACTOR_NOT_VERIFIED")
     if snapshot.actor_cost_class not in COST_CLASSES:
         return deny("COST_CLASS_BLOCKED")
-    if (
-        type(intent.requested_extra_spend) is not int
-        or type(snapshot.extra_spend_cap) is not int
-        or intent.requested_extra_spend != 0
-        or snapshot.extra_spend_cap != 0
-    ):
+    if (type(intent.requested_extra_spend) is not int or type(snapshot.extra_spend_cap) is not int or intent.requested_extra_spend != 0 or snapshot.extra_spend_cap != 0):
         return deny("EXTRA_SPEND_BLOCKED")
-    if not isinstance(intent.tools, frozenset) or not isinstance(
-        snapshot.permitted_tools, frozenset
-    ):
+    if not isinstance(intent.tools, frozenset) or not isinstance(snapshot.permitted_tools, frozenset):
         return deny("INVALID_TOOL_SCOPE")
     if not intent.tools or not intent.tools.issubset(snapshot.permitted_tools):
         return deny("TOOL_SCOPE_BLOCKED")
@@ -142,15 +123,7 @@ def assess_intent(
         return deny("UNKNOWN_PROVIDER_SEAM")
     if not snapshot.provider_available:
         return deny("PROVIDER_UNAVAILABLE")
-    # Native is the only default. Optional providers must be explicitly
-    # configured by the trusted parent; a missing map cannot activate them.
-    configured = (
-        {"native": True}
-        if provider_configuration is None else provider_configuration
-    )
+    configured = {"native": True} if provider_configuration is None else provider_configuration
     if configured.get(intent.provider_seam) is not True:
         return deny("PROVIDER_NOT_CONFIGURED")
-    return HarnessAdmission(True, "ADMITTED_FOR_TRUSTED_PARENT", (
-        "candidate matches current supplied snapshot; parent must still "
-        "enforce real lease, permissions and budget at execution time"
-    ))
+    return HarnessAdmission(True, "ADMITTED_FOR_TRUSTED_PARENT", "candidate matches current supplied snapshot; parent must still enforce real lease, permissions and budget at execution time")

@@ -101,7 +101,12 @@ def assess_intent(intent: HarnessIntent, snapshot: TrustedHarnessSnapshot, *, pr
         return deny("WRONG_ACTOR")
     if not intent.capability or intent.capability != snapshot.lease_capability:
         return deny("CAPABILITY_NOT_LEASED")
-    if not SHA.fullmatch(intent.head or "") or not SHA.fullmatch(intent.base or ""):
+    if (
+        not isinstance(intent.head, str)
+        or not isinstance(intent.base, str)
+        or not SHA.fullmatch(intent.head)
+        or not SHA.fullmatch(intent.base)
+    ):
         return deny("INVALID_REVISION")
     if intent.head == intent.base:
         return deny("NONDISTINCT_REVISIONS")

@@ -17,7 +17,7 @@ class MissionControlLocalTests(unittest.TestCase):
 
     def test_page_escapes_projection_and_states_no_authority(self):
         """Never interpret projection fields as markup or imply authority."""
-        page = mission.render({"revision": "<script>alert(1)</script>", "ready": False}).decode()
+        page = mission.render({"revision": "<script>alert(1)</script>", "readiness": "BLOCKED"}).decode()
         self.assertIn("NOT READY", page)
         self.assertIn("&lt;script&gt;", page)
         self.assertNotIn("<script>", page)
@@ -25,7 +25,7 @@ class MissionControlLocalTests(unittest.TestCase):
 
     def test_real_loopback_http_page_and_404(self):
         """Exercise the actual loopback HTTP surface without remote binding."""
-        server = mission.serve({"revision": "a" * 40, "ready": True}, 0)
+        server = mission.serve({"revision": "a" * 40, "readiness": "READY_FOR_OWNER_PREVIEW"}, 0)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
         try:
@@ -34,7 +34,7 @@ class MissionControlLocalTests(unittest.TestCase):
             with urllib.request.urlopen(base + "/", timeout=2) as response:
                 page = response.read().decode()
                 self.assertEqual(response.status, 200)
-                self.assertIn("READY", page)
+                self.assertIn("id='status'>READY</p>", page)
                 self.assertEqual(response.headers["Cache-Control"], "no-store")
             with self.assertRaises(urllib.error.HTTPError) as caught:
                 urllib.request.urlopen(base + "/mutate", timeout=2)

@@ -10,6 +10,7 @@ APP_PATH = ROOT / "examples" / "vertical-slice" / "app.py"
 ORIGINAL_RUN = subprocess.run
 TRANSIENT_CACHE_PATHS = {
     ".onecompany/selftest/__pycache__/",
+    "examples/vertical-slice/__pycache__/",
     "scripts/__pycache__/",
 }
 

@@ -2,6 +2,7 @@
 """Single dependency-free command entry point for a OneCompany checkout."""
 from __future__ import annotations
 
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -12,6 +13,7 @@ COMMANDS = {
     "brief": ["product_brief.py"],
     "journey": ["first_run_journey.py"],
     "demo": ["phase1_vertical_smoke.py"],
+    "preview-local": ["../examples/vertical-slice/app.py"],
     "shadow-migration": ["shadow_migration.py"],
     "cutover-readiness": ["cutover_readiness.py"],
     "doctor": ["doctor.py"], "status": ["status.py"], "check": ["check.py"], "validate": ["validate_all.py"], "schema-validate": ["schema_validate.py"],
@@ -28,6 +30,7 @@ COMMANDS = {
 
 
 def usage() -> int:
+    """Print available commands and highlight the safe first-run route."""
     print("OneCompany 0.3.0")
     print("usage: python onecompany.py <command> [args]")
     print("\nStart here:")
@@ -35,24 +38,42 @@ def usage() -> int:
     print("  brief             draft Product Brief from owner answers; read-only unless --save-to")
     print("  journey           guided Create/Adopt next steps; read-only, never approval")
     print("  demo              run real disposable local CRUD proof from owner draft (source checkout)")
+    print("  preview-local     interact with disposable checklist UI at localhost (source checkout)")
     print("  shadow-migration  analyze an external migration snapshot without target mutation")
     print("  cutover-readiness prove quiescent C2b readiness without target mutation")
     print("\nCommands:")
     for command in COMMANDS:
-        if command not in {"onboard", "brief", "journey", "demo", "shadow-migration", "cutover-readiness"}: print(f"  {command}")
+        if command not in {"onboard", "brief", "journey", "demo", "preview-local", "shadow-migration", "cutover-readiness"}: print(f"  {command}")
     return 2
 
 
 def main() -> int:
+    """Route the selected subcommand without changing customer project authority."""
     if len(sys.argv) < 2 or sys.argv[1] in {"-h", "--help", "help"}: return usage()
     command = sys.argv[1]; spec = COMMANDS.get(command)
     if not spec:
         print(f"unknown command: {command}"); return usage()
     helper = ROOT / "scripts" / spec[0]
-    if command == "demo" and not helper.is_file():
-        print("demo is available from the OneCompany source checkout only; no target is modified.")
+    if command in {"demo", "preview-local"} and not helper.is_file():
+        print(f"{command} is available from the OneCompany source checkout only; no target is modified.")
         return 2
-    return subprocess.run([sys.executable, str(helper), *spec[1:], *sys.argv[2:]], cwd=str(ROOT), check=False).returncode
+    argv = [sys.executable, str(helper), *spec[1:], *sys.argv[2:]]
+    if command == "preview-local":
+        # The command is interactive: Ctrl+C reaching only this wrapper must also
+        # stop the child server and discard its in-memory checklist.
+        child = subprocess.Popen(argv, cwd=str(ROOT))
+        try:
+            return child.wait()
+        except KeyboardInterrupt:
+            if child.poll() is None:
+                child.send_signal(signal.SIGINT)
+            try:
+                return child.wait(timeout=6)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.wait(timeout=3)
+                return 130
+    return subprocess.run(argv, cwd=str(ROOT), check=False).returncode
 
 
 if __name__ == "__main__":

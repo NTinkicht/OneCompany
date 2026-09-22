@@ -11,6 +11,7 @@ The ordinary `OneCompany Validate` and `OneCompany Handoff Supervision` workflow
 ## Optional local reproduction
 
 ```bash
+set -euo pipefail
 # Install only if allowed under the current approved local/CI resource budget.
 python -m pip install 'playwright==1.55.0'
 python -m playwright install chromium

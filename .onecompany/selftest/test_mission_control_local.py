@@ -86,7 +86,7 @@ class MissionControlLocalTests(unittest.TestCase):
     def test_missing_fields_are_unknown_not_verified_success(self):
         """No evidence and no approval are never silently inferred."""
         page = mission.render({"readiness": "READY_FOR_OWNER_PREVIEW"}).decode()
-        self.assertEqual(page.count("UNKNOWN (no confirmed evidence)"), 4)
+        self.assertEqual(page.count("UNKNOWN (no confirmed evidence)"), 5)
         self.assertIn("No blockers supplied; this does not prove clear gates", page)
         self.assertIn("Nothing here approves a Work Unit", page)
         with self.assertRaisesRegex(ValueError, "OBJECT_REQUIRED"):

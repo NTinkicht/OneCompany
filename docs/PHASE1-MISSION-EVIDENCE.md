@@ -29,8 +29,8 @@ python scripts/phase1_mission_evidence.py \
 python scripts/mission_control_local.py --input /tmp/mission.json --port 8765
 ```
 
-To see the honest negative case, omit `--quality`: the dashboard keeps quality
-**BLOCKED**, even after HTTP CRUD succeeded. A supplied quality document must
+To see the honest negative case, omit `--quality`: the dashboard remains **BLOCKED** even if both smoke and quality JSON claim PASS:
+the files are caller-controlled and cannot authenticate their producers. A supplied quality document must
 be the exact-revision `onecompany.local-quality-evidence.v1` local producer
 output, with `status=PASS`, `scope=real_local_http_ui`, and
 `deployable=false`; missing/mismatched/foreign scope refuses or blocks.
@@ -48,7 +48,7 @@ grant owner authorization, establish a canonical WU/lease/RunKey, produce
 independent review or exact-head CI, qualify Playwright, pay a provider,
 deploy publicly, or mutate a client project. No once-stopped preview URL is
 shown as live; open a separate `python onecompany.py preview-local --port 0`
-session if desired once that command has merged. A reported local PASS is
-display-only and cannot mint authority. Owner-only spending, credentials,
+session if desired once that command has merged. A reported local PASS is preserved only as an unauthenticated observation,
+never as a positive check or READY dashboard. Owner-only spending, credentials,
 legal decisions and destructive production operations remain protected.
 Phase 2 KServe, OpenViking, Supermemory and ARTEMIS remain planned.

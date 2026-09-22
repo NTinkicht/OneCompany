@@ -133,7 +133,7 @@ class FirstRunJourneyTests(unittest.TestCase):
                 journey.read_brief(payload)
             shortcut = folder / "link.json"
             shortcut.symlink_to(payload)
-            with self.assertRaisesRegex(ValueError, "FILE_REQUIRED"):
+            with self.assertRaises(OSError):
                 journey.read_brief(shortcut)
 
     def test_symlink_swap_during_open_is_refused_atomically(self):

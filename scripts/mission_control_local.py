@@ -11,7 +11,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 MAX_PROJECTION_BYTES = 65_536
-EVIDENCE = ("quality", "browser", "ci", "review")
+EVIDENCE = ("quality", "preview", "browser", "ci", "review")
 
 
 def _text(value: object, limit: int = 240) -> str:
@@ -50,9 +50,9 @@ def _evidence_value(projection: dict[str, object], key: str) -> object:
     checks = projection.get("checks")
     if not isinstance(checks, dict):
         return None
-    # Canonical projection currently produces app/quality/preview. Browser/CI/review
-    # remain UNKNOWN until a producer explicitly supplies them.
-    canonical = {"quality": "quality", "browser": "preview"}.get(key)
+    # Canonical projection produces app/quality/preview HTTP evidence, NOT a real browser run.
+    # Browser/CI/review remain UNKNOWN until their distinct producers supply them.
+    canonical = {"quality": "quality", "preview": "preview"}.get(key)
     return checks.get(canonical) if canonical else None
 
 

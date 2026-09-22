@@ -17,7 +17,8 @@ python -m playwright install chromium
 # In terminal one:
 python examples/vertical-slice/app.py --port 8765
 # In terminal two, on an unmodified clean checkout:
-python scripts/local_browser_evidence.py --revision <full-clean-checkout-HEAD-SHA> --url http://127.0.0.1:8765/
+REVISION=$(git rev-parse --verify HEAD)
+python scripts/local_browser_evidence.py --revision "$REVISION" --url http://127.0.0.1:8765/
 python -m unittest discover -s .onecompany/selftest -p 'test_local_browser_evidence.py'
 ```
 

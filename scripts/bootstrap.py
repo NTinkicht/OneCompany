@@ -56,6 +56,7 @@ SOURCE_INSTALLATION_SELFTESTS = frozenset({
     ".onecompany/selftest/test_grok_cloud_bridge.py",
     ".onecompany/selftest/test_local_quality_evidence.py",
     ".onecompany/selftest/test_phase1_preview_bundle.py",
+    ".onecompany/selftest/test_phase1_vertical_smoke.py",
 })
 
 # The source company's strategic plan must never become another company's
@@ -75,6 +76,8 @@ SOURCE_ONLY_PLANNING_FILES = frozenset({
     "scripts/grok_cloud_bridge.py",
     "scripts/local_quality_evidence.py",
     "scripts/phase1_preview_bundle.py",
+    "scripts/phase1_vertical_smoke.py",
+    "docs/PHASE1-VERTICAL-SMOKE.md",
 })
 SOURCE_INSTALLATION_EXCLUSIONS = SOURCE_INSTALLATION_SELFTESTS | SOURCE_ONLY_PLANNING_FILES
 

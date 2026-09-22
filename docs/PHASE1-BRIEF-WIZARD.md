@@ -1,6 +1,6 @@
 # Start here — guided Create or Adopt
 
-From a OneCompany **source checkout**, start without needing to learn Work Units,
+From a OneCompany checkout (source or installed target), start without needing to learn Work Units,
 leases or agent commands:
 
 ```bash
@@ -33,8 +33,8 @@ is just an owner-answer-and-discovery **DRAFT_NOT_APPROVED**, not a signed
 approval or authority. Save does not overwrite existing product files,
 initialize a repo, grant a lease/RunKey, pay a model, merge a PR or deploy.
 
-Source-checkout-only wizard absence in an installed target causes a clear
-refusal. Phase-1 end-to-end #153 still requires independently verified
+If this command's helper is missing in an older installed target, the router
+refuses clearly rather than creating project state. Phase-1 end-to-end #153 still requires independently verified
 canonical Work Unit authorization, current SHA CI and nonauthor review,
 real local app/quality/browser evidence before claiming autonomous delivery.
 Phase-2 KServe, OpenViking, Supermemory and ARTEMIS remain planned.

@@ -53,6 +53,7 @@ SOURCE_INSTALLATION_SELFTESTS = frozenset({
     ".onecompany/selftest/test_cloud_grok_scheduled.py",
     ".onecompany/selftest/test_mistral_cloud_review.py",
     ".onecompany/selftest/test_mistral_cloud_work.py",
+    ".onecompany/selftest/test_grok_cloud_bridge.py",
     ".onecompany/selftest/test_local_quality_evidence.py",
     ".onecompany/selftest/test_phase1_preview_bundle.py",
 })
@@ -70,6 +71,8 @@ SOURCE_ONLY_PLANNING_FILES = frozenset({
     "scripts/mistral_cloud_review.py",
     ".github/workflows/onecompany-mistral-devtest.yml",
     "scripts/mistral_cloud_work.py",
+    ".github/workflows/onecompany-grok-native-evidence.yml",
+    "scripts/grok_cloud_bridge.py",
     "scripts/local_quality_evidence.py",
     "scripts/phase1_preview_bundle.py",
 })

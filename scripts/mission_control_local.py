@@ -172,7 +172,7 @@ def main(argv: list[str] | None = None) -> int:
             journey = _read_projection_file(args.journey)
             projection = combine_projection_journey(projection, journey)
         server = serve(projection, args.port)
-    except (OSError, ValueError, TypeError) as exc:
+    except (OSError, ValueError, TypeError, RecursionError) as exc:
         print("BLOCKED: " + str(exc), file=sys.stderr); return 2
     print(f"Mission Control: http://127.0.0.1:{server.server_port}/", flush=True)
     try: server.serve_forever()

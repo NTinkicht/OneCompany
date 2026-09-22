@@ -92,6 +92,9 @@ class FirstRunWizardTests(unittest.TestCase):
 
     def test_source_repository_refuses_before_prompts(self):
         """The OneCompany framework must not onboard itself as a customer target."""
+        config = json.loads((ROOT / ".onecompany" / "config.json").read_text())
+        if config.get("project", {}).get("repository") != "NTinkicht/OneCompany":
+            self.skipTest("installed target is correctly allowed to start the wizard")
         result = self.run_start(ROOT, answers="A\nB\nC\nD\nE\n")
         self.assertEqual(result.returncode, 2)
         self.assertIn("DISCOVERY_BLOCKED", result.stderr)

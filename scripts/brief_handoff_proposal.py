@@ -64,7 +64,57 @@ def propose(brief: dict, head: str, base: str) -> dict:
     }
 
 
+def consume_for_planning(proposal: dict, trusted_head: str, trusted_base: str) -> dict:
+    """Validate an untrusted proposal for read-only existing-core planning.
+
+    The adapter deliberately cannot create a RunKey, lease, WU, provider call,
+    budget, or approval. Exact refs must already have been reconciled by the
+    trusted caller; any authority-bearing or stale proposal fails closed.
+    """
+    if not isinstance(proposal, dict) or proposal.get("schema") != "onecompany.phase1-brief-handoff-proposal.v1":
+        raise ValueError("HANDOFF_PROPOSAL_REQUIRED")
+    if proposal.get("read_only") is not True or proposal.get("authorization") != "NOT_GRANTED":
+        raise ValueError("HANDOFF_MUST_BE_UNAUTHORIZED")
+    if proposal.get("state") != "AWAIT_TRUSTED_PLANNING_AND_OWNER_APPROVAL":
+        raise ValueError("HANDOFF_STATE_INVALID")
+    if any(proposal.get(field) is not None for field in ("run_key", "lease_id", "canonical_work_unit")):
+        raise ValueError("EXECUTION_AUTHORITY_PRESENT")
+    refs = proposal.get("source_refs_unverified")
+    if (
+        not isinstance(refs, dict)
+        or not SHA.fullmatch(trusted_head or "")
+        or not SHA.fullmatch(trusted_base or "")
+        or trusted_head == trusted_base
+        or refs != {"head": trusted_head, "base": trusted_base}
+    ):
+        raise ValueError("STALE_OR_UNVERIFIED_REVISION")
+    project = proposal.get("project")
+    intent = proposal.get("owner_intent")
+    if not isinstance(project, dict) or not isinstance(intent, dict):
+        raise ValueError("HANDOFF_CONTENT_INVALID")
+    if any(not isinstance(project.get(k), list) for k in KNOWN_ASSETS):
+        raise ValueError("KNOWN_ASSETS_INVALID")
+    if proposal.get("acceptance_criteria") != []:
+        raise ValueError("AC_MUST_BE_PROPOSED_BY_TRUSTED_PLANNING")
+    return {
+        "schema": "onecompany.execution-core-planning-input.v1",
+        "mode": "READ_ONLY_PROPOSAL",
+        "authorization": "NOT_GRANTED",
+        "source_refs": {"head": trusted_head, "base": trusted_base},
+        "project": {k: project.get(k) for k in ("name", "repository", "default_branch", "path", *KNOWN_ASSETS)},
+        "owner_intent": {k: intent.get(k) for k in REQUIRED},
+        "constraints": proposal.get("constraints"),
+        "acceptance_criteria": [],
+        "run_key": None,
+        "lease_id": None,
+        "canonical_work_unit": None,
+        "provider_invocation": False,
+        "requested_extra_spend": 0,
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
+    """Parse a bounded saved draft and print its unauthorized proposal JSON."""
     parser = argparse.ArgumentParser(description="Read-only candidate brief handoff; never grants approval")
     parser.add_argument("--brief", required=True, type=Path)
     parser.add_argument("--head", required=True)

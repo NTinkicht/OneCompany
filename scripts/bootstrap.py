@@ -53,6 +53,8 @@ SOURCE_INSTALLATION_SELFTESTS = frozenset({
     ".onecompany/selftest/test_cloud_grok_scheduled.py",
     ".onecompany/selftest/test_mistral_cloud_review.py",
     ".onecompany/selftest/test_mistral_cloud_work.py",
+    ".onecompany/selftest/test_local_quality_evidence.py",
+    ".onecompany/selftest/test_phase1_preview_bundle.py",
 })
 
 # The source company's strategic plan must never become another company's
@@ -66,8 +68,10 @@ SOURCE_ONLY_PLANNING_FILES = frozenset({
     ".github/workflows/onecompany-mistral-vibe-wake.yml",
     ".github/workflows/onecompany-mistral-exact-head-review.yml",
     "scripts/mistral_cloud_review.py",
-    "scripts/mistral_cloud_work.py",
     ".github/workflows/onecompany-mistral-devtest.yml",
+    "scripts/mistral_cloud_work.py",
+    "scripts/local_quality_evidence.py",
+    "scripts/phase1_preview_bundle.py",
 })
 SOURCE_INSTALLATION_EXCLUSIONS = SOURCE_INSTALLATION_SELFTESTS | SOURCE_ONLY_PLANNING_FILES
 

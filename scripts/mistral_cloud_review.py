@@ -33,6 +33,9 @@ MISTRAL_ALIASES = frozenset({"mistral", "mistral-vibe", "mistral_vibe"})
 MATERIAL_AUTHOR = re.compile(r"(?im)^Material-Author:[ \t]*([a-z0-9_-]+)[ \t]*$")
 DIFF_NAME = ".onecompany_mistral_review.diff"
 MAX_DIFF_BYTES = 100_000
+MAX_REVIEW_STAGE_DIFF_BYTES = 32_000
+MAX_REVIEW_STAGE_SOURCE_BYTES = 24_000
+MAX_REVIEW_STAGE_TOTAL_BYTES = 64_000
 
 
 def parse_dispatch(body: str) -> tuple[int, str, str]:
@@ -263,8 +266,8 @@ def evidence() -> None:
              "--no-color", "--no-renames", f"{base}...{head}", "--"],
             stderr=subprocess.DEVNULL, timeout=20, env=clean_git_env(),
         )
-        if not diff or len(diff) > MAX_DIFF_BYTES:
-            raise ValueError("REVIEW_DIFF_BOUND_EXCEEDED")
+        if not diff or len(diff) > MAX_REVIEW_STAGE_DIFF_BYTES:
+            raise ValueError("REVIEW_STAGE_DIFF_BUDGET_EXCEEDED")
         path = Path(DIFF_NAME)
         flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
         if hasattr(os, "O_NOFOLLOW"):
@@ -331,12 +334,12 @@ def stage_review(
                 source /= part
                 if source.is_symlink():
                     raise ValueError("REVIEW_SYMLINK_BLOCKED")
-            if not source.is_file() or source.stat().st_size > 150_000:
+            if not source.is_file() or source.stat().st_size > MAX_REVIEW_STAGE_SOURCE_BYTES:
                 raise ValueError("REVIEW_SOURCE_BOUND_EXCEEDED")
             data = source.read_bytes()
             data.decode("utf-8")
             total += len(data)
-            if total > 500_000:
+            if total > MAX_REVIEW_STAGE_TOTAL_BYTES:
                 raise ValueError("REVIEW_TOTAL_BOUND_EXCEEDED")
             payload.append((rel, data))
 

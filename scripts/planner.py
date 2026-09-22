@@ -6,6 +6,7 @@ import argparse
 import json
 import sys
 
+import brief_handoff_proposal
 import knowledge
 import qualification
 from lease_lifecycle import coordination_view
@@ -51,6 +52,11 @@ def learning_preflight(work_item: dict) -> dict:
         }
 
 
+def consume_brief_handoff(proposal: dict, trusted_head: str, trusted_base: str) -> dict:
+    """Expose the draft brief through the existing planner without granting authority."""
+    return brief_handoff_proposal.consume_for_planning(proposal, trusted_head, trusted_base)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -62,7 +68,24 @@ def main() -> int:
     sub.add_parser("critical-path")
     explain = sub.add_parser("explain")
     explain.add_argument("id")
+    brief = sub.add_parser("brief-handoff")
+    brief.add_argument("--proposal", required=True)
+    brief.add_argument("--head", required=True)
+    brief.add_argument("--base", required=True)
     args = parser.parse_args()
+
+    if args.command == "brief-handoff":
+        try:
+            with open(args.proposal, "rb") as source:
+                raw = source.read(16_385)
+            if len(raw) > 16_384:
+                raise ValueError("BOUNDED_HANDOFF_PROPOSAL_REQUIRED")
+            proposal = json.loads(raw)
+            result = consume_brief_handoff(proposal, args.head, args.base)
+        except (OSError, ValueError, TypeError, UnicodeError, json.JSONDecodeError) as exc:
+            parser.error(str(exc))
+        print(json.dumps(result, sort_keys=True))
+        return 0
 
     planning = load_json(CONTROL / "planning.json")
     portfolio = load_json(CONTROL / "portfolio.json")

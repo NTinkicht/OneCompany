@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parent
 COMMANDS = {
     "onboard": ["onboard.py"],
     "brief": ["product_brief.py"],
+    "journey": ["first_run_journey.py"],
     "shadow-migration": ["shadow_migration.py"],
     "cutover-readiness": ["cutover_readiness.py"],
     "doctor": ["doctor.py"], "status": ["status.py"], "check": ["check.py"], "validate": ["validate_all.py"], "schema-validate": ["schema_validate.py"],
@@ -31,11 +32,12 @@ def usage() -> int:
     print("\nStart here:")
     print("  onboard           assess a new/existing repository; read-only unless --apply")
     print("  brief             draft Product Brief from owner answers; read-only unless --save-to")
+    print("  journey           guided Create/Adopt next steps; read-only, never approval")
     print("  shadow-migration  analyze an external migration snapshot without target mutation")
     print("  cutover-readiness prove quiescent C2b readiness without target mutation")
     print("\nCommands:")
     for command in COMMANDS:
-        if command not in {"onboard", "brief", "shadow-migration", "cutover-readiness"}: print(f"  {command}")
+        if command not in {"onboard", "brief", "journey", "shadow-migration", "cutover-readiness"}: print(f"  {command}")
     return 2
 
 

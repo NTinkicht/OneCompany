@@ -62,7 +62,7 @@ class PreviewLocalCommandTests(unittest.TestCase):
             deadline = time.monotonic() + 6
             with selectors.DefaultSelector() as selector:
                 selector.register(proc.stdout, selectors.EVENT_READ)
-                while b"\\n" not in startup and time.monotonic() < deadline:
+                while b"\n" not in startup and time.monotonic() < deadline:
                     if not selector.select(timeout=max(0, deadline - time.monotonic())):
                         break
                     chunk = os.read(proc.stdout.fileno(), 1024)
@@ -71,9 +71,9 @@ class PreviewLocalCommandTests(unittest.TestCase):
                     startup += chunk
                     if len(startup) > 4096:
                         break
-            if b"\\n" not in startup:
+            if b"\n" not in startup:
                 self.fail("local preview did not emit a complete startup URL within 6 seconds")
-            line = startup.split(b"\\n", 1)[0].decode("utf-8")
+            line = startup.split(b"\n", 1)[0].decode("utf-8")
             self.assertTrue(line.startswith("Local-only fixture: http://127.0.0.1:"),
                             f"unexpected local preview startup: {line!r}")
             url = line.split("Local-only fixture: ", 1)[1].strip()

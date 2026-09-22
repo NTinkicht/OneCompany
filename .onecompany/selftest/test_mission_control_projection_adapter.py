@@ -4,6 +4,8 @@ from pathlib import Path
 import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
+PROJECTION_PATH = ROOT / "scripts" / "mission_control_projection.py"
+VIEW_PATH = ROOT / "scripts" / "mission_control_local.py"
 
 
 def _load(name, path):
@@ -13,10 +15,19 @@ def _load(name, path):
     return module
 
 
-projection = _load("mission_control_projection", ROOT / "scripts" / "mission_control_projection.py")
-view = _load("mission_control_local", ROOT / "scripts" / "mission_control_local.py")
+# Bootstrap intentionally installs reusable governance/tests without source-only
+# product helpers. Keep installed-target validation green while exercising the
+# real adapter contract in the OneCompany source tree where both helpers exist.
+SOURCE_HELPERS_PRESENT = PROJECTION_PATH.is_file() and VIEW_PATH.is_file()
+if SOURCE_HELPERS_PRESENT:
+    projection = _load("mission_control_projection", PROJECTION_PATH)
+    view = _load("mission_control_local", VIEW_PATH)
+else:
+    projection = None
+    view = None
 
 
+@unittest.skipUnless(SOURCE_HELPERS_PRESENT, "source-only Mission Control helpers not installed")
 class MissionControlProjectionAdapterTests(unittest.TestCase):
     def test_canonical_exact_head_quality_and_preview_do_not_become_unknown(self):
         revision = "a" * 40

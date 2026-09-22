@@ -2,6 +2,7 @@
 """Single dependency-free command entry point for a OneCompany checkout."""
 from __future__ import annotations
 
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -29,6 +30,7 @@ COMMANDS = {
 
 
 def usage() -> int:
+    """Print available commands and highlight the safe first-run route."""
     print("OneCompany 0.3.0")
     print("usage: python onecompany.py <command> [args]")
     print("\nStart here:")
@@ -46,6 +48,7 @@ def usage() -> int:
 
 
 def main() -> int:
+    """Route the selected subcommand without changing customer project authority."""
     if len(sys.argv) < 2 or sys.argv[1] in {"-h", "--help", "help"}: return usage()
     command = sys.argv[1]; spec = COMMANDS.get(command)
     if not spec:
@@ -54,7 +57,23 @@ def main() -> int:
     if command in {"demo", "preview-local"} and not helper.is_file():
         print(f"{command} is available from the OneCompany source checkout only; no target is modified.")
         return 2
-    return subprocess.run([sys.executable, str(helper), *spec[1:], *sys.argv[2:]], cwd=str(ROOT), check=False).returncode
+    argv = [sys.executable, str(helper), *spec[1:], *sys.argv[2:]]
+    if command == "preview-local":
+        # The command is interactive: Ctrl+C reaching only this wrapper must also
+        # stop the child server and discard its in-memory checklist.
+        child = subprocess.Popen(argv, cwd=str(ROOT))
+        try:
+            return child.wait()
+        except KeyboardInterrupt:
+            if child.poll() is None:
+                child.send_signal(signal.SIGINT)
+            try:
+                return child.wait(timeout=6)
+            except subprocess.TimeoutExpired:
+                child.kill()
+                child.wait(timeout=3)
+                return 130
+    return subprocess.run(argv, cwd=str(ROOT), check=False).returncode
 
 
 if __name__ == "__main__":

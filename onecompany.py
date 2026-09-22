@@ -9,6 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 COMMANDS = {
+    "start": ["first_run_wizard.py"],
     "onboard": ["onboard.py"],
     "brief": ["product_brief.py"],
     "journey": ["first_run_journey.py"],
@@ -34,6 +35,7 @@ def usage() -> int:
     print("OneCompany 0.3.0")
     print("usage: python onecompany.py <command> [args]")
     print("\nStart here:")
+    print("  start             guided Create/Adopt owner Product Brief (source checkout)")
     print("  onboard           assess a new/existing repository; read-only unless --apply")
     print("  brief             draft Product Brief from owner answers; read-only unless --save-to")
     print("  journey           guided Create/Adopt next steps; read-only, never approval")
@@ -43,7 +45,7 @@ def usage() -> int:
     print("  cutover-readiness prove quiescent C2b readiness without target mutation")
     print("\nCommands:")
     for command in COMMANDS:
-        if command not in {"onboard", "brief", "journey", "demo", "preview-local", "shadow-migration", "cutover-readiness"}: print(f"  {command}")
+        if command not in {"start", "onboard", "brief", "journey", "demo", "preview-local", "shadow-migration", "cutover-readiness"}: print(f"  {command}")
     return 2
 
 
@@ -54,7 +56,7 @@ def main() -> int:
     if not spec:
         print(f"unknown command: {command}"); return usage()
     helper = ROOT / "scripts" / spec[0]
-    if command in {"demo", "preview-local"} and not helper.is_file():
+    if command in {"start", "demo", "preview-local"} and not helper.is_file():
         print(f"{command} is available from the OneCompany source checkout only; no target is modified.")
         return 2
     argv = [sys.executable, str(helper), *spec[1:], *sys.argv[2:]]

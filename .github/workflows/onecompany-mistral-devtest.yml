@@ -9,7 +9,7 @@ permissions:
   contents: write
   issues: write
   pull-requests: read
-  actions: read
+  actions: write
 
 jobs:
   mistral-devtest:
@@ -143,6 +143,34 @@ jobs:
         shell: bash
         run: python scripts/mistral_cloud_work.py publish
 
+      # GITHUB_TOKEN-produced Git Data commits do NOT trigger pull_request CI.
+      # workflow_dispatch is the permitted explicit event. It runs validate
+      # checked out at the branch's new exact SHA, not at protected main.
+      - name: Dispatch exact-new-head deterministic validation
+        id: ci_dispatch
+        if: steps.publish.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ steps.publish.outputs.pr }}
+          NEW_SHA: ${{ steps.publish.outputs.new_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          read -r LIVE_SHA LIVE_BRANCH < <(
+            gh api "repos/$GITHUB_REPOSITORY/pulls/$PR" \
+              --jq '[.head.sha, .head.ref] | @tsv'
+          )
+          if [[ "$LIVE_SHA" != "$NEW_SHA" || ! "$LIVE_SHA" =~ ^[a-f0-9]{40}$ ||
+                ! "$LIVE_BRANCH" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,100}$ ||
+                "$LIVE_BRANCH" == "main" ]]; then
+            echo "STALE_PUBLISHED_SHA_OR_UNSAFE_REF" >&2
+            exit 1
+          fi
+          gh api -X POST "repos/$GITHUB_REPOSITORY/actions/workflows/onecompany-validate.yml/dispatches" \
+            -f ref="$LIVE_BRANCH"
+          echo "status=CI_DISPATCHED_FOR_EXACT_NEW_HEAD" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$NEW_SHA" >> "$GITHUB_OUTPUT"
+
       - name: Durable bounded status in the existing owner wake bus
         if: always()
         env:
@@ -152,6 +180,7 @@ jobs:
           STAGE: ${{ steps.stage.outputs.status }}
           CODER: ${{ steps.coder.outputs.status }}
           PUBLISH: ${{ steps.publish.outputs.status }}
+          CI_DISPATCH: ${{ steps.ci_dispatch.outputs.status }}
           NEW_SHA: ${{ steps.publish.outputs.new_sha }}
           PR: ${{ steps.publish.outputs.pr }}
         shell: bash
@@ -161,7 +190,7 @@ jobs:
             echo "**Mistral provider-cloud canonical developer/tester**"
             echo "No Codespace, model GitHub token or PAYG."
             echo "Ticket=$TICKET entitlement=$ENTITLEMENT stage=$STAGE model=$CODER"
-            echo "Parent publication=$PUBLISH"
+            echo "Parent publication=$PUBLISH validation_trigger=$CI_DISPATCH"
             if [[ -n "$NEW_SHA" ]]; then
               echo "Mistral material-author PR #$PR new SHA $NEW_SHA."
               echo "CI, independent review and merge are separate gates."

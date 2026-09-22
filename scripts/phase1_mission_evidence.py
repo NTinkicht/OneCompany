@@ -81,10 +81,12 @@ def compose(smoke: dict, revision: str, quality: dict | None = None,
                 or quality.get("deployable") is not False):
             raise ValueError("QUALITY_EVIDENCE_NOT_EXACT_OR_NOT_LOCAL")
         quality_pass = True
+    # JSON documents are hand-editable and cannot authenticate their producer.
+    # Never promote asserted PASS fields to ready-to-preview, even when both
+    # files structurally match the source producer schemas and exact revision.
     evidence = {
-        "app": {"revision": revision, "status": "PASS"},
-        "preview": {"revision": revision, "status": "PASS"},
-        "quality": {"revision": revision, "status": "PASS" if quality_pass else "BLOCKED"},
+        key: {"revision": revision, "status": "BLOCKED"}
+        for key in ("app", "preview", "quality")
     }
     # Bounded means only the disposable fixture executed within local boundaries.
     # The projection remains non-authoritative even if every local check passes.
@@ -105,6 +107,7 @@ def compose(smoke: dict, revision: str, quality: dict | None = None,
     blockers = list(result.get("blockers", []))
     if not quality_pass:
         blockers.append("Exact clean-checkout local quality evidence is missing.")
+    blockers.append("Local smoke and quality JSON are caller-controlled and unauthenticated; no trusted producer provenance verified.")
     blockers.append("No owner approval, canonical Work Unit/lease, verified GitHub refs, CI or independent review was established by this demonstration.")
     result["blockers"] = blockers
     result["next_action"] = (
@@ -113,8 +116,15 @@ def compose(smoke: dict, revision: str, quality: dict | None = None,
     result["authority_granted"] = False
     result["local_fixture_discarded"] = True
     result["source_refs_unverified"] = True
+    result["reported_local_observations"] = {
+        "smoke": "UNVERIFIED_CALLER_SUPPLIED_JSON",
+        "quality": ("UNVERIFIED_CALLER_SUPPLIED_JSON" if quality_pass
+                    else "NOT_SUPPLIED"),
+    }
     # An already stopped fixture has no usable URL; never show its stale port.
     result.pop("preview_url", None)
+    if result["readiness"] != "BLOCKED":
+        raise ValueError("UNTRUSTED_INPUT_MUST_NOT_PRODUCE_READINESS")
     return result
 
 

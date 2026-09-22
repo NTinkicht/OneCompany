@@ -29,6 +29,26 @@ def _checkout_revision() -> str:
     return head.stdout.strip()
 
 
+def _load_sync_playwright():
+    """Return Playwright's sync entry point or a stable blocked dependency error."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError as exc:
+        raise ValueError("PLAYWRIGHT_NOT_INSTALLED") from exc
+    return sync_playwright
+
+
+def _launch_chromium(playwright):
+    """Launch Chromium while preserving the missing-browser blocked contract."""
+    try:
+        return playwright.chromium.launch(headless=True)
+    except Exception as exc:
+        message = str(exc).lower()
+        if "executable doesn't exist" in message or "executable does not exist" in message:
+            raise ValueError("CHROMIUM_NOT_INSTALLED") from exc
+        raise ValueError("BROWSER_SMOKE_FAILED") from exc
+
+
 def collect(revision: str, url: str) -> dict[str, object]:
     """Run actual browser CRUD against a clean exact-revision localhost fixture.
 
@@ -43,16 +63,13 @@ def collect(revision: str, url: str) -> dict[str, object]:
     health = preview.collect(revision, root)
     if health.get("revision") != revision or health.get("health") != "PASS":
         raise ValueError("LOCAL_PREVIEW_HEALTH_FAILED")
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError as exc:
-        raise ValueError("PLAYWRIGHT_NOT_INSTALLED") from exc
+    sync_playwright = _load_sync_playwright()
 
     title = "OneCompany browser proof"
     origin = urlsplit(root)
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = _launch_chromium(p)
             try:
                 page = browser.new_page()
                 page.set_default_timeout(5000)
@@ -77,6 +94,8 @@ def collect(revision: str, url: str) -> dict[str, object]:
                 page.get_by_role("button", name="Delete " + title).wait_for(state="detached")
             finally:
                 browser.close()
+    except ValueError:
+        raise
     except Exception as exc:
         raise ValueError("BROWSER_SMOKE_FAILED") from exc
     return {

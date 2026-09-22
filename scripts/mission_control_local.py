@@ -56,6 +56,25 @@ def _evidence_value(projection: dict[str, object], key: str) -> object:
     return checks.get(canonical) if canonical else None
 
 
+def combine_projection_journey(projection: dict[str, object], journey: dict[str, object]) -> dict[str, object]:
+    """Combine canonical producer outputs for display, without merging their authority."""
+    if (not isinstance(projection, dict)
+            or projection.get("schema") != "onecompany.mission-control.phase1.v1"
+            or projection.get("authority_granted") is not False):
+        raise ValueError("CANONICAL_UNAUTHORIZED_PROJECTION_REQUIRED")
+    if (not isinstance(journey, dict)
+            or journey.get("schema") != "onecompany.first-run-journey.v1"
+            or journey.get("read_only") is not True
+            or journey.get("approval") != "NOT_GRANTED"):
+        raise ValueError("CANONICAL_READ_ONLY_JOURNEY_REQUIRED")
+    combined = dict(projection)
+    for key in ("project", "stage", "blockers", "steps", "next_action"):
+        if key in journey:
+            combined[key] = journey[key]
+    combined["schema"] = "onecompany.mission-control-dashboard.phase1.v1"
+    return combined
+
+
 def render(projection: dict[str, object]) -> bytes:
     if not isinstance(projection, dict):
         raise ValueError("MISSION_CONTROL_PROJECTION_OBJECT_REQUIRED")
@@ -76,7 +95,7 @@ def render(projection: dict[str, object]) -> bytes:
     block_html = ("".join("<li>" + item + "</li>" for item in blockers)
                   if blockers else "<li>No blockers supplied; this does not prove clear gates.</li>")
     cards = "".join(
-        "<li><strong>" + _text(key.title()) + "</strong>: "
+        "<li><strong>" + _text("CI" if key == "ci" else key.title()) + "</strong>: "
         + _text(_status(_evidence_value(projection, key))) + "</li>"
         for key in EVIDENCE
     )
@@ -130,19 +149,28 @@ def serve(projection: dict[str, object], port: int = 0) -> ThreadingHTTPServer:
     return ThreadingHTTPServer(("127.0.0.1", port), Handler)
 
 
+def _read_projection_file(path: Path) -> dict[str, object]:
+    with path.open("rb") as source:
+        raw = source.read(MAX_PROJECTION_BYTES + 1)
+    if len(raw) > MAX_PROJECTION_BYTES:
+        raise ValueError("MISSION_CONTROL_PROJECTION_TOO_LARGE")
+    data = json.loads(raw)
+    if not isinstance(data, dict):
+        raise ValueError("MISSION_CONTROL_PROJECTION_OBJECT_REQUIRED")
+    return data
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Serve local read-only Mission Control")
     parser.add_argument("--input", type=Path, required=True)
+    parser.add_argument("--journey", type=Path, help="Optional canonical read-only first-run journey JSON")
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args(argv)
     try:
-        with args.input.open("rb") as source:
-            raw = source.read(MAX_PROJECTION_BYTES + 1)
-        if len(raw) > MAX_PROJECTION_BYTES:
-            raise ValueError("MISSION_CONTROL_PROJECTION_TOO_LARGE")
-        projection = json.loads(raw)
-        if not isinstance(projection, dict):
-            raise ValueError("MISSION_CONTROL_PROJECTION_OBJECT_REQUIRED")
+        projection = _read_projection_file(args.input)
+        if args.journey is not None:
+            journey = _read_projection_file(args.journey)
+            projection = combine_projection_journey(projection, journey)
         server = serve(projection, args.port)
     except (OSError, ValueError, TypeError) as exc:
         print("BLOCKED: " + str(exc), file=sys.stderr); return 2

@@ -116,7 +116,7 @@ def live_ticket(value: dict) -> dict:
     if item.get("pr") != value["pr"] or item.get("branch") != branch:
         raise ValueError("WORK_UNIT_PR_MISMATCH")
     scope = literal_paths(item.get("write_scope"))
-    if item.get("risk_class") in ("HIGH", "CRITICAL"):
+    if item.get("risk_class") not in ("LOW", "MEDIUM"):
         raise ValueError("MODEL_HIGH_RISK_BLOCKED")
     view = lease_lifecycle.coordination_view(pr=value["pr"])
     if view.get("integrity_conflicts") or view.get("conflicts"):
@@ -315,7 +315,7 @@ def main() -> int:
         elif mode == "publish":
             ticket = json.loads((TRUSTED / "ticket.json").read_text())
             new_sha = publish(ticket)
-            actions_output(ready="true", status="MISTRAL_CODE_COMMITTED",
+            actions_output(ready="true", status="MISTRAL_CODE_COMMITTED_AWAIT_CI",
                            new_sha=new_sha, pr=ticket["pr"])
         else:
             raise ValueError("UNKNOWN_WORKER_MODE")

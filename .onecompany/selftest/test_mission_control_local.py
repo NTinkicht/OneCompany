@@ -4,6 +4,7 @@ import json
 import tempfile
 import threading
 import unittest
+from unittest import mock
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -133,6 +134,10 @@ class MissionControlLocalTests(unittest.TestCase):
             self.assertEqual(mission.main(["--input", str(path), "--port", "0"]), 2)
             path.write_text(json.dumps([]))
             self.assertEqual(mission.main(["--input", str(path), "--port", "0"]), 2)
+            # Deep nesting fits under the byte limit but exceeds the JSON recursion depth.
+            path.write_text("[" * 1100 + "0" + "]" * 1100)
+            with mock.patch.object(mission, "serve", side_effect=AssertionError("server must not start")):
+                self.assertEqual(mission.main(["--input", str(path), "--port", "0"]), 2)
 
 
 if __name__ == "__main__":

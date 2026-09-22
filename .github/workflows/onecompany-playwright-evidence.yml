@@ -1,0 +1,79 @@
+name: OneCompany Playwright Local Evidence
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/local_browser_evidence.py'
+      - 'scripts/local_preview_evidence.py'
+      - 'examples/vertical-slice/**'
+      - '.onecompany/selftest/test_local_browser_evidence.py'
+      - '.github/workflows/onecompany-playwright-evidence.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Install optional browser assurance dependencies
+        run: |
+          set -euo pipefail
+          python -m pip install 'playwright==1.55.0'
+          python -m playwright install --with-deps chromium
+      - name: Prove real disposable localhost Chromium CRUD
+        run: |
+          set -euo pipefail
+          REVISION="$(git rev-parse HEAD)"
+          python examples/vertical-slice/app.py --port 8765 > "$RUNNER_TEMP/onecompany-local-app.log" 2>&1 &
+          SERVER_PID=$!
+          cleanup() {
+            kill "$SERVER_PID" 2>/dev/null || true
+            wait "$SERVER_PID" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+          python - <<'PY'
+          import time
+          import urllib.request
+          for attempt in range(40):
+              try:
+                  with urllib.request.urlopen("http://127.0.0.1:8765/health", timeout=1) as response:
+                      assert response.status == 200
+                  break
+              except (OSError, AssertionError):
+                  time.sleep(0.25)
+          else:
+              raise SystemExit("LOCAL_APP_HEALTH_FAILED")
+          PY
+          python scripts/local_browser_evidence.py --revision "$REVISION" --url http://127.0.0.1:8765/ > "$RUNNER_TEMP/onecompany-browser-evidence.json"
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+          artifact = Path(os.environ["RUNNER_TEMP"]) / "onecompany-browser-evidence.json"
+          value = json.loads(artifact.read_text(encoding="utf-8"))
+          expected = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+          assert value["revision"] == expected
+          assert value["status"] == "PASS"
+          assert value["flow"] == "real_dom_add_complete_delete"
+          assert value["browser"] == "chromium"
+          assert value["deployable"] is False and value["authority_granted"] is False
+          print("REAL_CHROMIUM_EXACT_HEAD_CRUD_PASS", expected)
+          PY
+      - name: Upload exact-head local browser evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: onecompany-real-browser-evidence
+          path: ${{ runner.temp }}/onecompany-browser-evidence.json
+          retention-days: 7
+          if-no-files-found: error

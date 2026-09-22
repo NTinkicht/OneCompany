@@ -15,13 +15,11 @@ EVIDENCE = ("quality", "browser", "ci", "review")
 
 
 def _text(value: object, limit: int = 240) -> str:
-    """Escape and bound arbitrary projection fields before any HTML rendering."""
     raw = value if isinstance(value, (str, int, float)) and not isinstance(value, bool) else ""
     return html.escape(str(raw)[:limit], quote=True)
 
 
 def _preview_url(value: object) -> str | None:
-    """Display only a local preview address, never an off-device URL or secret."""
     if not isinstance(value, str) or len(value) > 256:
         return None
     try:
@@ -36,7 +34,6 @@ def _preview_url(value: object) -> str | None:
 
 
 def _status(value: object) -> str:
-    """Show reported evidence faithfully without converting it to an actual gate."""
     raw = value.get("status") if isinstance(value, dict) else value
     if raw in ("OBSERVED", "PENDING", "UNKNOWN"):
         return str(raw) + " (reported; not independently verified here)"
@@ -45,8 +42,21 @@ def _status(value: object) -> str:
     return "UNKNOWN (no confirmed evidence)"
 
 
+def _evidence_value(projection: dict[str, object], key: str) -> object:
+    """Adapt canonical v1 `checks` without inventing unsupported evidence."""
+    direct = projection.get(key)
+    if direct is not None:
+        return direct
+    checks = projection.get("checks")
+    if not isinstance(checks, dict):
+        return None
+    # Canonical projection currently produces app/quality/preview. Browser/CI/review
+    # remain UNKNOWN until a producer explicitly supplies them.
+    canonical = {"quality": "quality", "browser": "preview"}.get(key)
+    return checks.get(canonical) if canonical else None
+
+
 def render(projection: dict[str, object]) -> bytes:
-    """Render accessible, escaped evidence and next steps without granting authority."""
     if not isinstance(projection, dict):
         raise ValueError("MISSION_CONTROL_PROJECTION_OBJECT_REQUIRED")
     project = projection.get("project")
@@ -54,7 +64,7 @@ def render(projection: dict[str, object]) -> bytes:
     name = _text(project.get("name") or projection.get("project_name") or "Unspecified project")
     revision = _text(projection.get("revision", "unknown"), 80)
     ready = projection.get("readiness") == "READY_FOR_OWNER_PREVIEW"
-    status = "READY" if ready else "NOT READY"  # Existing UI compatibility.
+    status = "READY" if ready else "NOT READY"
     stage = _text(projection.get("stage") or "unknown")
     readiness = _text(projection.get("readiness") or "UNKNOWN")
     safe_url = _preview_url(projection.get("preview_url"))
@@ -67,19 +77,17 @@ def render(projection: dict[str, object]) -> bytes:
                   if blockers else "<li>No blockers supplied; this does not prove clear gates.</li>")
     cards = "".join(
         "<li><strong>" + _text(key.title()) + "</strong>: "
-        + _text(_status(projection.get(key))) + "</li>"
+        + _text(_status(_evidence_value(projection, key))) + "</li>"
         for key in EVIDENCE
     )
     steps = projection.get("steps")
     if not isinstance(steps, list):
         steps = []
     step_html = "".join(
-        "<li>" + _text(item.get("title"), 120) + ": "
-        + _text(item.get("status"), 60) + "</li>"
+        "<li>" + _text(item.get("title"), 120) + ": " + _text(item.get("status"), 60) + "</li>"
         for item in steps[:15] if isinstance(item, dict)
     ) or "<li>No guided steps supplied yet.</li>"
-    next_action = _text(projection.get("next_action")
-                        or "Review actual evidence and confirm the next authorized step.")
+    next_action = _text(projection.get("next_action") or "Review actual evidence and confirm the next authorized step.")
     body = f"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>OneCompany Mission Control</title></head>
@@ -101,42 +109,28 @@ Nothing here approves a Work Unit, lease, RunKey, model, merge or production rel
 
 
 def serve(projection: dict[str, object], port: int = 0) -> ThreadingHTTPServer:
-    """Create local-only HTTP status; server never writes to the project."""
     page = render(projection)
-
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
             host = self.headers.get("Host", "").lower()
-            if host not in {
-                "127.0.0.1", "localhost", f"127.0.0.1:{self.server.server_port}",
-                f"localhost:{self.server.server_port}",
-            }:
-                self.send_error(403)
-                return
+            if host not in {"127.0.0.1", "localhost", f"127.0.0.1:{self.server.server_port}", f"localhost:{self.server.server_port}"}:
+                self.send_error(403); return
             if self.path != "/":
-                self.send_error(404)
-                return
+                self.send_error(404); return
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
             self.send_header("X-Frame-Options", "DENY")
             self.send_header("Referrer-Policy", "no-referrer")
-            self.send_header("Content-Security-Policy",
-                             "default-src 'none'; base-uri 'none'; "
-                             "form-action 'none'; frame-ancestors 'none'")
+            self.send_header("Content-Security-Policy", "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
             self.send_header("Content-Length", str(len(page)))
-            self.end_headers()
-            self.wfile.write(page)
-
-        def log_message(self, *_args):
-            return
-
+            self.end_headers(); self.wfile.write(page)
+        def log_message(self, *_args): return
     return ThreadingHTTPServer(("127.0.0.1", port), Handler)
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Load a bounded local projection and expose a loopback-only read view."""
     parser = argparse.ArgumentParser(description="Serve local read-only Mission Control")
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--port", type=int, default=8765)
@@ -151,15 +145,11 @@ def main(argv: list[str] | None = None) -> int:
             raise ValueError("MISSION_CONTROL_PROJECTION_OBJECT_REQUIRED")
         server = serve(projection, args.port)
     except (OSError, ValueError, TypeError) as exc:
-        print("BLOCKED: " + str(exc), file=sys.stderr)
-        return 2
+        print("BLOCKED: " + str(exc), file=sys.stderr); return 2
     print(f"Mission Control: http://127.0.0.1:{server.server_port}/", flush=True)
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        server.server_close()
+    try: server.serve_forever()
+    except KeyboardInterrupt: pass
+    finally: server.server_close()
     return 0
 
 

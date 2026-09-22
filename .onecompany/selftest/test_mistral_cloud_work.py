@@ -99,6 +99,28 @@ class MistralFencedWorkerTests(unittest.TestCase):
                     with self.assertRaises(ValueError):
                         w.live_ticket({**w.assignment(BODY), **change})
 
+    def test_risk_class_requires_explicit_low_or_medium(self):
+        """Unknown, missing and mixed-case risk labels must not authorize writes."""
+        ticket = w.assignment(BODY)
+        for risk in ("LOW", "MEDIUM", "HIGH", "CRITICAL", "UNKNOWN", "low", None, ""):
+            def read_queue(path):
+                record = fake_load(path)
+                record["work_units"][0]["risk_class"] = risk
+                return record
+
+            with self.subTest(risk=risk), patch.dict(
+                os.environ, {"GITHUB_REPOSITORY": w.REPO}
+            ), patch.object(w, "zero_spend"), patch.object(
+                w, "current_pr", side_effect=fake_pr
+            ), patch.object(w, "load_json", side_effect=read_queue), patch.object(
+                w.lease_lifecycle, "coordination_view", side_effect=fake_view
+            ):
+                if risk in ("LOW", "MEDIUM"):
+                    self.assertEqual(w.live_ticket(ticket)["scope"], SCOPE)
+                else:
+                    with self.assertRaisesRegex(ValueError, "HIGH_RISK_BLOCKED"):
+                        w.live_ticket(ticket)
+
     def test_stage_copies_bounded_scoped_sources_and_requires_edits(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -186,6 +208,12 @@ class MistralFencedWorkerTests(unittest.TestCase):
         self.assertIn("--enabled-tools write_file", flow)
         self.assertIn("--max-tokens 45000", flow)
         self.assertIn("python scripts/mistral_cloud_work.py publish", flow)
+        self.assertIn("actions: write", flow)
+        self.assertIn("id: ci_dispatch", flow)
+        self.assertIn("steps.publish.outputs.ready == 'true'", flow)
+        self.assertIn("onecompany-validate.yml/dispatches", flow)
+        self.assertIn("validation_trigger=$CI_DISPATCH", flow)
+        self.assertIn("STALE_PUBLISHED_SHA_OR_UNSAFE_REF", flow)
         self.assertIn("contains(github.event.comment.body, 'MISTRAL_WORK_V1') == false", wake)
         self.assertNotIn("gh pr merge", flow)
         self.assertNotIn("git push", flow)

@@ -2,6 +2,7 @@
 import importlib.util
 import os
 from pathlib import Path
+import selectors
 import signal
 import subprocess
 import sys
@@ -50,6 +51,13 @@ class PreviewLocalCommandTests(unittest.TestCase):
             stderr=subprocess.PIPE,
         )
         try:
+            with selectors.DefaultSelector() as selector:
+                selector.register(proc.stdout, selectors.EVENT_READ)
+                ready = selector.select(timeout=6)
+            if not ready:
+                proc.kill()
+                proc.communicate(timeout=3)
+                self.fail("local preview did not emit its startup URL within 6 seconds")
             line = proc.stdout.readline()
             self.assertTrue(line.startswith("Local-only fixture: http://127.0.0.1:"),
                             f"unexpected local preview startup: {line!r}")
@@ -73,7 +81,7 @@ class PreviewLocalCommandTests(unittest.TestCase):
             except subprocess.TimeoutExpired:
                 proc.kill()
                 proc.communicate(timeout=3)
-            self.assertIsNotNone(proc.returncode)
+            self.assertEqual(proc.returncode, 0, "preview-local must handle SIGINT as a clean shutdown")
 
 
 if __name__ == "__main__":

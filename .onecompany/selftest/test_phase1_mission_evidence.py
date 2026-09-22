@@ -90,7 +90,7 @@ class Phase1MissionEvidenceTests(unittest.TestCase):
         self.assertTrue(result["source_refs_unverified"])
         self.assertNotIn("preview_url", result)
         page = render(result).decode()
-        self.assertIn("id='status'>READY", page)
+        self.assertIn("id='status'>NOT READY", page)
         self.assertIn("No execution or deployment authority", page)
         self.assertIn("Projection fields are unverified input", page)
 

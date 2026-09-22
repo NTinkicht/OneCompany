@@ -69,8 +69,8 @@ class Phase1MissionEvidenceTests(unittest.TestCase):
         result = bridge.compose(smoke_fixture(), "a" * 40)
         self.assertEqual(result["readiness"], "BLOCKED")
         self.assertEqual(result["checks"]["quality"]["status"], "BLOCKED")
-        self.assertEqual(result["checks"]["app"]["status"], "PASS")
-        self.assertEqual(result["checks"]["preview"]["status"], "PASS")
+        self.assertEqual(result["checks"]["app"]["status"], "BLOCKED")
+        self.assertEqual(result["checks"]["preview"]["status"], "BLOCKED")
         self.assertIs(result["authority_granted"], False)
         self.assertIs(result["local_fixture_discarded"], True)
         self.assertNotIn("preview_url", result)
@@ -84,8 +84,8 @@ class Phase1MissionEvidenceTests(unittest.TestCase):
     def test_real_local_quality_is_displayed_but_still_not_authority(self):
         """A real separate exact-checkout quality record permits only preview projection."""
         result = bridge.compose(smoke_fixture(), "a" * 40, quality_fixture())
-        self.assertEqual(result["readiness"], "READY_FOR_OWNER_PREVIEW")
-        self.assertEqual(result["checks"]["quality"]["status"], "PASS")
+        self.assertEqual(result["readiness"], "BLOCKED")
+        self.assertEqual(result["checks"]["quality"]["status"], "BLOCKED")
         self.assertFalse(result["authority_granted"])
         self.assertTrue(result["source_refs_unverified"])
         self.assertNotIn("preview_url", result)
@@ -93,6 +93,33 @@ class Phase1MissionEvidenceTests(unittest.TestCase):
         self.assertIn("id='status'>READY", page)
         self.assertIn("No execution or deployment authority", page)
         self.assertIn("Projection fields are unverified input", page)
+
+    def test_hand_authored_schema_valid_json_never_becomes_ready(self):
+        """Identical-looking untrusted records do not gain producer provenance."""
+        smoke = smoke_fixture()
+        quality = quality_fixture()
+        result = bridge.compose(smoke, "a" * 40, quality)
+        self.assertEqual(result["readiness"], "BLOCKED")
+        self.assertEqual(result["checks"]["quality"]["status"], "BLOCKED")
+        self.assertEqual(result["reported_local_observations"]["quality"],
+                         "UNVERIFIED_CALLER_SUPPLIED_JSON")
+        self.assertTrue(any("unauthenticated" in item for item in result["blockers"]))
+
+    def test_bootstrap_excludes_source_only_composer(self):
+        """Installer must not leak source-company demo helpers, tests or docs."""
+        from bootstrap import SOURCE_INSTALLATION_EXCLUSIONS, copy_item
+        excluded = (
+            "scripts/phase1_mission_evidence.py",
+            ".onecompany/selftest/test_phase1_mission_evidence.py",
+            "docs/PHASE1-MISSION-EVIDENCE.md",
+        )
+        for relative in excluded:
+            self.assertIn(relative, SOURCE_INSTALLATION_EXCLUSIONS)
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp)
+            for relative in excluded:
+                copy_item(ROOT / relative, target / relative, False, target)
+                self.assertFalse((target / relative).exists())
 
     def test_reject_forged_smoke_scope_authority_and_mismatched_refs(self):
         """No stale or invented fixture proof can become a positive dashboard."""
@@ -164,7 +191,7 @@ class Phase1MissionEvidenceTests(unittest.TestCase):
             run = subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True, timeout=12)
             self.assertEqual(run.returncode, 0, run.stderr)
             output = json.loads(run.stdout)
-            self.assertEqual(output["checks"]["quality"]["status"], "PASS")
+            self.assertEqual(output["checks"]["quality"]["status"], "BLOCKED")
             self.assertFalse(output["authority_granted"])
             link = root / "linked.json"
             link.symlink_to(smoke)

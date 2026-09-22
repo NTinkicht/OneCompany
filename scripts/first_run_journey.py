@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import stat
 import sys
 from pathlib import Path
 
 from onboard import analyze
+from brief_handoff_proposal import propose as propose_brief_handoff
 from product_brief import FIELDS, make_draft
 
 MAX_BRIEF_BYTES = 16_384
@@ -15,10 +18,17 @@ MAX_BRIEF_BYTES = 16_384
 
 def read_brief(path: Path) -> dict:
     """Read one bounded owner-saved JSON draft without following a symlink."""
-    if path.is_symlink() or not path.is_file():
-        raise ValueError("SAVED_BRIEF_FILE_REQUIRED")
-    with path.open("rb") as stream:
-        raw = stream.read(MAX_BRIEF_BYTES + 1)
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise ValueError("SECURE_BRIEF_READ_UNAVAILABLE")
+    flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0)
+    descriptor = os.open(path, flags)
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise ValueError("SAVED_BRIEF_FILE_REQUIRED")
+        with os.fdopen(descriptor, "rb", closefd=False) as stream:
+            raw = stream.read(MAX_BRIEF_BYTES + 1)
+    finally:
+        os.close(descriptor)
     if len(raw) > MAX_BRIEF_BYTES:
         raise ValueError("SAVED_BRIEF_TOO_LARGE")
     result = json.loads(raw)
@@ -59,9 +69,11 @@ def view(assessment: dict, saved_brief: dict | None = None,
         next_commands = [brief_cmd + ["--json"]]  # Rebuild the draft explicitly.
     else:
         next_commands = [[
-            "python", "scripts/brief_handoff_proposal.py", "--brief",
-            str(brief_path or "<SAVED_BRIEF_JSON>"),
-            "--head", "<LIVE_HEAD_SHA>", "--base", "<LIVE_BASE_SHA>",
+            "python", "onecompany.py", "journey",
+            "--target", target, "--repository", repository,
+            "--brief", str(brief_path or "<SAVED_BRIEF_JSON>"),
+            "--emit-proposal", "--head", "<LIVE_HEAD_SHA>",
+            "--base", "<LIVE_BASE_SHA>",
         ]]
     if blocked:
         next_commands = [["python", "onecompany.py", "onboard",
@@ -122,15 +134,28 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repository")
     parser.add_argument("--brief", type=Path, help="Previously saved draft JSON")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--emit-proposal", action="store_true",
+                        help="Emit a revalidated unauthorized handoff from this same boundary")
+    parser.add_argument("--head", help="Caller-supplied unverified candidate revision")
+    parser.add_argument("--base", help="Caller-supplied unverified base revision")
     args = parser.parse_args(argv)
     try:
         assessment = analyze(Path(args.target).resolve(), repository=args.repository)
         saved = read_brief(args.brief) if args.brief else None
         result = view(assessment, saved, str(args.brief) if args.brief else None)
+        proposal = None
+        if args.emit_proposal:
+            if result["stage"] != "PROPOSAL_READY_NOT_APPROVED":
+                raise ValueError("COMPLETE_VALIDATED_BRIEF_REQUIRED")
+            if not args.head or not args.base:
+                raise ValueError("EXACT_CALLER_REFS_REQUIRED")
+            proposal = propose_brief_handoff(saved, args.head, args.base)
     except (ValueError, OSError, TypeError, UnicodeError) as exc:
         print("REFUSED: " + str(exc), file=sys.stderr)
         return 2
-    if args.json:
+    if proposal is not None:
+        print(json.dumps(proposal, sort_keys=True, ensure_ascii=False))
+    elif args.json:
         print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
         print("OneCompany - guided first run (read-only, NOT APPROVED)")

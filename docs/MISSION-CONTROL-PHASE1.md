@@ -5,8 +5,13 @@ The Phase-1 loopback-only dashboard reads a **projection**, not the authoritativ
 Run against a locally prepared JSON file:
 
 ```bash
-python scripts/mission_control_local.py --input /tmp/onecompany-projection.json --port 8765
+python scripts/mission_control_local.py \
+  --input /tmp/onecompany-projection.json \
+  --journey /tmp/onecompany-journey.json \
+  --port 8765
 ```
+
+The `--input` file is the JSON produced by `scripts/mission_control_projection.py` (schema `onecompany.mission-control.phase1.v1`); optional `--journey` is the read-only `python onecompany.py journey --json` output (schema `onecompany.first-run-journey.v1`). The dashboard combines only display fields from the journey; it preserves the original exact-revision `checks`, readiness and `authority_granted=false`. Without `--journey`, journey fields will correctly remain missing and no guidance is invented. Both inputs are bounded to 64 KiB, and an unauthorized or non-canonical journey is rejected.
 
 The page shows the project, revision, proposed guided stage, quality/browser/CI/independent-review **reported** states, blockers, next action, and local preview address if safe. It renders `steps` from the existing read-only guided journey and treats missing fields as UNKNOWN. `READY_FOR_OWNER_PREVIEW` preserves the older UI's READY label, but prominently states that **the projection itself is unverified** and no implementation or deployment authority follows.
 

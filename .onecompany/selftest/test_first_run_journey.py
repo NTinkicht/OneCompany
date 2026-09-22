@@ -4,10 +4,12 @@ from __future__ import annotations
 import contextlib
 import io
 import json
+import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -79,8 +81,10 @@ class FirstRunJourneyTests(unittest.TestCase):
             self.assertFalse(result["deployment_ready"])
             self.assertEqual(result["requested_extra_spend"], 0)
             cmd = result["next_commands_argv"][0]
-            self.assertEqual(cmd[1:3],
-                             ["scripts/brief_handoff_proposal.py", "--brief"])
+            self.assertEqual(cmd[1:3], ["onecompany.py", "journey"])
+            self.assertIn("--emit-proposal", cmd)
+            self.assertIn(str(target), cmd)
+            self.assertIn("demo/future", cmd)
             self.assertIn("<LIVE_HEAD_SHA>", cmd)
             self.assertFalse(target.exists())
 
@@ -131,6 +135,71 @@ class FirstRunJourneyTests(unittest.TestCase):
             shortcut.symlink_to(payload)
             with self.assertRaisesRegex(ValueError, "FILE_REQUIRED"):
                 journey.read_brief(shortcut)
+
+    def test_symlink_swap_during_open_is_refused_atomically(self):
+        """A last-moment symlink replacement cannot defeat O_NOFOLLOW."""
+        if not hasattr(os, "O_NOFOLLOW"):
+            self.skipTest("atomic O_NOFOLLOW unavailable")
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            payload = folder / "draft.json"
+            victim = folder / "victim.json"
+            payload.write_text('{"document_kind":"product_brief_draft"}')
+            victim.write_text('{"secret":"must not be read"}')
+            original_open = os.open
+
+            def replace_just_before_open(path, flags, *args, **kwargs):
+                if Path(path) == payload:
+                    payload.unlink()
+                    payload.symlink_to(victim)
+                return original_open(path, flags, *args, **kwargs)
+
+            with patch.object(journey.os, "open", side_effect=replace_just_before_open):
+                with self.assertRaises(OSError):
+                    journey.read_brief(payload)
+            self.assertEqual(victim.read_text(), '{"secret":"must not be read"}')
+
+    def test_emitted_handoff_revalidates_same_saved_brief_and_refs(self):
+        """Continuation does not fall back to the weaker standalone reader."""
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "future"
+            report = product_brief.analyze(target, repository="demo/future")
+            draft = product_brief.make_draft(report, self.answers())
+            saved = Path(tmp) / "draft.json"
+            saved.write_text(json.dumps(draft))
+            head, base = "a" * 40, "b" * 40
+            with contextlib.redirect_stdout(io.StringIO()) as output:
+                rc = journey.main([
+                    "--target", str(target), "--repository", "demo/future",
+                    "--brief", str(saved), "--emit-proposal",
+                    "--head", head, "--base", base,
+                ])
+            self.assertEqual(rc, 0)
+            proposal = json.loads(output.getvalue())
+            self.assertEqual(proposal["source_refs_unverified"],
+                             {"head": head, "base": base})
+            self.assertEqual(proposal["authorization"], "NOT_GRANTED")
+            self.assertIsNone(proposal["run_key"])
+            tampered = dict(draft)
+            tampered["run_key"] = "forged"
+            saved.write_text(json.dumps(tampered))
+            with contextlib.redirect_stderr(io.StringIO()):
+                rc = journey.main([
+                    "--target", str(target), "--repository", "demo/future",
+                    "--brief", str(saved), "--emit-proposal",
+                    "--head", head, "--base", base,
+                ])
+            self.assertEqual(rc, 2)
+            saved.write_text(json.dumps(draft))
+            target.mkdir()
+            (target / "tests").mkdir()
+            with contextlib.redirect_stderr(io.StringIO()):
+                rc = journey.main([
+                    "--target", str(target), "--repository", "demo/future",
+                    "--brief", str(saved), "--emit-proposal",
+                    "--head", head, "--base", base,
+                ])
+            self.assertEqual(rc, 2)
 
     def test_cli_end_to_end_create_and_no_mutation(self):
         """The actual route prints a structured proposal, with no target writes."""

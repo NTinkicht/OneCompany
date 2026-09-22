@@ -8,6 +8,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 import brief_handoff_proposal as handoff
+import planner
 
 HEAD, BASE = "a" * 40, "b" * 40
 
@@ -81,10 +82,10 @@ class BriefHandoffTests(unittest.TestCase):
             with self.subTest(mutation=mutation), self.assertRaises(ValueError):
                 handoff.propose(candidate, HEAD, BASE)
 
-    def test_planning_adapter_preserves_assets_and_zero_authority(self):
-        """Existing-core input preserves contracts/tests/CI and cannot spend/run."""
+    def test_existing_planner_entry_preserves_assets_and_zero_authority(self):
+        """The real planner entry consumes the handoff without granting execution."""
         proposal = handoff.propose(draft(), HEAD, BASE)
-        planning = handoff.consume_for_planning(proposal, HEAD, BASE)
+        planning = planner.consume_brief_handoff(proposal, HEAD, BASE)
         self.assertEqual(planning["project"]["existing_tests"], ["pytest"])
         self.assertEqual(planning["project"]["existing_ci"], ["workflow.yml"])
         self.assertEqual(planning["project"]["known_contracts"], ["API v1"])
@@ -96,16 +97,16 @@ class BriefHandoffTests(unittest.TestCase):
         self.assertFalse(planning["provider_invocation"])
         self.assertEqual(planning["requested_extra_spend"], 0)
 
-    def test_planning_adapter_rejects_stale_refs_or_execution_authority(self):
-        """Consumption rejects stale refs and any injected RunKey/lease/WU."""
+    def test_existing_planner_entry_rejects_stale_refs_or_execution_authority(self):
+        """The real planner boundary rejects stale refs and injected authority."""
         proposal = handoff.propose(draft(), HEAD, BASE)
         with self.assertRaisesRegex(ValueError, "STALE_OR_UNVERIFIED_REVISION"):
-            handoff.consume_for_planning(proposal, "c" * 40, BASE)
+            planner.consume_brief_handoff(proposal, "c" * 40, BASE)
         for field, value in (("run_key", {"generation": 1}), ("lease_id", "lease"), ("canonical_work_unit", "WU-1")):
             poisoned = copy.deepcopy(proposal)
             poisoned[field] = value
             with self.subTest(field=field), self.assertRaisesRegex(ValueError, "EXECUTION_AUTHORITY_PRESENT"):
-                handoff.consume_for_planning(poisoned, HEAD, BASE)
+                planner.consume_brief_handoff(poisoned, HEAD, BASE)
 
 
 if __name__ == "__main__":

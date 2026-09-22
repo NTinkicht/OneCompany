@@ -8,7 +8,7 @@ PAYG/overage or transferred CLI auth session.
 ## Actual write path
 
 1. A canonical Work Unit must be READY in the protected target queue, with
-   the exact same PR number and branch, LOW or MEDIUM risk and 1–8 literal
+   the exact same PR number and branch, exactly uppercase LOW or MEDIUM risk and 1–8 literal
    product source/test paths under examples/, src/, app/ or tests/. Broad
    globs, control-plane paths, AGENTS.md and workflow files are REFUSED.
 2. One active durable native OneCompany implementation lease MUST already
@@ -60,3 +60,7 @@ Future Grok can receive an independent reviewer/tester assignment against
 the resulting model-authored commit; neither model can be the sole reviewer of
 its own material changes. Keep the existing trusted Execution Core,
 RunKey/generation and lease control plane, no alternate workflow authority.
+
+## GitHub-token publication CI handoff
+
+GitHub suppresses ordinary pull_request/push workflow events from commits published with the built-in GITHUB_TOKEN. The trusted parent therefore re-fetches the PR and checks that its current head is exactly the newly published SHA, then explicitly dispatches `OneCompany Validate` with `workflow_dispatch` on that actual PR branch. The workflow has scoped `actions: write` permission for this dispatch; Mistral never receives the GitHub token. An accepted dispatch is **not** green CI, independent review, a merge gate, or proof of a real model-authored qualification run; separately inspect the validation job and exact checkout revision. If the branch moved, dispatch fails closed and the issue status records the CI handoff failure. Unknown or absent risk classes fail closed; only exact `LOW` and `MEDIUM` are admitted.

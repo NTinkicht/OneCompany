@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import stat
 import sys
 from pathlib import Path
 
@@ -13,13 +14,21 @@ REQUIRED = ("audience", "problem", "outcome", "first_feature")
 
 
 def load_draft(path: Path) -> dict:
-    if path.is_symlink():
-        raise ValueError("draft path must not be a symlink")
-    stat = path.stat()
-    if not path.is_file() or stat.st_size > MAX_BYTES:
-        raise ValueError("draft must be a regular file no larger than 16384 bytes")
-    with path.open("r", encoding="utf-8") as stream:
-        data = json.load(stream)
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    fd = os.open(path, flags)
+    try:
+        metadata = os.fstat(fd)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > MAX_BYTES:
+            raise ValueError("draft must be a regular file no larger than 16384 bytes")
+        with os.fdopen(fd, "rb", closefd=False) as stream:
+            raw = stream.read(MAX_BYTES + 1)
+        if len(raw) > MAX_BYTES:
+            raise ValueError("draft must be a regular file no larger than 16384 bytes")
+        data = json.loads(raw.decode("utf-8"))
+    finally:
+        os.close(fd)
     if not isinstance(data, dict):
         raise ValueError("draft must be a JSON object")
     if data.get("schema_version") != "1.0" or data.get("document_kind") != "product_brief_draft":
@@ -34,6 +43,8 @@ def load_draft(path: Path) -> dict:
         raise ValueError("draft contains authority or malformed approval state")
     if data.get("write_lease_granted") is not False:
         raise ValueError("draft must not grant a write lease")
+    if data.get("qualified_implementer_selected") is not False:
+        raise ValueError("draft must not select a qualified implementer")
     return data
 
 
@@ -71,7 +82,7 @@ def main(argv: list[str] | None = None) -> int:
             print("Missing required: " + (", ".join(result["missing_required"]) or "none"))
             print("Next: " + result["next_action"])
         return 0 if not result["missing_required"] else 2
-    except (OSError, ValueError, json.JSONDecodeError) as exc:
+    except (OSError, UnicodeDecodeError, ValueError, json.JSONDecodeError) as exc:
         print("REFUSED: " + str(exc), file=sys.stderr)
         return 2
 

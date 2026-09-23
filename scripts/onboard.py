@@ -13,6 +13,8 @@ from typing import Any
 from onecompany_lib import ROOT
 
 SOURCE_REPOSITORY = "NTinkicht/OneCompany"
+# Immutable source-history fingerprint (root commit, not origin, index or config).
+SOURCE_ROOT_COMMIT = "cc4acd72c573e13e77478c34cc4df9b8e83831ff"
 FRAMEWORK_PATHS = [
     ".onecompany", "agents", "company", "patterns", "overlays", "docs", "scripts", "onecompany.py",
     "AGENTS.md", "CLAUDE.md", "GEMINI.md", ".github/copilot-instructions.md", ".github/ISSUE_TEMPLATE",
@@ -89,15 +91,16 @@ def detect_mode(target: Path) -> tuple[str, str | None]:
         except Exception:
             pass
         if repo == SOURCE_REPOSITORY:
-            # Preserve source checkout identity even when origin disappears or
-            # changes. Requiring an INDEXED source config distinguishes it from
-            # a freshly copied template that has since run git init: the latter
-            # config is not yet tracked. A full source-history clone remains
-            # source-like until it has been explicitly initialized for its owner.
-            if (target.resolve() == ROOT.resolve()
-                    and git(target, "ls-files", "--error-unmatch", "--",
-                            ".onecompany/config.json") == ".onecompany/config.json"):
-                return "SOURCE_REPOSITORY", repo
+            # A Git origin, index entry or tracked config is mutable and is
+            # identical in many GitHub template copies. Only the actual source
+            # history's immutable root identifies this company checkout/fork.
+            # Shallow history has no verifiable root: fail closed rather than
+            # accept a renamed shallow source clone as a customer copy.
+            if target.resolve() == ROOT.resolve():
+                shallow = git(target, "rev-parse", "--is-shallow-repository")
+                roots = (git(target, "rev-list", "--max-parents=0", "HEAD") or "").split()
+                if shallow == "true" or SOURCE_ROOT_COMMIT in roots:
+                    return "SOURCE_REPOSITORY", repo
             return "TEMPLATE_COPY", repo
         return "INSTALLED", repo
     meaningful = [p for p in target.iterdir() if p.name != ".git"] if target.exists() else []

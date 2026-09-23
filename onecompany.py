@@ -15,6 +15,7 @@ COMMANDS = {
     "journey": ["first_run_journey.py"],
     "demo": ["phase1_vertical_smoke.py"],
     "preview-local": ["../examples/vertical-slice/app.py"],
+    "mission-control": ["mission_control_local.py"],
     "shadow-migration": ["shadow_migration.py"],
     "cutover-readiness": ["cutover_readiness.py"],
     "doctor": ["doctor.py"], "status": ["status.py"], "check": ["check.py"], "validate": ["validate_all.py"], "schema-validate": ["schema_validate.py"],
@@ -41,28 +42,33 @@ def usage() -> int:
     print("  journey           guided Create/Adopt next steps; read-only, never approval")
     print("  demo              run real disposable local CRUD proof from owner draft (source checkout)")
     print("  preview-local     interact with disposable checklist UI at localhost (source checkout)")
+    print("  mission-control   serve canonical read-only Mission Control evidence at localhost")
     print("  shadow-migration  analyze an external migration snapshot without target mutation")
     print("  cutover-readiness prove quiescent C2b readiness without target mutation")
     print("\nCommands:")
+    featured = {"start", "onboard", "brief", "journey", "demo", "preview-local", "mission-control", "shadow-migration", "cutover-readiness"}
     for command in COMMANDS:
-        if command not in {"start", "onboard", "brief", "journey", "demo", "preview-local", "shadow-migration", "cutover-readiness"}: print(f"  {command}")
+        if command not in featured:
+            print(f"  {command}")
     return 2
 
 
 def main() -> int:
     """Route the selected subcommand without changing customer project authority."""
-    if len(sys.argv) < 2 or sys.argv[1] in {"-h", "--help", "help"}: return usage()
-    command = sys.argv[1]; spec = COMMANDS.get(command)
+    if len(sys.argv) < 2 or sys.argv[1] in {"-h", "--help", "help"}:
+        return usage()
+    command = sys.argv[1]
+    spec = COMMANDS.get(command)
     if not spec:
-        print(f"unknown command: {command}"); return usage()
+        print(f"unknown command: {command}")
+        return usage()
     helper = ROOT / "scripts" / spec[0]
-    if command in {"start", "demo", "preview-local"} and not helper.is_file():
+    interactive_source = {"start", "demo", "preview-local", "mission-control"}
+    if command in interactive_source and not helper.is_file():
         print(f"{command} is available from the OneCompany source checkout only; no target is modified.")
         return 2
     argv = [sys.executable, str(helper), *spec[1:], *sys.argv[2:]]
-    if command == "preview-local":
-        # The command is interactive: Ctrl+C reaching only this wrapper must also
-        # stop the child server and discard its in-memory checklist.
+    if command in {"preview-local", "mission-control"}:
         child = subprocess.Popen(argv, cwd=str(ROOT))
         try:
             return child.wait()

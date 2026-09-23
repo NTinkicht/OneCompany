@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -13,6 +14,8 @@ from typing import Any
 from onecompany_lib import ROOT
 
 SOURCE_REPOSITORY = "NTinkicht/OneCompany"
+# Immutable source-history fingerprint (root commit, not origin, index or config).
+SOURCE_ROOT_COMMIT = "cc4acd72c573e13e77478c34cc4df9b8e83831ff"
 FRAMEWORK_PATHS = [
     ".onecompany", "agents", "company", "patterns", "overlays", "docs", "scripts", "onecompany.py",
     "AGENTS.md", "CLAUDE.md", "GEMINI.md", ".github/copilot-instructions.md", ".github/ISSUE_TEMPLATE",
@@ -21,7 +24,14 @@ FRAMEWORK_PATHS = [
 
 
 def git(target: Path, *args: str) -> str | None:
-    result = subprocess.run(["git", "-C", str(target), *args], text=True, capture_output=True, check=False)
+    env = os.environ.copy()
+    for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE",
+                 "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES"):
+        env.pop(name, None)
+    result = subprocess.run(
+        ["git", "-C", str(target), *args],
+        text=True, capture_output=True, check=False, env=env,
+    )
     return result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
 
 
@@ -89,8 +99,26 @@ def detect_mode(target: Path) -> tuple[str, str | None]:
         except Exception:
             pass
         if repo == SOURCE_REPOSITORY:
-            if target.resolve() == ROOT.resolve() and infer_repo(target) == SOURCE_REPOSITORY:
-                return "SOURCE_REPOSITORY", repo
+            # A Git origin, index entry or tracked config is mutable and is
+            # identical in many GitHub template copies. Only the actual source
+            # history's immutable root identifies this company checkout/fork.
+            # Shallow history has no verifiable root: fail closed rather than
+            # accept a renamed shallow source clone as a customer copy.
+            if target.resolve() == ROOT.resolve():
+                # Verify the immutable source root is reachable from HEAD. This
+                # works in a shallow clone only when that root is actually
+                # present; shallowness by itself never confers source identity.
+                source_ancestor = subprocess.run(
+                    ["git", "-C", str(target), "merge-base", "--is-ancestor",
+                     SOURCE_ROOT_COMMIT, "HEAD"],
+                    text=True, capture_output=True, check=False,
+                    env={k: v for k, v in os.environ.items()
+                         if k not in {"GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR",
+                                      "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+                                      "GIT_ALTERNATE_OBJECT_DIRECTORIES"}},
+                )
+                if source_ancestor.returncode == 0:
+                    return "SOURCE_REPOSITORY", repo
             return "TEMPLATE_COPY", repo
         return "INSTALLED", repo
     meaningful = [p for p in target.iterdir() if p.name != ".git"] if target.exists() else []

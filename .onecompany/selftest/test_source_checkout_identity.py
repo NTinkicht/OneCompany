@@ -87,6 +87,15 @@ class SourceCheckoutIdentityTests(unittest.TestCase):
             config.write_text(json.dumps({
                 "project": {"repository": "NTinkicht/OneCompany"},
             }), encoding="utf-8")
+            # Match smoke_init.py: the copied tree gets its own fresh Git
+            # repository BEFORE OneCompany init updates the source config.
+            initialized = subprocess.run(
+                ["git", "init", "-b", "main"],
+                cwd=target, text=True, capture_output=True, timeout=12,
+            )
+            self.assertEqual(initialized.returncode, 0, initialized.stderr)
+            self.assertIsNone(onboard.git(target, "ls-files", "--error-unmatch", "--",
+                                         ".onecompany/config.json"))
             code = (
                 "import json, onboard; from pathlib import Path; "
                 "print(json.dumps({'root': str(onboard.ROOT), "

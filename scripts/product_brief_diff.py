@@ -70,9 +70,12 @@ def validate(data: dict) -> dict:
             or data["status"] != "DRAFT_NOT_APPROVED"
             or data["source"] != "owner_supplied_answers_and_read_only_discovery"):
         raise ValueError("unsupported Product Brief draft")
-    if (data["approval"] != {
-        "product_brief": False, "implementation": False, "deployment": False,
-    } or data["write_lease_granted"] is not False
+    approval = data["approval"]
+    if (not isinstance(approval, dict)
+            or set(approval) != {"product_brief", "implementation", "deployment"}
+            or any(approval[name] is not False for name in
+                   ("product_brief", "implementation", "deployment"))
+            or data["write_lease_granted"] is not False
             or data["qualified_implementer_selected"] is not False
             or data["acceptance_criteria"] != []):
         raise ValueError("Product Brief contains authority-bearing state")

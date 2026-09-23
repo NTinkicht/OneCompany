@@ -30,7 +30,6 @@ class BriefStatusTests(unittest.TestCase):
         }
 
     def test_complete_draft_reports_owner_decision_next(self):
-        """A canonical complete draft is ready for an owner decision, not approved."""
         result = summarize(self.write(self.canonical({
             "problem": "P", "audience": "A", "outcome": "O", "first_feature": "F",
         })))
@@ -39,13 +38,11 @@ class BriefStatusTests(unittest.TestCase):
         self.assertFalse(result["approved"])
 
     def test_incomplete_draft_lists_missing_answers(self):
-        """Missing canonical nested answers are reported accurately."""
         result = summarize(self.write(self.canonical({"problem": "P"})))
         self.assertEqual(result["stage"], "DRAFT_INCOMPLETE")
         self.assertIn("audience", result["missing"])
 
     def test_authority_bearing_draft_is_blocked(self):
-        """A draft that claims authority is blocked with a safe next action."""
         payload = self.canonical({
             "problem": "P", "audience": "A", "outcome": "O", "first_feature": "F",
         })
@@ -53,9 +50,9 @@ class BriefStatusTests(unittest.TestCase):
         result = summarize(self.write(payload))
         self.assertEqual(result["stage"], "BLOCKED")
         self.assertEqual(result["next_action"], "remove_unverified_authority_and_revalidate")
+        self.assertEqual(result["missing"], list(("problem", "audience", "outcome", "first_feature")))
 
     def test_top_level_answer_shape_is_not_misreported_as_saved_brief(self):
-        """Legacy/top-level answer-shaped JSON is refused rather than misclassified."""
         result = summarize(self.write({
             "problem": "P", "audience": "A", "outcome": "O", "first_feature": "F",
         }))
@@ -63,7 +60,6 @@ class BriefStatusTests(unittest.TestCase):
         self.assertIn("missing_answers_object", result["blockers"])
 
     def test_malformed_json_is_blocked_with_next_step(self):
-        """Malformed JSON is blocked and still gives the caller a recovery action."""
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
         path = Path(directory.name) / "brief.json"
@@ -71,6 +67,34 @@ class BriefStatusTests(unittest.TestCase):
         result = summarize(path)
         self.assertEqual(result["stage"], "BLOCKED")
         self.assertEqual(result["next_action"], "recreate_saved_brief")
+
+    def test_non_object_json_is_blocked(self):
+        result = summarize(self.write([]))
+        self.assertEqual(result["stage"], "BLOCKED")
+        self.assertIn("unsafe_or_malformed_brief", result["blockers"])
+
+    def test_symlinked_brief_is_blocked(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        target = Path(directory.name) / "target.json"
+        path = Path(directory.name) / "brief.json"
+        target.write_text(json.dumps(self.canonical({})), encoding="utf-8")
+        try:
+            path.symlink_to(target)
+        except (OSError, NotImplementedError):
+            self.skipTest("test environment cannot create symlinks")
+        result = summarize(path)
+        self.assertEqual(result["stage"], "BLOCKED")
+        self.assertIn("unsafe_or_malformed_brief", result["blockers"])
+
+    def test_oversized_brief_is_blocked(self):
+        directory = tempfile.TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        path = Path(directory.name) / "brief.json"
+        path.write_bytes(b"x" * (16_384 + 1))
+        result = summarize(path)
+        self.assertEqual(result["stage"], "BLOCKED")
+        self.assertIn("unsafe_or_malformed_brief", result["blockers"])
 
 
 if __name__ == "__main__":

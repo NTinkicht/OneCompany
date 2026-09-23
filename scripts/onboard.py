@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -23,7 +24,14 @@ FRAMEWORK_PATHS = [
 
 
 def git(target: Path, *args: str) -> str | None:
-    result = subprocess.run(["git", "-C", str(target), *args], text=True, capture_output=True, check=False)
+    env = os.environ.copy()
+    for name in ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE",
+                 "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES"):
+        env.pop(name, None)
+    result = subprocess.run(
+        ["git", "-C", str(target), *args],
+        text=True, capture_output=True, check=False, env=env,
+    )
     return result.stdout.strip() if result.returncode == 0 and result.stdout.strip() else None
 
 
@@ -97,9 +105,19 @@ def detect_mode(target: Path) -> tuple[str, str | None]:
             # Shallow history has no verifiable root: fail closed rather than
             # accept a renamed shallow source clone as a customer copy.
             if target.resolve() == ROOT.resolve():
-                shallow = git(target, "rev-parse", "--is-shallow-repository")
-                roots = (git(target, "rev-list", "--max-parents=0", "HEAD") or "").split()
-                if shallow == "true" or SOURCE_ROOT_COMMIT in roots:
+                # Verify the immutable source root is reachable from HEAD. This
+                # works in a shallow clone only when that root is actually
+                # present; shallowness by itself never confers source identity.
+                source_ancestor = subprocess.run(
+                    ["git", "-C", str(target), "merge-base", "--is-ancestor",
+                     SOURCE_ROOT_COMMIT, "HEAD"],
+                    text=True, capture_output=True, check=False,
+                    env={k: v for k, v in os.environ.items()
+                         if k not in {"GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR",
+                                      "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+                                      "GIT_ALTERNATE_OBJECT_DIRECTORIES"}},
+                )
+                if source_ancestor.returncode == 0:
                     return "SOURCE_REPOSITORY", repo
             return "TEMPLATE_COPY", repo
         return "INSTALLED", repo

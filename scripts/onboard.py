@@ -89,10 +89,12 @@ def detect_mode(target: Path) -> tuple[str, str | None]:
         except Exception:
             pass
         if repo == SOURCE_REPOSITORY:
-            # Module install identity, not a mutable/missing Git origin, marks the
-            # actual OneCompany source checkout. A copied template elsewhere
-            # retains TEMPLATE_COPY even when its config still names OneCompany.
-            if target.resolve() == ROOT.resolve():
+            # Never use mutable origin to decide source identity. The source's
+            # own checkout has Git metadata; a standalone template copy running
+            # its OWN copied module has the same ROOT/config, but no .git.
+            # An ambiguous Git clone still fails closed as source until its
+            # owner explicitly reinitializes it with a different project config.
+            if target.resolve() == ROOT.resolve() and (target / ".git").exists():
                 return "SOURCE_REPOSITORY", repo
             return "TEMPLATE_COPY", repo
         return "INSTALLED", repo

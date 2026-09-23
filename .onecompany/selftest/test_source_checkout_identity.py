@@ -111,6 +111,32 @@ class SourceCheckoutIdentityTests(unittest.TestCase):
             observed = json.loads(result.stdout)
             self.assertEqual(observed["root"], str(target))
             self.assertEqual(observed["mode"], "TEMPLATE_COPY")
+            # Merely staging source-looking configuration must not confer
+            # source identity (nor should committing the copied template).
+            stage = subprocess.run(
+                ["git", "add", ".onecompany/config.json"],
+                cwd=target, text=True, capture_output=True, timeout=12,
+            )
+            self.assertEqual(stage.returncode, 0, stage.stderr)
+            staged = subprocess.run(
+                [sys.executable, "-c", code],
+                cwd=target, env=env, text=True, capture_output=True, timeout=12,
+            )
+            self.assertEqual(staged.returncode, 0, staged.stderr)
+            self.assertEqual(json.loads(staged.stdout)["mode"], "TEMPLATE_COPY")
+            committed = subprocess.run(
+                ["git", "-c", "user.name=Test Reviewer",
+                 "-c", "user.email=test@example.invalid",
+                 "commit", "-m", "template first commit"],
+                cwd=target, text=True, capture_output=True, timeout=12,
+            )
+            self.assertEqual(committed.returncode, 0, committed.stderr)
+            adopted = subprocess.run(
+                [sys.executable, "-c", code],
+                cwd=target, env=env, text=True, capture_output=True, timeout=12,
+            )
+            self.assertEqual(adopted.returncode, 0, adopted.stderr)
+            self.assertEqual(json.loads(adopted.stdout)["mode"], "TEMPLATE_COPY")
 
     def test_no_source_paths_mutated(self):
         """A source-discovery read must not touch local project or remotes."""

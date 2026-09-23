@@ -87,9 +87,10 @@ def load_draft(path: Path) -> dict:
         raise ValueError("draft has malformed project/discovery facts")
     if project["path"] not in ("create", "adopt"):
         raise ValueError("draft project path invalid")
-    if any(not isinstance(project[k], str) or not project[k] for k in
-           ("name", "repository", "default_branch")):
-        raise ValueError("draft project identity invalid")
+    if any(not isinstance(project[k], str) or not project[k]
+           or any(ord(char) < 32 or ord(char) == 127 for char in project[k])
+           for k in ("name", "repository", "default_branch")):
+        raise ValueError("draft project identity contains unsafe display characters")
     if any(not isinstance(project[k], list) or
            any(not isinstance(v, str) for v in project[k])
            for k in PROJECT_LISTS):

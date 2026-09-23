@@ -31,7 +31,8 @@ def main() -> int:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--synthetic-data", action="store_true")
     parser.add_argument("--authority", action="store_true")
-    result = preflight(parser.parse_args().host, parser.parse_args().synthetic_data, parser.parse_args().authority)
+    args = parser.parse_args()
+    result = preflight(args.host, args.synthetic_data, args.authority)
     print(json.dumps(result, sort_keys=True))
     return 0 if result["safe"] else 2
 

@@ -27,7 +27,8 @@ PROJECT_LISTS = ("known_stack", "existing_tests", "existing_ci", "known_contract
 
 def _read_bounded(path: Path) -> dict:
     """Open every path component without following links; read one bounded FD."""
-    if not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_DIRECTORY"):
+    if (not getattr(os, "O_NOFOLLOW", 0) or not getattr(os, "O_DIRECTORY", 0)
+            or not getattr(os, "O_NONBLOCK", 0)):
         raise ValueError("secure Product Brief reading requires O_NOFOLLOW/O_DIRECTORY")
     parts = path.parts[1:] if path.is_absolute() else path.parts
     if not parts or any(p in ("", ".", "..") for p in parts):

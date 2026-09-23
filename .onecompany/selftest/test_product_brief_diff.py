@@ -91,6 +91,7 @@ class ProductBriefDiffTests(unittest.TestCase):
             ("missing implementer", lambda b: b.pop("qualified_implementer_selected")),
             ("lease", lambda b: b.update(write_lease_granted=True)),
             ("approve", lambda b: b["approval"].update(implementation=True)),
+            ("numeric false-like approval", lambda b: b["approval"].update(implementation=0)),
             ("criteria", lambda b: b.update(acceptance_criteria=["untrusted"])),
             ("extra authority", lambda b: b.update(run_key="forged")),
             ("missing answer field", lambda b: b["answers"].pop("outcome")),

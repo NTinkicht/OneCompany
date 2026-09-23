@@ -8,4 +8,5 @@ reviews:
     auto_incremental_review: true
     drafts: false
     base_branches:
+      - "^main$"
       - "^epic-0\\.6-integration$"

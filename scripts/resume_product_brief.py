@@ -70,9 +70,11 @@ def load_draft(path: Path) -> dict:
             or data["status"] != "DRAFT_NOT_APPROVED"
             or data["source"] != "owner_supplied_answers_and_read_only_discovery"):
         raise ValueError("unsupported Product Brief schema or kind")
-    if data["approval"] != {
-        "product_brief": False, "implementation": False, "deployment": False,
-    }:
+    approval = data["approval"]
+    if (not isinstance(approval, dict)
+            or set(approval) != {"product_brief", "implementation", "deployment"}
+            or any(approval[name] is not False for name in
+                   ("product_brief", "implementation", "deployment"))):
         raise ValueError("draft contains authority or malformed approval state")
     if (data["write_lease_granted"] is not False
             or data["qualified_implementer_selected"] is not False

@@ -89,7 +89,10 @@ def detect_mode(target: Path) -> tuple[str, str | None]:
         except Exception:
             pass
         if repo == SOURCE_REPOSITORY:
-            if target.resolve() == ROOT.resolve() and infer_repo(target) == SOURCE_REPOSITORY:
+            # Module install identity, not a mutable/missing Git origin, marks the
+            # actual OneCompany source checkout. A copied template elsewhere
+            # retains TEMPLATE_COPY even when its config still names OneCompany.
+            if target.resolve() == ROOT.resolve():
                 return "SOURCE_REPOSITORY", repo
             return "TEMPLATE_COPY", repo
         return "INSTALLED", repo

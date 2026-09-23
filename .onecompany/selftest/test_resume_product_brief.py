@@ -150,6 +150,9 @@ class ResumeProductBriefTests(unittest.TestCase):
             with mock.patch.object(MOD.os, "O_NOFOLLOW", 0):
                 with self.assertRaisesRegex(ValueError, "secure resume"):
                     MOD.load_draft(path)
+            with mock.patch.object(MOD.os, "O_NONBLOCK", 0):
+                with self.assertRaisesRegex(ValueError, "secure resume"):
+                    MOD.load_draft(path)
 
     @unittest.skipUnless(os.name == "posix", "FIFO tests require POSIX")
     def test_fifo_and_dynamic_oversize_refused(self):

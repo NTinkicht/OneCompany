@@ -194,6 +194,17 @@ class ProductBriefDiffTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "exceeds"):
                     MOD.load(big)
 
+    @unittest.skipUnless(os.name == "posix", "safe flags require POSIX")
+    def test_missing_nonblock_or_nofollow_fails_closed(self):
+        """No platform fallback may block on FIFO or follow attacker links."""
+        with tempfile.TemporaryDirectory() as td:
+            path = self.write(Path(td), "brief.json", brief())
+            for flag in ("O_NOFOLLOW", "O_NONBLOCK"):
+                with self.subTest(flag=flag):
+                    with mock.patch.object(MOD.os, flag, 0):
+                        with self.assertRaisesRegex(ValueError, "secure Product Brief"):
+                            MOD.load(path)
+
     def test_bad_json_or_list_refuses_in_cli(self):
         """Malformed inputs do not crash or produce misleading comparison."""
         with tempfile.TemporaryDirectory() as td:

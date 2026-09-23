@@ -70,6 +70,12 @@ def main() -> int:
     argv = [sys.executable, str(helper), *spec[1:], *sys.argv[2:]]
     if command in {"preview-local", "mission-control"}:
         child = subprocess.Popen(argv, cwd=str(ROOT))
+
+        def stop_child(signum, _frame):
+            if child.poll() is None:
+                child.send_signal(signum)
+
+        previous_term = signal.signal(signal.SIGTERM, stop_child)
         try:
             return child.wait()
         except KeyboardInterrupt:
@@ -81,6 +87,15 @@ def main() -> int:
                 child.kill()
                 child.wait(timeout=3)
                 return 130
+        finally:
+            signal.signal(signal.SIGTERM, previous_term)
+            if child.poll() is None:
+                child.terminate()
+                try:
+                    child.wait(timeout=6)
+                except subprocess.TimeoutExpired:
+                    child.kill()
+                    child.wait(timeout=3)
     return subprocess.run(argv, cwd=str(ROOT), check=False).returncode
 
 

@@ -27,7 +27,7 @@ PROJECT_LISTS = ("known_stack", "existing_tests", "existing_ci", "known_contract
 
 def _read_json(path: Path) -> dict:
     """Use anchored, no-follow directory and file FDs with bounded reads."""
-    if not hasattr(os, "O_NOFOLLOW") or not hasattr(os, "O_DIRECTORY"):
+    if not getattr(os, "O_NOFOLLOW", 0) or not getattr(os, "O_DIRECTORY", 0):
         raise ValueError("secure resume requires O_NOFOLLOW/O_DIRECTORY")
     parts = path.parts[1:] if path.is_absolute() else path.parts
     if not parts or any(part in ("", ".", "..") for part in parts):

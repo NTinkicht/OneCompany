@@ -3,6 +3,9 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import shutil
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -70,6 +73,35 @@ class SourceCheckoutIdentityTests(unittest.TestCase):
                 assessment = onboard.analyze(target, repository="NTinkicht/my-new-app")
                 self.assertEqual(assessment["journey"]["path"], "adopt")
                 self.assertEqual(assessment["mode"], "TEMPLATE_COPY")
+
+    def test_actual_copied_module_detects_template_without_source_root(self):
+        """A standalone template uses its OWN module and still offers Adopt."""
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "copied-template"
+            scripts = target / "scripts"
+            scripts.mkdir(parents=True)
+            for name in ("onboard.py", "onecompany_lib.py"):
+                shutil.copyfile(ROOT / "scripts" / name, scripts / name)
+            config = target / ".onecompany" / "config.json"
+            config.parent.mkdir()
+            config.write_text(json.dumps({
+                "project": {"repository": "NTinkicht/OneCompany"},
+            }), encoding="utf-8")
+            code = (
+                "import json, onboard; from pathlib import Path; "
+                "print(json.dumps({'root': str(onboard.ROOT), "
+                "'mode': onboard.detect_mode(Path('.').resolve())[0]}))"
+            )
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(scripts)
+            result = subprocess.run(
+                [sys.executable, "-c", code],
+                cwd=target, env=env, text=True, capture_output=True, timeout=12,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            observed = json.loads(result.stdout)
+            self.assertEqual(observed["root"], str(target))
+            self.assertEqual(observed["mode"], "TEMPLATE_COPY")
 
     def test_no_source_paths_mutated(self):
         """A source-discovery read must not touch local project or remotes."""

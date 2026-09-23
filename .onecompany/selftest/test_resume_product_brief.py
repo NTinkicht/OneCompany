@@ -19,6 +19,7 @@ def draft():
         "answers": {"audience": "Patients", "problem": "Waiting", "outcome": "Clarity", "first_feature": "Status", "constraints": None},
         "approval": {"product_brief": False, "implementation": False, "deployment": False},
         "write_lease_granted": False,
+        "qualified_implementer_selected": False,
     }
 
 
@@ -48,11 +49,30 @@ class ResumeProductBriefTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "authority"):
                 MOD.load_draft(self.write(Path(td), payload))
 
+    def test_selected_implementer_is_refused(self):
+        with tempfile.TemporaryDirectory() as td:
+            payload = draft(); payload["qualified_implementer_selected"] = True
+            with self.assertRaisesRegex(ValueError, "qualified implementer"):
+                MOD.load_draft(self.write(Path(td), payload))
+
+    def test_missing_implementer_selection_is_refused(self):
+        with tempfile.TemporaryDirectory() as td:
+            payload = draft(); del payload["qualified_implementer_selected"]
+            with self.assertRaisesRegex(ValueError, "qualified implementer"):
+                MOD.load_draft(self.write(Path(td), payload))
+
     def test_symlink_is_refused(self):
         with tempfile.TemporaryDirectory() as td:
             folder = Path(td); target = self.write(folder, draft()); link = folder / "link.json"; link.symlink_to(target)
-            with self.assertRaisesRegex(ValueError, "symlink"):
+            with self.assertRaises(OSError):
                 MOD.load_draft(link)
+
+    def test_oversized_draft_is_refused(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "brief.json"
+            path.write_bytes(b"{" + b" " * MOD.MAX_BYTES + b"}")
+            with self.assertRaisesRegex(ValueError, "no larger"):
+                MOD.load_draft(path)
 
 
 if __name__ == "__main__":

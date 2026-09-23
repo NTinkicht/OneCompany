@@ -40,8 +40,7 @@ def _read_bounded(path: Path) -> dict:
             dirs.append(os.open(component,
                                 os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
                                 dir_fd=dirs[-1]))
-        fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW |
-                     getattr(os, "O_NONBLOCK", 0), dir_fd=dirs[-1])
+        fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dirs[-1])
         try:
             meta = os.fstat(fd)
             if not stat.S_ISREG(meta.st_mode) or meta.st_size > MAX_BYTES:

@@ -27,7 +27,7 @@ PROJECT_LISTS = ("known_stack", "existing_tests", "existing_ci", "known_contract
 
 def _read_json(path: Path) -> dict:
     """Use anchored, no-follow directory and file FDs with bounded reads."""
-    if not getattr(os, "O_NOFOLLOW", 0) or not getattr(os, "O_DIRECTORY", 0):
+    if not getattr(os, "O_NOFOLLOW", 0) or not getattr(os, "O_DIRECTORY", 0) or not getattr(os, "O_NONBLOCK", 0):
         raise ValueError("secure resume requires O_NOFOLLOW/O_DIRECTORY")
     parts = path.parts[1:] if path.is_absolute() else path.parts
     if not parts or any(part in ("", ".", "..") for part in parts):
@@ -40,8 +40,7 @@ def _read_json(path: Path) -> dict:
             dirs.append(os.open(component,
                                 os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
                                 dir_fd=dirs[-1]))
-        fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW |
-                     getattr(os, "O_NONBLOCK", 0), dir_fd=dirs[-1])
+        fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dirs[-1])
         try:
             metadata = os.fstat(fd)
             if not stat.S_ISREG(metadata.st_mode) or metadata.st_size > MAX_BYTES:

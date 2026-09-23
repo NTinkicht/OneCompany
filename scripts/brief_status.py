@@ -7,15 +7,16 @@ import argparse
 import json
 from pathlib import Path
 
+from first_run_journey import read_brief
+
 REQUIRED = ("problem", "audience", "outcome", "first_feature")
-MAX_BYTES = 128 * 1024
 
 
 def _blocked(reason: str, next_action: str) -> dict[str, object]:
     """Return a bounded blocked status with an explicit safe next action."""
     return {
         "stage": "BLOCKED",
-        "missing": [],
+        "missing": list(REQUIRED),
         "blockers": [reason],
         "next_action": next_action,
         "approved": False,
@@ -24,18 +25,11 @@ def _blocked(reason: str, next_action: str) -> dict[str, object]:
 
 def summarize(path: Path) -> dict[str, object]:
     """Classify a saved Product Brief without mutating or granting authority."""
-    if path.is_symlink() or not path.is_file() or path.stat().st_size > MAX_BYTES:
-        return _blocked("unsafe_or_missing_brief", "recreate_saved_brief")
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError):
-        return _blocked("malformed_brief", "recreate_saved_brief")
-    if not isinstance(data, dict):
-        return _blocked("malformed_brief", "recreate_saved_brief")
+        data = read_brief(path)
+    except (OSError, UnicodeError, json.JSONDecodeError, ValueError):
+        return _blocked("unsafe_or_malformed_brief", "recreate_saved_brief")
 
-    # Canonical Product Brief drafts keep owner answers under `answers`.
-    # Do not silently accept legacy/top-level answer-shaped objects because that
-    # would report a status for a file the real journey boundary would refuse.
     answers = data.get("answers")
     if not isinstance(answers, dict):
         return _blocked("missing_answers_object", "recreate_saved_brief")
@@ -52,7 +46,10 @@ def summarize(path: Path) -> dict[str, object]:
         )
     )
     if authority_bearing:
-        return _blocked("authority_bearing_brief", "remove_unverified_authority_and_revalidate")
+        return _blocked(
+            "authority_bearing_brief",
+            "remove_unverified_authority_and_revalidate",
+        )
 
     missing = [
         key
@@ -63,7 +60,9 @@ def summarize(path: Path) -> dict[str, object]:
         "stage": "DRAFT_INCOMPLETE" if missing else "DRAFT_COMPLETE_NOT_APPROVED",
         "missing": missing,
         "blockers": [],
-        "next_action": "collect_owner_answers" if missing else "request_explicit_owner_decision",
+        "next_action": "collect_owner_answers"
+        if missing
+        else "request_explicit_owner_decision",
         "approved": False,
     }
 

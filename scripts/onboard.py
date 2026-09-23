@@ -89,12 +89,14 @@ def detect_mode(target: Path) -> tuple[str, str | None]:
         except Exception:
             pass
         if repo == SOURCE_REPOSITORY:
-            # Never use mutable origin to decide source identity. The source's
-            # own checkout has Git metadata; a standalone template copy running
-            # its OWN copied module has the same ROOT/config, but no .git.
-            # An ambiguous Git clone still fails closed as source until its
-            # owner explicitly reinitializes it with a different project config.
-            if target.resolve() == ROOT.resolve() and (target / ".git").exists():
+            # Preserve source checkout identity even when origin disappears or
+            # changes. Requiring an INDEXED source config distinguishes it from
+            # a freshly copied template that has since run git init: the latter
+            # config is not yet tracked. A full source-history clone remains
+            # source-like until it has been explicitly initialized for its owner.
+            if (target.resolve() == ROOT.resolve()
+                    and git(target, "ls-files", "--error-unmatch", "--",
+                            ".onecompany/config.json") == ".onecompany/config.json"):
                 return "SOURCE_REPOSITORY", repo
             return "TEMPLATE_COPY", repo
         return "INSTALLED", repo

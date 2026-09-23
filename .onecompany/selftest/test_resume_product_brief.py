@@ -147,7 +147,7 @@ class ResumeProductBriefTests(unittest.TestCase):
         """No insecure platform fallback silently follows a symlink."""
         with tempfile.TemporaryDirectory() as td:
             path = self.write(Path(td), draft())
-            with mock.patch.delattr(MOD.os, "O_NOFOLLOW"):
+            with mock.patch.object(MOD.os, "O_NOFOLLOW", 0):
                 with self.assertRaisesRegex(ValueError, "secure resume"):
                     MOD.load_draft(path)
 

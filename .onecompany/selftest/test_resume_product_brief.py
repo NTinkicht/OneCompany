@@ -79,6 +79,7 @@ class ResumeProductBriefTests(unittest.TestCase):
         """Reject approval, lease, claims, stale answers and unsafe discovery."""
         cases = [
             ("approval", lambda b: b["approval"].update(implementation=True)),
+            ("numeric false-like approval", lambda b: b["approval"].update(implementation=0)),
             ("lease", lambda b: b.update(write_lease_granted=True)),
             ("qualified", lambda b: b.update(qualified_implementer_selected=True)),
             ("qualified missing", lambda b: b.pop("qualified_implementer_selected")),

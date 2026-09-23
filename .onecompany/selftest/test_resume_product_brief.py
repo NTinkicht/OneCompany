@@ -95,7 +95,7 @@ class ResumeProductBriefTests(unittest.TestCase):
             ("next step conflict", lambda b: b.update(next_action="Go live")),
             ("wrong source", lambda b: b.update(source="forged")),
             ("invalid project", lambda b: b["project"].update(path="source")),
-            ("terminal-control project", lambda b: b["project"].update(name="Fake\\x1b[2Japproved")),
+            ("terminal-control project", lambda b: b["project"].update(name="Fake\x1b[2Japproved")),
         ]
         with tempfile.TemporaryDirectory() as td:
             for name, mutation in cases:

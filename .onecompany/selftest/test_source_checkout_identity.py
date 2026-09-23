@@ -138,6 +138,52 @@ class SourceCheckoutIdentityTests(unittest.TestCase):
             self.assertEqual(adopted.returncode, 0, adopted.stderr)
             self.assertEqual(json.loads(adopted.stdout)["mode"], "TEMPLATE_COPY")
 
+    def test_shallow_template_copy_is_not_source(self):
+        """A shallow customer/template repo must not gain source identity."""
+        with tempfile.TemporaryDirectory() as td:
+            target = Path(td) / "shallow-copy"
+            scripts = target / "scripts"
+            scripts.mkdir(parents=True)
+            for name in ("onboard.py", "onecompany_lib.py"):
+                shutil.copyfile(ROOT / "scripts" / name, scripts / name)
+            cfg = target / ".onecompany" / "config.json"
+            cfg.parent.mkdir()
+            cfg.write_text(json.dumps({
+                "project": {"repository": "NTinkicht/OneCompany"},
+            }), encoding="utf-8")
+            subprocess.run(["git", "init", "-b", "main"], cwd=target,
+                           check=True, capture_output=True, text=True)
+            subprocess.run(["git", "add", "."], cwd=target,
+                           check=True, capture_output=True, text=True)
+            subprocess.run(
+                ["git", "-c", "user.name=Test Reviewer",
+                 "-c", "user.email=test@example.invalid",
+                 "commit", "-m", "template"],
+                cwd=target, check=True, capture_output=True, text=True,
+            )
+            # A shallow boundary without the immutable OneCompany root commit
+            # cannot prove source identity.
+            subprocess.run(["git", "rev-parse", "--is-shallow-repository"],
+                           cwd=target, check=True, capture_output=True, text=True)
+            env = os.environ.copy()
+            env["PYTHONPATH"] = str(scripts)
+            code = ("import onboard; from pathlib import Path; "
+                    "print(onboard.detect_mode(Path('.').resolve())[0])")
+            result = subprocess.run([sys.executable, "-c", code], cwd=target,
+                                    env=env, text=True, capture_output=True,
+                                    timeout=12)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), "TEMPLATE_COPY")
+
+    def test_git_helper_scrubs_repository_location_environment(self):
+        """Inherited Git location variables cannot redirect identity checks."""
+        with mock.patch.dict(os.environ, {
+            "GIT_DIR": "/definitely/not/the/repo",
+            "GIT_WORK_TREE": "/also/not/the/repo",
+            "GIT_INDEX_FILE": "/tmp/not-an-index",
+        }):
+            self.assertIsNotNone(onboard.git(ROOT, "rev-parse", "--show-toplevel"))
+
     def test_no_source_paths_mutated(self):
         """A source-discovery read must not touch local project or remotes."""
         source = ROOT / "scripts" / "onboard.py"

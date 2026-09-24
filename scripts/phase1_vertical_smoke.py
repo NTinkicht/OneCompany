@@ -17,6 +17,7 @@ from first_run_journey import read_brief, view
 from onboard import analyze
 from planner import consume_brief_handoff
 import local_preview_evidence
+from demo_safety import require_safe_demo
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -69,11 +70,16 @@ def run(assessment: dict, saved_brief: dict, head: str, base: str) -> dict:
 
     app = _local_app()
     server, store = app.start_server(0)
-    worker = threading.Thread(target=server.serve_forever,
-                              kwargs={"poll_interval": 0.05}, daemon=True)
-    worker.start()
-    root = f"http://127.0.0.1:{server.server_port}/"
+    worker = None
+    worker_started = False
     try:
+        # Verify the actual socket/store/plan BEFORE accepting HTTP requests.
+        require_safe_demo(server, store, plan)
+        worker = threading.Thread(target=server.serve_forever,
+                                  kwargs={"poll_interval": 0.05}, daemon=True)
+        worker.start()
+        worker_started = True
+        root = f"http://127.0.0.1:{server.server_port}/"
         for _ in range(30):
             try:
                 health = local_preview_evidence.collect(head, root, timeout=0.5)
@@ -108,9 +114,12 @@ def run(assessment: dict, saved_brief: dict, head: str, base: str) -> dict:
         _assert_response(_request(root, "POST", "api/items", {"title": "blocked"},
                                   origin="https://remote.example"), 403)
     finally:
-        server.shutdown()
+        # BaseServer.shutdown() deadlocks if serve_forever never started.
+        if worker_started:
+            server.shutdown()
         server.server_close()
-        worker.join(timeout=2)
+        if worker_started:
+            worker.join(timeout=2)
         store.close()
 
     return {

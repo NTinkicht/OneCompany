@@ -78,7 +78,7 @@ class SavedBriefCommandTests(unittest.TestCase):
             self.assertEqual(resumed.returncode, 0, resumed.stderr)
             resume = json.loads(resumed.stdout)
             self.assertEqual(resume["missing_required"], [])
-            self.assertNotIn("APPROVED", resume.get("status", ""))
+            self.assertEqual(resume.get("status"), "DRAFT_NOT_APPROVED")
             self.assertFalse(resume.get("approved", False))
 
             diffed = self.run_cli("brief-diff", str(first), str(second), "--json")

@@ -112,6 +112,8 @@ class MissionInputGuardTests(unittest.TestCase):
             for raw in (
                 '{"schema":"a","schema":"b"}',
                 '{"nonfinite":NaN}',
+                '{"nonfinite":1e9999}',
+                '{"nonfinite":-1e9999}',
                 '{"outer":' * 1100 + "null" + "}" * 1100,
                 '[]',
             ):

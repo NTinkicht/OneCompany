@@ -40,10 +40,10 @@ class MistralReviewResultTests(unittest.TestCase):
         for field, bad in (
             ("version", True), ("version", 2), ("repo", "other/repo"),
             ("pr", 202), ("pr", True), ("head_sha", BASE),
-            ("base_sha", HEAD), ("summary", ""), ("summary", "bad\\nline"),
+            ("base_sha", HEAD), ("summary", ""), ("summary", "bad\nline"),
             ("summary", "x" * 1801), ("verdict", "APPROVED"),
             ("verdict", "MERGE_NOW"), ("findings", {}),
-            ("findings", [{}]), ("findings", [] * 13),
+            ("findings", [{}]), ("findings", [{}] * 13),
         ):
             with self.subTest(field=field, bad=str(bad)[:25]):
                 p = self.payload()
@@ -90,7 +90,7 @@ class MistralReviewResultTests(unittest.TestCase):
             ("severity", "APPROVED"), ("path", "../private"),
             ("path", ".git/config"), ("path", "/etc/passwd"),
             ("line", True), ("line", 0), ("description", ""),
-            ("description", "a\\ncontrol"),
+            ("description", "a\ncontrol"),
         ):
             with self.subTest(name=name):
                 q = self.payload()

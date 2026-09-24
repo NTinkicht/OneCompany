@@ -29,6 +29,25 @@ if AVAILABLE:
     from onboard import analyze
 
 
+@unittest.skipUnless(ENTRY.is_file(), "entrypoint is not installed")
+class MissingHelperCommandTests(unittest.TestCase):
+    def test_absent_helper_fails_without_attempting_child_or_target(self):
+        spec = importlib.util.spec_from_file_location("brief_commands_entry", ENTRY)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        with tempfile.TemporaryDirectory() as td:
+            for command in HELPERS:
+                with self.subTest(command=command):
+                    with mock.patch.object(module, "ROOT", Path(td)), \
+                         mock.patch.object(module.sys, "argv", ["onecompany.py", command, "x"]), \
+                         mock.patch.object(module.subprocess, "run") as run:
+                        with contextlib.redirect_stdout(io.StringIO()) as output:
+                            self.assertEqual(module.main(), 2)
+                        self.assertIn("source checkout only", output.getvalue())
+                        run.assert_not_called()
+
+
+
 @unittest.skipUnless(AVAILABLE, "source-only saved-brief helpers are not installed")
 class SavedBriefCommandTests(unittest.TestCase):
     def run_cli(self, *args: str) -> subprocess.CompletedProcess:
@@ -115,11 +134,11 @@ class SavedBriefCommandTests(unittest.TestCase):
             ):
                 with self.subTest(command=command):
                     result = self.run_cli(command, *args)
-                    self.assertNotEqual(result.returncode, 0)
+                    self.assertEqual(result.returncode, 2)
                     self.assertEqual(bad.read_text(encoding="utf-8"), "{broken")
             for command in HELPERS:
                 with self.subTest(command=command):
-                    self.assertNotEqual(self.run_cli(command).returncode, 0)
+                    self.assertEqual(self.run_cli(command).returncode, 2)
 
     @unittest.skipUnless(os.name == "posix", "symlink guard requires POSIX")
     def test_symlink_is_not_followed_by_comparison_or_resume(self):
@@ -134,21 +153,6 @@ class SavedBriefCommandTests(unittest.TestCase):
             ):
                 with self.subTest(command=command):
                     self.assertNotEqual(self.run_cli(command, *args).returncode, 0)
-
-    def test_absent_helper_fails_without_attempting_child_or_target(self):
-        spec = importlib.util.spec_from_file_location("brief_commands_entry", ENTRY)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        with tempfile.TemporaryDirectory() as td:
-            for command in HELPERS:
-                with self.subTest(command=command):
-                    with mock.patch.object(module, "ROOT", Path(td)), \
-                         mock.patch.object(module.sys, "argv", ["onecompany.py", command, "x"]), \
-                         mock.patch.object(module.subprocess, "run") as run:
-                        with contextlib.redirect_stdout(io.StringIO()) as output:
-                            self.assertEqual(module.main(), 2)
-                        self.assertIn("source checkout only", output.getvalue())
-                        run.assert_not_called()
 
     def test_nonserver_command_preserves_child_exit_code_and_arguments(self):
         spec = importlib.util.spec_from_file_location("brief_command_entry", ENTRY)

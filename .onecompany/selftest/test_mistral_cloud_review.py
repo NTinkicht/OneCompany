@@ -352,7 +352,7 @@ class MistralCloudReviewTests(unittest.TestCase):
         self.assertIn("guard.current_pr(number, head, base)", review)
         self.assertIn("guard.latest_ci_green(number, head)", review)
         self.assertIn("guard.independent_material_authors(number, head)", review)
-        self.assertIn('"-f event=COMMENT"', review.replace("\\\\", ""))
+        self.assertIn("-f event=COMMENT", review)
         self.assertNotIn("-f event=APPROVE", review)
         self.assertIn('"commit_id=$REVIEW_SHA"', review)
         self.assertIn("ADVISORY, NON-GATING", review)

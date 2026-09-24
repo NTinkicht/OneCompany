@@ -51,6 +51,24 @@ class MistralReviewResultTests(unittest.TestCase):
         self.assertIn("&#64;owner", text)
         self.assertIn("&lt;img", text)
 
+    def test_contractions_stay_readable_while_prose_stays_inert(self):
+        p = self.payload()
+        p["summary"] = "The guard doesn't recheck the base; @team *should* see it."
+        p["verdict"] = "CHANGES_REQUIRED"
+        p["findings"] = [{"severity": "MEDIUM", "path": "scripts/example.py", "line": 7,
+                          "description": "It isn't bounded; ping @owner [here](https://example.invalid)."}]
+        text = format_comment(self.parse(p), run_url="https://github.com/example/run/1")
+        self.assertIn("doesn't", text)
+        self.assertIn("isn't", text)
+        self.assertNotIn("&#x27;", text)
+        self.assertNotIn("&#35;x27;", text)
+        self.assertNotIn("@team", text)
+        self.assertNotIn("@owner", text)
+        self.assertNotIn("*should*", text)
+        self.assertNotIn("[here]", text)
+        self.assertIn("&#64;team", text)
+        self.assertIn("&#64;owner", text)
+
     def test_rejects_stale_foreign_or_malformed_results(self):
         for field, bad in (
             ("version", True), ("version", 2), ("repo", "other/repo"), ("pr", 202),

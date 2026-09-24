@@ -35,7 +35,9 @@ def _plain(value: object, maximum: int) -> bool:
 
 def _inert(value: str) -> str:
     """Render model-controlled prose as inert GitHub text without active markup/mentions."""
-    escaped = html.escape(value, quote=True)
+    # quote=False: output is Markdown text, never an HTML attribute, and the
+    # apostrophe entity (&#x27;) would have its "#" re-encoded below.
+    escaped = html.escape(value, quote=False)
     # Encode Markdown metacharacters as entities: GitHub parses entities as
     # literal characters after inline Markdown delimiter recognition.
     return re.sub(r"[@*_`\[\]()!#>~\\|]", lambda match: f"&#{ord(match.group())};", escaped)

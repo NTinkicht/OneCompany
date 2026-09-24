@@ -6,6 +6,7 @@ It never treats model-supplied instructions or approval assertions as authority.
 """
 from __future__ import annotations
 
+import html
 import json
 import re
 from pathlib import Path
@@ -30,6 +31,11 @@ def _plain(value: object, maximum: int) -> bool:
     return (type(value) is str and 1 <= len(value) <= maximum
             and value.strip() == value
             and not any(ord(char) < 32 or ord(char) == 127 for char in value))
+
+
+def _inert(value: str) -> str:
+    """Render model-controlled prose as inert GitHub text without active markup/mentions."""
+    return html.escape(value, quote=True).replace("@", "&#64;")
 
 
 def parse_result(raw: bytes, *, pr: int, head: str, base: str) -> dict:
@@ -92,17 +98,17 @@ def format_comment(value: dict, *, run_url: str) -> str:
     # Returned data is an ADVISORY COMMENT, never GitHub APPROVE or a merge gate.
     lines = [
         "**Mistral Vibe exact-head advisory code review (NON-GATING)**",
-        f"GitHub publisher: github-actions[bot]; model: mistral-vibe.",
+        "GitHub publisher: github-actions[bot]; model: mistral-vibe.",
         f"PR #{value['pr']}; head `{value['head_sha']}`; base `{value['base_sha']}`.",
         f"Trusted run: {run_url}",
         f"Verdict: {value['verdict']}.",
         "",
-        value["summary"],
+        _inert(value["summary"]),
         "",
     ]
     for item in value["findings"]:
         lines.append(
-            f"- [{item['severity']}] `{item['path']}:{item['line']}` - {item['description']}"
+            f"- [{item['severity']}] `{item['path']}:{item['line']}` - {_inert(item['description'])}"
         )
     lines.extend(["", "No approval, binding reviewer gate, code write or merge authority."])
     return "\n".join(lines) + "\n"

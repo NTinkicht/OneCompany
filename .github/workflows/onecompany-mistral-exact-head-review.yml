@@ -48,7 +48,7 @@ jobs:
           cp AGENTS.md /tmp/onecompany-mistral-trusted/AGENTS.md
           cp docs/CLOUD-AGENT-QUALIFICATION.md /tmp/onecompany-mistral-trusted/CLOUD-AGENT-QUALIFICATION.md
           cp .github/workflows/onecompany-ledger-read-smoke.yml /tmp/onecompany-mistral-trusted/ledger-workflow.yml
-          python /tmp/onecompany-mistral-review-trusted.py prepare
+          python -I /tmp/onecompany-mistral-review-trusted.py prepare
 
       - name: Checkout the validated same-repository PR head
         if: steps.target.outputs.ready == 'true'
@@ -67,7 +67,7 @@ jobs:
           REVIEW_SHA: ${{ steps.target.outputs.sha }}
           REVIEW_BASE: ${{ steps.target.outputs.base }}
         shell: bash
-        run: python /tmp/onecompany-mistral-review-trusted.py evidence
+        run: python -I /tmp/onecompany-mistral-review-trusted.py evidence
 
       - name: Build isolated bounded review-data stage
         id: stage
@@ -78,7 +78,7 @@ jobs:
           REVIEW_SHA: ${{ steps.target.outputs.sha }}
           REVIEW_BASE: ${{ steps.target.outputs.base }}
         shell: bash
-        run: python /tmp/onecompany-mistral-review-trusted.py stage
+        run: python -I /tmp/onecompany-mistral-review-trusted.py stage
 
       - name: Preflight included-capacity guard
         if: steps.stage.outputs.ready == 'true'
@@ -90,7 +90,7 @@ jobs:
         run: |
           set -euo pipefail
           # The owner-set guard is never sufficient without zero-spend machine policy.
-          if ! python - <<'PY'
+          if ! python -I - <<'PY'
           import json
           from pathlib import Path
           budget = json.loads(Path("/tmp/onecompany-budget-trusted.json").read_text())
@@ -298,7 +298,7 @@ jobs:
             # Job-log-only diagnostics. Scrub the literal credential plus common
             # bearer/key renderings before the excerpt can reach the Actions log;
             # it is never posted to the public issue comment.
-            python - <<'PY'
+            python -I - <<'PY'
           import os
           import re
           from pathlib import Path
@@ -352,7 +352,7 @@ jobs:
             # Defense in depth: even though Vibe has no shell/write tool, scrub the
             # literal provider credential plus common authorization/key renderings
             # before any model-authored text can reach a public issue comment.
-            python - <<'PY'
+            python -I - <<'PY'
           import os
           import re
           from pathlib import Path
@@ -407,7 +407,7 @@ jobs:
         run: |
           set -euo pipefail
           # Pin source policy to pre-candidate protected-main copy.
-          python - <<'PY'
+          python -I - <<'PY'
           import os
           import sys
           from pathlib import Path

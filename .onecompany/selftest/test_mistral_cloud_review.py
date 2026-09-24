@@ -352,6 +352,8 @@ class MistralCloudReviewTests(unittest.TestCase):
         self.assertEqual(review.count("python -I - <<'PY'"), 4)
         self.assertNotIn("python - <<'PY'", review)
         self.assertIn("python -I /tmp/onecompany-mistral-review-trusted.py", review)
+        self.assertIn("python -I -m pip install", review)
+        self.assertNotIn("run: python -m pip install", review)
         self.assertIn("Publish current-head Mistral advisory PR review as Actions bot", review)
         self.assertIn("steps.actor.outputs.exit_code == '0'", review)
         self.assertIn("guard.current_pr(number, head, base)", review)

@@ -118,24 +118,69 @@ class MissionInputGuardTests(unittest.TestCase):
                     self.assertEqual(mission.main(
                         ["--input", str(path), "--port", port]), 2)
 
-    def test_duplicate_key_nan_and_deep_json_refused(self):
+    @unittest.skipUnless(os.name == "posix", "POSIX anchored reader required")
+    def test_canonical_duplicate_keys_and_nonfinite_values_refuse_at_parser(self):
         with tempfile.TemporaryDirectory() as td:
-            folder = Path(td)
-            path = folder / "input.json"
-            for raw in (
-                '{"schema":"a","schema":"b"}',
-                '{"nonfinite":NaN}',
-                '{"nonfinite":1e9999}',
-                '{"nonfinite":-1e9999}',
-                '{"outer":' * 1100 + "null" + "}" * 1100,
-                '[]',
+            path = Path(td) / "input.json"
+            baseline = json.dumps(canonical())
+            for label, raw, error in (
+                ("duplicate authority", baseline.replace(
+                    '"authority_granted": false',
+                    '"authority_granted": true, "authority_granted": false', 1),
+                 "MISSION_CONTROL_DUPLICATE_JSON_KEY"),
+                ("escaped duplicate", baseline.replace(
+                    '"authority_granted": false',
+                    '"authority\\u005fgranted": true, "authority_granted": false', 1),
+                 "MISSION_CONTROL_DUPLICATE_JSON_KEY"),
+                ("nested duplicate", baseline.replace(
+                    '"status": "PASS"',
+                    '"status": "BLOCKED", "status": "PASS"', 1),
+                 "MISSION_CONTROL_DUPLICATE_JSON_KEY"),
+                ("nan extension", baseline[:-1] + ', "local_extension": NaN}',
+                 "MISSION_CONTROL_NONFINITE_JSON_VALUE"),
+                ("infinite extension", baseline[:-1] + ', "local_extension": Infinity}',
+                 "MISSION_CONTROL_NONFINITE_JSON_VALUE"),
+                ("float overflow", baseline[:-1] + ', "local_extension": 1e9999}',
+                 "MISSION_CONTROL_NONFINITE_JSON_VALUE"),
+                ("negative overflow", baseline[:-1] + ', "local_extension": -1e9999}',
+                 "MISSION_CONTROL_NONFINITE_JSON_VALUE"),
             ):
-                with self.subTest(raw=raw[:32]):
+                with self.subTest(label=label):
                     path.write_text(raw, encoding="utf-8")
-                    with mock.patch.object(mission, "serve",
-                                           side_effect=AssertionError("must not serve")):
-                        self.assertEqual(mission.main(
-                            ["--input", str(path), "--port", "0"]), 2)
+                    with self.assertRaisesRegex(ValueError, error):
+                        mission._read_projection_file(path)
+            path.write_text("[]", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "PROJECTION_OBJECT_REQUIRED"):
+                mission._read_projection_file(path)
+
+    def test_nested_forged_authority_and_depth_limit_are_refused(self):
+        for field in (
+            "approved", "approval", "authorization", "run_key", "lease_id",
+            "canonical_work_unit", "deployment_authorized", "spend_authorized",
+        ):
+            for location in ("extra", "app_check", "nested_list"):
+                with self.subTest(field=field, location=location):
+                    value = canonical()
+                    if location == "extra":
+                        value["extension"] = {"metadata": {field: "GRANTED"}}
+                    elif location == "app_check":
+                        value["checks"]["app"][field] = True
+                    else:
+                        value["extension"] = [{"data": {field: "GRANTED"}}]
+                    with self.assertRaisesRegex(ValueError, "AUTHORITY_FIELD_FORBIDDEN"):
+                        mission._validate_projection_input(value)
+        for count, accepted in ((32, True), (128, False), (1500, False)):
+            with self.subTest(nesting=count):
+                value = canonical()
+                nested: dict = {}
+                for _ in range(count):
+                    nested = {"child": nested}
+                value["untrusted_display"] = nested
+                if accepted:
+                    mission._validate_projection_input(value)
+                else:
+                    with self.assertRaisesRegex(ValueError, "JSON_NESTING_LIMIT"):
+                        mission._validate_projection_input(value)
 
     @unittest.skipUnless(os.name == "posix", "POSIX anchored reader required")
     def test_symlink_parent_leaf_fifo_and_oversize_rejected(self):

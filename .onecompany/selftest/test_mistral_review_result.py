@@ -42,7 +42,8 @@ class MistralReviewResultTests(unittest.TestCase):
             ("pr", 202), ("pr", True), ("head_sha", BASE),
             ("base_sha", HEAD), ("summary", ""), ("summary", "bad\nline"),
             ("summary", "x" * 1801), ("verdict", "APPROVED"),
-            ("verdict", "MERGE_NOW"), ("findings", {}),
+            ("verdict", "MERGE_NOW"), ("verdict", []),
+            ("verdict", {}), ("findings", {}),
             ("findings", [{}]), ("findings", [{}] * 13),
         ):
             with self.subTest(field=field, bad=str(bad)[:25]):
@@ -98,6 +99,12 @@ class MistralReviewResultTests(unittest.TestCase):
                 q["findings"] = [{**sample, name: bad}]
                 with self.assertRaises(ValueError):
                     self.parse(q)
+
+    def test_change_request_without_findings_is_rejected(self):
+        p = self.payload()
+        p["verdict"] = "CHANGES_REQUIRED"
+        with self.assertRaisesRegex(ValueError, "WITHOUT_FINDINGS"):
+            self.parse(p)
 
     def test_incomplete_review_cannot_publish(self):
         p = self.payload()

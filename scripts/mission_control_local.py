@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import math
 import os
 import re
 import stat
@@ -196,8 +197,16 @@ def _read_projection_file(path: Path) -> dict[str, object]:
     def reject_nonfinite(_value: str) -> object:
         raise ValueError("MISSION_CONTROL_NONFINITE_JSON_VALUE")
 
+    def finite_float(value: str) -> float:
+        number = float(value)
+        # JSON's 1e9999 is syntactically legal but converts to +Infinity;
+        # parse_constant alone does not catch this Python float overflow.
+        if not math.isfinite(number):
+            raise ValueError("MISSION_CONTROL_NONFINITE_JSON_VALUE")
+        return number
+
     data = json.loads(raw, object_pairs_hook=unique_object,
-                      parse_constant=reject_nonfinite)
+                      parse_constant=reject_nonfinite, parse_float=finite_float)
     if not isinstance(data, dict):
         raise ValueError("MISSION_CONTROL_PROJECTION_OBJECT_REQUIRED")
     return data

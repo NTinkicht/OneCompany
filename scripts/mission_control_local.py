@@ -214,6 +214,15 @@ def _read_projection_file(path: Path) -> dict[str, object]:
 
 def _validate_projection_input(projection: dict[str, object]) -> None:
     """Accept only existing non-authorizing local producer schema envelopes."""
+    # An otherwise canonical projection carrying an extra RunKey/lease or
+    # approval assertion is contradictory, even if render() would ignore it.
+    # Real projection and dashboard composers never emit these keys.
+    forbidden_authority = {
+        "approved", "approval", "authorization", "run_key", "lease_id",
+        "canonical_work_unit", "deployment_authorized", "spend_authorized",
+    }
+    if forbidden_authority.intersection(projection):
+        raise ValueError("MISSION_CONTROL_AUTHORITY_FIELD_FORBIDDEN")
     if (projection.get("schema") not in {
             "onecompany.mission-control.phase1.v1",
             "onecompany.mission-control-dashboard.phase1.v1",

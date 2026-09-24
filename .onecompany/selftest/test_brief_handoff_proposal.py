@@ -225,6 +225,57 @@ class BriefHandoffTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     planner.consume_brief_handoff(poisoned, HEAD, BASE)
 
+    def test_planner_cli_refuses_duplicate_authority_and_unsafe_proposal_paths(self):
+        """The actual second CLI entrypoint must use the secure shared reader."""
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            valid = handoff.propose(draft(), HEAD, BASE)
+            source = folder / "proposal.json"
+            source.write_text(json.dumps(valid), encoding="utf-8")
+            command = [
+                sys.executable, str(ROOT / "scripts" / "planner.py"),
+                "brief-handoff", "--proposal", str(source),
+                "--head", HEAD, "--base", BASE,
+            ]
+            result = subprocess.run(command, cwd=ROOT, text=True,
+                                    capture_output=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            result_data = json.loads(result.stdout)
+            self.assertEqual(result_data["authorization"], "NOT_GRANTED")
+            self.assertEqual(result_data["mode"], "READ_ONLY_PROPOSAL")
+            self.assertIsNone(result_data["run_key"])
+            original = source.read_bytes()
+
+            # Last-key-wins parsing must not erase the earlier forged grant.
+            raw = json.dumps(valid).replace(
+                '"authorization": "NOT_GRANTED"',
+                '"authorization": "GRANTED", "authorization": "NOT_GRANTED"', 1,
+            )
+            source.write_text(raw, encoding="utf-8")
+            blocked = subprocess.run(command, cwd=ROOT, text=True,
+                                     capture_output=True, timeout=15)
+            self.assertEqual(blocked.returncode, 2)
+            self.assertEqual(blocked.stdout, "")
+            self.assertIn("DUPLICATE_PRODUCT_BRIEF_JSON_KEY", blocked.stderr)
+            source.write_bytes(original)
+
+            if os.name == "posix":
+                link = folder / "proposal-link.json"
+                link.symlink_to(source)
+                parent = folder / "parent-link"
+                parent.symlink_to(folder, target_is_directory=True)
+                fifo = folder / "proposal-pipe.json"
+                os.mkfifo(fifo)
+                for candidate in (link, parent / "proposal.json", fifo):
+                    with self.subTest(candidate=str(candidate)):
+                        argv = command.copy()
+                        argv[argv.index(str(source))] = str(candidate)
+                        denied = subprocess.run(argv, cwd=ROOT, text=True,
+                                                capture_output=True, timeout=15)
+                        self.assertEqual(denied.returncode, 2)
+                        self.assertEqual(denied.stdout, "")
+            self.assertEqual(source.read_bytes(), original)
+
     def test_existing_planner_entry_rejects_stale_refs_or_execution_authority(self):
         """The real planner boundary rejects stale refs and injected authority."""
         proposal = handoff.propose(draft(), HEAD, BASE)

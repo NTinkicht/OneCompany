@@ -12,6 +12,7 @@ COMMANDS = {
     "start": ["first_run_wizard.py"],
     "onboard": ["onboard.py"],
     "brief": ["product_brief.py"],
+    "brief-handoff": ["brief_handoff_proposal.py"],
     "journey": ["first_run_journey.py"],
     "demo": ["phase1_vertical_smoke.py"],
     "preview-local": ["../examples/vertical-slice/app.py"],
@@ -39,6 +40,7 @@ def usage() -> int:
     print("  start             guided Create/Adopt owner Product Brief (source checkout)")
     print("  onboard           assess a new/existing repository; read-only unless --apply")
     print("  brief             draft Product Brief from owner answers; read-only unless --save-to")
+    print("  brief-handoff     preview a read-only planning handoff from a saved owner brief")
     print("  journey           guided Create/Adopt next steps; read-only, never approval")
     print("  demo              run real disposable local CRUD proof from owner draft (source checkout)")
     print("  preview-local     interact with disposable checklist UI at localhost (source checkout)")
@@ -46,7 +48,7 @@ def usage() -> int:
     print("  shadow-migration  analyze an external migration snapshot without target mutation")
     print("  cutover-readiness prove quiescent C2b readiness without target mutation")
     print("\nCommands:")
-    featured = {"start", "onboard", "brief", "journey", "demo", "preview-local", "mission-control", "shadow-migration", "cutover-readiness"}
+    featured = {"start", "onboard", "brief", "brief-handoff", "journey", "demo", "preview-local", "mission-control", "shadow-migration", "cutover-readiness"}
     for command in COMMANDS:
         if command not in featured:
             print(f"  {command}")

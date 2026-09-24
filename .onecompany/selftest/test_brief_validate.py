@@ -1,7 +1,13 @@
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+SCRIPTS = ROOT / "scripts"
+if str(SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS))
 
 from scripts.brief_validate import validate
 
@@ -68,6 +74,22 @@ class BriefValidateTests(unittest.TestCase):
         payload["approval"]["implementation"] = True
         result = validate(self.write(payload))
         self.assertEqual(result["status"], "REFUSED_AUTHORITY_BEARING")
+
+    def test_real_export_with_safety_blocker_is_never_ready(self):
+        payload = self.canonical()
+        payload["safety_blockers"] = ["target_has_production_secrets"]
+        result = validate(self.write(payload))
+        self.assertFalse(result["valid"])
+        self.assertNotEqual(result["status"], "PROPOSAL_READY_NOT_APPROVED")
+
+    def test_top_level_authority_is_not_ready(self):
+        for key, value in (("run_key", "fake"),
+                           ("approved", True),
+                           ("deployment_authorized", True)):
+            with self.subTest(key=key):
+                payload = self.canonical()
+                payload[key] = value
+                self.assertFalse(validate(self.write(payload))["valid"])
 
     def test_flat_answer_object_is_not_a_saved_product_brief(self):
         result = validate(self.write({

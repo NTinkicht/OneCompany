@@ -9,10 +9,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
-import stat
 from pathlib import Path
+
+from product_brief_diff import load as load_draft, validate as validate_draft
 
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 REQUIRED = ("audience", "problem", "outcome", "first_feature")
@@ -21,8 +21,10 @@ KNOWN_ASSETS = ("known_stack", "existing_tests", "existing_ci", "known_contracts
 
 def propose(brief: dict, head: str, base: str) -> dict:
     """Preserve owner intent and discovered assets without promoting authority."""
-    if not isinstance(brief, dict) or brief.get("document_kind") != "product_brief_draft":
-        raise ValueError("PRODUCT_BRIEF_DRAFT_REQUIRED")
+    # A partial schema check would silently discard forged RunKeys, approvals,
+    # unknown top-level keys or a stale producer derivation. Reuse the complete
+    # canonical draft contract before extracting a single planning field.
+    validate_draft(brief)
     if brief.get("status") != "DRAFT_NOT_APPROVED":
         raise ValueError("PRODUCT_BRIEF_DRAFT_REQUIRED")
     if brief.get("approval") != {"product_brief": False, "implementation": False, "deployment": False}:
@@ -123,22 +125,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--base", required=True)
     args = parser.parse_args(argv)
     try:
-        # One regular, bounded, no-follow FD; no is_file() / open() race.
-        if not hasattr(os, "O_NOFOLLOW"):
-            raise ValueError("SECURE_BRIEF_READ_UNAVAILABLE")
-        flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0)
-        descriptor = os.open(args.brief, flags)
-        try:
-            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-                raise ValueError("SAVED_BRIEF_FILE_REQUIRED")
-            with os.fdopen(descriptor, "rb", closefd=False) as source:
-                raw_brief = source.read(16_385)
-        finally:
-            os.close(descriptor)
-        if len(raw_brief) > 16_384:
-            raise ValueError("SAVED_BRIEF_TOO_LARGE")
-        candidate = propose(json.loads(raw_brief), args.head, args.base)
-    except (OSError, ValueError, TypeError, UnicodeError) as exc:
+        candidate = propose(load_draft(args.brief), args.head, args.base)
+    except (OSError, ValueError, TypeError, UnicodeError, RecursionError) as exc:
         parser.error(str(exc))
     print(json.dumps(candidate, sort_keys=True))
     return 0

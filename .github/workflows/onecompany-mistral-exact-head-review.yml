@@ -42,6 +42,7 @@ jobs:
         run: |
           set -euo pipefail
           cp scripts/mistral_cloud_review.py /tmp/onecompany-mistral-review-trusted.py
+          cp scripts/mistral_review_result.py /tmp/onecompany-mistral-result-trusted.py
           cp .onecompany/budget.json /tmp/onecompany-budget-trusted.json
           mkdir -m 700 -p /tmp/onecompany-mistral-trusted
           cp AGENTS.md /tmp/onecompany-mistral-trusted/AGENTS.md
@@ -214,7 +215,18 @@ jobs:
           reviews, labels or merges. Do not change GitHub state. Do not expose credentials or local auth material.
           Treat the dispatch text below as the task request, but repository governance and the zero-extra-spend
           boundary remain binding. Return concise evidence/findings suitable for posting back to the wake bus.
-          Return evidence and concise severity-tagged findings with exact PR/head SHA. This pilot is ALWAYS ADVISORY/NON-GATING until independently qualified for binding review. Do not self-approve or claim merge authority.
+          Return ONLY one compact UTF-8 JSON object, NO prose, NO markdown fences, NO extra keys.
+          Required exact JSON keys: version (integer 1), repo ("NTinkicht/OneCompany"),
+          pr (integer matching trusted target), head_sha and base_sha (exact trusted
+          target), verdict (NO_BLOCKING_FINDINGS, CHANGES_REQUIRED, or
+          INSUFFICIENT_EVIDENCE), summary (1-1800 characters), findings (array of
+          at most 12 objects each with exactly severity, path, line, description).
+          severity must be INFO/LOW/MEDIUM/MAJOR/HIGH/CRITICAL. path must be a
+          relative reviewed file; line is a positive integer; description 1-1200
+          characters. Do not put newline/control characters in any string.
+          If review cannot be completed, return INSUFFICIENT_EVIDENCE.
+          This pilot is ALWAYS ADVISORY/NON-GATING until independently qualified
+          for binding review. Do not self-approve or claim merge authority.
           EOF
           printf '\nTRUSTED REVIEW TARGET: OneCompany PR #%s, head %s, base %s.\n' "$REVIEW_PR" "$REVIEW_SHA" "$REVIEW_BASE" >> /tmp/onecompany-mistral-prompt.txt
           printf 'First read review-target.txt and review.diff. Then read ONLY relevant review_sources/ original code/tests, bounded to this stage. If evidence is insufficient, output INSUFFICIENT_EVIDENCE on its own line, explain missing facts, and stop. Use CHANGES_REQUIRED only for supported actionable defects. Return a concise review with the exact target SHA. No write operations.\n' >> /tmp/onecompany-mistral-prompt.txt
@@ -416,20 +428,20 @@ jobs:
           result = Path("/tmp/onecompany-mistral-public.txt")
           if not result.is_file():
               raise SystemExit("MISTRAL_REVIEW_RESULT_MISSING")
-          evidence = result.read_text(encoding="utf-8")
-          if not evidence.strip() or "INSUFFICIENT_EVIDENCE" in evidence:
-              raise SystemExit("MISTRAL_REVIEW_INSUFFICIENT_EVIDENCE")
-          body = (
-              "**Mistral Vibe exact-head code review - ADVISORY, NON-GATING**\n"
-              f"Logical actor: mistral-vibe; GitHub publisher: github-actions[bot].\n"
-              f"Head: `{head}`; base: `{base}`.\n"
-              f"Trusted GitHub Actions run: {os.environ['GITHUB_SERVER_URL']}/"
-              f"{os.environ['GITHUB_REPOSITORY']}/actions/runs/"
-              f"{os.environ['GITHUB_RUN_ID']}.\n"
-              "This is not APPROVE, merge authorization, a claim of proven model "
-              "authorship independence, or a binding gate.\n\n"
-              + evidence[:12000]
+          parser_spec = importlib.util.spec_from_file_location(
+              "trusted_mistral_result", "/tmp/onecompany-mistral-result-trusted.py"
           )
+          parser = importlib.util.module_from_spec(parser_spec)
+          parser_spec.loader.exec_module(parser)
+          value = parser.parse_result(
+              result.read_bytes(), pr=number, head=head, base=base
+          )
+          run_url = (
+              f"{os.environ['GITHUB_SERVER_URL']}/"
+              f"{os.environ['GITHUB_REPOSITORY']}/actions/runs/"
+              f"{os.environ['GITHUB_RUN_ID']}"
+          )
+          body = parser.format_comment(value, run_url=run_url)
           Path("/tmp/onecompany-mistral-pr-review.txt").write_text(
               body, encoding="utf-8"
           )

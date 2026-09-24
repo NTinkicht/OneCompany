@@ -26,13 +26,19 @@ class MissionControlCommandTests(unittest.TestCase):
         )
 
     def test_command_serves_real_loopback_http_without_mutating_input(self):
-        projection = {
-            "schema": "onecompany.mission-control.phase1.v1",
-            "authority_granted": False,
-            "project": {"name": "Example"},
-            "readiness": "READY_FOR_OWNER_PREVIEW",
-            "checks": {"quality": {"status": "PASS"}, "preview": {"status": "OBSERVED"}},
-        }
+        # Use the actual canonical producer envelope, not a hand-written
+        # display-only mock that would bypass new input safety validation.
+        sys.path.insert(0, str(ROOT / "scripts"))
+        from mission_control_projection import project
+
+        revision = "a" * 40
+        projection = project(
+            revision, {"status": "DRAFT", "approved": False},
+            {"bounded": True},
+            {name: {"revision": revision, "status": "PASS"}
+             for name in ("app", "quality", "preview")},
+        )
+        projection["project"] = {"name": "Example"}
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "projection.json"
             path.write_text(json.dumps(projection), encoding="utf-8")

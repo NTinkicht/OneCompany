@@ -8,7 +8,7 @@ on:
 permissions:
   contents: read
   issues: write
-  pull-requests: read
+  pull-requests: write
   actions: read
 
 jobs:
@@ -379,3 +379,64 @@ jobs:
             fi
           } > /tmp/onecompany-mistral-comment.md
           gh issue comment 130 --repo "$GITHUB_REPOSITORY" --body-file /tmp/onecompany-mistral-comment.md
+
+      # Review publication is performed by the trusted parent, NEVER the
+      # model. The provider has read-only tools and no GitHub write token.
+      # The resulting GitHub review remains ADVISORY until actor-provenance
+      # and nonauthor publisher qualification are separately demonstrated.
+      - name: Publish current-head Mistral advisory PR review as Actions bot
+        if: steps.preflight.outputs.ready == 'true' && steps.actor.outputs.exit_code == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REVIEW_PR: ${{ steps.target.outputs.pr }}
+          REVIEW_SHA: ${{ steps.target.outputs.sha }}
+          REVIEW_BASE: ${{ steps.target.outputs.base }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Pin source policy to pre-candidate protected-main copy.
+          python - <<'PY'
+          import os
+          import sys
+          from pathlib import Path
+          sys.path.insert(0, "/tmp")
+          import importlib.util
+          spec = importlib.util.spec_from_file_location(
+              "trusted_mistral_review", "/tmp/onecompany-mistral-review-trusted.py"
+          )
+          guard = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(guard)
+          number = int(os.environ["REVIEW_PR"])
+          head, base = os.environ["REVIEW_SHA"], os.environ["REVIEW_BASE"]
+          guard.current_pr(number, head, base)
+          if not guard.independent_material_authors(number, head):
+              raise SystemExit("MISTRAL_REVIEW_AUTHORSHIP_BLOCKED")
+          if not guard.latest_ci_green(number, head):
+              raise SystemExit("MISTRAL_REVIEW_STALE_CI")
+          result = Path("/tmp/onecompany-mistral-public.txt")
+          if not result.is_file():
+              raise SystemExit("MISTRAL_REVIEW_RESULT_MISSING")
+          evidence = result.read_text(encoding="utf-8")
+          if not evidence.strip() or "INSUFFICIENT_EVIDENCE" in evidence:
+              raise SystemExit("MISTRAL_REVIEW_INSUFFICIENT_EVIDENCE")
+          body = (
+              "**Mistral Vibe exact-head code review - ADVISORY, NON-GATING**\\n"
+              f"Logical actor: mistral-vibe; GitHub publisher: github-actions[bot].\\n"
+              f"Head: \`{head}\`; base: \`{base}\`.\\n"
+              f"Trusted GitHub Actions run: {os.environ['GITHUB_SERVER_URL']}/"
+              f"{os.environ['GITHUB_REPOSITORY']}/actions/runs/"
+              f"{os.environ['GITHUB_RUN_ID']}.\\n"
+              "This is not APPROVE, merge authorization, a claim of proven model "
+              "authorship independence, or a binding gate.\\n\\n"
+              + evidence[:12000]
+          )
+          Path("/tmp/onecompany-mistral-pr-review.txt").write_text(
+              body, encoding="utf-8"
+          )
+          PY
+          gh api -X POST "repos/$GITHUB_REPOSITORY/pulls/$REVIEW_PR/reviews" \\
+            -f event=COMMENT \\
+            -f "commit_id=$REVIEW_SHA" \\
+            --raw-field "body=$(cat /tmp/onecompany-mistral-pr-review.txt)" \\
+            --jq '{review_id:.id, login:.user.login, commit_id:.commit_id, state:.state}'
+

@@ -115,3 +115,31 @@ def format_comment(value: dict, *, run_url: str) -> str:
         )
     lines.extend(["", "No approval, binding reviewer gate, code write or merge authority."])
     return "\n".join(lines) + "\n"
+
+
+def main() -> int:
+    """Validate untrusted Vibe output with only bounded, trusted CLI inputs."""
+    import sys
+    if len(sys.argv) != 5:
+        return 72
+    try:
+        pr = int(sys.argv[1])
+        raw_path = Path(sys.argv[4])
+        if raw_path.is_symlink() or not raw_path.is_file():
+            return 72
+        # Hard bound before reading model-authored data.
+        if not 1 <= raw_path.stat().st_size <= MAX_BYTES:
+            return 72
+        parse_result(
+            raw_path.read_bytes(), pr=pr,
+            head=sys.argv[2], base=sys.argv[3],
+        )
+    except (ValueError, OSError, OverflowError):
+        if "MISTRAL_INSUFFICIENT_EVIDENCE" in str(sys.exc_info()[1]):
+            return 71
+        return 72
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

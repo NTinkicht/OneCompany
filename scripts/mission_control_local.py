@@ -228,8 +228,17 @@ def _validate_projection_input(projection: dict[str, object]) -> None:
     for check in projection["checks"].values():
         if (not isinstance(check, dict)
                 or type(check.get("exact_revision")) is not bool
-                or check.get("status") not in {"PASS", "BLOCKED"}):
+                or check.get("status") not in {"PASS", "BLOCKED"}
+                or (check["status"] == "PASS" and not check["exact_revision"])):
             raise ValueError("MISSION_CONTROL_CANONICAL_CHECK_REQUIRED")
+    # A canonical producer never reports readiness if execution is blocked or
+    # any check is not PASS. Keep hand-written display fields from masquerading
+    # as a coherent producer snapshot; this still is NOT an authenticated gate.
+    ready = (projection["execution_core"] == "BOUNDED"
+             and all(c["status"] == "PASS" for c in projection["checks"].values()))
+    expected = "READY_FOR_OWNER_PREVIEW" if ready else "BLOCKED"
+    if projection.get("readiness") != expected:
+        raise ValueError("MISSION_CONTROL_CANONICAL_READINESS_MISMATCH")
 
 
 def main(argv: list[str] | None = None) -> int:

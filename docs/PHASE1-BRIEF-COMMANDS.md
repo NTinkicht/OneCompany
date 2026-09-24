@@ -17,9 +17,10 @@ python onecompany.py brief-validate /tmp/owner-draft-v1.json
 # After creating an independent SECOND export using the same project identity:
 python onecompany.py brief-diff /tmp/owner-draft-v1.json /tmp/owner-draft-v2.json --json
 
-# Planning handoff remains a proposal, never permission:
+# Planning handoff remains a proposal, never permission. Set HEAD_SHA and
+# BASE_SHA to distinct full 40-character lowercase commit SHAs before running:
 python onecompany.py brief-handoff --brief /tmp/owner-draft-v2.json \
-  --head <full-40-hex-sha> --base <full-40-hex-sha>
+  --head "$HEAD_SHA" --base "$BASE_SHA"
 ```
 
 **Output meanings.** `brief-resume` displays completed/missing required owner answers; `brief-diff` shows changes only between drafts of the **same discovered project**. `brief-status --require-complete` exits 3 when owner answers are incomplete, 2 when blocked or malformed, and 0 when complete. Without `--require-complete`, an honest incomplete draft can exit 0. `brief-validate` returns 0 only for a complete, structurally acceptable unapproved draft; refused/incomplete drafts return 2. `brief-diff` and `brief-resume` reject malformed/authority-bearing drafts, unsafe symlinks and oversized files. Some secure draft-reading features require POSIX no-follow file descriptors; unsupported installations refuse rather than silently weaken checks.

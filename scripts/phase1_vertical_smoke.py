@@ -112,7 +112,9 @@ def run(assessment: dict, saved_brief: dict, head: str, base: str) -> dict:
         _assert_response(_request(root, "POST", "api/items", {"title": "blocked"},
                                   origin="https://remote.example"), 403)
     finally:
-        server.shutdown()
+        # BaseServer.shutdown() deadlocks if serve_forever never started.
+        if worker is not None:
+            server.shutdown()
         server.server_close()
         if worker is not None:
             worker.join(timeout=2)

@@ -1,5 +1,7 @@
 """Fail-closed structural contract for Mistral's source-only advisory reviewer."""
 import json
+import subprocess
+import tempfile
 import sys
 import unittest
 from pathlib import Path
@@ -92,6 +94,27 @@ class MistralReviewResultTests(unittest.TestCase):
     def test_change_request_without_findings_is_rejected(self):
         p = self.payload(); p["verdict"] = "CHANGES_REQUIRED"
         with self.assertRaisesRegex(ValueError, "WITHOUT_FINDINGS"): self.parse(p)
+
+    def test_isolated_cli_classifies_json_review_and_insufficient(self):
+        script = SCRIPTS / "mistral_review_result.py"
+        with tempfile.TemporaryDirectory() as temp:
+            result = Path(temp) / "review.json"
+            for verdict, expected in (
+                ("NO_BLOCKING_FINDINGS", 0),
+                ("INSUFFICIENT_EVIDENCE", 71),
+                ("APPROVE", 72),
+            ):
+                with self.subTest(verdict=verdict):
+                    p = self.payload()
+                    p["verdict"] = verdict
+                    result.write_text(json.dumps(p), encoding="utf-8")
+                    run = subprocess.run(
+                        [sys.executable, "-I", str(script),
+                         "201", HEAD, BASE, str(result)],
+                        capture_output=True, text=True, check=False,
+                    )
+                    self.assertEqual(run.returncode, expected, run.stderr)
+                    self.assertEqual(run.stdout, "")
 
     def test_incomplete_review_cannot_publish(self):
         p = self.payload(); p["verdict"] = "INSUFFICIENT_EVIDENCE"

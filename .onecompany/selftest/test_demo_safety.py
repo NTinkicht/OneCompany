@@ -8,11 +8,16 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 from scripts.demo_safety import preflight, require_safe_demo
-import phase1_vertical_smoke as vertical
+SOURCE_ONLY = (ROOT / "scripts" / "phase1_vertical_smoke.py").is_file()
+if SOURCE_ONLY:
+    import phase1_vertical_smoke as vertical
+else:
+    vertical = None
 
 PLAN = {"authorization": "NOT_GRANTED", "mode": "READ_ONLY_PROPOSAL"}
 
 
+@unittest.skipUnless(SOURCE_ONLY, "disposable demo is source-only, absent from fresh bootstrap")
 class DemoSafetyTests(unittest.TestCase):
     def setUp(self):
         self.server, self.store = vertical._local_app().start_server(0)

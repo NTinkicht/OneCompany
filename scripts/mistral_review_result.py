@@ -90,7 +90,7 @@ def format_comment(value: dict, *, run_url: str) -> str:
     lines = [
         "**Mistral Vibe exact-head advisory code review (NON-GATING)**",
         f"GitHub publisher: github-actions[bot]; model: mistral-vibe.",
-        f"PR #{value['pr']}; head \`{value['head_sha']}\`; base \`{value['base_sha']}\`.",
+        f"PR #{value['pr']}; head `{value['head_sha']}`; base `{value['base_sha']}`.",
         f"Trusted run: {run_url}",
         f"Verdict: {value['verdict']}.",
         "",
@@ -99,7 +99,7 @@ def format_comment(value: dict, *, run_url: str) -> str:
     ]
     for item in value["findings"]:
         lines.append(
-            f"- [{item['severity']}] \`{item['path']}:{item['line']}\` - {item['description']}"
+            f"- [{item['severity']}] `{item['path']}:{item['line']}` - {item['description']}"
         )
     lines.extend(["", "No approval, binding reviewer gate, code write or merge authority."])
     return "\n".join(lines) + "\n"

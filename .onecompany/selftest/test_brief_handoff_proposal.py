@@ -198,6 +198,33 @@ class BriefHandoffTests(unittest.TestCase):
         self.assertFalse(planning["provider_invocation"])
         self.assertEqual(planning["requested_extra_spend"], 0)
 
+    def test_existing_planner_rejects_smuggled_authority_and_malformed_content(self):
+        """The second untrusted handoff boundary cannot launder extra claims."""
+        baseline = handoff.propose(draft(), HEAD, BASE)
+        for label, mutate in (
+            ("approved", lambda p: p.update(approved=True)),
+            ("approval", lambda p: p.update(approval={"implementation": True})),
+            ("deploy", lambda p: p.update(deployment_authorized=True)),
+            ("spend", lambda p: p.update(spend_authorized=True)),
+            ("extra RunKey", lambda p: p.update(RunKey={"generation": 1})),
+            ("unrecognized state", lambda p: p.update(unknown_authority="grant")),
+            ("missing canonical field", lambda p: p.pop("next_action")),
+            ("forged project approval", lambda p: p["project"].update(approved=True)),
+            ("invalid project path", lambda p: p["project"].update(path="remote")),
+            ("false project identity", lambda p: p["project"].update(repository=False)),
+            ("non-string asset", lambda p: p["project"]["existing_ci"].append(True)),
+            ("extra owner authority", lambda p: p["owner_intent"].update(approved=True)),
+            ("missing owner intent", lambda p: p["owner_intent"].pop("outcome")),
+            ("empty owner intent", lambda p: p["owner_intent"].update(problem=" ")),
+            ("non-string constraints", lambda p: p.update(constraints=True)),
+            ("non-string next action", lambda p: p.update(next_action={"deploy": True})),
+        ):
+            with self.subTest(label=label):
+                poisoned = copy.deepcopy(baseline)
+                mutate(poisoned)
+                with self.assertRaises(ValueError):
+                    planner.consume_brief_handoff(poisoned, HEAD, BASE)
+
     def test_existing_planner_entry_rejects_stale_refs_or_execution_authority(self):
         """The real planner boundary rejects stale refs and injected authority."""
         proposal = handoff.propose(draft(), HEAD, BASE)

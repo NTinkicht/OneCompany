@@ -6,6 +6,8 @@ import unittest
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts"))
+from product_brief import make_draft
 
 
 class BriefHandoffCommandTests(unittest.TestCase):
@@ -22,23 +24,20 @@ class BriefHandoffCommandTests(unittest.TestCase):
         self.assertIn("read-only planning handoff", result.stdout)
 
     def saved_brief(self):
-        return {
-            "document_kind": "product_brief_draft",
-            "status": "DRAFT_NOT_APPROVED",
-            "approval": {"product_brief": False, "implementation": False,
-                         "deployment": False},
-            "write_lease_granted": False,
-            "qualified_implementer_selected": False,
-            "acceptance_criteria": [], "safety_blockers": [],
-            "missing_required_answers": [],
-            "answers": {"audience": "Families", "problem": "Missed tasks",
-                        "outcome": "Visible checklist",
-                        "first_feature": "Create a task"},
-            "project": {"name": "Demo", "repository": "owner/demo",
-                        "default_branch": "main", "path": "create",
-                        "known_stack": [], "existing_tests": [],
-                        "existing_ci": [], "known_contracts": []},
-        }
+        """An actual canonical producer-shaped unapproved saved Product Brief."""
+        assessment = {"journey": {
+            "path": "create",
+            "safety_blockers": [],
+            "product_brief_draft": {
+                "project_name": "Demo", "repository": "owner/demo",
+                "branch": "main", "known_stack": [], "existing_tests": [],
+                "existing_ci": [], "known_contracts": [],
+            },
+        }}
+        return make_draft(assessment, {
+            "audience": "Families", "problem": "Missed tasks",
+            "outcome": "Visible checklist", "first_feature": "Create a task",
+        })
 
     def run_handoff(self, brief):
         return subprocess.run(

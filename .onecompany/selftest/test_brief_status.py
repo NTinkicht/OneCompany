@@ -23,6 +23,11 @@ class BriefStatusTests(unittest.TestCase):
 
     def canonical(self, answers):
         """Build the authority-free shape used by saved Product Brief drafts."""
+        missing = [
+            key
+            for key in ("problem", "audience", "outcome", "first_feature")
+            if not isinstance(answers.get(key), str) or not answers[key].strip()
+        ]
         return {
             "schema_version": "1.0",
             "document_kind": "product_brief_draft",
@@ -30,7 +35,7 @@ class BriefStatusTests(unittest.TestCase):
             "source": "owner_supplied_answers_and_read_only_discovery",
             "project": {"name": "demo"},
             "answers": answers,
-            "missing_required_answers": [],
+            "missing_required_answers": missing,
             "acceptance_criteria": [],
             "approval": {
                 "product_brief": False,
@@ -54,6 +59,15 @@ class BriefStatusTests(unittest.TestCase):
         result = summarize(self.write(self.canonical({"problem": "P"})))
         self.assertEqual(result["stage"], "DRAFT_INCOMPLETE")
         self.assertIn("audience", result["missing"])
+
+    def test_inconsistent_saved_missing_answers_are_blocked(self):
+        payload = self.canonical({
+            "problem": "P", "audience": "A", "outcome": "O", "first_feature": "F",
+        })
+        payload["missing_required_answers"] = ["problem"]
+        result = summarize(self.write(payload))
+        self.assertEqual(result["stage"], "BLOCKED")
+        self.assertIn("inconsistent_missing_required_answers", result["blockers"])
 
     def test_authority_bearing_draft_is_blocked(self):
         payload = self.canonical({

@@ -100,13 +100,28 @@ def summarize(path: Path) -> dict[str, object]:
     }
 
 
+def readiness_exit_code(stage: object, require_complete: bool = False) -> int:
+    """Map a read-only brief stage to a deterministic, authority-free exit code."""
+    if stage == "BLOCKED":
+        return 2
+    if require_complete:
+        return 0 if stage == "DRAFT_COMPLETE_NOT_APPROVED" else 3
+    return 0 if stage in {"DRAFT_INCOMPLETE", "DRAFT_COMPLETE_NOT_APPROVED"} else 2
+
+
 def main() -> int:
-    """Print a read-only saved-brief status and return nonzero only if blocked."""
+    """Print a read-only saved-brief status and return a deterministic exit code."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("brief", type=Path)
-    result = summarize(parser.parse_args().brief)
+    parser.add_argument(
+        "--require-complete",
+        action="store_true",
+        help="return exit 3 for an incomplete draft without granting approval",
+    )
+    args = parser.parse_args()
+    result = summarize(args.brief)
     print(json.dumps(result, sort_keys=True))
-    return 2 if result["stage"] == "BLOCKED" else 0
+    return readiness_exit_code(result["stage"], args.require_complete)
 
 
 if __name__ == "__main__":

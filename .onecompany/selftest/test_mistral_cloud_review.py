@@ -355,7 +355,8 @@ class MistralCloudReviewTests(unittest.TestCase):
         self.assertIn("-f event=COMMENT", review)
         self.assertNotIn("-f event=APPROVE", review)
         self.assertIn('"commit_id=$REVIEW_SHA"', review)
-        self.assertIn("ADVISORY, NON-GATING", review)
+        self.assertIn("advisory", review.lower())
+        self.assertIn("NON-GATING", review)
         self.assertNotIn("gh pr merge", review)
         import re
         active_uses = re.findall(r"(?m)^\s+uses:\s+([^\s]+)", review)

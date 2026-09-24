@@ -1,24 +1,45 @@
 #!/usr/bin/env python3
-"""Fail-closed safety preflight for OneCompany's disposable local demo."""
+"""Verify the bound disposable demo fixture before any request is served."""
 
 from __future__ import annotations
 
-import argparse
-import json
+import ipaddress
+import sqlite3
+from http.server import HTTPServer
 
-LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
+def preflight(server: HTTPServer, store: object, plan: dict) -> dict[str, object]:
+    """Inspect the ACTUAL bound socket, empty in-memory DB and planner result.
 
-def preflight(host: str, synthetic_data: bool, authority: bool) -> dict[str, object]:
-    blockers = []
-    if host not in LOCAL_HOSTS:
-        blockers.append("non_local_host")
-    if not synthetic_data:
-        blockers.append("non_synthetic_data")
-    if authority:
-        blockers.append("authority_not_permitted")
+    Caller-declared booleans or hostnames cannot attest to safety. Fail closed
+    before serve_forever begins; the owner brief and plan were already checked.
+    """
+    blockers: list[str] = []
+    try:
+        host = server.server_address[0]
+        if not ipaddress.ip_address(host).is_loopback:
+            blockers.append("non_local_bind")
+    except (AttributeError, IndexError, TypeError, ValueError):
+        blockers.append("unverified_bind")
+
+    try:
+        db = store.db
+        if not isinstance(db, sqlite3.Connection):
+            raise ValueError("store_not_sqlite")
+        databases = db.execute("PRAGMA database_list").fetchall()
+        if not databases or any(str(row[2]) != "" for row in databases):
+            blockers.append("persistent_data_store")
+        if store.list():
+            blockers.append("nonempty_disposable_store")
+    except (AttributeError, TypeError, ValueError, sqlite3.Error):
+        blockers.append("unverified_disposable_store")
+
+    if (not isinstance(plan, dict)
+            or plan.get("authorization") != "NOT_GRANTED"
+            or plan.get("mode") != "READ_ONLY_PROPOSAL"):
+        blockers.append("execution_authority_not_permitted")
     return {
-        "safe": not blockers,
+        "verified": not blockers,
         "blockers": blockers,
         "scope": "LOCAL_DISPOSABLE_DEMO_ONLY",
         "deployable": False,
@@ -26,16 +47,9 @@ def preflight(host: str, synthetic_data: bool, authority: bool) -> dict[str, obj
     }
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--host", default="127.0.0.1")
-    parser.add_argument("--synthetic-data", action="store_true")
-    parser.add_argument("--authority", action="store_true")
-    args = parser.parse_args()
-    result = preflight(args.host, args.synthetic_data, args.authority)
-    print(json.dumps(result, sort_keys=True))
-    return 0 if result["safe"] else 2
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+def require_safe_demo(server: HTTPServer, store: object, plan: dict) -> None:
+    """Refuse an unverified fixture before starting its HTTP worker."""
+    report = preflight(server, store, plan)
+    if not report["verified"]:
+        raise ValueError("DISPOSABLE_DEMO_SAFETY_BLOCKED:" +
+                         ",".join(report["blockers"]))

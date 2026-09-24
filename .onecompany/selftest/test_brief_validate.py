@@ -3,13 +3,14 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
-from scripts.brief_validate import validate
+from scripts.brief_validate import validate, read_brief
 
 
 class BriefValidateTests(unittest.TestCase):
@@ -63,6 +64,14 @@ class BriefValidateTests(unittest.TestCase):
         self.assertTrue(result["valid"])
         self.assertEqual(result["status"], "PROPOSAL_READY_NOT_APPROVED")
         self.assertFalse(result["approved"])
+
+    def test_validator_uses_one_secure_snapshot_for_shape_and_safety(self):
+        path = self.write(self.canonical())
+        with patch("scripts.brief_validate.read_brief",
+                   wraps=read_brief) as secure_reader:
+            result = validate(path)
+        self.assertTrue(result["valid"])
+        self.assertEqual(secure_reader.call_count, 1)
 
     def test_missing_answer_remains_incomplete(self):
         result = validate(self.write(self.canonical(outcome=None)))

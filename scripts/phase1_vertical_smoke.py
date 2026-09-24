@@ -71,12 +71,14 @@ def run(assessment: dict, saved_brief: dict, head: str, base: str) -> dict:
     app = _local_app()
     server, store = app.start_server(0)
     worker = None
+    worker_started = False
     try:
         # Verify the actual socket/store/plan BEFORE accepting HTTP requests.
         require_safe_demo(server, store, plan)
         worker = threading.Thread(target=server.serve_forever,
                                   kwargs={"poll_interval": 0.05}, daemon=True)
         worker.start()
+        worker_started = True
         root = f"http://127.0.0.1:{server.server_port}/"
         for _ in range(30):
             try:
@@ -113,10 +115,10 @@ def run(assessment: dict, saved_brief: dict, head: str, base: str) -> dict:
                                   origin="https://remote.example"), 403)
     finally:
         # BaseServer.shutdown() deadlocks if serve_forever never started.
-        if worker is not None:
+        if worker_started:
             server.shutdown()
         server.server_close()
-        if worker is not None:
+        if worker_started:
             worker.join(timeout=2)
         store.close()
 

@@ -135,6 +135,18 @@ class BriefHandoffTests(unittest.TestCase):
                         command, cwd=ROOT, text=True, capture_output=True, timeout=16)
                     self.assertEqual(rejected.returncode, 2)
                     self.assertNotIn("NOT_GRANTED", rejected.stdout)
+            # The earlier approval assertion must not vanish via last-key-wins
+            # parsing before the canonical draft validator sees the document.
+            raw = json.dumps(original).replace(
+                '"status": "DRAFT_NOT_APPROVED"',
+                '"status": "APPROVED", "status": "DRAFT_NOT_APPROVED"', 1,
+            )
+            brief_file.write_text(raw, encoding="utf-8")
+            rejected = subprocess.run(
+                command, cwd=ROOT, text=True, capture_output=True, timeout=16)
+            self.assertEqual(rejected.returncode, 2)
+            self.assertIn("DUPLICATE_PRODUCT_BRIEF_JSON_KEY", rejected.stderr)
+            self.assertEqual(rejected.stdout, "")
 
     @unittest.skipUnless(os.name == "posix", "anchored safe reader needs POSIX")
     def test_cli_rejects_symlinked_parent_and_leaf(self):

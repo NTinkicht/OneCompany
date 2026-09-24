@@ -17,6 +17,11 @@ from product_brief_diff import load as load_draft, validate as validate_draft
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 REQUIRED = ("audience", "problem", "outcome", "first_feature")
 KNOWN_ASSETS = ("known_stack", "existing_tests", "existing_ci", "known_contracts")
+PROPOSAL_FIELDS = frozenset({
+    "schema", "read_only", "authorization", "state", "source_refs_unverified",
+    "run_key", "lease_id", "canonical_work_unit", "project", "owner_intent",
+    "constraints", "acceptance_criteria", "next_action",
+})
 
 
 def propose(brief: dict, head: str, base: str) -> dict:
@@ -77,6 +82,10 @@ def consume_for_planning(proposal: dict, trusted_head: str, trusted_base: str) -
     """
     if not isinstance(proposal, dict) or proposal.get("schema") != "onecompany.phase1-brief-handoff-proposal.v1":
         raise ValueError("HANDOFF_PROPOSAL_REQUIRED")
+    if set(proposal) != PROPOSAL_FIELDS:
+        # Silently stripping an appended approval, RunKey, deployment or spend
+        # assertion can turn a poisoned proposal into a plausible planning input.
+        raise ValueError("HANDOFF_PROPOSAL_FIELD_SET_INVALID")
     if proposal.get("read_only") is not True or proposal.get("authorization") != "NOT_GRANTED":
         raise ValueError("HANDOFF_MUST_BE_UNAUTHORIZED")
     if proposal.get("state") != "AWAIT_TRUSTED_PLANNING_AND_OWNER_APPROVAL":
@@ -94,9 +103,22 @@ def consume_for_planning(proposal: dict, trusted_head: str, trusted_base: str) -
         raise ValueError("STALE_OR_UNVERIFIED_REVISION")
     project = proposal.get("project")
     intent = proposal.get("owner_intent")
-    if not isinstance(project, dict) or not isinstance(intent, dict):
+    if (not isinstance(project, dict)
+            or set(project) != {"name", "repository", "default_branch", "path", *KNOWN_ASSETS}
+            or project.get("path") not in {"create", "adopt"}
+            or any(not isinstance(project.get(k), str) or not project[k].strip()
+                   for k in ("name", "repository", "default_branch"))
+            or not isinstance(intent, dict)
+            or set(intent) != set(REQUIRED)
+            or any(not isinstance(intent[k], str) or not intent[k].strip()
+                   for k in REQUIRED)
+            or (proposal.get("constraints") is not None
+                and not isinstance(proposal["constraints"], str))
+            or not isinstance(proposal.get("next_action"), str)):
         raise ValueError("HANDOFF_CONTENT_INVALID")
-    if any(not isinstance(project.get(k), list) for k in KNOWN_ASSETS):
+    if any(not isinstance(project.get(k), list)
+           or any(not isinstance(value, str) for value in project[k])
+           for k in KNOWN_ASSETS):
         raise ValueError("KNOWN_ASSETS_INVALID")
     if proposal.get("acceptance_criteria") != []:
         raise ValueError("AC_MUST_BE_PROPOSED_BY_TRUSTED_PLANNING")

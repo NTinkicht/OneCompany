@@ -30,6 +30,14 @@ def summarize(path: Path) -> dict[str, object]:
     except (OSError, UnicodeError, json.JSONDecodeError, RecursionError, ValueError):
         return _blocked("unsafe_or_malformed_brief", "recreate_saved_brief")
 
+    return summarize_data(data)
+
+
+def summarize_data(data: object) -> dict[str, object]:
+    """Classify ONE already-securely-read saved draft without reopening its path."""
+    if not isinstance(data, dict):
+        return _blocked("unsafe_or_malformed_brief", "recreate_saved_brief")
+
     answers = data.get("answers")
     if not isinstance(answers, dict):
         return _blocked("missing_answers_object", "recreate_saved_brief")

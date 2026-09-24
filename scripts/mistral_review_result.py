@@ -54,6 +54,7 @@ def parse_result(raw: bytes, *, pr: int, head: str, base: str) -> dict:
             or value["repo"] != "NTinkicht/OneCompany"
             or type(value["pr"]) is not int or value["pr"] != pr
             or value["head_sha"] != head or value["base_sha"] != base
+            or type(value["verdict"]) is not str
             or value["verdict"] not in VERDICTS
             or not _plain(value["summary"], 1800)
             or type(value["findings"]) is not list
@@ -75,6 +76,8 @@ def parse_result(raw: bytes, *, pr: int, head: str, base: str) -> dict:
                 or not 1 <= finding["line"] <= 1_000_000
                 or not _plain(finding["description"], 1200)):
             raise ValueError("MISTRAL_FINDING_INVALID")
+    if value["verdict"] == "CHANGES_REQUIRED" and not value["findings"]:
+        raise ValueError("MISTRAL_CHANGE_REQUEST_WITHOUT_FINDINGS")
     if value["verdict"] == "INSUFFICIENT_EVIDENCE":
         raise ValueError("MISTRAL_INSUFFICIENT_EVIDENCE")
     if value["verdict"] == "NO_BLOCKING_FINDINGS" and any(

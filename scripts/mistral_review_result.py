@@ -38,7 +38,7 @@ def _inert(value: str) -> str:
     escaped = html.escape(value, quote=True)
     # Encode Markdown metacharacters as entities: GitHub parses entities as
     # literal characters after inline Markdown delimiter recognition.
-    return re.sub(r"[@*_`\\[\\]()!#>~\\\\|]", lambda match: f"&#{ord(match.group())};", escaped)
+    return re.sub(r"[@*_`\[\]()!#>~\\|]", lambda match: f"&#{ord(match.group())};", escaped)
 
 
 def parse_result(raw: bytes, *, pr: int, head: str, base: str) -> dict:

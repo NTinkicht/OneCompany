@@ -420,14 +420,14 @@ jobs:
           if not evidence.strip() or "INSUFFICIENT_EVIDENCE" in evidence:
               raise SystemExit("MISTRAL_REVIEW_INSUFFICIENT_EVIDENCE")
           body = (
-              "**Mistral Vibe exact-head code review - ADVISORY, NON-GATING**\\n"
-              f"Logical actor: mistral-vibe; GitHub publisher: github-actions[bot].\\n"
-              f"Head: \`{head}\`; base: \`{base}\`.\\n"
+              "**Mistral Vibe exact-head code review - ADVISORY, NON-GATING**\n"
+              f"Logical actor: mistral-vibe; GitHub publisher: github-actions[bot].\n"
+              f"Head: `{head}`; base: `{base}`.\n"
               f"Trusted GitHub Actions run: {os.environ['GITHUB_SERVER_URL']}/"
               f"{os.environ['GITHUB_REPOSITORY']}/actions/runs/"
-              f"{os.environ['GITHUB_RUN_ID']}.\\n"
+              f"{os.environ['GITHUB_RUN_ID']}.\n"
               "This is not APPROVE, merge authorization, a claim of proven model "
-              "authorship independence, or a binding gate.\\n\\n"
+              "authorship independence, or a binding gate.\n\n"
               + evidence[:12000]
           )
           Path("/tmp/onecompany-mistral-pr-review.txt").write_text(

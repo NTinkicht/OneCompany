@@ -446,9 +446,9 @@ jobs:
               body, encoding="utf-8"
           )
           PY
-          gh api -X POST "repos/$GITHUB_REPOSITORY/pulls/$REVIEW_PR/reviews" \\
-            -f event=COMMENT \\
-            -f "commit_id=$REVIEW_SHA" \\
-            --raw-field "body=$(cat /tmp/onecompany-mistral-pr-review.txt)" \\
+          gh api -X POST "repos/$GITHUB_REPOSITORY/pulls/$REVIEW_PR/reviews" \
+            -f event=COMMENT \
+            -f "commit_id=$REVIEW_SHA" \
+            --raw-field "body=$(cat /tmp/onecompany-mistral-pr-review.txt)" \
             --jq '{review_id:.id, login:.user.login, commit_id:.commit_id, state:.state}'
 

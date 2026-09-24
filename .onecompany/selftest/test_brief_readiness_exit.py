@@ -7,6 +7,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPTS = ROOT / "scripts"
+# Both imports are necessary for isolated execution: this test imports the
+# scripts package, while its source-only helper uses bare sibling imports.
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 

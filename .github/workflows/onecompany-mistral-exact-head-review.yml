@@ -224,12 +224,12 @@ jobs:
           severity must be INFO/LOW/MEDIUM/MAJOR/HIGH/CRITICAL. path must be a
           relative reviewed file; line is a positive integer; description 1-1200
           characters. Do not put newline/control characters in any string.
-          If review cannot be completed, return INSUFFICIENT_EVIDENCE.
+          If review cannot be completed, return a valid JSON object with verdict INSUFFICIENT_EVIDENCE, a summary naming the missing evidence, and findings []. Never emit bare prose or a standalone verdict marker.
           This pilot is ALWAYS ADVISORY/NON-GATING until independently qualified
           for binding review. Do not self-approve or claim merge authority.
           EOF
           printf '\nTRUSTED REVIEW TARGET: OneCompany PR #%s, head %s, base %s.\n' "$REVIEW_PR" "$REVIEW_SHA" "$REVIEW_BASE" >> /tmp/onecompany-mistral-prompt.txt
-          printf 'First read review-target.txt and review.diff. Then read ONLY relevant review_sources/ original code/tests, bounded to this stage. If evidence is insufficient, output INSUFFICIENT_EVIDENCE on its own line, explain missing facts, and stop. Use CHANGES_REQUIRED only for supported actionable defects. Return a concise review with the exact target SHA. No write operations.\n' >> /tmp/onecompany-mistral-prompt.txt
+          printf 'First read review-target.txt and review.diff. Then read ONLY relevant review_sources/ original code/tests, bounded to this stage. If evidence is insufficient, return the same exact-schema JSON object with verdict INSUFFICIENT_EVIDENCE, specific missing facts in summary and findings []. Use CHANGES_REQUIRED only for supported actionable findings. Return the one strict JSON review with exact target SHA. No write operations.\n' >> /tmp/onecompany-mistral-prompt.txt
           printf '\nDispatch text:\n%s\n' "$DISPATCH_BODY" >> /tmp/onecompany-mistral-prompt.txt
 
           # Programmatic Vibe otherwise falls back to broad auto-approval. Select
@@ -263,6 +263,25 @@ jobs:
             code=71
             status="INSUFFICIENT_EVIDENCE"
             reason="Mistral explicitly reported insufficient evidence; not a completed advisory review"
+          elif [[ "$code" == "0" ]]; then
+            # A nonempty model answer is NOT proof of a completed review.
+            # Validate strict UTF-8 JSON and detect INSUFFICIENT_EVIDENCE
+            # while the raw result is still local and before publication.
+            set +e
+            python -I /tmp/onecompany-mistral-result-trusted.py \
+              "$REVIEW_PR" "$REVIEW_SHA" "$REVIEW_BASE" \
+              /tmp/onecompany-mistral-output.txt
+            parsed_code=$?
+            set -e
+            if [[ "$parsed_code" == "71" ]]; then
+              code=71
+              status="INSUFFICIENT_EVIDENCE"
+              reason="Mistral returned a valid JSON insufficient-evidence verdict"
+            elif [[ "$parsed_code" != "0" ]]; then
+              code=72
+              status="RESULT_CONTRACT_INVALID"
+              reason="Mistral review is malformed, stale, overbound or not schema-valid"
+            fi
           elif [[ "$code" == "124" || "$code" == "137" ]]; then
             status="WAKE_TIMEOUT"
             reason="Mistral Vibe exceeded the 10-minute actor time limit"

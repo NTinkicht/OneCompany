@@ -7,6 +7,7 @@ import argparse
 import json
 from pathlib import Path
 
+from brief_status import summarize
 from first_run_journey import read_brief
 from product_brief import FIELDS, REQUIRED
 
@@ -19,14 +20,10 @@ CANONICAL = {
 
 
 def validate(path: Path) -> dict[str, object]:
-    """Validate the canonical saved-draft envelope without granting authority.
-
-    The journey command remains the stronger check because it additionally
-    recreates the draft from current discovery and requires full equality.
-    """
+    """Validate the canonical saved-draft envelope without granting authority."""
     try:
         data = read_brief(path)
-    except (OSError, UnicodeError, json.JSONDecodeError, ValueError, TypeError) as exc:
+    except (OSError, UnicodeError, json.JSONDecodeError, RecursionError, ValueError, TypeError) as exc:
         message = str(exc)
         if "TOO_LARGE" in message:
             status = "REFUSED_OVERSIZED"
@@ -63,6 +60,17 @@ def validate(path: Path) -> dict[str, object]:
         return {"valid": False, "status": "REFUSED_AUTHORITY_BEARING"}
     if data.get("acceptance_criteria") != []:
         return {"valid": False, "status": "REFUSED_AUTHORITY_BEARING"}
+
+    # Reuse the canonical status classifier so unsafe discovery blockers and
+    # authority-bearing fields can never be reported as proposal-ready here.
+    status_summary = summarize(path)
+    if status_summary["stage"] == "BLOCKED":
+        return {
+            "valid": False,
+            "status": "REFUSED_BLOCKED",
+            "blockers": status_summary.get("blockers", []),
+            "approved": False,
+        }
 
     missing = [
         key for key in REQUIRED

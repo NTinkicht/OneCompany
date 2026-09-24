@@ -15,6 +15,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 MAX_PROJECTION_BYTES = 65_536
+MAX_PROJECTION_NESTING = 128
 EVIDENCE = ("quality", "preview", "browser", "ci", "review")
 
 
@@ -221,8 +222,24 @@ def _validate_projection_input(projection: dict[str, object]) -> None:
         "approved", "approval", "authorization", "run_key", "lease_id",
         "canonical_work_unit", "deployment_authorized", "spend_authorized",
     }
-    if forbidden_authority.intersection(projection):
-        raise ValueError("MISSION_CONTROL_AUTHORITY_FIELD_FORBIDDEN")
+    # Bound and inspect the ENTIRE already-parsed display tree, not only root
+    # keys. A nested check or ignored extension must not launder a forged
+    # approval, lease, RunKey or spending assertion through this local view.
+    # Iteration avoids relying on Python's much higher version-dependent
+    # recursive JSON parser threshold as a security depth guard.
+    pending: list[tuple[object, int]] = [(projection, 1)]
+    while pending:
+        current, depth = pending.pop()
+        if depth > MAX_PROJECTION_NESTING:
+            raise ValueError("MISSION_CONTROL_JSON_NESTING_LIMIT")
+        if isinstance(current, dict):
+            if forbidden_authority.intersection(current):
+                raise ValueError("MISSION_CONTROL_AUTHORITY_FIELD_FORBIDDEN")
+            pending.extend((value, depth + 1) for value in current.values()
+                           if isinstance(value, (dict, list)))
+        elif isinstance(current, list):
+            pending.extend((value, depth + 1) for value in current
+                           if isinstance(value, (dict, list)))
     if (projection.get("schema") not in {
             "onecompany.mission-control.phase1.v1",
             "onecompany.mission-control-dashboard.phase1.v1",

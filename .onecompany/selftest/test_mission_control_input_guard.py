@@ -85,6 +85,11 @@ class MissionInputGuardTests(unittest.TestCase):
                 ("missing check", lambda d: d["checks"].pop("quality")),
                 ("forged check", lambda d: d["checks"]["app"].update(status="SUCCESS")),
                 ("false-like check", lambda d: d["checks"]["app"].update(exact_revision=1)),
+                ("PASS without exact revision", lambda d: d["checks"]["app"].update(exact_revision=False)),
+                ("blocked check with READY", lambda d: d["checks"]["quality"].update(status="BLOCKED")),
+                ("unbounded execution READY", lambda d: d.update(execution_core="BLOCKED")),
+                ("all PASS yet reported BLOCKED", lambda d: d.update(readiness="BLOCKED")),
+                ("invented readiness", lambda d: d.update(readiness="SUCCESS")),
             ):
                 with self.subTest(name=name):
                     candidate = canonical()

@@ -152,7 +152,10 @@ class SavedBriefCommandTests(unittest.TestCase):
                 ("brief-diff", (str(good), str(link))),
             ):
                 with self.subTest(command=command):
-                    self.assertNotEqual(self.run_cli(command, *args).returncode, 0)
+                    result = self.run_cli(command, *args)
+                    self.assertEqual(result.returncode, 2, result.stderr)
+                    self.assertIn("REFUSED", result.stderr)
+                    self.assertEqual(result.stdout, "")
 
     def test_nonserver_command_preserves_child_exit_code_and_arguments(self):
         spec = importlib.util.spec_from_file_location("brief_command_entry", ENTRY)

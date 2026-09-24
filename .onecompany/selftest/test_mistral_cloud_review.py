@@ -372,11 +372,16 @@ class MistralCloudReviewTests(unittest.TestCase):
             self.assertRegex(use, r"^actions/[a-z0-9-]+@[0-9a-f]{40}$")
         for source_path in (
             "scripts/mistral_cloud_review.py",
+            "scripts/mistral_review_result.py",
             ".github/workflows/onecompany-mistral-exact-head-review.yml",
         ):
             self.assertIn(source_path, bootstrap.SOURCE_INSTALLATION_EXCLUSIONS)
         self.assertIn(
             ".onecompany/selftest/test_mistral_cloud_review.py",
+            bootstrap.SOURCE_INSTALLATION_EXCLUSIONS,
+        )
+        self.assertIn(
+            ".onecompany/selftest/test_mistral_review_result.py",
             bootstrap.SOURCE_INSTALLATION_EXCLUSIONS,
         )
 

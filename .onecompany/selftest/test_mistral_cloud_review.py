@@ -347,6 +347,11 @@ class MistralCloudReviewTests(unittest.TestCase):
         self.assertNotIn('--workdir "$GITHUB_WORKSPACE"', review)
         self.assertNotIn("contents: write", review)
         self.assertIn("pull-requests: write", review)
+        # Candidate PR checkout must never shadow stdlib modules while tokens
+        # are in privileged trusted-parent Python heredocs.
+        self.assertEqual(review.count("python -I - <<'PY'"), 4)
+        self.assertNotIn("python - <<'PY'", review)
+        self.assertIn("python -I /tmp/onecompany-mistral-review-trusted.py", review)
         self.assertIn("Publish current-head Mistral advisory PR review as Actions bot", review)
         self.assertIn("steps.actor.outputs.exit_code == '0'", review)
         self.assertIn("guard.current_pr(number, head, base)", review)

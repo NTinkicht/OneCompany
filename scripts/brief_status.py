@@ -104,9 +104,9 @@ def readiness_exit_code(stage: object, require_complete: bool = False) -> int:
     """Map a read-only brief stage to a deterministic, authority-free exit code."""
     if stage == "BLOCKED":
         return 2
-    if require_complete and stage == "DRAFT_INCOMPLETE":
-        return 3
-    return 0
+    if require_complete:
+        return 0 if stage == "DRAFT_COMPLETE_NOT_APPROVED" else 3
+    return 0 if stage in {"DRAFT_INCOMPLETE", "DRAFT_COMPLETE_NOT_APPROVED"} else 2
 
 
 def main() -> int:

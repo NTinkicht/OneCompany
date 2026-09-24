@@ -61,6 +61,18 @@ def summarize(path: Path) -> dict[str, object]:
             "recreate_saved_brief_from_read_only_discovery",
         )
 
+    missing = [
+        key
+        for key in REQUIRED
+        if not isinstance(answers.get(key), str) or not answers[key].strip()
+    ]
+    saved_missing = data.get("missing_required_answers")
+    if saved_missing != missing:
+        return _blocked(
+            "inconsistent_missing_required_answers",
+            "recreate_saved_brief_from_read_only_discovery",
+        )
+
     safety_blockers = data.get("safety_blockers")
     if not isinstance(safety_blockers, list) or any(
         not isinstance(blocker, str) or not blocker.strip()
@@ -68,11 +80,6 @@ def summarize(path: Path) -> dict[str, object]:
     ):
         return _blocked("invalid_safety_blockers", "recreate_saved_brief")
 
-    missing = [
-        key
-        for key in REQUIRED
-        if not isinstance(answers.get(key), str) or not answers[key].strip()
-    ]
     if safety_blockers:
         return {
             "stage": "BLOCKED",

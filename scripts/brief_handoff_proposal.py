@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
+import stat
 from pathlib import Path
 
 SHA = re.compile(r"[0-9a-f]{40}\Z")
@@ -120,13 +122,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--head", required=True)
     parser.add_argument("--base", required=True)
     args = parser.parse_args(argv)
-    if not args.brief.is_file():
-        parser.error("bounded saved Product Brief required")
     try:
-        with args.brief.open("rb") as source:
-            raw_brief = source.read(16_385)
+        # One regular, bounded, no-follow FD; no is_file() / open() race.
+        if not hasattr(os, "O_NOFOLLOW"):
+            raise ValueError("SECURE_BRIEF_READ_UNAVAILABLE")
+        flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0)
+        descriptor = os.open(args.brief, flags)
+        try:
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise ValueError("SAVED_BRIEF_FILE_REQUIRED")
+            with os.fdopen(descriptor, "rb", closefd=False) as source:
+                raw_brief = source.read(16_385)
+        finally:
+            os.close(descriptor)
         if len(raw_brief) > 16_384:
-            parser.error("bounded saved Product Brief required")
+            raise ValueError("SAVED_BRIEF_TOO_LARGE")
         candidate = propose(json.loads(raw_brief), args.head, args.base)
     except (OSError, ValueError, TypeError, UnicodeError) as exc:
         parser.error(str(exc))

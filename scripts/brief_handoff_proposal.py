@@ -12,7 +12,8 @@ import json
 import re
 from pathlib import Path
 
-from product_brief_diff import load as load_draft, validate as validate_draft
+from product_brief_diff import (_read_bounded as read_bounded_json_object,
+                               load as load_draft, validate as validate_draft)
 
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 REQUIRED = ("audience", "problem", "outcome", "first_feature")
@@ -71,6 +72,16 @@ def propose(brief: dict, head: str, base: str) -> dict:
         "acceptance_criteria": [],
         "next_action": "Trusted parent: verify live refs and owner authorization; propose acceptance criteria and one canonical WU in existing planning/Execution Core.",
     }
+
+
+def load_proposal(path: Path) -> dict:
+    """Securely load the untrusted proposal using the same anchored JSON reader.
+
+    A partial JSON parser or direct open() could silently overwrite a forged
+    first approval with a later innocuous duplicate, or block on a FIFO. The
+    actual authority and field-set checks remain in consume_for_planning().
+    """
+    return read_bounded_json_object(path)
 
 
 def consume_for_planning(proposal: dict, trusted_head: str, trusted_base: str) -> dict:

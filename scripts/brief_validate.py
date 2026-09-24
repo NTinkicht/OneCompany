@@ -7,7 +7,7 @@ import argparse
 import json
 from pathlib import Path
 
-from brief_status import summarize
+from brief_status import summarize_data
 from first_run_journey import read_brief
 from product_brief import FIELDS, REQUIRED
 
@@ -63,7 +63,7 @@ def validate(path: Path) -> dict[str, object]:
 
     # Reuse the canonical status classifier so unsafe discovery blockers and
     # authority-bearing fields can never be reported as proposal-ready here.
-    status_summary = summarize(path)
+    status_summary = summarize_data(data)
     if status_summary["stage"] == "BLOCKED":
         return {
             "valid": False,

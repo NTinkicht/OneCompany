@@ -44,6 +44,25 @@ class DemoSafetyTests(unittest.TestCase):
         self.assertIn("nonempty_disposable_store", report["blockers"])
         self.assertIn("execution_authority_not_permitted", report["blockers"])
 
+    def test_failed_http_thread_start_never_shutdowns_or_joins(self):
+        from onboard import analyze
+        from product_brief import make_draft
+        import tempfile
+        with tempfile.TemporaryDirectory() as td:
+            assessment = analyze(Path(td) / "new", repository="demo/new")
+            draft = make_draft(assessment, {
+                "audience": "Families", "problem": "Track small tasks",
+                "outcome": "See checklist", "first_feature": "Add item",
+            })
+            with patch.object(vertical.threading.Thread, "start",
+                              side_effect=OSError("cannot start worker")):
+                with patch("socketserver.BaseServer.shutdown",
+                           side_effect=AssertionError("shutdown unstarted worker")):
+                    with patch.object(vertical.threading.Thread, "join",
+                                      side_effect=AssertionError("join unstarted worker")):
+                        with self.assertRaisesRegex(OSError, "cannot start worker"):
+                            vertical.run(assessment, draft, "a"*40, "b"*40)
+
     def test_actual_demo_run_refuses_before_http_worker(self):
         from onboard import analyze
         from product_brief import make_draft

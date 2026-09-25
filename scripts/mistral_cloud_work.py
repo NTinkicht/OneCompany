@@ -159,13 +159,13 @@ def tracked_mode(head: str, path: str) -> str | None:
         )
         if response.returncode != 0:
             raise ValueError("GIT_TREE_INSPECTION_FAILED")
-        rows = [row for row in response.stdout.split(b"\\0") if row]
+        rows = [row for row in response.stdout.split(b"\0") if row]
         if not rows:
             mode = None
             continue
-        if len(rows) != 1 or b"\\t" not in rows[0]:
+        if len(rows) != 1 or b"\t" not in rows[0]:
             raise ValueError("GIT_TREE_ENTRY_INVALID")
-        header, raw_name = rows[0].split(b"\\t", 1)
+        header, raw_name = rows[0].split(b"\t", 1)
         fields = header.split(b" ")
         if len(fields) != 3 or raw_name != prefix.encode("utf-8"):
             raise ValueError("GIT_TREE_ENTRY_INVALID")

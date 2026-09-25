@@ -43,6 +43,8 @@ class MistralBindingIdentityTests(unittest.TestCase):
             "body": MARKER,
         }
         run = {
+            "run_started_at": "2026-09-25T15:14:00Z",
+            "updated_at": "2026-09-25T15:16:00Z",
             "path": identity.MISTRAL_WORKFLOW, "status": "completed",
             "conclusion": "success", "event": "issue_comment",
             "head_branch": "main", "head_sha": RUN_SHA,
@@ -135,6 +137,19 @@ class MistralBindingIdentityTests(unittest.TestCase):
                 REPO, 220, 14, HEAD, BASE)
         self.assertIsNone(reviewer)
         self.assertIn("mistral_binding_run_not_in_protected_main_history", errors)
+
+    def test_recycled_successful_run_cannot_authorize_later_approval(self):
+        for submitted in ("2026-09-25T15:17:00Z", "2026-09-25T15:10:00Z"):
+            with self.subTest(submitted=submitted), patch.object(
+                identity, "_gh_json",
+                side_effect=self.fake_api({
+                    "review": {"submitted_at": submitted},
+                })
+            ):
+                reviewer, errors = identity.review_platform_identity(
+                    REPO, 220, 14, HEAD, BASE)
+                self.assertIsNone(reviewer)
+                self.assertIn("mistral_binding_review_outside_run", errors)
 
     def test_changes_requested_is_not_approving_platform_review(self):
         with patch.object(

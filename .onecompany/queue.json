@@ -101,6 +101,81 @@
         "NTinkicht/OneCompany issue #92 wind-down record; no strict initial L2_REPAIR_COMMITTED/review/MERGED proof",
         "NTinkicht/OneCompany issue #128 transition WU"
       ]
+    },
+    {
+      "id": "WU-CLOUD-MISTRAL-DEV-001",
+      "title": "Qualify Mistral cloud developer/tester with a real bounded source-and-test pilot",
+      "work_kind": "ENABLER",
+      "status": "PROPOSED",
+      "priority": 100,
+      "dependencies": [
+        "WU-PFC-001"
+      ],
+      "issue": 133,
+      "pr": null,
+      "branch": "wu-cloud-mistral-dev-001",
+      "risk_class": "LOW",
+      "planning_refs": [
+        "EPIC-001",
+        "CAP-001"
+      ],
+      "requirement_ids": [
+        "FR-001",
+        "SEC-001"
+      ],
+      "write_scope": [
+        "examples/agent-qualification/demo.py",
+        "tests/test_agent_qualification.py"
+      ],
+      "resource_locks": [
+        "onecompany:mistral-cloud-qualification"
+      ],
+      "parallelism": "disjoint_only",
+      "qualification_exit": [
+        "Canonical PR and live Mistral implementation lease verified before MISTRAL_WORK_V1 dispatch",
+        "Model-authored source and tests committed with exact-head CAS and CI",
+        "Independent non-Mistral review completed before merge",
+        "Zero added spend; no Codespace or model-held GitHub token"
+      ]
+    },
+    {
+      "id": "WU-CLOUD-GROK-DEV-REVIEW-QA-001",
+      "title": "Qualify Grok native-cloud coding testing and independent review on a real pilot",
+      "work_kind": "ENABLER",
+      "status": "BLOCKED",
+      "priority": 100,
+      "dependencies": [
+        "WU-PFC-001"
+      ],
+      "issue": 136,
+      "pr": null,
+      "branch": "wu-cloud-grok-dev-review-qa-001",
+      "risk_class": "HIGH",
+      "planning_refs": [
+        "EPIC-001",
+        "CAP-001"
+      ],
+      "requirement_ids": [
+        "FR-001",
+        "SEC-001"
+      ],
+      "write_scope": [
+        "examples/grok-qualification/demo.py",
+        "tests/test_grok_qualification.py"
+      ],
+      "resource_locks": [
+        "onecompany:grok-cloud-qualification"
+      ],
+      "parallelism": "serial",
+      "blocked_reason": "Grok native cloud read-only intake is observed, but bot-authored write and exact-head review are not proven; scoped App writer #105 and dispatch bridge #172 are unqualified.",
+      "blocked_owner": "integration",
+      "qualification_exit": [
+        "Authenticated provider-cloud assignment and run verified",
+        "Lease-bound OneCompany-only bot-authored commit and CI verified",
+        "Independent non-Grok exact-head review and test evidence of Grok-authored code published",
+        "Grok-authored independent exact-head review of a non-Grok-authored PR, with verified bot/provider provenance and non-self authorship, published as distinct reviewer qualification evidence",
+        "No cross-repo permission expansion or paid provider fallback"
+      ]
     }
   ]
 }

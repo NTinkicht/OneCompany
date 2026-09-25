@@ -348,6 +348,42 @@ class MistralCloudReviewTests(unittest.TestCase):
                 )
                 self.assertEqual(result.returncode == 0, accepted)
 
+    def test_redaction_step_creates_review_input_under_actions_guard(self):
+        """Publisher must not depend on unset READY/ACTOR_EXIT shell variables."""
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        stage = workflow.split(
+            "      - name: Prepare redacted current-head Mistral review\n", 1
+        )[1].split("      # The parent publishes model PASS", 1)[0]
+        self.assertIn(
+            "if: steps.preflight.outputs.ready == 'true' && steps.actor.outputs.exit_code == '0'",
+            stage,
+        )
+        self.assertNotIn("${READY:-false}", stage)
+        self.assertNotIn("${ACTOR_EXIT:-1}", stage)
+        script = textwrap.dedent(stage.split("        run: |\n", 1)[1])
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "model-source.json"
+            public = root / "redacted.json"
+            token = "SYNTHETIC_REDAC_TEST_TOKEN"
+            source.write_text('{"summary": "' + token + '"}', encoding="utf-8")
+            script = script.replace(
+                "/tmp/onecompany-mistral-output.txt", str(source)
+            ).replace(
+                "/tmp/onecompany-mistral-public.txt", str(public)
+            )
+            env = os.environ.copy()
+            env["MISTRAL_API_KEY"] = token
+            result = subprocess.run(
+                ["bash", "-c", script], capture_output=True, text=True,
+                env=env, check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            actual = public.read_text(encoding="utf-8")
+            self.assertIn("[REDACTED]", actual)
+            self.assertNotIn(token, actual)
+            self.assertEqual(result.stdout, "")
+
     def test_wake_bus_reports_binding_only_after_successful_platform_publication(self):
         """Grok finding: a pre-publish wake message must never claim binding PASS."""
         workflow = WORKFLOW.read_text(encoding="utf-8")

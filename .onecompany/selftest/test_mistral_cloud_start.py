@@ -53,11 +53,21 @@ class MistralCanonicalIntakeTests(unittest.TestCase):
             COMMAND + "\nbranch: main",
             COMMAND.replace("MISTRAL_START_V1", "MISTRAL_START_V1 EXTRA"),
             COMMAND.replace("main_sha: " + SHA, "main_sha: main"),
-            COMMAND.replace("WU-CLOUD-MISTRAL-DEV-001", "WU-OTHER"),
             COMMAND + "\nMISTRAL_START_V1",
         ):
             with self.subTest(body=body[:70]), self.assertRaises(ValueError):
                 start.assignment(body)
+
+    def test_unknown_wu_is_rejected_by_trusted_queue_not_string_syntax(self):
+        values = start.assignment(
+            COMMAND.replace("WU-CLOUD-MISTRAL-DEV-001", "WU-OTHER"))
+        with patch.dict(os.environ, {
+            "GITHUB_REPOSITORY": start.REPO,
+            "ONECOMPANY_EMERGENCY_STOP": "false",
+        }), self.assertRaisesRegex(ValueError, "START_WU_NOT_UNIQUE"):
+            start.policy_ticket(
+                values, queue=self.queue, budget=self.budget,
+                config=self.config, actual_main_sha=SHA)
 
     def test_no_lease_or_code_qualification_from_branch_scaffold(self):
         code = (ROOT / "scripts/mistral_cloud_start.py").read_text()

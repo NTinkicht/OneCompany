@@ -434,6 +434,9 @@ class MistralCloudReviewTests(unittest.TestCase):
                         report_body,
                     )
                     self.assertNotIn("ADVISORY review (non-binding)", report_body)
+                    self.assertNotIn('{"synthetic": "review"}', report_body)
+                    if not blocked:
+                        self.assertIn("Validated findings are in the exact-head GitHub PR review.", report_body)
                     self.assertEqual(
                         "no binding GitHub technical PASS/FAIL recorded" in report_body,
                         blocked,
@@ -518,6 +521,7 @@ class MistralCloudReviewTests(unittest.TestCase):
         self.assertIn("PUBLISH_EVENT: ${{ steps.publish.outputs.review_event }}", review)
         self.assertIn('echo "review_event=$review_event" >> "$GITHUB_OUTPUT"', review)
         self.assertIn("REVIEW_PUBLICATION_BLOCKED", review)
+        self.assertNotIn("cat /tmp/onecompany-mistral-public.txt", review)
         self.assertNotIn("MISTRAL_API_KEY", review.split("- name: Post Mistral result", 1)[1])
         self.assertIn("Trusted run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID", review)
         self.assertLess(

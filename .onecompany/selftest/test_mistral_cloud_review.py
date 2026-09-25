@@ -482,6 +482,7 @@ class MistralCloudReviewTests(unittest.TestCase):
         self.assertIn("PUBLISH_EVENT: ${{ steps.publish.outputs.review_event }}", review)
         self.assertIn('echo "review_event=$review_event" >> "$GITHUB_OUTPUT"', review)
         self.assertIn("REVIEW_PUBLICATION_BLOCKED", review)
+        self.assertNotIn("MISTRAL_API_KEY", review.split("- name: Post Mistral result", 1)[1])
         self.assertIn("Trusted run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID", review)
         self.assertLess(
             review.index("- name: Prepare redacted current-head Mistral review"),

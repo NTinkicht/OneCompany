@@ -170,7 +170,7 @@ jobs:
               --enabled-tools grep \
               --enabled-tools read_file \
               --max-turns 8 \
-              --max-tokens 75000 \
+              --max-tokens 90000 \
               --output text \
               --prompt "$(cat /tmp/onecompany-mistral-prompt.txt)" \
               > /tmp/onecompany-mistral-output.txt \

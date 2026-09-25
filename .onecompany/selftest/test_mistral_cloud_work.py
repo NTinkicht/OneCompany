@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -195,6 +196,56 @@ class MistralFencedWorkerTests(unittest.TestCase):
         self.assertIn("Material-Author: mistral-vibe", commits[0]["message"])
         refs = [data for route, method, data in seen if "/git/refs/heads/" in route]
         self.assertEqual(refs, [{"sha": C, "force": False}])
+
+    def test_exact_head_git_tree_scope_refuses_symlinks_executables_and_trees(self):
+        path = "examples/agent-qualification/demo.py"
+        def entry(name, mode):
+            kind = "tree" if mode == "040000" else "blob"
+            return (f"{mode} {kind} {B}\\t{name}\\0").encode()
+        def run(command, **_kwargs):
+            self.assertEqual(command[:3], ["git", "ls-tree", "-z"])
+            name = command[-1]
+            if name == "examples":
+                mode = "040000"
+            elif name == "examples/agent-qualification":
+                mode = ancestor_mode
+            else:
+                mode = file_mode
+            return SimpleNamespace(returncode=0,
+                                   stdout=entry(name, mode) if mode else b"")
+        for file_mode in ("100644", "120000", "100755", "040000", None):
+            ancestor_mode = "040000"
+            with self.subTest(mode=file_mode), patch.object(
+                w.subprocess, "run", side_effect=run
+            ):
+                if file_mode in ("100644", None):
+                    self.assertEqual(w.tracked_mode(H, path), file_mode)
+                else:
+                    with self.assertRaisesRegex(
+                        ValueError, "MODEL_SCOPE_NOT_REGULAR_BLOB"
+                    ):
+                        w.tracked_mode(H, path)
+        ancestor_mode, file_mode = "120000", "100644"
+        with patch.object(w.subprocess, "run", side_effect=run), self.assertRaisesRegex(
+            ValueError, "MODEL_SCOPE_NON_DIRECTORY_ANCESTOR"
+        ):
+            w.tracked_mode(H, path)
+
+    def test_mistral_source_stage_rejects_git_symlink_before_git_show(self):
+        with patch.object(w, "tracked_mode", return_value="120000"), patch.object(
+            w.subprocess, "run", return_value=SimpleNamespace(
+                returncode=0, stdout=b"../sensitive-file"
+            )
+        ):
+            # The real tree-mode verifier refuses symlinks; never stage the link
+            # target as editable source even if git show would print its bytes.
+            self.assertNotEqual(w.tracked_mode(H, SCOPE[0]), "100644")
+        with patch.object(w, "tracked_mode", return_value="100644"), patch.object(
+            w.subprocess, "run", return_value=SimpleNamespace(
+                returncode=1, stdout=b""
+            )
+        ), self.assertRaisesRegex(ValueError, "GIT_TRACKED_SOURCE_UNREADABLE"):
+            w.git_file(H, SCOPE[0])
 
     def test_workflow_separates_model_from_publisher_and_source_installer(self):
         from bootstrap import SOURCE_INSTALLATION_EXCLUSIONS

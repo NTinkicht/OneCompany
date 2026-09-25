@@ -139,6 +139,30 @@
       "target": "WU-A4-FACTORY-001",
       "relationship": "implements",
       "rationale": "A4 first-PR production and isolation build on delivered planning and canonical-stream security."
+    },
+    {
+      "source": "EPIC-001",
+      "target": "WU-CLOUD-MISTRAL-DEV-001",
+      "relationship": "decomposes_to",
+      "rationale": "The low-risk model qualification WU implements autonomous workflow capability."
+    },
+    {
+      "source": "CAP-001",
+      "target": "WU-CLOUD-MISTRAL-DEV-001",
+      "relationship": "realizes",
+      "rationale": "A bounded Mistral model-authored test pilot validates parallel delivery admission."
+    },
+    {
+      "source": "FR-001",
+      "target": "WU-CLOUD-MISTRAL-DEV-001",
+      "relationship": "implements",
+      "rationale": "Pilot exercises admitted WU and worker capacity for scheduler."
+    },
+    {
+      "source": "SEC-001",
+      "target": "WU-CLOUD-MISTRAL-DEV-001",
+      "relationship": "implements",
+      "rationale": "Pilot preserves exclusive durable implementation lease with no model GitHub token."
     }
   ]
 }

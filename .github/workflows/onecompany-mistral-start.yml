@@ -62,7 +62,11 @@ jobs:
             echo "The draft PR scaffold is NOT Mistral-authored code or green model tests."
             echo "A protected WU-to-PR binding and a durable implementation lease are"
             echo "still required before the existing MISTRAL_WORK_V1 coder may run."
-            if [[ "${STATE:-}" == "PR_PREPARED_NOT_MODEL_QUALIFIED" ]]; then
+            # The trusted Python entrypoint emits only a bounded, sanitized
+            # reconciliation status and protected-main ticket coordinates.
+            # Print the result even when intake exits nonzero, so a green
+            # reporting job never hides an already-written branch/scaffold.
+            if [[ -s /tmp/mistral-start-result.json ]]; then
               cat /tmp/mistral-start-result.json
             fi
           } > /tmp/mistral-start-report.md

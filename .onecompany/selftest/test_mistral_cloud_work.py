@@ -201,7 +201,7 @@ class MistralFencedWorkerTests(unittest.TestCase):
         path = "examples/agent-qualification/demo.py"
         def entry(name, mode):
             kind = "tree" if mode == "040000" else "blob"
-            return (f"{mode} {kind} {B}\\t{name}\\0").encode()
+            return (f"{mode} {kind} {B}\t{name}\0").encode()
         def run(command, **_kwargs):
             self.assertEqual(command[:3], ["git", "ls-tree", "-z"])
             name = command[-1]
@@ -232,14 +232,6 @@ class MistralFencedWorkerTests(unittest.TestCase):
             w.tracked_mode(H, path)
 
     def test_mistral_source_stage_rejects_git_symlink_before_git_show(self):
-        with patch.object(w, "tracked_mode", return_value="120000"), patch.object(
-            w.subprocess, "run", return_value=SimpleNamespace(
-                returncode=0, stdout=b"../sensitive-file"
-            )
-        ):
-            # The real tree-mode verifier refuses symlinks; never stage the link
-            # target as editable source even if git show would print its bytes.
-            self.assertNotEqual(w.tracked_mode(H, SCOPE[0]), "100644")
         with patch.object(w, "tracked_mode", return_value="100644"), patch.object(
             w.subprocess, "run", return_value=SimpleNamespace(
                 returncode=1, stdout=b""

@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+from datetime import datetime
 from typing import Any
 from urllib.parse import quote
 
@@ -376,6 +377,19 @@ def verified_mistral_review_publisher(
         ((run.get("repository") or {}).get("full_name")) != repo,
     ]):
         return None, ["mistral_binding_run_provenance_invalid"]
+    # Bind the platform review submission to the model workflow's execution
+    # window. A previously successful unrelated run cannot be recycled later
+    # as a generic Actions-bot approval of a different PR.
+    try:
+        submitted = datetime.fromisoformat(review["submitted_at"].replace("Z", "+00:00"))
+        started = datetime.fromisoformat(
+            run["run_started_at"].replace("Z", "+00:00"))
+        finished = datetime.fromisoformat(
+            run["updated_at"].replace("Z", "+00:00"))
+        if not started <= submitted <= finished:
+            raise ValueError("review_outside_run")
+    except (ValueError, KeyError, AttributeError, TypeError):
+        return None, ["mistral_binding_review_outside_run"]
     # A copied/replayed workflow result from a candidate branch is not trusted.
     _, errors = protected_default_branch_context(repo, run_sha)
     if errors:

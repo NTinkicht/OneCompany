@@ -153,7 +153,7 @@ def tracked_mode(head: str, path: str) -> str | None:
     for depth in range(1, len(parts) + 1):
         prefix = "/".join(parts[:depth])
         response = subprocess.run(
-            ["git", "ls-tree", "-z", head, "--", prefix],
+            ["git", "ls-tree", "--full-tree", "-z", head, "--", prefix],
             capture_output=True, timeout=15, check=False,
             env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
         )

@@ -377,7 +377,7 @@ class MistralCloudReviewTests(unittest.TestCase):
         self.assertIn("TURN_LIMIT_EXCEEDED", review)
         self.assertIn("RESULT_CONTRACT_INVALID", review)
         self.assertIn("Mistral returned a valid JSON insufficient-evidence verdict", review)
-        self.assertIn('verdict INSUFFICIENT_EVIDENCE', review)
+        self.assertIn("REVIEW_PACKET_BLOCKED", review)
         self.assertIn("python -I /tmp/onecompany-mistral-result-trusted.py", review)
         self.assertNotIn("output INSUFFICIENT_EVIDENCE on its own line", review)
         self.assertIn("Turn limit of [0-9]+ reached", review)

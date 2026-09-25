@@ -358,24 +358,31 @@ class MistralCloudReviewTests(unittest.TestCase):
         self.assertIn("/tmp/onecompany-budget-trusted.json", review)
         self.assertIn("cp scripts/mistral_cloud_review.py /tmp/", review)
         self.assertIn("ADVISORY review (non-binding)", review)
-        self.assertIn("_onecompany_trusted/AGENTS.md", review)
-        self.assertIn("_onecompany_trusted/CLOUD-AGENT-QUALIFICATION.md", review)
-        self.assertIn("First read review-target.txt and review.diff.", review)
-        self.assertIn("relevant review_sources/", review)
-        self.assertIn("--max-turns 8", review)
+        self.assertIn("cp AGENTS.md /tmp/onecompany-mistral-trusted/AGENTS.md", review)
+        self.assertIn("cp docs/CLOUD-AGENT-QUALIFICATION.md /tmp/onecompany-mistral-trusted/", review)
+        self.assertIn("cp scripts/mistral_review_packet.py /tmp/onecompany-mistral-packet-trusted.py", review)
+        self.assertIn("--stage /tmp/onecompany-mistral-review-stage", review)
+        self.assertIn("--trusted /tmp/onecompany-mistral-trusted", review)
+        self.assertIn("REVIEW_PACKET_BLOCKED", review)
+        self.assertIn("--max-turns 2", review)
+        self.assertIn("enabled_tools = [\"re:^(?!)\"]", review)
+        self.assertIn("--enabled-tools 're:^(?!)'", review)
+        self.assertNotIn("--enabled-tools read_file", review)
+        self.assertNotIn("--enabled-tools grep", review)
+        self.assertIn("REVIEW_PACKET_BLOCKED", review)
         self.assertIn("--max-tokens 64000", review)
         self.assertIn("NOT proof of exhausted subscription credits, included quota or financial budget", review)
         self.assertNotIn("--max-tokens 50000", review)
-        self.assertIn("Reserve the last turn for the final answer", review)
+        self.assertIn("the entire permitted review context", review)
         self.assertIn("TURN_LIMIT_EXCEEDED", review)
         self.assertIn("RESULT_CONTRACT_INVALID", review)
         self.assertIn("Mistral returned a valid JSON insufficient-evidence verdict", review)
-        self.assertIn('verdict INSUFFICIENT_EVIDENCE', review)
+        self.assertIn("REVIEW_PACKET_BLOCKED", review)
         self.assertIn("python -I /tmp/onecompany-mistral-result-trusted.py", review)
         self.assertNotIn("output INSUFFICIENT_EVIDENCE on its own line", review)
         self.assertIn("Turn limit of [0-9]+ reached", review)
         self.assertNotIn("--max-turns 4", review)
-        self.assertIn("Do not re-read the same file", review)
+        self.assertIn("or repeated tool turns", review)
         self.assertLessEqual(target.MAX_REVIEW_STAGE_DIFF_BYTES, 32_000)
         self.assertLessEqual(target.MAX_REVIEW_STAGE_SOURCE_BYTES, 24_000)
         self.assertLessEqual(target.MAX_REVIEW_STAGE_TOTAL_BYTES, 64_000)
@@ -408,7 +415,7 @@ class MistralCloudReviewTests(unittest.TestCase):
         self.assertNotIn("-f event=APPROVE", review)
         self.assertIn('"commit_id=$REVIEW_SHA"', review)
         self.assertIn("advisory", review.lower())
-        self.assertIn("NON-GATING", review)
+        self.assertIn("ADVISORY review (non-binding)", review)
         self.assertNotIn("gh pr merge", review)
         import re
         active_uses = re.findall(r"(?m)^\s+uses:\s+([^\s]+)", review)
@@ -429,6 +436,11 @@ class MistralCloudReviewTests(unittest.TestCase):
             ".onecompany/selftest/test_mistral_review_result.py",
             bootstrap.SOURCE_INSTALLATION_EXCLUSIONS,
         )
+        for source_only in (
+            "scripts/mistral_review_packet.py",
+            ".onecompany/selftest/test_mistral_review_packet.py",
+        ):
+            self.assertIn(source_only, bootstrap.SOURCE_INSTALLATION_EXCLUSIONS)
 
 
 if __name__ == "__main__":

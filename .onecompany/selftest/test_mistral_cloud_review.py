@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -346,6 +347,61 @@ class MistralCloudReviewTests(unittest.TestCase):
                     capture_output=True, check=False,
                 )
                 self.assertEqual(result.returncode == 0, accepted)
+
+    def test_wake_bus_reports_binding_only_after_successful_platform_publication(self):
+        """Grok finding: a pre-publish wake message must never claim binding PASS."""
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        self.assertEqual(workflow.count("- name: Post Mistral result"), 1)
+        report = workflow.split("      - name: Post Mistral result\n", 1)[1]
+        script = textwrap.dedent(report.split("        run: |\n", 1)[1])
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            comment = root / "wake-report.md"
+            model_output = root / "model-result.json"
+            model_output.write_text('{"synthetic": "review"}', encoding="utf-8")
+            script = script.replace(
+                "/tmp/onecompany-mistral-comment.md", str(comment)
+            ).replace(
+                "/tmp/onecompany-mistral-public.txt", str(model_output)
+            )
+            scenarios = [
+                ("success", "APPROVE", "BINDING technical PASS", False),
+                ("success", "REQUEST_CHANGES", "BINDING technical FAIL", False),
+                ("failure", "", "REVIEW_PUBLICATION_BLOCKED", True),
+                ("skipped", "", "REVIEW_PUBLICATION_BLOCKED", True),
+            ]
+            for outcome, event, expected, blocked in scenarios:
+                with self.subTest(outcome=outcome, event=event):
+                    env = os.environ.copy()
+                    env.update({
+                        "READY": "true", "ACTOR_EXIT": "0",
+                        "TARGET_READY": "true",
+                        "EVIDENCE_READY": "true", "STAGE_READY": "true",
+                        "PUBLISH_OUTCOME": outcome,
+                        "PUBLISH_EVENT": event,
+                        "REVIEW_PR": "220", "REVIEW_SHA": HEAD,
+                        "GITHUB_SERVER_URL": "https://github.com",
+                        "GITHUB_REPOSITORY": "NTinkicht/OneCompany",
+                        "GITHUB_RUN_ID": "42",
+                    })
+                    # Replace the external GitHub operation with a shell stub.
+                    result = subprocess.run(
+                        ["bash", "-c", "gh() { :; }\n" + script],
+                        capture_output=True, text=True, env=env, check=False,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    report_body = comment.read_text(encoding="utf-8")
+                    self.assertIn(expected, report_body)
+                    self.assertIn("PR #220; exact head " + HEAD, report_body)
+                    self.assertIn(
+                        "https://github.com/NTinkicht/OneCompany/actions/runs/42",
+                        report_body,
+                    )
+                    self.assertNotIn("ADVISORY review (non-binding)", report_body)
+                    self.assertEqual(
+                        "no binding GitHub technical PASS/FAIL recorded" in report_body,
+                        blocked,
+                    )
 
     def test_owner_wake_and_review_are_disjoint_source_only(self):
         regular = WAKE.read_text(encoding="utf-8")

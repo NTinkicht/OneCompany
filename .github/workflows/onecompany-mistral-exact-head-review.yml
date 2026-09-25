@@ -328,7 +328,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "${READY:-false}" == "true" && "${ACTOR_EXIT:-1}" == "0" ]]; then
             # Defense in depth: even though Vibe has no shell/write tool, scrub the
             # literal provider credential plus common authorization/key renderings
             # before any model-authored text can reach a public issue comment.
@@ -347,7 +346,6 @@ jobs:
           text = re.sub(r'(?i)(MISTRAL_API_KEY\s*[=:]\s*)\S+', r'\1[REDACTED]', text)
           target.write_text(text[:50000], encoding='utf-8')
           PY
-          fi
 
       # The parent publishes model PASS -> GitHub APPROVE, FAIL -> REQUEST_CHANGES.
       # It rechecks exact head/base, green CI and non-self authorship. The model

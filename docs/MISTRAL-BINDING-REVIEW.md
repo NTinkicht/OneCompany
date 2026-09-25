@@ -23,6 +23,15 @@ it map to actor `mistral-vibe` with authority **code_review only**.
 This is not a blanket approval identity for other Actions workflows and does
 not grant root, spending, merge_execution, branch creation, or self-review.
 
+The issue #130 wake-bus report is published **after** GitHub accepts the
+technical platform review. It reports binding PASS only after a successful
+`APPROVE`, and binding FAIL only after a successful `REQUEST_CHANGES`, with the
+exact PR head and workflow run linked. If the model fails, evidence is
+insufficient, or GitHub rejects publication, the wake bus explicitly states
+**NOT BINDING**; a successful model answer by itself is never a published
+technical verdict. The previous unconditional `ADVISORY (non-binding)` banner
+has been removed from the binding path.
+
 The native gate still verifies non-self cumulative authorship, correct
 exact head **and** base, scope, required CI, assurance packet, emergency stop
 and platform `APPROVED` review; a Vibe review is not permission to ignore

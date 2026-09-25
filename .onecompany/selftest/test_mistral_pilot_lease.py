@@ -125,6 +125,13 @@ class MistralQualificationPilotTests(unittest.TestCase):
             with self.subTest(field=field):
                 self.assertFalse(mistral_qualification_pilot_admission(**altered))
 
+    def test_fresh_bootstrap_excludes_both_source_only_control_tests(self):
+        bootstrap = (ROOT / "scripts/bootstrap.py").read_text()
+        for name in ("test_mistral_pilot_lease.py",
+                     "test_mistral_start_reconcile.py"):
+            with self.subTest(name=name):
+                self.assertIn(f'".onecompany/selftest/{name}"', bootstrap)
+
     def test_paid_fallback_and_emergency_stop_always_refused(self):
         for field, value in (
             ("allow_paid_fallback", True),

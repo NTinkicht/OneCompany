@@ -5,12 +5,17 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import math
+import os
+import re
+import stat
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
 
 MAX_PROJECTION_BYTES = 65_536
+MAX_PROJECTION_NESTING = 128
 EVIDENCE = ("quality", "preview", "browser", "ci", "review")
 
 
@@ -150,14 +155,116 @@ def serve(projection: dict[str, object], port: int = 0) -> ThreadingHTTPServer:
 
 
 def _read_projection_file(path: Path) -> dict[str, object]:
-    with path.open("rb") as source:
-        raw = source.read(MAX_PROJECTION_BYTES + 1)
+    """Read one bounded JSON object, never following a path component or FIFO."""
+    if not all(getattr(os, flag, 0) for flag in
+               ("O_DIRECTORY", "O_NOFOLLOW", "O_NONBLOCK")):
+        raise ValueError("MISSION_CONTROL_SECURE_READ_UNAVAILABLE")
+    components = path.parts[1:] if path.is_absolute() else path.parts
+    if not components or any(item in ("", ".", "..") for item in components):
+        raise ValueError("MISSION_CONTROL_UNSAFE_INPUT_PATH")
+    opened: list[int] = []
+    try:
+        opened.append(os.open(path.anchor if path.is_absolute() else ".",
+                              os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW))
+        for item in components[:-1]:
+            opened.append(os.open(item, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
+                                  dir_fd=opened[-1]))
+        fd = os.open(components[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                     dir_fd=opened[-1])
+        try:
+            metadata = os.fstat(fd)
+            if not stat.S_ISREG(metadata.st_mode):
+                raise ValueError("MISSION_CONTROL_REGULAR_INPUT_REQUIRED")
+            if metadata.st_size > MAX_PROJECTION_BYTES:
+                raise ValueError("MISSION_CONTROL_PROJECTION_TOO_LARGE")
+            with os.fdopen(fd, "rb", closefd=False) as source:
+                raw = source.read(MAX_PROJECTION_BYTES + 1)
+        finally:
+            os.close(fd)
+    finally:
+        for fd in reversed(opened):
+            os.close(fd)
     if len(raw) > MAX_PROJECTION_BYTES:
         raise ValueError("MISSION_CONTROL_PROJECTION_TOO_LARGE")
-    data = json.loads(raw)
+
+    def unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+        result: dict[str, object] = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("MISSION_CONTROL_DUPLICATE_JSON_KEY")
+            result[key] = value
+        return result
+
+    def reject_nonfinite(_value: str) -> object:
+        raise ValueError("MISSION_CONTROL_NONFINITE_JSON_VALUE")
+
+    def finite_float(value: str) -> float:
+        number = float(value)
+        # JSON's 1e9999 is syntactically legal but converts to +Infinity;
+        # parse_constant alone does not catch this Python float overflow.
+        if not math.isfinite(number):
+            raise ValueError("MISSION_CONTROL_NONFINITE_JSON_VALUE")
+        return number
+
+    data = json.loads(raw, object_pairs_hook=unique_object,
+                      parse_constant=reject_nonfinite, parse_float=finite_float)
     if not isinstance(data, dict):
         raise ValueError("MISSION_CONTROL_PROJECTION_OBJECT_REQUIRED")
     return data
+
+
+def _validate_projection_input(projection: dict[str, object]) -> None:
+    """Accept only existing non-authorizing local producer schema envelopes."""
+    # An otherwise canonical projection carrying an extra RunKey/lease or
+    # approval assertion is contradictory, even if render() would ignore it.
+    # Real projection and dashboard composers never emit these keys.
+    forbidden_authority = {
+        "approved", "approval", "authorization", "run_key", "lease_id",
+        "canonical_work_unit", "deployment_authorized", "spend_authorized",
+    }
+    # Bound and inspect the ENTIRE already-parsed display tree, not only root
+    # keys. A nested check or ignored extension must not launder a forged
+    # approval, lease, RunKey or spending assertion through this local view.
+    # Iteration avoids relying on Python's much higher version-dependent
+    # recursive JSON parser threshold as a security depth guard.
+    pending: list[tuple[object, int]] = [(projection, 1)]
+    while pending:
+        current, depth = pending.pop()
+        if depth > MAX_PROJECTION_NESTING:
+            raise ValueError("MISSION_CONTROL_JSON_NESTING_LIMIT")
+        if isinstance(current, dict):
+            if forbidden_authority.intersection(current):
+                raise ValueError("MISSION_CONTROL_AUTHORITY_FIELD_FORBIDDEN")
+            pending.extend((value, depth + 1) for value in current.values()
+                           if isinstance(value, (dict, list)))
+        elif isinstance(current, list):
+            pending.extend((value, depth + 1) for value in current
+                           if isinstance(value, (dict, list)))
+    if (projection.get("schema") not in {
+            "onecompany.mission-control.phase1.v1",
+            "onecompany.mission-control-dashboard.phase1.v1",
+        } or projection.get("authority_granted") is not False
+            or not isinstance(projection.get("revision"), str)
+            or re.fullmatch(r"[0-9a-f]{40}", projection["revision"]) is None
+            or projection.get("product_brief") != "DRAFT_UNAPPROVED"
+            or projection.get("execution_core") not in {"BOUNDED", "BLOCKED"}
+            or not isinstance(projection.get("checks"), dict)
+            or set(projection["checks"]) != {"app", "quality", "preview"}):
+        raise ValueError("MISSION_CONTROL_CANONICAL_UNAUTHORIZED_INPUT_REQUIRED")
+    for check in projection["checks"].values():
+        if (not isinstance(check, dict)
+                or type(check.get("exact_revision")) is not bool
+                or check.get("status") not in {"PASS", "BLOCKED"}
+                or (check["status"] == "PASS" and not check["exact_revision"])):
+            raise ValueError("MISSION_CONTROL_CANONICAL_CHECK_REQUIRED")
+    # A canonical producer never reports readiness if execution is blocked or
+    # any check is not PASS. Keep hand-written display fields from masquerading
+    # as a coherent producer snapshot; this still is NOT an authenticated gate.
+    ready = (projection["execution_core"] == "BOUNDED"
+             and all(c["status"] == "PASS" for c in projection["checks"].values()))
+    expected = "READY_FOR_OWNER_PREVIEW" if ready else "BLOCKED"
+    if projection.get("readiness") != expected:
+        raise ValueError("MISSION_CONTROL_CANONICAL_READINESS_MISMATCH")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -167,12 +274,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=8765)
     args = parser.parse_args(argv)
     try:
+        if not 0 <= args.port <= 65535:
+            raise ValueError("MISSION_CONTROL_INVALID_PORT")
         projection = _read_projection_file(args.input)
+        _validate_projection_input(projection)
         if args.journey is not None:
             journey = _read_projection_file(args.journey)
             projection = combine_projection_journey(projection, journey)
         server = serve(projection, args.port)
-    except (OSError, ValueError, TypeError, RecursionError) as exc:
+    except (OSError, ValueError, TypeError, RecursionError, UnicodeError) as exc:
         print("BLOCKED: " + str(exc), file=sys.stderr); return 2
     print(f"Mission Control: http://127.0.0.1:{server.server_port}/", flush=True)
     try: server.serve_forever()

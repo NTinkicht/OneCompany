@@ -1,0 +1,233 @@
+"""Source-only Mission Control input hardening and actual loopback smoke."""
+from __future__ import annotations
+
+import copy
+import importlib.util
+import json
+import os
+from pathlib import Path
+import select
+import subprocess
+import sys
+import tempfile
+import unittest
+from unittest import mock
+import urllib.request
+
+ROOT = Path(__file__).resolve().parents[2]
+SCRIPT = ROOT / "scripts" / "mission_control_local.py"
+sys.path.insert(0, str(ROOT / "scripts"))
+from mission_control_projection import project
+
+spec = importlib.util.spec_from_file_location("mission_control_input_guard", SCRIPT)
+mission = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mission)
+
+
+def canonical() -> dict:
+    revision = "a" * 40
+    return project(
+        revision, {"status": "DRAFT", "approved": False},
+        {"bounded": True},
+        {name: {"revision": revision, "status": "PASS"}
+         for name in ("app", "quality", "preview")},
+    )
+
+
+class MissionInputGuardTests(unittest.TestCase):
+    def write(self, folder: Path, name: str, value: dict) -> Path:
+        path = folder / name
+        path.write_text(json.dumps(value), encoding="utf-8")
+        return path
+
+    def test_real_canonical_projection_served_on_loopback(self):
+        with tempfile.TemporaryDirectory() as td:
+            folder = Path(td)
+            path = self.write(folder, "projection.json", canonical())
+            before = path.read_bytes()
+            child = subprocess.Popen(
+                [sys.executable, str(SCRIPT), "--input", str(path), "--port", "0"],
+                cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True,
+            )
+            try:
+                ready, _, _ = select.select([child.stdout], [], [], 10)
+                self.assertTrue(ready, "local server did not announce loopback URL")
+                line = child.stdout.readline().strip()
+                self.assertTrue(line.startswith("Mission Control: http://127.0.0.1:"),
+                                line + child.stderr.read() if child.poll() is not None else line)
+                address = line.split("Mission Control: ", 1)[1]
+                with urllib.request.urlopen(address, timeout=3) as response:
+                    body = response.read().decode("utf-8")
+                    self.assertEqual(response.status, 200)
+                    self.assertIn("id='status'>READY</p>", body)
+                    self.assertIn("No execution or deployment authority", body)
+                    self.assertEqual(response.headers["Cache-Control"], "no-store")
+                self.assertEqual(path.read_bytes(), before)
+                self.assertEqual(sorted(p.name for p in folder.iterdir()),
+                                 ["projection.json"])
+            finally:
+                child.terminate()
+                try:
+                    child.communicate(timeout=4)
+                except subprocess.TimeoutExpired:
+                    child.kill()
+                    child.communicate(timeout=4)
+
+    def test_wrong_schema_and_authority_state_refused_before_server(self):
+        with tempfile.TemporaryDirectory() as td:
+            folder = Path(td)
+            for name, mutation in (
+                ("schema", lambda d: d.update(schema="invented")),
+                ("authority", lambda d: d.update(authority_granted=True)),
+                ("missing authority", lambda d: d.pop("authority_granted")),
+                ("injected approved flag", lambda d: d.update(approved=True)),
+                ("injected approval record", lambda d: d.update(approval={"implementation": True})),
+                ("injected authorization", lambda d: d.update(authorization="GRANTED")),
+                ("injected RunKey", lambda d: d.update(run_key="forged")),
+                ("injected lease", lambda d: d.update(lease_id="forged")),
+                ("injected WU", lambda d: d.update(canonical_work_unit="WU-FORGED")),
+                ("injected deploy flag", lambda d: d.update(deployment_authorized=True)),
+                ("injected spend flag", lambda d: d.update(spend_authorized=True)),
+                ("wrong revision", lambda d: d.update(revision="not-a-sha")),
+                ("missing check", lambda d: d["checks"].pop("quality")),
+                ("forged check", lambda d: d["checks"]["app"].update(status="SUCCESS")),
+                ("false-like check", lambda d: d["checks"]["app"].update(exact_revision=1)),
+                ("PASS without exact revision", lambda d: d["checks"]["app"].update(exact_revision=False)),
+                ("blocked check with READY", lambda d: d["checks"]["quality"].update(status="BLOCKED")),
+                ("unbounded execution READY", lambda d: d.update(execution_core="BLOCKED")),
+                ("all PASS yet reported BLOCKED", lambda d: d.update(readiness="BLOCKED")),
+                ("invented readiness", lambda d: d.update(readiness="SUCCESS")),
+            ):
+                with self.subTest(name=name):
+                    candidate = canonical()
+                    mutation(candidate)
+                    path = self.write(folder, "candidate.json", candidate)
+                    with mock.patch.object(mission, "serve",
+                                           side_effect=AssertionError("must not serve")):
+                        self.assertEqual(mission.main(
+                            ["--input", str(path), "--port", "0"]), 2)
+
+    def test_invalid_ports_refuse_before_socket_setup(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = self.write(Path(td), "projection.json", canonical())
+            for port in ("-1", "65536", "999999999"):
+                with self.subTest(port=port), \
+                     mock.patch.object(mission, "serve",
+                                       side_effect=AssertionError("must not bind")):
+                    self.assertEqual(mission.main(
+                        ["--input", str(path), "--port", port]), 2)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX anchored reader required")
+    def test_canonical_duplicate_keys_and_nonfinite_values_refuse_at_parser(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "input.json"
+            baseline = json.dumps(canonical())
+            for label, raw, error in (
+                ("duplicate authority", baseline.replace(
+                    '"authority_granted": false',
+                    '"authority_granted": true, "authority_granted": false', 1),
+                 "MISSION_CONTROL_DUPLICATE_JSON_KEY"),
+                ("escaped duplicate", baseline.replace(
+                    '"authority_granted": false',
+                    '"authority\\u005fgranted": true, "authority_granted": false', 1),
+                 "MISSION_CONTROL_DUPLICATE_JSON_KEY"),
+                ("nested duplicate", baseline.replace(
+                    '"status": "PASS"',
+                    '"status": "BLOCKED", "status": "PASS"', 1),
+                 "MISSION_CONTROL_DUPLICATE_JSON_KEY"),
+                ("nan extension", baseline[:-1] + ', "local_extension": NaN}',
+                 "MISSION_CONTROL_NONFINITE_JSON_VALUE"),
+                ("infinite extension", baseline[:-1] + ', "local_extension": Infinity}',
+                 "MISSION_CONTROL_NONFINITE_JSON_VALUE"),
+                ("float overflow", baseline[:-1] + ', "local_extension": 1e9999}',
+                 "MISSION_CONTROL_NONFINITE_JSON_VALUE"),
+                ("negative overflow", baseline[:-1] + ', "local_extension": -1e9999}',
+                 "MISSION_CONTROL_NONFINITE_JSON_VALUE"),
+            ):
+                with self.subTest(label=label):
+                    path.write_text(raw, encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, error):
+                        mission._read_projection_file(path)
+            path.write_text("[]", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "PROJECTION_OBJECT_REQUIRED"):
+                mission._read_projection_file(path)
+
+    def test_nested_forged_authority_and_depth_limit_are_refused(self):
+        for field in (
+            "approved", "approval", "authorization", "run_key", "lease_id",
+            "canonical_work_unit", "deployment_authorized", "spend_authorized",
+        ):
+            for location in ("extra", "app_check", "nested_list"):
+                with self.subTest(field=field, location=location):
+                    value = canonical()
+                    if location == "extra":
+                        value["extension"] = {"metadata": {field: "GRANTED"}}
+                    elif location == "app_check":
+                        value["checks"]["app"][field] = True
+                    else:
+                        value["extension"] = [{"data": {field: "GRANTED"}}]
+                    with self.assertRaisesRegex(ValueError, "AUTHORITY_FIELD_FORBIDDEN"):
+                        mission._validate_projection_input(value)
+        for count, accepted in ((32, True), (128, False), (1500, False)):
+            with self.subTest(nesting=count):
+                value = canonical()
+                nested: dict = {}
+                for _ in range(count):
+                    nested = {"child": nested}
+                value["untrusted_display"] = nested
+                if accepted:
+                    mission._validate_projection_input(value)
+                else:
+                    with self.assertRaisesRegex(ValueError, "JSON_NESTING_LIMIT"):
+                        mission._validate_projection_input(value)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX anchored reader required")
+    def test_symlink_parent_leaf_fifo_and_oversize_rejected(self):
+        with tempfile.TemporaryDirectory() as td:
+            folder = Path(td)
+            target = self.write(folder, "valid.json", canonical())
+            leaf = folder / "link.json"
+            leaf.symlink_to(target)
+            with self.assertRaises(OSError):
+                mission._read_projection_file(leaf)
+            parent = folder / "parent-link"
+            parent.symlink_to(folder, target_is_directory=True)
+            with self.assertRaises(OSError):
+                mission._read_projection_file(parent / "valid.json")
+            fifo = folder / "pipe.json"
+            os.mkfifo(fifo)
+            with self.assertRaisesRegex(ValueError, "REGULAR_INPUT_REQUIRED"):
+                mission._read_projection_file(fifo)
+            large = folder / "large.json"
+            large.write_bytes(b"{" + b" " * mission.MAX_PROJECTION_BYTES + b"}")
+            with self.assertRaisesRegex(ValueError, "TOO_LARGE"):
+                mission._read_projection_file(large)
+            self.assertEqual(json.loads(target.read_text()), canonical())
+
+    def test_missing_secure_flags_refuse_closed(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = self.write(Path(td), "valid.json", canonical())
+            for flag in ("O_NOFOLLOW", "O_NONBLOCK", "O_DIRECTORY"):
+                with self.subTest(flag=flag):
+                    with mock.patch.object(mission.os, flag, 0):
+                        with self.assertRaisesRegex(ValueError, "SECURE_READ_UNAVAILABLE"):
+                            mission._read_projection_file(path)
+
+    def test_optional_journey_cannot_claim_approval(self):
+        with tempfile.TemporaryDirectory() as td:
+            folder = Path(td)
+            path = self.write(folder, "projection.json", canonical())
+            invalid_journey = self.write(folder, "journey.json", {
+                "schema": "onecompany.first-run-journey.v1",
+                "read_only": True, "approval": "GRANTED",
+            })
+            with mock.patch.object(mission, "serve",
+                                   side_effect=AssertionError("must not serve")):
+                self.assertEqual(mission.main([
+                    "--input", str(path), "--journey", str(invalid_journey),
+                    "--port", "0"]), 2)
+
+
+if __name__ == "__main__":
+    unittest.main()

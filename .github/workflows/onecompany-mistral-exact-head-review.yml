@@ -1,5 +1,7 @@
-# Source-only reviewer pilot: not a binding merge gate or customer installer component.
-name: OneCompany Mistral Exact-Head Advisory Review
+# Source-repository technical PASS/FAIL reviewer. A published review may satisfy
+# the independent technical-review gate, NEVER the other merge/assurance gates;
+# this workflow is not installed into customer repositories.
+name: OneCompany Mistral Exact-Head Technical Review
 
 on:
   issue_comment:
@@ -446,7 +448,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
 
           {
             if [[ "${PUBLISH_OUTCOME:-}" == "success" && "${PUBLISH_EVENT:-}" == "APPROVE" ]]; then

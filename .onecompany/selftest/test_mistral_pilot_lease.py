@@ -32,9 +32,8 @@ class MistralQualificationPilotTests(unittest.TestCase):
         ready = next(x for x in self.readiness["actors"]
                      if x["actor_id"] == "mistral-vibe")
         item = next(x for x in self.queue["work_units"] if x["id"] == WU)
-        # An unmerged queue binding is deliberately NOT admission authority.
-        # Model the eventual reviewed protected-main queue value in this
-        # pure offline test; the runtime uses only the verified PR base.
+        # Offline fixture models the protected-main canonical PR mapping.
+        # Runtime derives admission only from the verified PR base.
         item = copy.deepcopy(item)
         item["pr"] = PR
         return dict(repo=REPO, actor="mistral-vibe", pr=PR, work_unit=WU,
@@ -73,7 +72,8 @@ class MistralQualificationPilotTests(unittest.TestCase):
             ("status", "DONE"),
             ("risk_class", "HIGH"),
             ("branch", "main"),
-            ("dependencies", []),
+            ("dependencies", ["WU-PFC-001"]),
+            ("legacy_completion_reference", {}),
             ("write_scope", ["**/*"]),
             ("write_scope", ["tests/test_agent_qualification.py"]),
             ("resource_locks", []),
@@ -102,6 +102,28 @@ class MistralQualificationPilotTests(unittest.TestCase):
             p[owner][field] = value
             with self.subTest(owner=owner, field=field):
                 self.assertFalse(mistral_qualification_pilot_admission(**p))
+
+    def test_legacy_cutover_reference_is_not_a_durable_merge_event(self):
+        pfc = next(x for x in self.queue["work_units"]
+                   if x["id"] == "WU-PFC-001")
+        self.assertEqual((pfc["status"], pfc["pr"]), ("DONE", 9))
+        p = self.policy()
+        self.assertEqual(p["item"]["dependencies"], [])
+        self.assertEqual(p["item"]["legacy_completion_reference"], {
+            "work_unit": "WU-PFC-001",
+            "pr": 9,
+            "merge_sha": "92351502fe85e83da5609269ef868f6d768004f4",
+            "cutover": "legacy-merged-before-v2-ledger",
+        })
+        for field, value in (
+            ("merge_sha", "0" * 40),
+            ("pr", 10),
+            ("cutover", "not-reviewed"),
+        ):
+            altered = self.policy()
+            altered["item"]["legacy_completion_reference"][field] = value
+            with self.subTest(field=field):
+                self.assertFalse(mistral_qualification_pilot_admission(**altered))
 
     def test_paid_fallback_and_emergency_stop_always_refused(self):
         for field, value in (

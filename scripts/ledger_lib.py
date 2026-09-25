@@ -550,6 +550,15 @@ def _normalized_planning_snapshot(
 # It is intentionally not a reusable client product feature or general-purpose
 # exemption for arbitrary READY WUs.
 MISTRAL_QUALIFICATION_PR = 224
+# Historical WU-PFC-001 completed in GitHub PR #9 before the v2 event ledger.
+# This independent sandbox qualification has no active WU dependencies;
+# record the historical reference without manufacturing a MERGED event.
+MISTRAL_QUALIFICATION_LEGACY = {
+    "work_unit": "WU-PFC-001",
+    "pr": 9,
+    "merge_sha": "92351502fe85e83da5609269ef868f6d768004f4",
+    "cutover": "legacy-merged-before-v2-ledger",
+}
 MISTRAL_QUALIFICATION_SCOPE = [
     "examples/agent-qualification/demo.py",
     "tests/test_agent_qualification.py",
@@ -587,7 +596,8 @@ def mistral_qualification_pilot_admission(
             or item.get("status") != "READY"
             or item.get("risk_class") != "LOW"
             or item.get("branch") != "wu-cloud-mistral-dev-001"
-            or item.get("dependencies") != ["WU-PFC-001"]
+            or item.get("dependencies") != []
+            or item.get("legacy_completion_reference") != MISTRAL_QUALIFICATION_LEGACY
             or item.get("write_scope") != MISTRAL_QUALIFICATION_SCOPE
             or item.get("resource_locks") != [
                 "onecompany:mistral-cloud-qualification"

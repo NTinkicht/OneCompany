@@ -97,6 +97,7 @@ class GemmaFreeProbeTests(unittest.TestCase):
         self.assertEqual(payload["model"], g.FREE_MODEL)
         self.assertEqual(payload["stream"], False)
         self.assertEqual(payload["max_tokens"], 750)
+        self.assertEqual(payload["usage"], {"include": True})
         self.assertEqual(len(payload["messages"]), 2)
         self.assertIn("synthetic example", payload["messages"][1]["content"])
         self.assertNotIn("PRIVATE_TOKEN_TEST", request.data.decode())

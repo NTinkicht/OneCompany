@@ -42,7 +42,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if python -I scripts/mistral_cloud_start.py > /tmp/mistral-start-result.json; then
+          if python scripts/mistral_cloud_start.py > /tmp/mistral-start-result.json; then
             echo "status=PR_PREPARED_NOT_MODEL_QUALIFIED" >> "$GITHUB_OUTPUT"
           else
             echo "status=START_BLOCKED_OR_RECONCILE_REQUIRED" >> "$GITHUB_OUTPUT"

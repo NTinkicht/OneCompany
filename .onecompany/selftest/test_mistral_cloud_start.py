@@ -61,7 +61,7 @@ class MistralCanonicalIntakeTests(unittest.TestCase):
 
     def test_no_lease_or_code_qualification_from_branch_scaffold(self):
         code = (ROOT / "scripts/mistral_cloud_start.py").read_text()
-        self.assertIn("NOT model-authored code", code)
+        self.assertIn("not model-authored code", code)
         self.assertIn("A reviewed protected-main WU PR-number", code)
         self.assertNotIn("ROLE_LEASE_ASSIGNED", code)
         self.assertNotIn("Material-Author: mistral-vibe", code)

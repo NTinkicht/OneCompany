@@ -14,7 +14,7 @@ from pathlib import Path
 
 SHA = re.compile(r"[a-f0-9]{40}\Z")
 FILE = re.compile(r"(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\Z")
-MAX_INLINE_BYTES = 45_000
+MAX_INLINE_BYTES = 50_000
 MAX_INPUT_BYTES = 64_000
 MAX_SOURCE_FILES = 16
 MAX_POLICY_BYTES = 8_000

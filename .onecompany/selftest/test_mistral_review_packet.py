@@ -98,6 +98,24 @@ class MistralReviewPacketTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "REVIEW_PACKET_PATH_BLOCKED"):
                 self.build(stage, trusted)
 
+    def test_valid_multi_file_packet_between_old_and_new_limit_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            stage, trusted = self.fixture(Path(tmp))
+            (stage / "review.diff").write_text(
+                "diff --git a/src/demo.py b/src/demo.py\\n" + "D" * 24000
+            )
+            (trusted / "AGENTS.md").write_text("P" * 2600)
+            (stage / "review_sources" / "src" / "demo.py").write_text("x" * 8500)
+            (stage / "review_sources" / "src" / "extra.py").write_text("y" * 8500)
+            prompt = self.build(stage, trusted)
+            actual = len(prompt.encode("utf-8"))
+            self.assertGreater(actual, 45_000)
+            self.assertLessEqual(actual, packet.MAX_INLINE_BYTES)
+            self.assertLess(packet.MAX_INLINE_BYTES, packet.MAX_INPUT_BYTES)
+            self.assertIn("D" * 24000, prompt)
+            self.assertIn("x" * 8500, prompt)
+            self.assertIn("y" * 8500, prompt)
+
     def test_total_inline_byte_ceiling_blocks_before_inference(self):
         with tempfile.TemporaryDirectory() as tmp:
             stage, trusted = self.fixture(Path(tmp))

@@ -178,6 +178,7 @@ def tracked_mode(head: str, path: str) -> str | None:
 
 
 def git_file(head: str, path: str) -> bytes | None:
+    """Read exact-head regular blobs only; distinguish missing files from errors."""
     mode = tracked_mode(head, path)
     response = subprocess.run(
         ["git", "show", f"{head}:{path}"], text=False, capture_output=True,

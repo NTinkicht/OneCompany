@@ -108,9 +108,7 @@
       "work_kind": "ENABLER",
       "status": "READY",
       "priority": 100,
-      "dependencies": [
-        "WU-PFC-001"
-      ],
+      "dependencies": [],
       "issue": 133,
       "pr": 224,
       "branch": "wu-cloud-mistral-dev-001",
@@ -137,7 +135,13 @@
         "Model-authored source and tests committed with exact-head CAS and CI",
         "Independent non-Mistral review completed before merge",
         "Zero added spend; no Codespace or model-held GitHub token"
-      ]
+      ],
+      "legacy_completion_reference": {
+        "work_unit": "WU-PFC-001",
+        "pr": 9,
+        "merge_sha": "92351502fe85e83da5609269ef868f6d768004f4",
+        "cutover": "legacy-merged-before-v2-ledger"
+      }
     },
     {
       "id": "WU-CLOUD-GROK-DEV-REVIEW-QA-001",

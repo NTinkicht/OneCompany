@@ -470,10 +470,11 @@ jobs:
             elif [[ "${PUBLISH_OUTCOME:-}" != "success" || ( "${PUBLISH_EVENT:-}" != "APPROVE" && "${PUBLISH_EVENT:-}" != "REQUEST_CHANGES" ) ]]; then
               echo "REVIEW_PUBLICATION_BLOCKED - no binding GitHub technical PASS/FAIL recorded; model output is not approval evidence."
             else
-              echo '```text'
-              cat /tmp/onecompany-mistral-public.txt
-              echo
-              echo '```'
+              # Model-controlled JSON is already rendered inert and attached
+              # to the exact-head PR review. Do not echo raw model text into
+              # issue #130 where a crafted code fence could become markup.
+              echo "Validated findings are in the exact-head GitHub PR review."
+              echo "The binding gate accepts it only after this run completes successfully and all remaining merge requirements pass."
             fi
           } > /tmp/onecompany-mistral-comment.md
           gh issue comment 130 --repo "$GITHUB_REPOSITORY" --body-file /tmp/onecompany-mistral-comment.md

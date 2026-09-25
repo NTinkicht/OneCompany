@@ -79,8 +79,10 @@ def parse_code_tests(content: str) -> dict:
     return result
 
 
-def probe(key: str, *, model: str = FREE_MODEL, opener=None) -> dict:
-    """Submit a single synthetic task to the exact free model, no paid fallback."""
+def probe(key: str, *, model: str = FREE_MODEL, opener=None,
+          budget_path: Path = ROOT / ".onecompany/budget.json") -> dict:
+    """Submit one synthetic task only when free model and budget are verified."""
+    check_budget(budget_path)
     check_model(model)
     if not key or not key.strip():
         raise ValueError("OPENROUTER_API_KEY_MISSING")
@@ -93,6 +95,7 @@ def probe(key: str, *, model: str = FREE_MODEL, opener=None) -> dict:
             {"role": "user", "content": TASK},
         ],
         "max_tokens": 750,
+        "response_format": {"type": "json_object"},
         "temperature": 0,
         "stream": False,
     }).encode("utf-8")
@@ -122,8 +125,10 @@ def probe(key: str, *, model: str = FREE_MODEL, opener=None) -> dict:
     usage = data.get("usage") or {}
     if not isinstance(usage, dict):
         raise ValueError("OPENROUTER_USAGE_INVALID")
-    cost = usage.get("cost")
-    if cost is not None and (type(cost) not in (int, float) or cost != 0):
+    if "cost" not in usage:
+        raise ValueError("NONZERO_OR_UNKNOWN_INFERENCE_COST")
+    cost = usage["cost"]
+    if type(cost) not in (int, float) or cost != 0:
         raise ValueError("NONZERO_OR_UNKNOWN_INFERENCE_COST")
     choices = data.get("choices")
     if not isinstance(choices, list) or len(choices) != 1:

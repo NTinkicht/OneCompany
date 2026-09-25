@@ -301,7 +301,7 @@ jobs:
               reason="Mistral Vibe entitlement was rejected by the runtime"
             elif grep -Eqi 'token limit exceeded|context (window|length) exceeded|too many tokens' /tmp/onecompany-mistral-error.txt; then
               status="TOKEN_BUDGET_EXCEEDED"
-              reason="Mistral Vibe hit this workflow\u0027s configured per-execution token ceiling; NOT proof of exhausted subscription credits, included quota or financial budget; narrow evidence before retry"
+              reason="Mistral Vibe hit this workflow's configured per-execution token ceiling; NOT proof of exhausted subscription credits, included quota or financial budget; narrow evidence before retry"
             elif grep -Eqi '429|rate.?limit|quota|usage[^[:alnum:]]*limit|capacity' /tmp/onecompany-mistral-error.txt; then
               status="CAPACITY_DEGRADED"
               reason="Mistral included capacity is unavailable or exhausted"

@@ -357,7 +357,7 @@ class MistralCloudReviewTests(unittest.TestCase):
         self.assertIn("persist-credentials: false", review)
         self.assertIn("/tmp/onecompany-budget-trusted.json", review)
         self.assertIn("cp scripts/mistral_cloud_review.py /tmp/", review)
-        self.assertIn("ADVISORY review (non-binding)", review)
+        self.assertIn("name: OneCompany Mistral Exact-Head Technical Review", review)
         self.assertIn("cp AGENTS.md /tmp/onecompany-mistral-trusted/AGENTS.md", review)
         self.assertIn("cp docs/CLOUD-AGENT-QUALIFICATION.md /tmp/onecompany-mistral-trusted/", review)
         self.assertIn("cp scripts/mistral_review_packet.py /tmp/onecompany-mistral-packet-trusted.py", review)
@@ -417,8 +417,24 @@ class MistralCloudReviewTests(unittest.TestCase):
         self.assertIn("parser.format_binding_review(", review)
         self.assertNotIn("-f event=COMMENT", review)
         self.assertIn('"commit_id=$REVIEW_SHA"', review)
-        self.assertIn("advisory", review.lower())
-        self.assertIn("ADVISORY review (non-binding)", review)
+        self.assertIn("technical PASS/FAIL", review)
+        self.assertIn("**Mistral Vibe exact-head BINDING technical PASS", review)
+        self.assertIn("**Mistral Vibe exact-head BINDING technical FAIL", review)
+        self.assertIn("Mistral Vibe review NOT BINDING", review)
+        self.assertNotIn("ADVISORY review (non-binding)", review)
+        self.assertIn("PUBLISH_OUTCOME: ${{ steps.publish.outcome }}", review)
+        self.assertIn("PUBLISH_EVENT: ${{ steps.publish.outputs.review_event }}", review)
+        self.assertIn('echo "review_event=$review_event" >> "$GITHUB_OUTPUT"', review)
+        self.assertIn("REVIEW_PUBLICATION_BLOCKED", review)
+        self.assertIn("Trusted run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID", review)
+        self.assertLess(
+            review.index("- name: Prepare redacted current-head Mistral review"),
+            review.index("- name: Publish current-head Mistral independent technical PR review as Actions bot"),
+        )
+        self.assertLess(
+            review.index("- name: Publish current-head Mistral independent technical PR review as Actions bot"),
+            review.index("- name: Post Mistral result"),
+        )
         self.assertNotIn("gh pr merge", review)
         import re
         active_uses = re.findall(r"(?m)^\s+uses:\s+([^\s]+)", review)

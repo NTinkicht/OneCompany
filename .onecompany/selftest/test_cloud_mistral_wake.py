@@ -109,6 +109,7 @@ class MistralCloudWakeTests(unittest.TestCase):
             "--enabled-tools read_file",
             "enabled_tools = [\"grep\", \"read_file\"]",
             "timeout --signal=TERM --kill-after=15s 600s",
+            "--max-tokens 90000",
             "AUTH_BLOCKED",
             "CONFIG_BLOCKED",
             "CAPACITY_DEGRADED",

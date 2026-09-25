@@ -291,6 +291,44 @@ class MistralCloudReviewTests(unittest.TestCase):
             finally:
                 os.chdir(old)
 
+    def test_large_source_is_a_bounded_changed_line_excerpt(self):
+        """Reviewer sees numbered changed context, never unrelated huge source."""
+        original = [f"line_{number} = {number}" for number in range(1, 5001)]
+        original[0] = "UNRELATED_SECRET_MARKER = 1"
+        original[2499] = "REVIEW_CHANGED_MARKER = 2500"
+        source = ("\n".join(original) + "\n").encode("utf-8")
+        self.assertGreater(len(source), target.MAX_REVIEW_STAGE_SOURCE_BYTES)
+
+        def patch_for_one_hunk(args, **_kwargs):
+            self.assertEqual(args[1:3], ["diff", "--no-ext-diff"])
+            self.assertIn("--unified=0", args)
+            self.assertEqual(args[-1], "scripts/large.py")
+            return b"diff --git a/scripts/large.py b/scripts/large.py\n@@ -2500 +2500 @@\n"
+
+        with patch.object(target.subprocess, "check_output", side_effect=patch_for_one_hunk):
+            staged = target.bounded_review_source("scripts/large.py", source, BASE, HEAD)
+        self.assertLessEqual(len(staged), target.MAX_REVIEW_STAGE_SOURCE_BYTES)
+        self.assertIn(b"2500: REVIEW_CHANGED_MARKER = 2500", staged)
+        self.assertIn(b"INSUFFICIENT_EVIDENCE, not PASS.", staged)
+        self.assertNotIn(b"UNRELATED_SECRET_MARKER", staged)
+        self.assertNotIn(b"line_5000", staged)
+        self.assertIn(b"2499:", staged)
+
+    def test_large_source_missing_changed_hunks_fails_closed(self):
+        """A truncated or malformed diff cannot create a false source review."""
+        source = b"line = 1\n" * 3000
+        with patch.object(target.subprocess, "check_output", return_value=b""):
+            with self.assertRaisesRegex(ValueError, "REVIEW_SOURCE_HUNKS_MISSING"):
+                target.bounded_review_source("scripts/large.py", source, BASE, HEAD)
+
+    def test_large_source_excerpt_still_has_hard_byte_ceiling(self):
+        """Even changed-line windows do not admit an oversized staged payload."""
+        source = (b"change = '" + b"A" * 13000 + b"'\n") * 2
+        with patch.object(target.subprocess, "check_output",
+                          return_value=b"@@ -1 +1 @@\n"):
+            with self.assertRaisesRegex(ValueError, "REVIEW_SOURCE_EXCERPT_BOUND_EXCEEDED"):
+                target.bounded_review_source("scripts/large.py", source, BASE, HEAD)
+
     def test_insufficient_evidence_uses_a_valid_standalone_marker(self):
         """A prose mention is not a terminal marker; an isolated marker is."""
         workflow = WORKFLOW.read_text(encoding="utf-8")
@@ -325,7 +363,9 @@ class MistralCloudReviewTests(unittest.TestCase):
         self.assertIn("First read review-target.txt and review.diff.", review)
         self.assertIn("relevant review_sources/", review)
         self.assertIn("--max-turns 8", review)
-        self.assertIn("--max-tokens 50000", review)
+        self.assertIn("--max-tokens 64000", review)
+        self.assertIn("NOT proof of exhausted subscription credits, included quota or financial budget", review)
+        self.assertNotIn("--max-tokens 50000", review)
         self.assertIn("Reserve the last turn for the final answer", review)
         self.assertIn("TURN_LIMIT_EXCEEDED", review)
         self.assertIn("RESULT_CONTRACT_INVALID", review)

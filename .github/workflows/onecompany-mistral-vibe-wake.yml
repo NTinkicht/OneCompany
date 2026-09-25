@@ -170,7 +170,7 @@ jobs:
               --enabled-tools grep \
               --enabled-tools read_file \
               --max-turns 8 \
-              --max-tokens 75000 \
+              --max-tokens 90000 \
               --output text \
               --prompt "$(cat /tmp/onecompany-mistral-prompt.txt)" \
               > /tmp/onecompany-mistral-output.txt \
@@ -196,7 +196,7 @@ jobs:
               reason="Mistral Vibe entitlement was rejected by the runtime"
             elif grep -Eqi 'token limit exceeded|context (window|length) exceeded|too many tokens' /tmp/onecompany-mistral-error.txt; then
               status="TOKEN_BUDGET_EXCEEDED"
-              reason="Mistral bounded context/token budget was exceeded; narrow evidence and retry once"
+              reason="Mistral Vibe hit this workflow's configured per-execution token ceiling; NOT proof of exhausted subscription credits, included quota or financial budget; narrow evidence before retry"
             elif grep -Eqi '429|rate.?limit|quota|usage[^[:alnum:]]*limit|capacity' /tmp/onecompany-mistral-error.txt; then
               status="CAPACITY_DEGRADED"
               reason="Mistral included capacity is unavailable or exhausted"

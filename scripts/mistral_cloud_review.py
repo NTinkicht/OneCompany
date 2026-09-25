@@ -34,8 +34,10 @@ MATERIAL_AUTHOR = re.compile(r"(?im)^Material-Author:[ \t]*([a-z0-9_-]+)[ \t]*$"
 DIFF_NAME = ".onecompany_mistral_review.diff"
 MAX_DIFF_BYTES = 100_000
 MAX_REVIEW_STAGE_DIFF_BYTES = 32_000
-MAX_REVIEW_STAGE_SOURCE_BYTES = 24_000
-MAX_REVIEW_STAGE_TOTAL_BYTES = 64_000
+MAX_REVIEW_STAGE_SOURCE_BYTES = 12_000
+MAX_REVIEW_STAGE_SOURCE_FILE_BYTES = 96_000
+MAX_REVIEW_STAGE_CONTEXT_LINES = 12
+MAX_REVIEW_STAGE_TOTAL_BYTES = 48_000
 
 
 def parse_dispatch(body: str) -> tuple[int, str, str]:
@@ -282,6 +284,51 @@ def evidence() -> None:
     output(ready="true", status="OK")
 
 
+def bounded_review_source(name: str, source: bytes, base: str, head: str) -> bytes:
+    """Stage complete small files, but only changed-line context for large files.
+
+    The complete patch remains in review.diff. Missing/oversized context is a
+    hard stage failure, not silent omission or a false full-source review.
+    Excerpts preserve original source line numbers for grounded findings.
+    """
+    if len(source) <= MAX_REVIEW_STAGE_SOURCE_BYTES:
+        return source
+    patch = subprocess.check_output(
+        ["git", "diff", "--no-ext-diff", "--no-textconv", "--no-color",
+         "--no-renames", "--unified=0", f"{base}...{head}", "--", name],
+        stderr=subprocess.DEVNULL, timeout=20, env=clean_git_env(),
+    ).decode("utf-8")
+    lines = source.decode("utf-8").splitlines()
+    hunk = re.compile(r"^@@ -[0-9]+(?:,[0-9]+)? \+([0-9]+)(?:,([0-9]+))? @@")
+    selected: set[int] = set()
+    for patch_line in patch.splitlines():
+        match = hunk.match(patch_line)
+        if match is None:
+            continue
+        start = int(match.group(1))
+        count = int(match.group(2) or "1")
+        lower = max(1, start - MAX_REVIEW_STAGE_CONTEXT_LINES)
+        upper = min(len(lines), start + max(count, 1) + MAX_REVIEW_STAGE_CONTEXT_LINES)
+        selected.update(range(lower, upper + 1))
+    if not selected:
+        raise ValueError("REVIEW_SOURCE_HUNKS_MISSING")
+    result = (
+        f"REVIEW SOURCE EXCERPT: {name}. Unlisted lines intentionally omitted; "
+        "review.diff is the complete patch. If more source is needed, return "
+        "INSUFFICIENT_EVIDENCE, not PASS.\n"
+    )
+    last = 0
+    for number in sorted(selected):
+        if number > last + 1:
+            result += "... omitted source lines ...\n"
+        result += f"{number}: {lines[number - 1]}\n"
+        last = number
+    encoded = result.encode("utf-8")
+    if len(encoded) > MAX_REVIEW_STAGE_SOURCE_BYTES:
+        raise ValueError("REVIEW_SOURCE_EXCERPT_BOUND_EXCEEDED")
+    return encoded
+
+
 def stage_review(
     stage: Path = Path("/tmp/onecompany-mistral-review-stage"),
     trusted: Path = Path("/tmp/onecompany-mistral-trusted"),
@@ -334,10 +381,11 @@ def stage_review(
                 source /= part
                 if source.is_symlink():
                     raise ValueError("REVIEW_SYMLINK_BLOCKED")
-            if not source.is_file() or source.stat().st_size > MAX_REVIEW_STAGE_SOURCE_BYTES:
+            if not source.is_file() or source.stat().st_size > MAX_REVIEW_STAGE_SOURCE_FILE_BYTES:
                 raise ValueError("REVIEW_SOURCE_BOUND_EXCEEDED")
             data = source.read_bytes()
             data.decode("utf-8")
+            data = bounded_review_source(name, data, base, head)
             total += len(data)
             if total > MAX_REVIEW_STAGE_TOTAL_BYTES:
                 raise ValueError("REVIEW_TOTAL_BOUND_EXCEEDED")

@@ -112,7 +112,7 @@
         "WU-PFC-001"
       ],
       "issue": 133,
-      "pr": null,
+      "pr": 224,
       "branch": "wu-cloud-mistral-dev-001",
       "risk_class": "LOW",
       "planning_refs": [

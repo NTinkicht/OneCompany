@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 from typing import Any
 from urllib.parse import quote
 
@@ -325,6 +326,70 @@ def pull_request_material_author_actor_ids(
     return (actors if not errors else None), errors
 
 
+MISTRAL_BINDING = re.compile(
+    r"(?m)^<!-- ONECOMPANY_MISTRAL_BINDING_REVIEW_V1 "
+    r"pr=([1-9][0-9]{0,5}) head=([a-f0-9]{40}) base=([a-f0-9]{40}) "
+    r"run=([1-9][0-9]{0,19}) run_sha=([a-f0-9]{40}) "
+    r"verdict=(PASS|FAIL) -->$"
+)
+MISTRAL_WORKFLOW = ".github/workflows/onecompany-mistral-exact-head-review.yml"
+
+
+def verified_mistral_review_publisher(
+    repo: str, pr: int, review: dict[str, Any], head: str, base: str,
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Give binding review authority ONLY to the proven protected-main Vibe run.
+
+    Other github-actions[bot] reviews never inherit Mistral identity. The
+    reviewer remains a model author distinct from the trusted GitHub publisher.
+    """
+    if repo != "NTinkicht/OneCompany" or review.get("state") != "APPROVED":
+        return None, ["mistral_binding_repo_or_state_invalid"]
+    if (review.get("user") or {}).get("login") != "github-actions[bot]":
+        return None, ["mistral_binding_publisher_invalid"]
+    body = review.get("body")
+    matches = MISTRAL_BINDING.findall(body) if isinstance(body, str) else []
+    if len(matches) != 1:
+        return None, ["mistral_binding_marker_missing_or_ambiguous"]
+    target_pr, target_head, target_base, run_id, run_sha, verdict = matches[0]
+    if (int(target_pr) != pr or target_head != head or target_base != base
+            or verdict != "PASS" or review.get("commit_id") != head):
+        return None, ["mistral_binding_target_or_verdict_mismatch"]
+    run, error = _gh_json(f"repos/{repo}/actions/runs/{run_id}")
+    if run is None:
+        return None, [error or "mistral_binding_run_unavailable"]
+    path = run.get("path")
+    if path not in {
+        f"{MISTRAL_WORKFLOW}@main",
+        f"{MISTRAL_WORKFLOW}@refs/heads/main",
+    }:
+        return None, ["mistral_binding_workflow_invalid"]
+    if any([
+        run.get("event") != "issue_comment",
+        run.get("head_branch") != "main",
+        run.get("head_sha") != run_sha,
+        run.get("status") != "completed",
+        run.get("conclusion") != "success",
+        ((run.get("actor") or {}).get("login")) != "NTinkicht",
+        ((run.get("triggering_actor") or {}).get("login")) != "NTinkicht",
+        ((run.get("repository") or {}).get("full_name")) != repo,
+    ]):
+        return None, ["mistral_binding_run_provenance_invalid"]
+    # A copied/replayed workflow result from a candidate branch is not trusted.
+    _, errors = protected_default_branch_context(repo, run_sha)
+    if errors:
+        return None, ["mistral_binding_run_not_in_protected_main_history", *errors]
+    return {
+        "login": "github-actions[bot]",
+        "actor_id": "mistral-vibe",
+        "authorities": ["code_review"],
+        "publisher": "github-actions[bot]",
+        "provider": "github_pull_request_review",
+        "verified_mistral_run_id": int(run_id),
+        "verified_mistral_run_sha": run_sha,
+    }, []
+
+
 def review_platform_identity(
     repo: str,
     pr: int,
@@ -355,6 +420,13 @@ def review_platform_identity(
     if policy is None:
         return None, policy_errors
     identity, mapping_error = map_platform_login(policy, login)
+    if identity is None and login == "github-actions[bot]":
+        identity, binding_errors = verified_mistral_review_publisher(
+            repo, pr, review, candidate_sha, trusted_ref
+        )
+        if identity is None:
+            return None, binding_errors
+        mapping_error = None
     if identity is None and provenance.get("source") == "repository-owner-bootstrap":
         identity = {
             "login": login,

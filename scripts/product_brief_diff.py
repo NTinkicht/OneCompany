@@ -55,7 +55,18 @@ def _read_bounded(path: Path) -> dict:
     finally:
         for fd in reversed(dirs):
             os.close(fd)
-    data = json.loads(raw.decode("utf-8"))
+    def unique_object(pairs: list[tuple[str, object]]) -> dict:
+        result: dict = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("DUPLICATE_PRODUCT_BRIEF_JSON_KEY")
+            result[key] = value
+        return result
+
+    # A raw JSON document containing both an authority-bearing key and a
+    # later innocent duplicate must not have the first assertion discarded
+    # before the canonical draft validator sees it.
+    data = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_object)
     if not isinstance(data, dict):
         raise ValueError("Product Brief must be a JSON object")
     return data

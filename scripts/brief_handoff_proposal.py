@@ -9,20 +9,28 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
-import stat
 from pathlib import Path
+
+from product_brief_diff import (_read_bounded as read_bounded_json_object,
+                               load as load_draft, validate as validate_draft)
 
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 REQUIRED = ("audience", "problem", "outcome", "first_feature")
 KNOWN_ASSETS = ("known_stack", "existing_tests", "existing_ci", "known_contracts")
+PROPOSAL_FIELDS = frozenset({
+    "schema", "read_only", "authorization", "state", "source_refs_unverified",
+    "run_key", "lease_id", "canonical_work_unit", "project", "owner_intent",
+    "constraints", "acceptance_criteria", "next_action",
+})
 
 
 def propose(brief: dict, head: str, base: str) -> dict:
     """Preserve owner intent and discovered assets without promoting authority."""
-    if not isinstance(brief, dict) or brief.get("document_kind") != "product_brief_draft":
-        raise ValueError("PRODUCT_BRIEF_DRAFT_REQUIRED")
+    # A partial schema check would silently discard forged RunKeys, approvals,
+    # unknown top-level keys or a stale producer derivation. Reuse the complete
+    # canonical draft contract before extracting a single planning field.
+    validate_draft(brief)
     if brief.get("status") != "DRAFT_NOT_APPROVED":
         raise ValueError("PRODUCT_BRIEF_DRAFT_REQUIRED")
     if brief.get("approval") != {"product_brief": False, "implementation": False, "deployment": False}:
@@ -66,6 +74,16 @@ def propose(brief: dict, head: str, base: str) -> dict:
     }
 
 
+def load_proposal(path: Path) -> dict:
+    """Securely load the untrusted proposal using the same anchored JSON reader.
+
+    A partial JSON parser or direct open() could silently overwrite a forged
+    first approval with a later innocuous duplicate, or block on a FIFO. The
+    actual authority and field-set checks remain in consume_for_planning().
+    """
+    return read_bounded_json_object(path)
+
+
 def consume_for_planning(proposal: dict, trusted_head: str, trusted_base: str) -> dict:
     """Validate an untrusted proposal for read-only existing-core planning.
 
@@ -75,6 +93,10 @@ def consume_for_planning(proposal: dict, trusted_head: str, trusted_base: str) -
     """
     if not isinstance(proposal, dict) or proposal.get("schema") != "onecompany.phase1-brief-handoff-proposal.v1":
         raise ValueError("HANDOFF_PROPOSAL_REQUIRED")
+    if set(proposal) != PROPOSAL_FIELDS:
+        # Silently stripping an appended approval, RunKey, deployment or spend
+        # assertion can turn a poisoned proposal into a plausible planning input.
+        raise ValueError("HANDOFF_PROPOSAL_FIELD_SET_INVALID")
     if proposal.get("read_only") is not True or proposal.get("authorization") != "NOT_GRANTED":
         raise ValueError("HANDOFF_MUST_BE_UNAUTHORIZED")
     if proposal.get("state") != "AWAIT_TRUSTED_PLANNING_AND_OWNER_APPROVAL":
@@ -92,9 +114,22 @@ def consume_for_planning(proposal: dict, trusted_head: str, trusted_base: str) -
         raise ValueError("STALE_OR_UNVERIFIED_REVISION")
     project = proposal.get("project")
     intent = proposal.get("owner_intent")
-    if not isinstance(project, dict) or not isinstance(intent, dict):
+    if (not isinstance(project, dict)
+            or set(project) != {"name", "repository", "default_branch", "path", *KNOWN_ASSETS}
+            or project.get("path") not in {"create", "adopt"}
+            or any(not isinstance(project.get(k), str) or not project[k].strip()
+                   for k in ("name", "repository", "default_branch"))
+            or not isinstance(intent, dict)
+            or set(intent) != set(REQUIRED)
+            or any(not isinstance(intent[k], str) or not intent[k].strip()
+                   for k in REQUIRED)
+            or (proposal.get("constraints") is not None
+                and not isinstance(proposal["constraints"], str))
+            or not isinstance(proposal.get("next_action"), str)):
         raise ValueError("HANDOFF_CONTENT_INVALID")
-    if any(not isinstance(project.get(k), list) for k in KNOWN_ASSETS):
+    if any(not isinstance(project.get(k), list)
+           or any(not isinstance(value, str) for value in project[k])
+           for k in KNOWN_ASSETS):
         raise ValueError("KNOWN_ASSETS_INVALID")
     if proposal.get("acceptance_criteria") != []:
         raise ValueError("AC_MUST_BE_PROPOSED_BY_TRUSTED_PLANNING")
@@ -123,22 +158,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--base", required=True)
     args = parser.parse_args(argv)
     try:
-        # One regular, bounded, no-follow FD; no is_file() / open() race.
-        if not hasattr(os, "O_NOFOLLOW"):
-            raise ValueError("SECURE_BRIEF_READ_UNAVAILABLE")
-        flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0)
-        descriptor = os.open(args.brief, flags)
-        try:
-            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-                raise ValueError("SAVED_BRIEF_FILE_REQUIRED")
-            with os.fdopen(descriptor, "rb", closefd=False) as source:
-                raw_brief = source.read(16_385)
-        finally:
-            os.close(descriptor)
-        if len(raw_brief) > 16_384:
-            raise ValueError("SAVED_BRIEF_TOO_LARGE")
-        candidate = propose(json.loads(raw_brief), args.head, args.base)
-    except (OSError, ValueError, TypeError, UnicodeError) as exc:
+        candidate = propose(load_draft(args.brief), args.head, args.base)
+    except (OSError, ValueError, TypeError, UnicodeError, RecursionError) as exc:
         parser.error(str(exc))
     print(json.dumps(candidate, sort_keys=True))
     return 0

@@ -115,6 +115,36 @@ class ProductBriefDiffTests(unittest.TestCase):
                     with self.assertRaises((ValueError, TypeError)):
                         MOD.load(self.write(Path(td), "bad.json", candidate))
 
+    def test_duplicate_raw_json_keys_refuse_before_authority_validation(self):
+        """Last-key-wins JSON must not hide a prior owner approval assertion."""
+        with tempfile.TemporaryDirectory() as td:
+            folder = Path(td)
+            original = brief()
+            raw = json.dumps(original)
+            # First authority claim is overwritten if a parser silently takes
+            # only the second (legitimate) status/approval value.
+            cases = (
+                raw.replace('"status": "DRAFT_NOT_APPROVED"',
+                            '"status": "APPROVED", "status": "DRAFT_NOT_APPROVED"', 1),
+                raw.replace('"approval": {',
+                            '"approval": {"implementation": true}, "approval": {', 1),
+                raw.replace('"implementation": false',
+                            '"implementation": true, "implementation": false', 1),
+            )
+            for index, case in enumerate(cases):
+                with self.subTest(index=index):
+                    path = folder / f"dup-{index}.json"
+                    path.write_text(case, encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, "DUPLICATE_PRODUCT_BRIEF_JSON_KEY"):
+                        MOD.load(path)
+                    run = subprocess.run(
+                        [sys.executable, str(SCRIPTS / "product_brief_diff.py"),
+                         str(path), str(path)],
+                        cwd=ROOT, text=True, capture_output=True, timeout=12,
+                    )
+                    self.assertEqual(run.returncode, 2)
+                    self.assertIn("DUPLICATE_PRODUCT_BRIEF_JSON_KEY", run.stderr)
+
     def test_incomplete_but_honest_draft_remains_comparable(self):
         """Missing owner answers remain missing, not invented or promoted."""
         candidate = brief()

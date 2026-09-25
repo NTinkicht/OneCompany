@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 
 import brief_handoff_proposal
 import knowledge
@@ -76,13 +77,11 @@ def main() -> int:
 
     if args.command == "brief-handoff":
         try:
-            with open(args.proposal, "rb") as source:
-                raw = source.read(16_385)
-            if len(raw) > 16_384:
-                raise ValueError("BOUNDED_HANDOFF_PROPOSAL_REQUIRED")
-            proposal = json.loads(raw)
+            proposal = brief_handoff_proposal.load_proposal(
+                Path(args.proposal)
+            )
             result = consume_brief_handoff(proposal, args.head, args.base)
-        except (OSError, ValueError, TypeError, UnicodeError, json.JSONDecodeError) as exc:
+        except (OSError, ValueError, TypeError, UnicodeError, RecursionError) as exc:
             parser.error(str(exc))
         print(json.dumps(result, sort_keys=True))
         return 0

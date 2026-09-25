@@ -14,7 +14,7 @@ import re
 import subprocess
 import sys
 
-from onecompany_lib import CONTROL, load_json
+from onecompany_lib import CONTROL, load_json, emergency_stop_active
 from mistral_cloud_work import literal_paths
 
 REPO = "NTinkicht/OneCompany"
@@ -75,8 +75,7 @@ def policy_ticket(values: dict, *, queue: dict, budget: dict, config: dict,
             ))
             or ai.get("unknown_cost_behavior") != "forbid"):
         raise ValueError("START_FINANCIAL_POLICY_BLOCKED")
-    if config.get("safety", {}).get("emergency_stop") is True or os.getenv(
-            "ONECOMPANY_EMERGENCY_STOP", "").lower() in {"true", "1"}:
+    if emergency_stop_active(config):
         raise ValueError("START_EMERGENCY_STOP")
     candidates = [w for w in queue.get("work_units", [])
                   if w.get("id") == values["work_unit"]]

@@ -165,8 +165,10 @@ class MistralFencedWorkerTests(unittest.TestCase):
                 w.planned_edits(stage=stage, manifest=manifest)
 
     def test_publication_is_one_exact_parent_commit_without_model_token(self):
+        """Trusted publisher must keep the exact parent and deny model Git tokens."""
         seen = []
         def github_api(route, *, method="GET", payload=None):
+            """Return deterministic commit/tree responses for publisher assertions."""
             seen.append((route, method, payload))
             if method == "GET":
                 return {"tree": {"sha": B}}
@@ -198,11 +200,14 @@ class MistralFencedWorkerTests(unittest.TestCase):
         self.assertEqual(refs, [{"sha": C, "force": False}])
 
     def test_exact_head_git_tree_scope_refuses_symlinks_executables_and_trees(self):
+        """Only missing entries and mode-100644 files qualify for model staging."""
         path = "examples/agent-qualification/demo.py"
         def entry(name, mode):
+            """Encode one exact Git ls-tree -z entry for a path prefix."""
             kind = "tree" if mode == "040000" else "blob"
             return (f"{mode} {kind} {B}\t{name}\0").encode()
         def run(command, **_kwargs):
+            """Mock the tree mode at every prefix of the requested scope path."""
             self.assertEqual(command[:3], ["git", "ls-tree", "-z"])
             name = command[-1]
             if name == "examples":
@@ -232,6 +237,7 @@ class MistralFencedWorkerTests(unittest.TestCase):
             w.tracked_mode(H, path)
 
     def test_mistral_source_stage_rejects_git_symlink_before_git_show(self):
+        """Fail if a tracked source becomes unreadable rather than inventing a new file."""
         with patch.object(w, "tracked_mode", return_value="100644"), patch.object(
             w.subprocess, "run", return_value=SimpleNamespace(
                 returncode=1, stdout=b""
@@ -240,6 +246,7 @@ class MistralFencedWorkerTests(unittest.TestCase):
             w.git_file(H, SCOPE[0])
 
     def test_workflow_separates_model_from_publisher_and_source_installer(self):
+        """Keep model editing, protected publication, and installer scopes separate."""
         from bootstrap import SOURCE_INSTALLATION_EXCLUSIONS
         flow = (ROOT / ".github/workflows/onecompany-mistral-devtest.yml").read_text()
         wake = (ROOT / ".github/workflows/onecompany-mistral-vibe-wake.yml").read_text()

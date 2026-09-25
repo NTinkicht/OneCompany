@@ -29,8 +29,12 @@ technical platform review. It reports binding PASS only after a successful
 exact PR head and workflow run linked. If the model fails, evidence is
 insufficient, or GitHub rejects publication, the wake bus explicitly states
 **NOT BINDING**; a successful model answer by itself is never a published
-technical verdict. The previous unconditional `ADVISORY (non-binding)` banner
-has been removed from the binding path.
+technical verdict. The wake bus links the trusted run and exact PR head rather
+than repeating unsanitized model JSON: the validated findings live in the
+GitHub PR review. Binding eligibility is confirmed only once the workflow
+finishes successfully and the other merge gates are rechecked. The previous
+unconditional `ADVISORY (non-binding)` banner has been removed from the
+binding path.
 
 The native gate still verifies non-self cumulative authorship, correct
 exact head **and** base, scope, required CI, assurance packet, emergency stop

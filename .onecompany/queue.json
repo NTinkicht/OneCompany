@@ -172,7 +172,8 @@
       "qualification_exit": [
         "Authenticated provider-cloud assignment and run verified",
         "Lease-bound OneCompany-only bot-authored commit and CI verified",
-        "Independent non-self exact-head review and test evidence published",
+        "Independent non-Grok exact-head review and test evidence of Grok-authored code published",
+        "Grok-authored independent exact-head review of a non-Grok-authored PR, with verified bot/provider provenance and non-self authorship, published as distinct reviewer qualification evidence",
         "No cross-repo permission expansion or paid provider fallback"
       ]
     }

@@ -384,11 +384,11 @@ jobs:
           } > /tmp/onecompany-mistral-comment.md
           gh issue comment 130 --repo "$GITHUB_REPOSITORY" --body-file /tmp/onecompany-mistral-comment.md
 
-      # Review publication is performed by the trusted parent, NEVER the
-      # model. The provider has read-only tools and no GitHub write token.
-      # The resulting GitHub review remains ADVISORY until actor-provenance
-      # and nonauthor publisher qualification are separately demonstrated.
-      - name: Publish current-head Mistral advisory PR review as Actions bot
+      # The parent publishes model PASS -> GitHub APPROVE, FAIL -> REQUEST_CHANGES.
+      # It rechecks exact head/base, green CI and non-self authorship. The model
+      # has no GitHub token; binding identity is independently verified through
+      # this trusted protected-main run, not generic trust in github-actions.
+      - name: Publish current-head Mistral independent technical PR review as Actions bot
         if: steps.preflight.outputs.ready == 'true' && steps.actor.outputs.exit_code == '0'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -433,13 +433,25 @@ jobs:
               f"{os.environ['GITHUB_REPOSITORY']}/actions/runs/"
               f"{os.environ['GITHUB_RUN_ID']}"
           )
-          body = parser.format_comment(value, run_url=run_url)
+          event, body = parser.format_binding_review(
+              value, run_url=run_url,
+              run_id=int(os.environ["GITHUB_RUN_ID"]),
+              run_sha=os.environ["GITHUB_SHA"],
+          )
           Path("/tmp/onecompany-mistral-pr-review.txt").write_text(
               body, encoding="utf-8"
           )
+          Path("/tmp/onecompany-mistral-pr-event.txt").write_text(
+              event, encoding="ascii"
+          )
           PY
+          review_event="$(cat /tmp/onecompany-mistral-pr-event.txt)"
+          if [[ "$review_event" != "APPROVE" && "$review_event" != "REQUEST_CHANGES" ]]; then
+            echo "MISTRAL_BINDING_EVENT_INVALID" >&2
+            exit 1
+          fi
           gh api -X POST "repos/$GITHUB_REPOSITORY/pulls/$REVIEW_PR/reviews" \
-            -f event=COMMENT \
+            -f "event=$review_event" \
             -f "commit_id=$REVIEW_SHA" \
             --raw-field "body=$(cat /tmp/onecompany-mistral-pr-review.txt)" \
             --jq '{review_id:.id, login:.user.login, commit_id:.commit_id, state:.state}'

@@ -106,7 +106,7 @@
       "id": "WU-CLOUD-MISTRAL-DEV-001",
       "title": "Qualify Mistral cloud developer/tester with a real bounded source-and-test pilot",
       "work_kind": "ENABLER",
-      "status": "PROPOSED",
+      "status": "READY",
       "priority": 100,
       "dependencies": [
         "WU-PFC-001"
@@ -132,6 +132,7 @@
       ],
       "parallelism": "disjoint_only",
       "qualification_exit": [
+        "A trusted owner-authorized MISTRAL_START_V1 creates exactly one scoped draft PR from the reserved branch; commit is a non-model scaffold, never code/test qualification",
         "Canonical PR and live Mistral implementation lease verified before MISTRAL_WORK_V1 dispatch",
         "Model-authored source and tests committed with exact-head CAS and CI",
         "Independent non-Mistral review completed before merge",

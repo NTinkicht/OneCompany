@@ -245,7 +245,7 @@ jobs:
               --enabled-tools grep \
               --enabled-tools read_file \
               --max-turns 8 \
-              --max-tokens 50000 \
+              --max-tokens 64000 \
               --output text \
               --prompt "$(cat /tmp/onecompany-mistral-prompt.txt)" \
               > /tmp/onecompany-mistral-output.txt \

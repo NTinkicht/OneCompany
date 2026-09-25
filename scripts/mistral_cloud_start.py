@@ -192,10 +192,25 @@ def start(ticket: dict) -> dict:
 def main() -> int:
     try:
         ticket = prepare()
+    except (ValueError, KeyError, TypeError, OSError, json.JSONDecodeError,
+            subprocess.TimeoutExpired):
+        # This phase is read-only. Do not mistake missing eligibility for
+        # a partial GitHub write or disclose remote stderr/input.
+        print(json.dumps({"status": "START_BLOCKED_PREWRITE"}))
+        return 2
+    try:
         result = start(ticket)
-    except (ValueError, KeyError, TypeError, OSError, json.JSONDecodeError):
-        # If a mutation might have succeeded, DO NOT retry without reconciling.
-        print(json.dumps({"status": "START_BLOCKED_OR_RECONCILE_REQUIRED"}))
+    except (ValueError, KeyError, TypeError, OSError, json.JSONDecodeError,
+            subprocess.TimeoutExpired):
+        # The branch, scaffold, or even PR might already exist. Return only
+        # trusted ticket coordinates and require GitHub reconciliation. A
+        # second START dispatch must never attempt to "repair" this blindly.
+        print(json.dumps({
+            "status": "START_RECONCILE_REQUIRED",
+            "work_unit": ticket["work_unit"],
+            "branch": ticket["branch"],
+            "main_sha": ticket["main_sha"],
+        }, sort_keys=True))
         return 2
     print(json.dumps(result, sort_keys=True))
     return 0

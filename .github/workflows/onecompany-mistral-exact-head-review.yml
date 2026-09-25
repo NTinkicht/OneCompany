@@ -1,5 +1,7 @@
-# Source-only reviewer pilot: not a binding merge gate or customer installer component.
-name: OneCompany Mistral Exact-Head Advisory Review
+# Source-repository technical PASS/FAIL reviewer. A published review may satisfy
+# the independent technical-review gate, NEVER the other merge/assurance gates;
+# this workflow is not installed into customer repositories.
+name: OneCompany Mistral Exact-Head Technical Review
 
 on:
   issue_comment:
@@ -317,30 +319,15 @@ jobs:
           echo "status=$status" >> "$GITHUB_OUTPUT"
           echo "failure_reason=$reason" >> "$GITHUB_OUTPUT"
 
-      - name: Post Mistral result
-        if: always()
+      # Redact the validated model output before the privileged PR publisher
+      # reads it. The later wake-bus report must not be the source of this file.
+      - name: Prepare redacted current-head Mistral review
+        if: steps.preflight.outputs.ready == 'true' && steps.actor.outputs.exit_code == '0'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
-          READY: ${{ steps.preflight.outputs.ready }}
-          PREFLIGHT_STATUS: ${{ steps.preflight.outputs.status }}
-          PREFLIGHT_REASON: ${{ steps.preflight.outputs.reason }}
-          TARGET_READY: ${{ steps.target.outputs.ready }}
-          TARGET_STATUS: ${{ steps.target.outputs.status }}
-          EVIDENCE_READY: ${{ steps.evidence.outputs.ready }}
-          EVIDENCE_STATUS: ${{ steps.evidence.outputs.status }}
-          STAGE_READY: ${{ steps.stage.outputs.ready }}
-          STAGE_STATUS: ${{ steps.stage.outputs.status }}
-          REVIEW_PR: ${{ steps.target.outputs.pr }}
-          REVIEW_SHA: ${{ steps.target.outputs.sha }}
-          ACTOR_EXIT: ${{ steps.actor.outputs.exit_code }}
-          ACTOR_STATUS: ${{ steps.actor.outputs.status }}
-          ACTOR_REASON: ${{ steps.actor.outputs.failure_reason }}
         shell: bash
         run: |
           set -euo pipefail
-
-          if [[ "${READY:-false}" == "true" && "${ACTOR_EXIT:-1}" == "0" ]]; then
             # Defense in depth: even though Vibe has no shell/write tool, scrub the
             # literal provider credential plus common authorization/key renderings
             # before any model-authored text can reach a public issue comment.
@@ -359,36 +346,13 @@ jobs:
           text = re.sub(r'(?i)(MISTRAL_API_KEY\s*[=:]\s*)\S+', r'\1[REDACTED]', text)
           target.write_text(text[:50000], encoding='utf-8')
           PY
-          fi
 
-          {
-            echo "**mistral-vibe cloud exact-head ADVISORY review (non-binding)**"
-            echo "PR #${REVIEW_PR:-not-admitted}; exact head ${REVIEW_SHA:-not-admitted}"
-            echo
-            if [[ "${TARGET_READY:-false}" != "true" ]]; then
-              echo "${TARGET_STATUS:-REVIEW_TARGET_BLOCKED} - no valid exact-head review assignment; no model call."
-            elif [[ "${EVIDENCE_READY:-false}" != "true" ]]; then
-              echo "${EVIDENCE_STATUS:-REVIEW_EVIDENCE_BLOCKED} - PR head/CI/diff validation failed; no model call."
-            elif [[ "${STAGE_READY:-false}" != "true" ]]; then
-              echo "${STAGE_STATUS:-REVIEW_STAGE_BLOCKED} - isolated source stage failed; no model call."
-            elif [[ "${READY:-false}" != "true" ]]; then
-              echo "${PREFLIGHT_STATUS:-PREFLIGHT_FAILED} - ${PREFLIGHT_REASON:-preflight failed}. No paid fallback was attempted."
-            elif [[ "${ACTOR_EXIT:-1}" != "0" ]]; then
-              echo "${ACTOR_STATUS:-EXECUTION_FAILED} - ${ACTOR_REASON:-Mistral Vibe exited without a usable result}. PAYG remains disabled and no paid fallback was attempted."
-            else
-              echo '```text'
-              cat /tmp/onecompany-mistral-public.txt
-              echo
-              echo '```'
-            fi
-          } > /tmp/onecompany-mistral-comment.md
-          gh issue comment 130 --repo "$GITHUB_REPOSITORY" --body-file /tmp/onecompany-mistral-comment.md
-
-      # Review publication is performed by the trusted parent, NEVER the
-      # model. The provider has read-only tools and no GitHub write token.
-      # The resulting GitHub review remains ADVISORY until actor-provenance
-      # and nonauthor publisher qualification are separately demonstrated.
-      - name: Publish current-head Mistral advisory PR review as Actions bot
+      # The parent publishes model PASS -> GitHub APPROVE, FAIL -> REQUEST_CHANGES.
+      # It rechecks exact head/base, green CI and non-self authorship. The model
+      # has no GitHub token; binding identity is independently verified through
+      # this trusted protected-main run, not generic trust in github-actions.
+      - name: Publish current-head Mistral independent technical PR review as Actions bot
+        id: publish
         if: steps.preflight.outputs.ready == 'true' && steps.actor.outputs.exit_code == '0'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -433,14 +397,84 @@ jobs:
               f"{os.environ['GITHUB_REPOSITORY']}/actions/runs/"
               f"{os.environ['GITHUB_RUN_ID']}"
           )
-          body = parser.format_comment(value, run_url=run_url)
+          event, body = parser.format_binding_review(
+              value, run_url=run_url,
+              run_id=int(os.environ["GITHUB_RUN_ID"]),
+              run_sha=os.environ["GITHUB_SHA"],
+          )
           Path("/tmp/onecompany-mistral-pr-review.txt").write_text(
               body, encoding="utf-8"
           )
+          Path("/tmp/onecompany-mistral-pr-event.txt").write_text(
+              event, encoding="ascii"
+          )
           PY
+          review_event="$(cat /tmp/onecompany-mistral-pr-event.txt)"
+          if [[ "$review_event" != "APPROVE" && "$review_event" != "REQUEST_CHANGES" ]]; then
+            echo "MISTRAL_BINDING_EVENT_INVALID" >&2
+            exit 1
+          fi
           gh api -X POST "repos/$GITHUB_REPOSITORY/pulls/$REVIEW_PR/reviews" \
-            -f event=COMMENT \
+            -f "event=$review_event" \
             -f "commit_id=$REVIEW_SHA" \
             --raw-field "body=$(cat /tmp/onecompany-mistral-pr-review.txt)" \
             --jq '{review_id:.id, login:.user.login, commit_id:.commit_id, state:.state}'
+          # Emitted ONLY after GitHub accepts the binding platform review.
+          echo "review_event=$review_event" >> "$GITHUB_OUTPUT"
 
+      - name: Post Mistral result
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          READY: ${{ steps.preflight.outputs.ready }}
+          PREFLIGHT_STATUS: ${{ steps.preflight.outputs.status }}
+          PREFLIGHT_REASON: ${{ steps.preflight.outputs.reason }}
+          TARGET_READY: ${{ steps.target.outputs.ready }}
+          TARGET_STATUS: ${{ steps.target.outputs.status }}
+          EVIDENCE_READY: ${{ steps.evidence.outputs.ready }}
+          EVIDENCE_STATUS: ${{ steps.evidence.outputs.status }}
+          STAGE_READY: ${{ steps.stage.outputs.ready }}
+          STAGE_STATUS: ${{ steps.stage.outputs.status }}
+          REVIEW_PR: ${{ steps.target.outputs.pr }}
+          REVIEW_SHA: ${{ steps.target.outputs.sha }}
+          ACTOR_EXIT: ${{ steps.actor.outputs.exit_code }}
+          ACTOR_STATUS: ${{ steps.actor.outputs.status }}
+          ACTOR_REASON: ${{ steps.actor.outputs.failure_reason }}
+          PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
+          PUBLISH_EVENT: ${{ steps.publish.outputs.review_event }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          {
+            if [[ "${PUBLISH_OUTCOME:-}" == "success" && "${PUBLISH_EVENT:-}" == "APPROVE" ]]; then
+              echo "**Mistral Vibe exact-head BINDING technical PASS — GitHub APPROVED review published**"
+            elif [[ "${PUBLISH_OUTCOME:-}" == "success" && "${PUBLISH_EVENT:-}" == "REQUEST_CHANGES" ]]; then
+              echo "**Mistral Vibe exact-head BINDING technical FAIL — GitHub CHANGES_REQUESTED review published**"
+            else
+              echo "**Mistral Vibe review NOT BINDING — no verified GitHub PASS/FAIL published**"
+            fi
+            echo "Trusted run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "PR #${REVIEW_PR:-not-admitted}; exact head ${REVIEW_SHA:-not-admitted}"
+            echo
+            if [[ "${TARGET_READY:-false}" != "true" ]]; then
+              echo "${TARGET_STATUS:-REVIEW_TARGET_BLOCKED} - no valid exact-head review assignment; no model call."
+            elif [[ "${EVIDENCE_READY:-false}" != "true" ]]; then
+              echo "${EVIDENCE_STATUS:-REVIEW_EVIDENCE_BLOCKED} - PR head/CI/diff validation failed; no model call."
+            elif [[ "${STAGE_READY:-false}" != "true" ]]; then
+              echo "${STAGE_STATUS:-REVIEW_STAGE_BLOCKED} - isolated source stage failed; no model call."
+            elif [[ "${READY:-false}" != "true" ]]; then
+              echo "${PREFLIGHT_STATUS:-PREFLIGHT_FAILED} - ${PREFLIGHT_REASON:-preflight failed}. No paid fallback was attempted."
+            elif [[ "${ACTOR_EXIT:-1}" != "0" ]]; then
+              echo "${ACTOR_STATUS:-EXECUTION_FAILED} - ${ACTOR_REASON:-Mistral Vibe exited without a usable result}. PAYG remains disabled and no paid fallback was attempted."
+            elif [[ "${PUBLISH_OUTCOME:-}" != "success" || ( "${PUBLISH_EVENT:-}" != "APPROVE" && "${PUBLISH_EVENT:-}" != "REQUEST_CHANGES" ) ]]; then
+              echo "REVIEW_PUBLICATION_BLOCKED - no binding GitHub technical PASS/FAIL recorded; model output is not approval evidence."
+            else
+              # Model-controlled JSON is already rendered inert and attached
+              # to the exact-head PR review. Do not echo raw model text into
+              # issue #130 where a crafted code fence could become markup.
+              echo "Validated findings are in the exact-head GitHub PR review."
+              echo "The binding gate accepts it only after this run completes successfully and all remaining merge requirements pass."
+            fi
+          } > /tmp/onecompany-mistral-comment.md
+          gh issue comment 130 --repo "$GITHUB_REPOSITORY" --body-file /tmp/onecompany-mistral-comment.md

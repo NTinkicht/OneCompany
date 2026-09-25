@@ -119,6 +119,57 @@ def format_comment(value: dict, *, run_url: str) -> str:
     return "\n".join(lines) + "\n"
 
 
+BINDING_MARKER = "ONECOMPANY_MISTRAL_BINDING_REVIEW_V1"
+
+
+def format_binding_review(value: dict, *, run_url: str,
+                          run_id: int, run_sha: str) -> tuple[str, str]:
+    """The trusted parent chooses the GitHub review event, never model prose.
+
+    A successful one-shot model review is eligible only as an independent
+    technical reviewer of code the model did NOT materially author. The trusted
+    publisher and OneCompany binding gate must verify this review's origin and
+    exact base/head independently.
+    """
+    if (type(run_id) is not int or run_id < 1
+            or type(run_sha) is not str or not SHA.fullmatch(run_sha)
+            or type(run_url) is not str or not run_url.endswith(
+                f"/NTinkicht/OneCompany/actions/runs/{run_id}"
+            )):
+        raise ValueError("MISTRAL_BINDING_RUN_INVALID")
+    if value.get("verdict") == "NO_BLOCKING_FINDINGS":
+        event, outcome = "APPROVE", "PASS"
+    elif value.get("verdict") == "CHANGES_REQUIRED":
+        event, outcome = "REQUEST_CHANGES", "FAIL"
+    else:
+        raise ValueError("MISTRAL_BINDING_VERDICT_INVALID")
+    marker = (
+        f"<!-- {BINDING_MARKER} pr={value['pr']} "
+        f"head={value['head_sha']} base={value['base_sha']} "
+        f"run={run_id} run_sha={run_sha} verdict={outcome} -->"
+    )
+    lines = [
+        "**Mistral Vibe independent exact-head technical review**",
+        f"Result: {outcome} (model: {value['verdict']}).",
+        f"PR #{value['pr']}; head `{value['head_sha']}`; "
+        f"base `{value['base_sha']}`.",
+        f"Trusted run: {run_url}",
+        "Publisher: github-actions[bot]; material reviewer: mistral-vibe.",
+        "Passing technical review never overrides deterministic CI, "
+        "exact-base/head, non-self authorship, scope, assurance or merge rules.",
+        "",
+        _inert(value["summary"]),
+        "",
+    ]
+    for item in value["findings"]:
+        lines.append(
+            f"- [{item['severity']}] `{item['path']}:{item['line']}` - "
+            f"{_inert(item['description'])}"
+        )
+    lines.extend(["", marker])
+    return event, "\n".join(lines) + "\n"
+
+
 def main() -> int:
     """Validate untrusted Vibe output with only bounded, trusted CLI inputs."""
     import sys

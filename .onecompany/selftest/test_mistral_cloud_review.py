@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -347,6 +348,100 @@ class MistralCloudReviewTests(unittest.TestCase):
                 )
                 self.assertEqual(result.returncode == 0, accepted)
 
+    def test_redaction_step_creates_review_input_under_actions_guard(self):
+        """Publisher must not depend on unset READY/ACTOR_EXIT shell variables."""
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        stage = workflow.split(
+            "      - name: Prepare redacted current-head Mistral review\n", 1
+        )[1].split("      # The parent publishes model PASS", 1)[0]
+        self.assertIn(
+            "if: steps.preflight.outputs.ready == 'true' && steps.actor.outputs.exit_code == '0'",
+            stage,
+        )
+        self.assertNotIn("${READY:-false}", stage)
+        self.assertNotIn("${ACTOR_EXIT:-1}", stage)
+        script = textwrap.dedent(stage.split("        run: |\n", 1)[1])
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / "model-source.json"
+            public = root / "redacted.json"
+            token = "SYNTHETIC_REDAC_TEST_TOKEN"
+            source.write_text('{"summary": "' + token + '"}', encoding="utf-8")
+            script = script.replace(
+                "/tmp/onecompany-mistral-output.txt", str(source)
+            ).replace(
+                "/tmp/onecompany-mistral-public.txt", str(public)
+            )
+            env = os.environ.copy()
+            env["MISTRAL_API_KEY"] = token
+            result = subprocess.run(
+                ["bash", "-c", script], capture_output=True, text=True,
+                env=env, check=False,
+            )
+            self.assertEqual(result.returncode, 0, result.stderr)
+            actual = public.read_text(encoding="utf-8")
+            self.assertIn("[REDACTED]", actual)
+            self.assertNotIn(token, actual)
+            self.assertEqual(result.stdout, "")
+
+    def test_wake_bus_reports_binding_only_after_successful_platform_publication(self):
+        """Grok finding: a pre-publish wake message must never claim binding PASS."""
+        workflow = WORKFLOW.read_text(encoding="utf-8")
+        self.assertEqual(workflow.count("- name: Post Mistral result"), 1)
+        report = workflow.split("      - name: Post Mistral result\n", 1)[1]
+        script = textwrap.dedent(report.split("        run: |\n", 1)[1])
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            comment = root / "wake-report.md"
+            model_output = root / "model-result.json"
+            model_output.write_text('{"synthetic": "review"}', encoding="utf-8")
+            script = script.replace(
+                "/tmp/onecompany-mistral-comment.md", str(comment)
+            ).replace(
+                "/tmp/onecompany-mistral-public.txt", str(model_output)
+            )
+            scenarios = [
+                ("success", "APPROVE", "BINDING technical PASS", False),
+                ("success", "REQUEST_CHANGES", "BINDING technical FAIL", False),
+                ("failure", "", "REVIEW_PUBLICATION_BLOCKED", True),
+                ("skipped", "", "REVIEW_PUBLICATION_BLOCKED", True),
+            ]
+            for outcome, event, expected, blocked in scenarios:
+                with self.subTest(outcome=outcome, event=event):
+                    env = os.environ.copy()
+                    env.update({
+                        "READY": "true", "ACTOR_EXIT": "0",
+                        "TARGET_READY": "true",
+                        "EVIDENCE_READY": "true", "STAGE_READY": "true",
+                        "PUBLISH_OUTCOME": outcome,
+                        "PUBLISH_EVENT": event,
+                        "REVIEW_PR": "220", "REVIEW_SHA": HEAD,
+                        "GITHUB_SERVER_URL": "https://github.com",
+                        "GITHUB_REPOSITORY": "NTinkicht/OneCompany",
+                        "GITHUB_RUN_ID": "42",
+                    })
+                    # Replace the external GitHub operation with a shell stub.
+                    result = subprocess.run(
+                        ["bash", "-c", "gh() { :; }\n" + script],
+                        capture_output=True, text=True, env=env, check=False,
+                    )
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    report_body = comment.read_text(encoding="utf-8")
+                    self.assertIn(expected, report_body)
+                    self.assertIn("PR #220; exact head " + HEAD, report_body)
+                    self.assertIn(
+                        "https://github.com/NTinkicht/OneCompany/actions/runs/42",
+                        report_body,
+                    )
+                    self.assertNotIn("ADVISORY review (non-binding)", report_body)
+                    self.assertNotIn('{"synthetic": "review"}', report_body)
+                    if not blocked:
+                        self.assertIn("Validated findings are in the exact-head GitHub PR review.", report_body)
+                    self.assertEqual(
+                        "no binding GitHub technical PASS/FAIL recorded" in report_body,
+                        blocked,
+                    )
+
     def test_owner_wake_and_review_are_disjoint_source_only(self):
         regular = WAKE.read_text(encoding="utf-8")
         review = WORKFLOW.read_text(encoding="utf-8")
@@ -357,7 +452,7 @@ class MistralCloudReviewTests(unittest.TestCase):
         self.assertIn("persist-credentials: false", review)
         self.assertIn("/tmp/onecompany-budget-trusted.json", review)
         self.assertIn("cp scripts/mistral_cloud_review.py /tmp/", review)
-        self.assertIn("ADVISORY review (non-binding)", review)
+        self.assertIn("name: OneCompany Mistral Exact-Head Technical Review", review)
         self.assertIn("cp AGENTS.md /tmp/onecompany-mistral-trusted/AGENTS.md", review)
         self.assertIn("cp docs/CLOUD-AGENT-QUALIFICATION.md /tmp/onecompany-mistral-trusted/", review)
         self.assertIn("cp scripts/mistral_review_packet.py /tmp/onecompany-mistral-packet-trusted.py", review)
@@ -406,16 +501,37 @@ class MistralCloudReviewTests(unittest.TestCase):
         self.assertIn("python -I /tmp/onecompany-mistral-review-trusted.py", review)
         self.assertIn("python -I -m pip install", review)
         self.assertNotIn("run: python -m pip install", review)
-        self.assertIn("Publish current-head Mistral advisory PR review as Actions bot", review)
+        self.assertIn("Publish current-head Mistral independent technical PR review as Actions bot", review)
         self.assertIn("steps.actor.outputs.exit_code == '0'", review)
         self.assertIn("guard.current_pr(number, head, base)", review)
         self.assertIn("guard.latest_ci_green(number, head)", review)
         self.assertIn("guard.independent_material_authors(number, head)", review)
-        self.assertIn("-f event=COMMENT", review)
-        self.assertNotIn("-f event=APPROVE", review)
+        self.assertIn('-f "event=$review_event"', review)
+        self.assertIn('review_event" != "APPROVE"', review)
+        self.assertIn('review_event" != "REQUEST_CHANGES"', review)
+        self.assertIn("parser.format_binding_review(", review)
+        self.assertNotIn("-f event=COMMENT", review)
         self.assertIn('"commit_id=$REVIEW_SHA"', review)
-        self.assertIn("advisory", review.lower())
-        self.assertIn("ADVISORY review (non-binding)", review)
+        self.assertIn("technical PASS/FAIL", review)
+        self.assertIn("**Mistral Vibe exact-head BINDING technical PASS", review)
+        self.assertIn("**Mistral Vibe exact-head BINDING technical FAIL", review)
+        self.assertIn("Mistral Vibe review NOT BINDING", review)
+        self.assertNotIn("ADVISORY review (non-binding)", review)
+        self.assertIn("PUBLISH_OUTCOME: ${{ steps.publish.outcome }}", review)
+        self.assertIn("PUBLISH_EVENT: ${{ steps.publish.outputs.review_event }}", review)
+        self.assertIn('echo "review_event=$review_event" >> "$GITHUB_OUTPUT"', review)
+        self.assertIn("REVIEW_PUBLICATION_BLOCKED", review)
+        self.assertNotIn("cat /tmp/onecompany-mistral-public.txt", review)
+        self.assertNotIn("MISTRAL_API_KEY", review.split("- name: Post Mistral result", 1)[1])
+        self.assertIn("Trusted run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID", review)
+        self.assertLess(
+            review.index("- name: Prepare redacted current-head Mistral review"),
+            review.index("- name: Publish current-head Mistral independent technical PR review as Actions bot"),
+        )
+        self.assertLess(
+            review.index("- name: Publish current-head Mistral independent technical PR review as Actions bot"),
+            review.index("- name: Post Mistral result"),
+        )
         self.assertNotIn("gh pr merge", review)
         import re
         active_uses = re.findall(r"(?m)^\s+uses:\s+([^\s]+)", review)

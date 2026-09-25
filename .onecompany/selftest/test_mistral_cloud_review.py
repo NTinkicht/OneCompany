@@ -364,6 +364,7 @@ class MistralCloudReviewTests(unittest.TestCase):
         self.assertIn("relevant review_sources/", review)
         self.assertIn("--max-turns 8", review)
         self.assertIn("--max-tokens 64000", review)
+        self.assertIn("NOT proof of exhausted subscription credits, included quota or financial budget", review)
         self.assertNotIn("--max-tokens 50000", review)
         self.assertIn("Reserve the last turn for the final answer", review)
         self.assertIn("TURN_LIMIT_EXCEEDED", review)

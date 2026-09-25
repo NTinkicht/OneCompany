@@ -299,7 +299,7 @@ def bounded_review_source(name: str, source: bytes, base: str, head: str) -> byt
         stderr=subprocess.DEVNULL, timeout=20, env=clean_git_env(),
     ).decode("utf-8")
     lines = source.decode("utf-8").splitlines()
-    hunk = re.compile(r"^@@ -[0-9]+(?:,[0-9]+)? \\+([0-9]+)(?:,([0-9]+))? @@")
+    hunk = re.compile(r"^@@ -[0-9]+(?:,[0-9]+)? \+([0-9]+)(?:,([0-9]+))? @@")
     selected: set[int] = set()
     for patch_line in patch.splitlines():
         match = hunk.match(patch_line)
@@ -315,13 +315,13 @@ def bounded_review_source(name: str, source: bytes, base: str, head: str) -> byt
     result = (
         f"REVIEW SOURCE EXCERPT: {name}. Unlisted lines intentionally omitted; "
         "review.diff is the complete patch. If more source is needed, return "
-        "INSUFFICIENT_EVIDENCE, not PASS.\\n"
+        "INSUFFICIENT_EVIDENCE, not PASS.\n"
     )
     last = 0
     for number in sorted(selected):
         if number > last + 1:
-            result += "... omitted source lines ...\\n"
-        result += f"{number}: {lines[number - 1]}\\n"
+            result += "... omitted source lines ...\n"
+        result += f"{number}: {lines[number - 1]}\n"
         last = number
     encoded = result.encode("utf-8")
     if len(encoded) > MAX_REVIEW_STAGE_SOURCE_BYTES:

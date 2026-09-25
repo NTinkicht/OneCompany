@@ -20,7 +20,13 @@ COMMAND = f"@mistral-vibe\nMISTRAL_START_V1\nwork_unit: WU-CLOUD-MISTRAL-DEV-001
 class MistralCanonicalIntakeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.queue = json.loads((ROOT / ".onecompany/queue.json").read_text())
+        cls.live_queue = json.loads((ROOT / ".onecompany/queue.json").read_text())
+        # The intake unit becomes bound to its canonical PR after the first
+        # successful start. Keep pre-intake fixtures independent of live state.
+        cls.queue = copy.deepcopy(cls.live_queue)
+        row = next(w for w in cls.queue["work_units"]
+                   if w["id"] == "WU-CLOUD-MISTRAL-DEV-001")
+        row["pr"] = None
         cls.budget = json.loads((ROOT / ".onecompany/budget.json").read_text())
         cls.config = json.loads((ROOT / ".onecompany/config.json").read_text())
 
@@ -95,6 +101,13 @@ class MistralCanonicalIntakeTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(ValueError, "BRANCH_CONFLICT"):
             self.ticket(queue=q)
+
+    def test_bound_live_unit_cannot_start_second_pr(self):
+        row = next(w for w in self.live_queue["work_units"]
+                   if w["id"] == "WU-CLOUD-MISTRAL-DEV-001")
+        if row.get("pr") is not None:
+            with self.assertRaisesRegex(ValueError, "START_WU_ALREADY_BOUND"):
+                self.ticket(queue=self.live_queue)
 
     def test_no_paid_fallback_and_emergency_stop(self):
         for field, value in (

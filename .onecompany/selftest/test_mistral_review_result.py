@@ -8,7 +8,7 @@ from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts"
 sys.path.insert(0, str(SCRIPTS))
-from mistral_review_result import MAX_BYTES, parse_result, format_comment
+from mistral_review_result import MAX_BYTES, parse_result, format_comment, format_binding_review
 
 HEAD = "a" * 40
 BASE = "b" * 40
@@ -34,6 +34,40 @@ class MistralReviewResultTests(unittest.TestCase):
         self.assertIn("NON-GATING", text)
         self.assertIn("github-actions[bot]", text)
         self.assertIn("NO_BLOCKING_FINDINGS", text)
+
+    def test_binding_pass_and_fail_are_exact_head_platform_events(self):
+        url = "https://github.com/NTinkicht/OneCompany/actions/runs/12345"
+        value = self.parse(self.payload())
+        event, body = format_binding_review(value, run_url=url,
+                                            run_id=12345, run_sha="c" * 40)
+        self.assertEqual(event, "APPROVE")
+        self.assertIn("verdict=PASS", body)
+        self.assertIn("head=" + HEAD, body)
+        self.assertIn("base=" + BASE, body)
+        self.assertIn("run_sha=" + "c" * 40, body)
+        self.assertNotIn("NON-GATING", body)
+        p = self.payload()
+        p["verdict"] = "CHANGES_REQUIRED"
+        p["findings"] = [{"severity": "MAJOR", "path": "src/demo.py",
+                          "line": 7, "description": "Incorrect boundary check."}]
+        event, body = format_binding_review(self.parse(p), run_url=url,
+                                            run_id=12345, run_sha="c" * 40)
+        self.assertEqual(event, "REQUEST_CHANGES")
+        self.assertIn("verdict=FAIL", body)
+        self.assertIn("Incorrect boundary check", body)
+
+    def test_binding_fails_closed_without_actual_run_provenance(self):
+        value = self.parse(self.payload())
+        for run_id, run_sha, url in (
+            (0, "c" * 40, "https://github.com/NTinkicht/OneCompany/actions/runs/0"),
+            (123, "bad", "https://github.com/NTinkicht/OneCompany/actions/runs/123"),
+            (123, "c" * 40, "https://github.com/foreign/repo/actions/runs/123"),
+        ):
+            with self.subTest(run_id=run_id, run_sha=run_sha), self.assertRaises(
+                ValueError
+            ):
+                format_binding_review(value, run_url=url,
+                                      run_id=run_id, run_sha=run_sha)
 
     def test_model_prose_is_rendered_inert(self):
         p = self.payload()

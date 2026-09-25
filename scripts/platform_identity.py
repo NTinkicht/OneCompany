@@ -360,6 +360,7 @@ def verified_mistral_review_publisher(
         return None, [error or "mistral_binding_run_unavailable"]
     path = run.get("path")
     if path not in {
+        MISTRAL_WORKFLOW,
         f"{MISTRAL_WORKFLOW}@main",
         f"{MISTRAL_WORKFLOW}@refs/heads/main",
     }:

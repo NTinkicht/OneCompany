@@ -365,6 +365,11 @@ class MistralCloudReviewTests(unittest.TestCase):
         self.assertIn("--trusted /tmp/onecompany-mistral-trusted", review)
         self.assertIn("REVIEW_PACKET_BLOCKED", review)
         self.assertIn("--max-turns 2", review)
+        self.assertIn("enabled_tools = [\"re:^(?!)\"]", review)
+        self.assertIn("--enabled-tools 're:^(?!)'", review)
+        self.assertNotIn("--enabled-tools read_file", review)
+        self.assertNotIn("--enabled-tools grep", review)
+        self.assertIn("REVIEW_PACKET_BLOCKED", review)
         self.assertIn("--max-tokens 64000", review)
         self.assertIn("NOT proof of exhausted subscription credits, included quota or financial budget", review)
         self.assertNotIn("--max-tokens 50000", review)
@@ -431,6 +436,11 @@ class MistralCloudReviewTests(unittest.TestCase):
             ".onecompany/selftest/test_mistral_review_result.py",
             bootstrap.SOURCE_INSTALLATION_EXCLUSIONS,
         )
+        for source_only in (
+            "scripts/mistral_review_packet.py",
+            ".onecompany/selftest/test_mistral_review_packet.py",
+        ):
+            self.assertIn(source_only, bootstrap.SOURCE_INSTALLATION_EXCLUSIONS)
 
 
 if __name__ == "__main__":

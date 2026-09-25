@@ -141,12 +141,54 @@ def live_ticket(value: dict) -> dict:
             "title": str(item.get("title", ""))[:160]}
 
 
+def tracked_mode(head: str, path: str) -> str | None:
+    """Refuse staged Git symlinks, executable blobs and file-valued ancestors.
+
+    Model-authorized files may be new regular files or existing regular blobs;
+    a model cannot silently turn a Git symlink/tree/executable into a file.
+    The tree is pinned to the PR's exact head, not the workspace checkout.
+    """
+    parts = path.split("/")
+    mode = None
+    for depth in range(1, len(parts) + 1):
+        prefix = "/".join(parts[:depth])
+        response = subprocess.run(
+            ["git", "ls-tree", "--full-tree", "-z", head, "--", prefix],
+            capture_output=True, timeout=15, check=False,
+            env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
+        )
+        if response.returncode != 0:
+            raise ValueError("GIT_TREE_INSPECTION_FAILED")
+        rows = [row for row in response.stdout.split(b"\0") if row]
+        if not rows:
+            mode = None
+            continue
+        if len(rows) != 1 or b"\t" not in rows[0]:
+            raise ValueError("GIT_TREE_ENTRY_INVALID")
+        header, raw_name = rows[0].split(b"\t", 1)
+        fields = header.split(b" ")
+        if len(fields) != 3 or raw_name != prefix.encode("utf-8"):
+            raise ValueError("GIT_TREE_ENTRY_INVALID")
+        mode = fields[0].decode("ascii")
+        if depth < len(parts) and mode != "040000":
+            raise ValueError("MODEL_SCOPE_NON_DIRECTORY_ANCESTOR")
+        if depth == len(parts) and mode != "100644":
+            raise ValueError("MODEL_SCOPE_NOT_REGULAR_BLOB")
+    return mode
+
+
 def git_file(head: str, path: str) -> bytes | None:
+    """Read exact-head regular blobs only; distinguish missing files from errors."""
+    mode = tracked_mode(head, path)
     response = subprocess.run(
         ["git", "show", f"{head}:{path}"], text=False, capture_output=True,
         timeout=15, check=False,
         env={k: v for k, v in os.environ.items() if not k.startswith("GIT_")},
     )
+    if response.returncode == 0 and mode is None:
+        raise ValueError("GIT_TREE_SOURCE_INCONSISTENT")
+    if response.returncode != 0 and mode is not None:
+        raise ValueError("GIT_TRACKED_SOURCE_UNREADABLE")
     if response.returncode != 0:
         # Missing paths are allowed as explicit WU-scoped NEW files. Fail
         # instead of treating all repo/API errors as a missing file.

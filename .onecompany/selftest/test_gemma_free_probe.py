@@ -128,14 +128,16 @@ class GemmaFreeProbeTests(unittest.TestCase):
                         opener=lambda *_a, data=data, **_k: FakeResponse(data))
 
     def test_offline_cli_does_not_require_key_or_contact_network(self):
+        out = io.StringIO()
         with patch.object(sys, "argv", ["gemma_free_probe.py"]), patch.dict(
             "os.environ", {"OPENROUTER_API_KEY": ""}, clear=False
         ), patch.object(g.urllib.request, "urlopen",
-                       side_effect=AssertionError("No network")), io.StringIO() as out:
+                       side_effect=AssertionError("No network")):
             with contextlib.redirect_stdout(out):
                 code = g.main()
         self.assertEqual(code, 0)
         result = json.loads(out.getvalue())
+        out.close()
         self.assertEqual(result["status"], "PREFLIGHT_OK_NO_NETWORK")
 
 

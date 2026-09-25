@@ -114,6 +114,7 @@ class MistralCloudWakeTests(unittest.TestCase):
             "CONFIG_BLOCKED",
             "CAPACITY_DEGRADED",
             "TOKEN_BUDGET_EXCEEDED",
+            "NOT proof of exhausted subscription credits, included quota or financial budget",
             'elif [[ "$code" == "124" || "$code" == "137" ]]; then',
             "[REDACTED]",
             "gh issue comment 130",

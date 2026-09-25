@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -208,7 +209,7 @@ class MistralFencedWorkerTests(unittest.TestCase):
             return (f"{mode} {kind} {B}\t{name}\0").encode()
         def run(command, **_kwargs):
             """Mock the tree mode at every prefix of the requested scope path."""
-            self.assertEqual(command[:3], ["git", "ls-tree", "-z"])
+            self.assertEqual(command[:4], ["git", "ls-tree", "--full-tree", "-z"])
             name = command[-1]
             if name == "examples":
                 mode = "040000"
@@ -236,14 +237,65 @@ class MistralFencedWorkerTests(unittest.TestCase):
         ):
             w.tracked_mode(H, path)
 
-    def test_mistral_source_stage_rejects_git_symlink_before_git_show(self):
-        """Fail if a tracked source becomes unreadable rather than inventing a new file."""
+    def test_mistral_source_stage_rejects_unreadable_tracked_blob(self):
+        """Fail if a tracked blob becomes unreadable rather than inventing a file."""
         with patch.object(w, "tracked_mode", return_value="100644"), patch.object(
             w.subprocess, "run", return_value=SimpleNamespace(
                 returncode=1, stdout=b""
             )
         ), self.assertRaisesRegex(ValueError, "GIT_TRACKED_SOURCE_UNREADABLE"):
             w.git_file(H, SCOPE[0])
+
+    def test_git_file_refuses_root_symlink_and_executable_from_nested_cwd(self):
+        """Ensure root-relative mode checks run before any git show in a nested cwd."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "examples").mkdir()
+            (root / "nested" / "examples").mkdir(parents=True)
+            (root / "examples" / "demo.py").symlink_to("../secret.txt")
+            executable = root / "examples" / "run.py"
+            executable.write_text("print('root executable')\\n")
+            executable.chmod(0o755)
+            for name in ("demo.py", "run.py"):
+                (root / "nested" / "examples" / name).write_text(
+                    "print('nested regular blob')\\n"
+                )
+            def git(*args):
+                """Run fixture setup commands in the isolated temporary repo."""
+                return subprocess.check_output(
+                    ["git", *args], cwd=root,
+                    env={key: value for key, value in os.environ.items()
+                         if not key.startswith("GIT_")},
+                    stderr=subprocess.PIPE,
+                ).decode().strip()
+            git("init", "-q")
+            git("config", "user.email", "test@example.invalid")
+            git("config", "user.name", "Test Fixture")
+            git("add", "--all")
+            git("commit", "-qm", "isolate root tree mode from current cwd")
+            head = git("rev-parse", "HEAD")
+            original = Path.cwd()
+            try:
+                os.chdir(root / "nested")
+                real_run = subprocess.run
+                for name in ("demo.py", "run.py"):
+                    with self.subTest(name=name), patch.object(
+                        w.subprocess, "run", wraps=real_run
+                    ) as runner, self.assertRaisesRegex(
+                        ValueError, "MODEL_SCOPE_NOT_REGULAR_BLOB"
+                    ):
+                        w.git_file(head, f"examples/{name}")
+                    commands = [call.args[0] for call in runner.call_args_list]
+                    self.assertTrue(commands)
+                    self.assertTrue(all(
+                        "--full-tree" in cmd for cmd in commands
+                        if cmd[:2] == ["git", "ls-tree"]
+                    ))
+                    self.assertFalse(any(
+                        cmd[:2] == ["git", "show"] for cmd in commands
+                    ))
+            finally:
+                os.chdir(original)
 
     def test_workflow_separates_model_from_publisher_and_source_installer(self):
         """Keep model editing, protected publication, and installer scopes separate."""

@@ -92,7 +92,7 @@ class MistralBindingIdentityTests(unittest.TestCase):
     def test_plain_actions_bot_or_fake_marker_never_grants_review(self):
         for body in ("", "I approve", MARKER.replace("verdict=PASS", "verdict=FAIL"),
                      MARKER.replace("base=" + BASE, "base=" + HEAD),
-                     MARKER + "\\n" + MARKER):
+                     MARKER + "\n" + MARKER):
             with self.subTest(body=body[:60]), patch.object(
                 identity, "_gh_json",
                 side_effect=self.fake_api({"review": {"body": body}})

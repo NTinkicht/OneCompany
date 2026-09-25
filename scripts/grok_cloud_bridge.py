@@ -50,6 +50,15 @@ def reject_nonfinite(_value: str) -> None:
     raise ValueError("GROK_NONFINITE_RESULT_NUMBER")
 
 
+def reject_fractional(_value: str) -> None:
+    """No bot-review schema field accepts decimals or exponent notation.
+
+    Failing at parse time also blocks e.g. 1e9999 (which otherwise becomes inf)
+    before a later version of the schema could accidentally accept a float.
+    """
+    raise ValueError("GROK_NONINTEGER_RESULT_NUMBER")
+
+
 def strict_result(raw: str) -> dict:
     """Untrusted Bot JSON must match exact contract; reject control-plane prose."""
     if not isinstance(raw, str) or len(raw.encode("utf-8")) > 12_000:
@@ -62,6 +71,7 @@ def strict_result(raw: str) -> dict:
         raw[len(MARKER) + 1:],
         object_pairs_hook=unique_object,
         parse_constant=reject_nonfinite,
+        parse_float=reject_fractional,
     )
     if not isinstance(value, dict) or set(value) != {
         "version", "kind", "repo", "pr", "head_sha", "base_sha",

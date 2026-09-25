@@ -188,7 +188,7 @@ jobs:
           enable_auto_update = false
           enable_notifications = false
           enable_telemetry = false
-          enabled_tools = ["re:^$"]
+          enabled_tools = ["re:^(?!)"]
           EOF
 
           # Trusted source-only parent assembles the exact-head bounded review
@@ -216,7 +216,7 @@ jobs:
               --trust \
               --agent plan \
               --workdir /tmp/onecompany-mistral-review-stage \
-              --enabled-tools 're:^
+              --enabled-tools 're:^(?!)' \
               --max-turns 2 \
               --max-tokens 64000 \
               --output text \

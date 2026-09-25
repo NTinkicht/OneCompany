@@ -428,7 +428,6 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
           READY: ${{ steps.preflight.outputs.ready }}
           PREFLIGHT_STATUS: ${{ steps.preflight.outputs.status }}
           PREFLIGHT_REASON: ${{ steps.preflight.outputs.reason }}

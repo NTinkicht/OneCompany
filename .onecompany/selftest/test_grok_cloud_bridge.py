@@ -98,6 +98,46 @@ class GrokCloudBridgeTests(unittest.TestCase):
             ):
                 g.strict_result(invalid)
 
+    def test_duplicate_top_level_keys_cannot_rewrite_identity_or_verdict(self):
+        # Python's default json.loads silently takes the LAST duplicate value.
+        # A bot result is evidence only if the entire original payload is unambiguous.
+        for first in (
+            '"verdict":"CHANGES_REQUIRED",',
+            '"head_sha":"' + B + '",',
+            '"\\u0076erdict":"CHANGES_REQUIRED",',
+        ):
+            raw = source().replace('{"base_sha":', '{' + first + '"base_sha":', 1)
+            with self.subTest(first=first), self.assertRaisesRegex(
+                ValueError, "GROK_DUPLICATE_RESULT_KEY"
+            ):
+                g.strict_result(raw)
+
+    def test_duplicate_nested_finding_keys_are_rejected(self):
+        raw = source().replace(
+            '"severity": "MAJOR"',
+            '"severity": "MINOR", "severity": "MAJOR"',
+            1,
+        )
+        with self.assertRaisesRegex(ValueError, "GROK_DUPLICATE_RESULT_KEY"):
+            g.strict_result(raw)
+
+    def test_nonfinite_json_constants_cannot_hide_in_bot_payload(self):
+        for token in ("NaN", "Infinity", "-Infinity"):
+            raw = source().replace('"summary": "', '"summary": ' + token + ', "unused": "', 1)
+            with self.subTest(token=token), self.assertRaisesRegex(
+                ValueError, "GROK_NONFINITE_RESULT_NUMBER"
+            ):
+                g.strict_result(raw)
+
+    def test_fractional_or_overflow_numbers_are_not_valid_review_evidence(self):
+        """Reject all unsupported JSON floats, including exponent overflow."""
+        for token in ("1.0", "-2.5", "1e9999", "-1e9999"):
+            raw = source().replace('"pr": 99', '"pr": ' + token, 1)
+            with self.subTest(token=token), self.assertRaisesRegex(
+                ValueError, "GROK_NONINTEGER_RESULT_NUMBER"
+            ):
+                g.strict_result(raw)
+
     def test_stale_target_or_missing_ci_fail_closed(self):
         with patch.object(g, "github", side_effect=fake_github), patch(
             "mistral_cloud_review.latest_ci_green", return_value=False

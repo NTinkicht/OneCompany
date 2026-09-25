@@ -420,14 +420,17 @@ def review_platform_identity(
     policy, provenance, policy_errors = load_identity_policy(repo, trusted_ref)
     if policy is None:
         return None, policy_errors
-    identity, mapping_error = map_platform_login(policy, login)
-    if identity is None and login == "github-actions[bot]":
+    # Never grant generic Actions-bot code-review authority through an
+    # identity mapping alone: every Mistral approval must have workflow proof.
+    if login == "github-actions[bot]":
         identity, binding_errors = verified_mistral_review_publisher(
             repo, pr, review, candidate_sha, trusted_ref
         )
         if identity is None:
             return None, binding_errors
         mapping_error = None
+    else:
+        identity, mapping_error = map_platform_login(policy, login)
     if identity is None and provenance.get("source") == "repository-owner-bootstrap":
         identity = {
             "login": login,

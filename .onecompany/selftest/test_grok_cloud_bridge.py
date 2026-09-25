@@ -129,6 +129,15 @@ class GrokCloudBridgeTests(unittest.TestCase):
             ):
                 g.strict_result(raw)
 
+    def test_fractional_or_overflow_numbers_are_not_valid_review_evidence(self):
+        """Reject all unsupported JSON floats, including exponent overflow."""
+        for token in ("1.0", "-2.5", "1e9999", "-1e9999"):
+            raw = source().replace('"pr": 99', '"pr": ' + token, 1)
+            with self.subTest(token=token), self.assertRaisesRegex(
+                ValueError, "GROK_NONINTEGER_RESULT_NUMBER"
+            ):
+                g.strict_result(raw)
+
     def test_stale_target_or_missing_ci_fail_closed(self):
         with patch.object(g, "github", side_effect=fake_github), patch(
             "mistral_cloud_review.latest_ci_green", return_value=False

@@ -543,6 +543,111 @@ def _normalized_planning_snapshot(
     }
 
 
+
+# A narrow SOURCE-repository, exact-canonical-PR bootstrap for the first real
+# Mistral source+test proof. Generic actor capacity and verified readiness stay
+# at ZERO until model-authored work is independently established and promoted.
+# It is intentionally not a reusable client product feature or general-purpose
+# exemption for arbitrary READY WUs.
+MISTRAL_QUALIFICATION_PR = 224
+# Historical WU-PFC-001 completed in GitHub PR #9 before the v2 event ledger.
+# This independent sandbox qualification has no active WU dependencies;
+# record the historical reference without manufacturing a MERGED event.
+MISTRAL_QUALIFICATION_LEGACY = {
+    "work_unit": "WU-PFC-001",
+    "pr": 9,
+    "merge_sha": "92351502fe85e83da5609269ef868f6d768004f4",
+    "cutover": "legacy-merged-before-v2-ledger",
+}
+MISTRAL_QUALIFICATION_SCOPE = [
+    "examples/agent-qualification/demo.py",
+    "tests/test_agent_qualification.py",
+]
+
+
+def mistral_qualification_pilot_admission(
+    *,
+    repo: str,
+    actor: str,
+    pr: int | None,
+    work_unit: str | None,
+    item: dict[str, Any] | None,
+    actor_record: dict[str, Any] | None,
+    ready: dict[str, Any] | None,
+    budget: dict[str, Any],
+    config: dict[str, Any],
+) -> bool:
+    """Permit only the named governed pilot, never general implementation.
+
+    Called against a verified, base-trusted immutable policy snapshot. Pilot
+    authorization cannot be derived from a proposed PR queue/readiness edit.
+    The ordinary capacity_pool, routing and readiness registries are unchanged.
+    """
+    if (repo != "NTinkicht/OneCompany" or actor != "mistral-vibe"
+            or work_unit != "WU-CLOUD-MISTRAL-DEV-001"
+            or pr != MISTRAL_QUALIFICATION_PR
+            or not isinstance(item, dict)
+            or not isinstance(actor_record, dict)
+            or not isinstance(ready, dict)):
+        return False
+    if (item.get("id") != work_unit
+            or item.get("pr") != pr
+            or item.get("issue") != 133
+            or item.get("status") != "READY"
+            or item.get("risk_class") != "LOW"
+            or item.get("branch") != "wu-cloud-mistral-dev-001"
+            or item.get("dependencies") != []
+            or item.get("legacy_completion_reference") != MISTRAL_QUALIFICATION_LEGACY
+            or item.get("write_scope") != MISTRAL_QUALIFICATION_SCOPE
+            or item.get("resource_locks") != [
+                "onecompany:mistral-cloud-qualification"
+            ]):
+        return False
+    if (actor_record.get("id") != actor
+            or actor_record.get("enabled") is not True
+            or actor_record.get("configured") is not True
+            or actor_record.get("cost_class") != "INCLUDED_SUBSCRIPTION"
+            or actor_record.get("permissions") != ["read"]
+            or "implementation" in actor_record.get("capabilities", [])
+            or not {"repository_intelligence", "test_design"}.issubset(
+                set(actor_record.get("capabilities", []))
+            )):
+        return False
+    access = ready.get("repository_access", {})
+    unattended = ready.get("unattended", {})
+    capacity = ready.get("capacity", {})
+    if (ready.get("actor_id") != actor
+            or ready.get("setup_state") != "ready"
+            or "implementation" in ready.get("verified_capabilities", [])
+            or not {"repository_intelligence", "test_design"}.issubset(
+                set(ready.get("verified_capabilities", []))
+            )
+            or "github-actions-onecompany-mistral-vibe-readonly"
+                not in ready.get("verified_surfaces", [])
+            or not isinstance(access, dict)
+            or access.get("read") is not True
+            or access.get("write") is not False
+            or access.get("review") is not False
+            or not isinstance(unattended, dict)
+            or unattended.get("configured") is not True
+            or unattended.get("verified") is not True
+            or not isinstance(capacity, dict)
+            or capacity.get("implementation_streams") != 0
+            or capacity.get("measured") is not True):
+        return False
+    ai = budget.get("ai", {})
+    safety = config.get("safety", {})
+    return (type(ai.get("additional_monthly_spend_cap")) is int
+            and ai["additional_monthly_spend_cap"] == 0
+            and ai.get("unknown_cost_behavior") == "forbid"
+            and all(ai.get(k) is False for k in (
+                "allow_paid_fallback", "allow_overage",
+                "allow_auto_topup", "allow_new_paid_vendor",
+            ))
+            and isinstance(safety, dict)
+            and safety.get("emergency_stop") is False)
+
+
 def trusted_admission_context(
     trusted_ref: str,
     actor: str,
@@ -618,8 +723,26 @@ def trusted_admission_context(
                 work_item, work_map
             )
 
+        qualification_pilot = bool(hard_reasons) and mistral_qualification_pilot_admission(
+            repo=repo,
+            actor=actor,
+            pr=pr,
+            work_unit=work_unit,
+            item=work_item,
+            actor_record=actor_record,
+            ready=ready,
+            budget=docs["budget"],
+            config=runtime["config"],
+        )
+        if qualification_pilot:
+            # One frozen native lease for PR #224 only; no writes/reviewer
+            # rights are added to the global actor/readiness registries.
+            actor_limit = 1
+            hard_reasons = []
+
         return {
             "trusted_ref": trusted_ref,
+            "qualification_pilot": qualification_pilot,
             "policy_blobs": blobs,
             "planning": docs["planning"],
             "work_map": work_map,

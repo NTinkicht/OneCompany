@@ -105,6 +105,34 @@ class ResumeProductBriefTests(unittest.TestCase):
                     with self.assertRaises((ValueError, TypeError)):
                         MOD.load_draft(self.write(Path(td), payload))
 
+    def test_duplicate_raw_authority_fields_refuse_before_resume(self):
+        """Last-key-wins JSON must never erase a forged approval assertion."""
+        with tempfile.TemporaryDirectory() as td:
+            folder = Path(td)
+            raw = json.dumps(draft())
+            cases = (
+                raw.replace('"status": "DRAFT_NOT_APPROVED"',
+                            '"status": "APPROVED", "status": "DRAFT_NOT_APPROVED"', 1),
+                raw.replace('"approval": {',
+                            '"approval": {"implementation": true}, "approval": {', 1),
+                raw.replace('"implementation": false',
+                            '"implementation": true, "implementation": false', 1),
+            )
+            for idx, case in enumerate(cases):
+                with self.subTest(index=idx):
+                    path = folder / f"duplicated-{idx}.json"
+                    path.write_text(case, encoding="utf-8")
+                    with self.assertRaisesRegex(ValueError, "DUPLICATE_SAVED_BRIEF_JSON_KEY"):
+                        MOD.load_draft(path)
+                    run = subprocess.run(
+                        [sys.executable, str(SCRIPTS / "resume_product_brief.py"),
+                         str(path), "--json"],
+                        cwd=ROOT, text=True, capture_output=True, timeout=12,
+                    )
+                    self.assertEqual(run.returncode, 2)
+                    self.assertIn("DUPLICATE_SAVED_BRIEF_JSON_KEY", run.stderr)
+                    self.assertEqual(run.stdout, "")
+
     @unittest.skipUnless(os.name == "posix", "nofollow descriptor tests require POSIX")
     def test_symlink_and_symlink_parent_are_refused(self):
         """Secure openat prevents final and intermediate path traversal."""

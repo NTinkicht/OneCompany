@@ -12,6 +12,10 @@ COMMANDS = {
     "start": ["first_run_wizard.py"],
     "onboard": ["onboard.py"],
     "brief": ["product_brief.py"],
+    "brief-resume": ["resume_product_brief.py"],
+    "brief-diff": ["product_brief_diff.py"],
+    "brief-status": ["brief_status.py"],
+    "brief-validate": ["brief_validate.py"],
     "brief-handoff": ["brief_handoff_proposal.py"],
     "journey": ["first_run_journey.py"],
     "demo": ["phase1_vertical_smoke.py"],
@@ -40,6 +44,10 @@ def usage() -> int:
     print("  start             guided Create/Adopt owner Product Brief (source checkout)")
     print("  onboard           assess a new/existing repository; read-only unless --apply")
     print("  brief             draft Product Brief from owner answers; read-only unless --save-to")
+    print("  brief-resume      inspect a saved Product Brief draft; read-only")
+    print("  brief-diff        preview changes between two saved drafts; read-only")
+    print("  brief-status      inspect saved-draft readiness; read-only")
+    print("  brief-validate    validate saved-draft structure; read-only")
     print("  brief-handoff     preview a read-only planning handoff from a saved owner brief")
     print("  journey           guided Create/Adopt next steps; read-only, never approval")
     print("  demo              run real disposable local CRUD proof from owner draft (source checkout)")
@@ -48,7 +56,7 @@ def usage() -> int:
     print("  shadow-migration  analyze an external migration snapshot without target mutation")
     print("  cutover-readiness prove quiescent C2b readiness without target mutation")
     print("\nCommands:")
-    featured = {"start", "onboard", "brief", "brief-handoff", "journey", "demo", "preview-local", "mission-control", "shadow-migration", "cutover-readiness"}
+    featured = {"start", "onboard", "brief", "brief-resume", "brief-diff", "brief-status", "brief-validate", "brief-handoff", "journey", "demo", "preview-local", "mission-control", "shadow-migration", "cutover-readiness"}
     for command in COMMANDS:
         if command not in featured:
             print(f"  {command}")
@@ -65,8 +73,9 @@ def main() -> int:
         print(f"unknown command: {command}")
         return usage()
     helper = ROOT / "scripts" / spec[0]
-    interactive_source = {"start", "demo", "preview-local", "mission-control"}
-    if command in interactive_source and not helper.is_file():
+    source_only = {"start", "demo", "preview-local", "mission-control",
+                   "brief-resume", "brief-diff", "brief-status", "brief-validate"}
+    if command in source_only and not helper.is_file():
         print(f"{command} is available from the OneCompany source checkout only; no target is modified.")
         return 2
     argv = [sys.executable, str(helper), *spec[1:], *sys.argv[2:]]

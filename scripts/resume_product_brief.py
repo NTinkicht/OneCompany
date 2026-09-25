@@ -54,7 +54,17 @@ def _read_json(path: Path) -> dict:
     finally:
         for fd in reversed(dirs):
             os.close(fd)
-    data = json.loads(raw.decode("utf-8"))
+    def unique_object(pairs: list[tuple[str, object]]) -> dict:
+        result: dict = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("DUPLICATE_SAVED_BRIEF_JSON_KEY")
+            result[key] = value
+        return result
+
+    # A later innocent duplicate must never erase an earlier forged approval
+    # or RunKey assertion before whole-document authority validation.
+    data = json.loads(raw.decode("utf-8"), object_pairs_hook=unique_object)
     if not isinstance(data, dict):
         raise ValueError("draft must be a JSON object")
     return data

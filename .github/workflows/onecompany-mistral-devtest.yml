@@ -14,11 +14,16 @@ permissions:
 jobs:
   mistral-devtest:
     if: >-
-      github.event.issue.number == 130 &&
       github.event.issue.pull_request == null &&
       github.actor == 'NTinkicht' &&
-      contains(github.event.comment.body, '@mistral-vibe') &&
-      contains(github.event.comment.body, 'MISTRAL_WORK_V1')
+      ((github.event.issue.number == 130 &&
+        contains(github.event.comment.body, '@mistral-vibe') &&
+        contains(github.event.comment.body, 'MISTRAL_WORK_V1')) ||
+       (github.event.issue.number == 45 &&
+        contains(github.event.comment.body, '<!-- onecompany-ledger-v1 -->') &&
+        contains(github.event.comment.body, '"type":"ROLE_LEASE_ASSIGNED"') &&
+        contains(github.event.comment.body, '"actor":"mistral-vibe"') &&
+        contains(github.event.comment.body, '"role":"implementation"')))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
@@ -36,8 +41,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           DISPATCH_BODY: ${{ github.event.comment.body }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
         shell: bash
-        run: python scripts/mistral_cloud_work.py prepare
+        run: |
+          set -euo pipefail
+          if [[ "$ISSUE_NUMBER" == "45" ]]; then
+            python scripts/mistral_cloud_work.py prepare-ledger
+          else
+            python scripts/mistral_cloud_work.py prepare
+          fi
 
       - name: Verify included Vibe entitlement (no model inference yet)
         id: quota

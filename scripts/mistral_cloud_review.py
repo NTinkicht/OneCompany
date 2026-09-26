@@ -31,6 +31,12 @@ TRUSTED_LEDGER_WORKFLOW = Path(os.environ.get(
 ))
 MISTRAL_ALIASES = frozenset({"mistral", "mistral-vibe", "mistral_vibe"})
 MATERIAL_AUTHOR = re.compile(r"(?im)^Material-Author:[ \t]*([a-z0-9_-]+)[ \t]*$")
+MISTRAL_BINDING_REVIEW = re.compile(
+    r"(?m)^<!-- ONECOMPANY_MISTRAL_BINDING_REVIEW_V1 "
+    r"pr=([1-9][0-9]{0,5}) head=([a-f0-9]{40}) base=([a-f0-9]{40}) "
+    r"run=([1-9][0-9]{0,19}) run_sha=([a-f0-9]{40}) "
+    r"verdict=(PASS|FAIL) -->$"
+)
 DIFF_NAME = ".onecompany_mistral_review.diff"
 MAX_DIFF_BYTES = 100_000
 MAX_REVIEW_STAGE_DIFF_BYTES = 32_000

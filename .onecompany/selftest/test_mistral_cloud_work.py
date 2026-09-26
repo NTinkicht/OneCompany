@@ -297,6 +297,94 @@ class MistralFencedWorkerTests(unittest.TestCase):
             finally:
                 os.chdir(original)
 
+    def test_owner_durable_lease_event_derives_exact_worker_ticket(self):
+        ledger = {
+            "version": 2,
+            "event_id": "lease-event-1",
+            "type": "ROLE_LEASE_ASSIGNED",
+            "actor": "mistral-vibe",
+            "payload": {
+                "lease_id": LEASE,
+                "role": "implementation",
+                "work_unit": WU,
+                "branch": BRANCH,
+                "pr": 99,
+                "start_head": H,
+            },
+        }
+        body = (
+            w.LEDGER_MARKER + "\n```json\n"
+            + json.dumps(ledger, separators=(",", ":"))
+            + "\n```"
+        )
+        envelope = {
+            "action": "created",
+            "issue": {"number": 45},
+            "comment": {
+                "user": {"login": "NTinkicht"},
+                "body": body,
+            },
+        }
+        pr = {
+            "state": "open",
+            "head": {
+                "sha": H,
+                "ref": BRANCH,
+                "repo": {"full_name": w.REPO},
+            },
+            "base": {
+                "sha": B,
+                "ref": "main",
+                "repo": {"full_name": w.REPO},
+            },
+        }
+        with tempfile.NamedTemporaryFile("w", delete=False) as stream:
+            json.dump(envelope, stream)
+            event_path = stream.name
+        try:
+            with patch.object(w, "api", return_value=pr):
+                self.assertEqual(
+                    w.ledger_assignment(body, event_path=event_path),
+                    {
+                        "pr": 99,
+                        "head_sha": H,
+                        "base_sha": B,
+                        "work_unit": WU,
+                        "lease_id": LEASE,
+                    },
+                )
+        finally:
+            Path(event_path).unlink(missing_ok=True)
+
+    def test_durable_lease_wake_rejects_non_mistral_or_nonimplementation(self):
+        base = {
+            "version": 2,
+            "event_id": "lease-event-2",
+            "type": "ROLE_LEASE_ASSIGNED",
+            "actor": "mistral-vibe",
+            "payload": {
+                "lease_id": LEASE,
+                "role": "implementation",
+                "work_unit": WU,
+                "branch": BRANCH,
+                "pr": 99,
+                "start_head": H,
+            },
+        }
+        for mutate in (
+            lambda event: event.update(actor="chatgpt"),
+            lambda event: event["payload"].update(role="review"),
+        ):
+            event = json.loads(json.dumps(base))
+            mutate(event)
+            body = (
+                w.LEDGER_MARKER + "\n```json\n"
+                + json.dumps(event, separators=(",", ":"))
+                + "\n```"
+            )
+            with self.assertRaises(ValueError):
+                w.ledger_assignment(body)
+
     def test_model_failure_classification_is_structured_and_sanitized(self):
         cases = (
             (124, "", "TIMEOUT"),

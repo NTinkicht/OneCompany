@@ -33,6 +33,84 @@ MAX_TOTAL = 72_000
 MAX_FILES = 8
 FIELDS = ("pr", "head_sha", "base_sha", "work_unit", "lease_id")
 
+MODEL_FAILURE_CLASSES = {
+    "CLI_USAGE", "AUTH", "QUOTA", "MODEL_RUNTIME",
+    "MODEL_NO_EDIT", "TIMEOUT", "UNKNOWN",
+}
+MODEL_STDERR = Path("/tmp/onecompany-mistral-devtest-errors.txt")
+
+
+def safe_cli_exit(value: object) -> int:
+    """Return a bounded non-secret CLI exit code for machine-readable evidence."""
+    try:
+        code = int(str(value))
+    except (TypeError, ValueError):
+        return 255
+    return code if 0 <= code <= 255 else 255
+
+
+def classify_model_failure(exit_code: int, stderr: str) -> str:
+    """Classify provider/CLI failure without publishing raw stderr or prompts."""
+    text = (stderr or "").lower()
+    if exit_code == 124 or "timed out" in text or "timeout" in text:
+        return "TIMEOUT"
+    if re.search(r"401|unauthori[sz]ed|authentication|invalid.{0,24}(api.{0,8})?key", text):
+        return "AUTH"
+    if re.search(r"429|rate.?limit|quota|capacity|token limit exceeded|usage.{0,12}limit", text):
+        return "QUOTA"
+    if re.search(r"no such option|unknown option|unrecognized option|usage:", text):
+        return "CLI_USAGE"
+    if exit_code != 0:
+        return "MODEL_RUNTIME"
+    return "UNKNOWN"
+
+
+def _has_executable_python_test(edits: list[dict]) -> bool:
+    """Require an actual Python test body, not a scaffold/comment-only file."""
+    for row in edits:
+        path = str(row.get("path", ""))
+        if not path.startswith("tests/") or not path.endswith(".py"):
+            continue
+        try:
+            source = row["content"].decode("utf-8")
+        except (KeyError, AttributeError, UnicodeDecodeError):
+            continue
+        if re.search(r"(?m)^\s*(?:async\s+)?def\s+test_[A-Za-z0-9_]+\s*\(", source):
+            return True
+        if "unittest.TestCase" in source and re.search(
+            r"(?m)^\s*def\s+test_[A-Za-z0-9_]+\s*\(", source
+        ):
+            return True
+    return False
+
+
+def assess_model_result(
+    exit_code: int,
+    *,
+    stderr_path: Path = MODEL_STDERR,
+    stage: Path = STAGE,
+    manifest: Path = TRUSTED / "manifest.json",
+) -> tuple[bool, str]:
+    """Prove a qualifying model edit before the privileged publisher can run."""
+    stderr = ""
+    if stderr_path.exists():
+        stderr = stderr_path.read_text(
+            encoding="utf-8", errors="replace"
+        )[:64_000]
+    if exit_code != 0:
+        return False, classify_model_failure(exit_code, stderr)
+    try:
+        edits = planned_edits(stage=stage, manifest=manifest)
+    except ValueError as exc:
+        if str(exc) == "MODEL_PRODUCED_NO_CODE_OR_TEST":
+            return False, "MODEL_NO_EDIT"
+        return False, "MODEL_RUNTIME"
+    changed_paths = {str(row.get("path", "")) for row in edits}
+    has_source = any(not path.startswith("tests/") for path in changed_paths)
+    if not has_source or not _has_executable_python_test(edits):
+        return False, "MODEL_NO_EDIT"
+    return True, "NONE"
+
 
 def actions_output(**fields: object) -> None:
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
@@ -354,6 +432,17 @@ def main() -> int:
             live_ticket(ticket)
             stage_files(ticket)
             actions_output(ready="true", status="MODEL_STAGE_READY")
+        elif mode == "assess-model":
+            exit_code = safe_cli_exit(os.environ.get("MODEL_CLI_EXIT", "255"))
+            ready, failure_class = assess_model_result(exit_code)
+            actions_output(
+                ready=str(ready).lower(),
+                status="MODEL_EDIT_VERIFIED" if ready else "MODEL_EDIT_FAILED",
+                failure_class=failure_class,
+                cli_exit=exit_code,
+            )
+            if not ready:
+                return 2
         elif mode == "publish":
             ticket = json.loads((TRUSTED / "ticket.json").read_text())
             new_sha = publish(ticket)
@@ -364,6 +453,7 @@ def main() -> int:
     except (ValueError, OSError, UnicodeError, json.JSONDecodeError, KeyError,
             subprocess.CalledProcessError, subprocess.TimeoutExpired):
         actions_output(ready="false", status="MISTRAL_WORK_BLOCKED")
+        return 2
     return 0
 
 

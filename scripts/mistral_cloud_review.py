@@ -231,16 +231,25 @@ def output(**fields: object) -> None:
             stream.write(f"{key}={value}\n")
 
 
-def existing_exact_mistral_review(number: int, head: str) -> bool:
+def existing_exact_mistral_review(number: int, head: str, base: str) -> bool:
     reviews = github_json(f"repos/{REPO}/pulls/{number}/reviews?per_page=100")
     if not isinstance(reviews, list):
         raise ValueError("REVIEW_HISTORY_UNAVAILABLE")
-    return any(
-        r.get("commit_id") == head
-        and r.get("state") in {"APPROVED", "CHANGES_REQUESTED"}
-        and "Mistral Vibe" in (r.get("body") or "")
-        for r in reviews
-    )
+    for review in reviews:
+        if (
+            review.get("commit_id") != head
+            or review.get("state") not in {"APPROVED", "CHANGES_REQUESTED"}
+            or (review.get("user") or {}).get("login") != "github-actions[bot]"
+        ):
+            continue
+        body = review.get("body")
+        matches = MISTRAL_BINDING_REVIEW.findall(body) if isinstance(body, str) else []
+        if len(matches) != 1:
+            continue
+        target_pr, target_head, target_base, _run, _run_sha, _verdict = matches[0]
+        if int(target_pr) == number and target_head == head and target_base == base:
+            return True
+    return False
 
 
 def auto_prepare() -> None:
@@ -266,7 +275,7 @@ def auto_prepare() -> None:
         if not SHA.fullmatch(base) or base == head:
             raise ValueError("AUTO_REVIEW_BASE_INVALID")
         current_pr(number, head, base)
-        if existing_exact_mistral_review(number, head):
+        if existing_exact_mistral_review(number, head, base):
             output(ready="false", status="EXACT_HEAD_REVIEW_ALREADY_EXISTS")
             return
         if not independent_material_authors(number, head):

@@ -143,6 +143,88 @@ def assignment(body: str) -> dict:
     return {**values, "pr": int(values["pr"])}
 
 
+LEDGER_ISSUE = 45
+LEDGER_MARKER = "<!-- onecompany-ledger-v1 -->"
+
+
+def ledger_assignment(body: str, *, event_path: str | None = None) -> dict:
+    """Derive a work ticket from an owner-published durable lease event.
+
+    The event is only a wake hint. live_ticket() replays the authoritative
+    ledger and revalidates current PR/head/scope/lease before model execution.
+    """
+    if not isinstance(body, str) or len(body) > 12_000:
+        raise ValueError("LEDGER_WAKE_INVALID")
+    match = re.fullmatch(
+        r"<!-- onecompany-ledger-v1 -->\n```json\n(\{.*\})\n```",
+        body,
+        flags=re.DOTALL,
+    )
+    if match is None:
+        raise ValueError("LEDGER_WAKE_INVALID")
+    event = json.loads(match.group(1))
+    if (
+        not isinstance(event, dict)
+        or event.get("version") != 2
+        or event.get("type") != "ROLE_LEASE_ASSIGNED"
+        or event.get("actor") != "mistral-vibe"
+    ):
+        raise ValueError("LEDGER_WAKE_NOT_MISTRAL_IMPLEMENTATION")
+    payload = event.get("payload")
+    if not isinstance(payload, dict) or payload.get("role") != "implementation":
+        raise ValueError("LEDGER_WAKE_NOT_IMPLEMENTATION")
+    values = {
+        "pr": payload.get("pr"),
+        "head_sha": payload.get("start_head"),
+        "work_unit": payload.get("work_unit"),
+        "lease_id": payload.get("lease_id"),
+        "branch": payload.get("branch"),
+    }
+    if (
+        type(values["pr"]) is not int
+        or values["pr"] < 1
+        or not SHA.fullmatch(str(values["head_sha"] or ""))
+        or not re.fullmatch(r"WU-[A-Z0-9-]{3,64}", str(values["work_unit"] or ""))
+        or not re.fullmatch(r"[A-Za-z0-9_-]{12,80}", str(values["lease_id"] or ""))
+        or not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9_.-]{0,100}", str(values["branch"] or "")
+        )
+        or values["branch"] == "main"
+    ):
+        raise ValueError("LEDGER_WAKE_FIELDS_INVALID")
+
+    if event_path:
+        envelope = json.loads(Path(event_path).read_text(encoding="utf-8"))
+        if (
+            envelope.get("action") != "created"
+            or (envelope.get("issue") or {}).get("number") != LEDGER_ISSUE
+            or ((envelope.get("comment") or {}).get("user") or {}).get("login") != OWNER
+            or (envelope.get("comment") or {}).get("body") != body
+        ):
+            raise ValueError("LEDGER_WAKE_ENVELOPE_UNTRUSTED")
+
+    pr = api(f"repos/{REPO}/pulls/{values['pr']}")
+    base = (pr.get("base") or {}).get("sha")
+    if (
+        pr.get("state") != "open"
+        or (pr.get("head") or {}).get("sha") != values["head_sha"]
+        or (pr.get("head") or {}).get("ref") != values["branch"]
+        or (pr.get("head") or {}).get("repo", {}).get("full_name") != REPO
+        or (pr.get("base") or {}).get("ref") != "main"
+        or (pr.get("base") or {}).get("repo", {}).get("full_name") != REPO
+        or not SHA.fullmatch(str(base or ""))
+        or base == values["head_sha"]
+    ):
+        raise ValueError("LEDGER_WAKE_PR_STALE_OR_FOREIGN")
+    return {
+        "pr": values["pr"],
+        "head_sha": values["head_sha"],
+        "base_sha": base,
+        "work_unit": values["work_unit"],
+        "lease_id": values["lease_id"],
+    }
+
+
 def zero_spend() -> None:
     ai = load_json(CONTROL / "budget.json")["ai"]
     if (type(ai.get("additional_monthly_spend_cap")) is not int
@@ -420,13 +502,27 @@ def publish(ticket: dict, *, stage: Path = STAGE,
 def main() -> int:
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
     try:
-        if mode == "prepare":
+        if mode in {"prepare", "prepare-ledger"}:
             if os.environ.get("GITHUB_ACTOR") != OWNER:
                 raise ValueError("UNTRUSTED_DISPATCH_AUTHOR")
-            ticket = live_ticket(assignment(os.environ["DISPATCH_BODY"]))
+            if mode == "prepare-ledger":
+                value = ledger_assignment(
+                    os.environ["DISPATCH_BODY"],
+                    event_path=os.environ.get("GITHUB_EVENT_PATH"),
+                )
+            else:
+                value = assignment(os.environ["DISPATCH_BODY"])
+            ticket = live_ticket(value)
             (TRUSTED).mkdir(parents=True, mode=0o700, exist_ok=True)
             (TRUSTED / "ticket.json").write_text(json.dumps(ticket))
-            actions_output(ready="true", status="WORK_TICKET_VERIFIED")
+            actions_output(
+                ready="true",
+                status=(
+                    "WORK_TICKET_VERIFIED_FROM_DURABLE_LEASE"
+                    if mode == "prepare-ledger"
+                    else "WORK_TICKET_VERIFIED"
+                ),
+            )
         elif mode == "stage":
             ticket = json.loads((TRUSTED / "ticket.json").read_text())
             live_ticket(ticket)

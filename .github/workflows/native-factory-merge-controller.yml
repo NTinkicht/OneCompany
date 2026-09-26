@@ -1,0 +1,144 @@
+name: Native Factory Merge Controller
+
+on:
+  workflow_run:
+    workflows: ["OneCompany Validate", "OneCompany Handoff Supervision", "OneCompany Mistral Exact-Head Technical Review"]
+    types: [completed]
+  pull_request_review:
+    types: [submitted, dismissed]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  actions: read
+
+concurrency:
+  group: native-factory-merge-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  reconcile-and-merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Reconcile exact-head merge gates from trusted main
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUIRED_CHECKS_JSON: '["validate","pr-smoke"]'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json, os, subprocess, sys
+          from pathlib import Path
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          owner, name = repo.split("/", 1)
+          required = set(json.loads(os.environ["REQUIRED_CHECKS_JSON"]))
+          event = json.loads(Path(os.environ["GITHUB_EVENT_PATH"]).read_text())
+
+          def gh(path, method=None, fields=None):
+              cmd = ["gh", "api"]
+              if method:
+                  cmd += ["-X", method]
+              if fields:
+                  for k, v in fields.items():
+                      cmd += ["-f", f"{k}={v}"]
+              cmd.append(path)
+              p = subprocess.run(cmd, text=True, capture_output=True)
+              if p.returncode:
+                  raise SystemExit(p.stderr.strip() or f"GitHub API failed: {path}")
+              return json.loads(p.stdout) if p.stdout.strip() else {}
+
+          pr_number = None
+          if os.environ["GITHUB_EVENT_NAME"] == "pull_request_review":
+              pr_number = event.get("pull_request", {}).get("number")
+          elif os.environ["GITHUB_EVENT_NAME"] == "workflow_run":
+              wr = event.get("workflow_run", {})
+              prs = wr.get("pull_requests") or []
+              if prs:
+                  pr_number = prs[0].get("number")
+              elif wr.get("head_sha"):
+                  matches = gh(f"repos/{repo}/commits/{wr['head_sha']}/pulls?per_page=20")
+                  matches = [p for p in matches if p.get("state") == "open"]
+                  if len(matches) == 1:
+                      pr_number = matches[0]["number"]
+
+          if not pr_number:
+              print("NO_CANONICAL_PR_FOR_EVENT")
+              raise SystemExit(0)
+
+          pr = gh(f"repos/{repo}/pulls/{pr_number}")
+          if pr.get("state") != "open" or pr.get("draft"):
+              print("PR_NOT_OPEN_OR_READY")
+              raise SystemExit(0)
+          if pr.get("base", {}).get("ref") != "main":
+              print("NON_MAIN_BASE_BLOCKED")
+              raise SystemExit(0)
+          if pr.get("head", {}).get("repo", {}).get("full_name") != repo:
+              print("FOREIGN_HEAD_BLOCKED")
+              raise SystemExit(0)
+
+          sha = pr["head"]["sha"]
+          checks = gh(f"repos/{repo}/commits/{sha}/check-runs?per_page=100").get("check_runs", [])
+          passing = {c["name"] for c in checks if c.get("status") == "completed" and c.get("conclusion") == "success"}
+          missing = sorted(required - passing)
+          if missing:
+              print("REQUIRED_CHECKS_NOT_GREEN", missing)
+              raise SystemExit(0)
+
+          reviews = gh(f"repos/{repo}/pulls/{pr_number}/reviews?per_page=100")
+          author = pr.get("user", {}).get("login", "").lower()
+          approved = [
+              r for r in reviews
+              if r.get("state") == "APPROVED"
+              and r.get("commit_id") == sha
+              and r.get("user", {}).get("login", "").lower() != author
+          ]
+          adverse = [
+              r for r in reviews
+              if r.get("state") == "CHANGES_REQUESTED" and r.get("commit_id") == sha
+          ]
+          if not approved or adverse:
+              print("INDEPENDENT_EXACT_HEAD_REVIEW_NOT_CLEAN")
+              raise SystemExit(0)
+
+          query = """query($owner:String!,$name:String!,$number:Int!){
+            repository(owner:$owner,name:$name){
+              pullRequest(number:$number){
+                reviewThreads(first:100){nodes{isResolved}}
+              }
+            }
+          }"""
+          cmd = [
+              "gh","api","graphql",
+              "-F",f"owner={owner}","-F",f"name={name}","-F",f"number={pr_number}",
+              "-f",f"query={query}"
+          ]
+          p = subprocess.run(cmd, text=True, capture_output=True)
+          if p.returncode:
+              raise SystemExit("REVIEW_THREAD_RECONCILIATION_UNAVAILABLE")
+          data = json.loads(p.stdout)
+          threads = data["data"]["repository"]["pullRequest"]["reviewThreads"]["nodes"]
+          if any(not t.get("isResolved") for t in threads):
+              print("UNRESOLVED_REVIEW_THREADS")
+              raise SystemExit(0)
+
+          pr = gh(f"repos/{repo}/pulls/{pr_number}")
+          if pr.get("head", {}).get("sha") != sha:
+              print("HEAD_MOVED")
+              raise SystemExit(0)
+          if pr.get("mergeable") is not True:
+              print("PR_NOT_MERGEABLE")
+              raise SystemExit(0)
+
+          result = gh(
+              f"repos/{repo}/pulls/{pr_number}/merge",
+              method="PUT",
+              fields={"sha": sha, "merge_method": "squash"}
+          )
+          if not result.get("merged"):
+              raise SystemExit("MERGE_REJECTED")
+          print(f"NATIVE_FACTORY_MERGED PR #{pr_number} exact head {sha}")
+          PY

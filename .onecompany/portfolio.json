@@ -163,6 +163,30 @@
       "target": "WU-CLOUD-MISTRAL-DEV-001",
       "relationship": "implements",
       "rationale": "Pilot preserves exclusive durable implementation lease with no model GitHub token."
+    },
+    {
+      "source": "EPIC-001",
+      "target": "WU-MISTRAL-RECOVERY-001",
+      "relationship": "decomposes_to",
+      "rationale": "The Mistral recovery WU hardens fail-closed autonomous developer qualification after the scaffold-only incident."
+    },
+    {
+      "source": "CAP-001",
+      "target": "WU-MISTRAL-RECOVERY-001",
+      "relationship": "realizes",
+      "rationale": "The recovery WU restores trustworthy bounded provider development evidence without weakening conflict-safe delivery."
+    },
+    {
+      "source": "FR-001",
+      "target": "WU-MISTRAL-RECOVERY-001",
+      "relationship": "implements",
+      "rationale": "Recovery admission remains tied to a canonical READY Work Unit and verified worker execution."
+    },
+    {
+      "source": "SEC-001",
+      "target": "WU-MISTRAL-RECOVERY-001",
+      "relationship": "implements",
+      "rationale": "Recovery preserves exact-head, lease, scope and non-self-review authority boundaries while failing closed on missing model evidence."
     }
   ]
 }

@@ -14,11 +14,16 @@ permissions:
 jobs:
   mistral-devtest:
     if: >-
-      github.event.issue.number == 130 &&
       github.event.issue.pull_request == null &&
       github.actor == 'NTinkicht' &&
-      contains(github.event.comment.body, '@mistral-vibe') &&
-      contains(github.event.comment.body, 'MISTRAL_WORK_V1')
+      ((github.event.issue.number == 130 &&
+        contains(github.event.comment.body, '@mistral-vibe') &&
+        contains(github.event.comment.body, 'MISTRAL_WORK_V1')) ||
+       (github.event.issue.number == 45 &&
+        contains(github.event.comment.body, '<!-- onecompany-ledger-v1 -->') &&
+        contains(github.event.comment.body, '"type":"ROLE_LEASE_ASSIGNED"') &&
+        contains(github.event.comment.body, '"actor":"mistral-vibe"') &&
+        contains(github.event.comment.body, '"role":"implementation"')))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
@@ -36,8 +41,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           DISPATCH_BODY: ${{ github.event.comment.body }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
         shell: bash
-        run: python scripts/mistral_cloud_work.py prepare
+        run: |
+          set -euo pipefail
+          if [[ "$ISSUE_NUMBER" == "45" ]]; then
+            python scripts/mistral_cloud_work.py prepare-ledger
+          else
+            python scripts/mistral_cloud_work.py prepare
+          fi
 
       - name: Verify included Vibe entitlement (no model inference yet)
         id: quota
@@ -87,6 +99,18 @@ jobs:
         shell: bash
         run: python -m pip install --disable-pip-version-check 'mistral-vibe==2.25.3'
 
+      - name: Validate pinned Mistral CLI contract
+        if: steps.stage.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          vibe --help > /tmp/onecompany-vibe-help.txt 2>/dev/null
+          for option in --agent --workdir --enabled-tools --max-turns --max-tokens --output; do
+            grep -F -- "$option" /tmp/onecompany-vibe-help.txt >/dev/null
+          done
+          # The worker invokes only the explicitly configured bounded file tools:
+          # read_file, grep, edit and write_file. It never receives shell/git/network.
+
       - name: Mistral authors bounded code plus test changes in isolated stage
         id: coder
         if: steps.stage.outputs.ready == 'true'
@@ -125,19 +149,25 @@ jobs:
               2> /tmp/onecompany-mistral-devtest-errors.txt
           code=$?
           set -e
-          if [[ "$code" == "0" ]] && ! grep -Eqi \
-            'token limit exceeded|context (window|length) exceeded|quota|429' \
-            /tmp/onecompany-mistral-devtest-errors.txt; then
-            echo "ready=true" >> "$GITHUB_OUTPUT"
-            echo "status=MODEL_EDIT_FINISHED" >> "$GITHUB_OUTPUT"
-          else
-            echo "ready=false" >> "$GITHUB_OUTPUT"
-            echo "status=MODEL_EDIT_FAILED_OR_CAPACITY_BLOCKED" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "$code" > /tmp/onecompany-mistral-cli-exit.txt
+          echo "status=MODEL_PROCESS_FINISHED_AWAIT_TRUSTED_ASSESSMENT" >> "$GITHUB_OUTPUT"
+
+      - name: Trusted parent verifies qualifying source plus executable test edit
+        id: assess
+        if: always() && steps.stage.outputs.ready == 'true' && steps.coder.outcome != 'skipped'
+        env:
+          MODEL_CLI_EXIT: ${{ steps.coder.outcome == 'success' && '0' || '255' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -s /tmp/onecompany-mistral-cli-exit.txt ]]; then
+            export MODEL_CLI_EXIT="$(cat /tmp/onecompany-mistral-cli-exit.txt)"
           fi
+          python scripts/mistral_cloud_work.py assess-model
 
       - name: Protected parent atomically publishes strict PR fast-forward
         id: publish
-        if: steps.coder.outputs.ready == 'true'
+        if: steps.assess.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -179,6 +209,9 @@ jobs:
           ENTITLEMENT: ${{ steps.quota.outputs.status }}
           STAGE: ${{ steps.stage.outputs.status }}
           CODER: ${{ steps.coder.outputs.status }}
+          ASSESS: ${{ steps.assess.outputs.status }}
+          FAILURE_CLASS: ${{ steps.assess.outputs.failure_class }}
+          CLI_EXIT: ${{ steps.assess.outputs.cli_exit }}
           PUBLISH: ${{ steps.publish.outputs.status }}
           CI_DISPATCH: ${{ steps.ci_dispatch.outputs.status }}
           NEW_SHA: ${{ steps.publish.outputs.new_sha }}
@@ -189,7 +222,8 @@ jobs:
           {
             echo "**Mistral provider-cloud canonical developer/tester**"
             echo "No Codespace, model GitHub token or PAYG."
-            echo "Ticket=$TICKET entitlement=$ENTITLEMENT stage=$STAGE model=$CODER"
+            echo "Ticket=$TICKET entitlement=$ENTITLEMENT stage=$STAGE model_process=$CODER"
+            echo "Trusted model assessment=$ASSESS failure_class=$FAILURE_CLASS cli_exit=$CLI_EXIT"
             echo "Parent publication=$PUBLISH validation_trigger=$CI_DISPATCH"
             if [[ -n "$NEW_SHA" ]]; then
               echo "Mistral material-author PR #$PR new SHA $NEW_SHA."

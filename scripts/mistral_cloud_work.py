@@ -33,6 +33,84 @@ MAX_TOTAL = 72_000
 MAX_FILES = 8
 FIELDS = ("pr", "head_sha", "base_sha", "work_unit", "lease_id")
 
+MODEL_FAILURE_CLASSES = {
+    "CLI_USAGE", "AUTH", "QUOTA", "MODEL_RUNTIME",
+    "MODEL_NO_EDIT", "TIMEOUT", "UNKNOWN",
+}
+MODEL_STDERR = Path("/tmp/onecompany-mistral-devtest-errors.txt")
+
+
+def safe_cli_exit(value: object) -> int:
+    """Return a bounded non-secret CLI exit code for machine-readable evidence."""
+    try:
+        code = int(str(value))
+    except (TypeError, ValueError):
+        return 255
+    return code if 0 <= code <= 255 else 255
+
+
+def classify_model_failure(exit_code: int, stderr: str) -> str:
+    """Classify provider/CLI failure without publishing raw stderr or prompts."""
+    text = (stderr or "").lower()
+    if exit_code == 124 or "timed out" in text or "timeout" in text:
+        return "TIMEOUT"
+    if re.search(r"401|unauthori[sz]ed|authentication|invalid.{0,24}(api.{0,8})?key", text):
+        return "AUTH"
+    if re.search(r"429|rate.?limit|quota|capacity|token limit exceeded|usage.{0,12}limit", text):
+        return "QUOTA"
+    if re.search(r"no such option|unknown option|unrecognized option|usage:", text):
+        return "CLI_USAGE"
+    if exit_code != 0:
+        return "MODEL_RUNTIME"
+    return "UNKNOWN"
+
+
+def _has_executable_python_test(edits: list[dict]) -> bool:
+    """Require an actual Python test body, not a scaffold/comment-only file."""
+    for row in edits:
+        path = str(row.get("path", ""))
+        if not path.startswith("tests/") or not path.endswith(".py"):
+            continue
+        try:
+            source = row["content"].decode("utf-8")
+        except (KeyError, AttributeError, UnicodeDecodeError):
+            continue
+        if re.search(r"(?m)^\s*(?:async\s+)?def\s+test_[A-Za-z0-9_]+\s*\(", source):
+            return True
+        if "unittest.TestCase" in source and re.search(
+            r"(?m)^\s*def\s+test_[A-Za-z0-9_]+\s*\(", source
+        ):
+            return True
+    return False
+
+
+def assess_model_result(
+    exit_code: int,
+    *,
+    stderr_path: Path = MODEL_STDERR,
+    stage: Path = STAGE,
+    manifest: Path = TRUSTED / "manifest.json",
+) -> tuple[bool, str]:
+    """Prove a qualifying model edit before the privileged publisher can run."""
+    stderr = ""
+    if stderr_path.exists():
+        stderr = stderr_path.read_text(
+            encoding="utf-8", errors="replace"
+        )[:64_000]
+    if exit_code != 0:
+        return False, classify_model_failure(exit_code, stderr)
+    try:
+        edits = planned_edits(stage=stage, manifest=manifest)
+    except ValueError as exc:
+        if str(exc) == "MODEL_PRODUCED_NO_CODE_OR_TEST":
+            return False, "MODEL_NO_EDIT"
+        return False, "MODEL_RUNTIME"
+    changed_paths = {str(row.get("path", "")) for row in edits}
+    has_source = any(not path.startswith("tests/") for path in changed_paths)
+    if not has_source or not _has_executable_python_test(edits):
+        return False, "MODEL_NO_EDIT"
+    return True, "NONE"
+
 
 def actions_output(**fields: object) -> None:
     with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as stream:
@@ -63,6 +141,88 @@ def assignment(body: str) -> dict:
         or not re.fullmatch(r"[A-Za-z0-9_-]{12,80}", values["lease_id"])):
         raise ValueError("WORK_ASSIGNMENT_VALUES_INVALID")
     return {**values, "pr": int(values["pr"])}
+
+
+LEDGER_ISSUE = 45
+LEDGER_MARKER = "<!-- onecompany-ledger-v1 -->"
+
+
+def ledger_assignment(body: str, *, event_path: str | None = None) -> dict:
+    """Derive a work ticket from an owner-published durable lease event.
+
+    The event is only a wake hint. live_ticket() replays the authoritative
+    ledger and revalidates current PR/head/scope/lease before model execution.
+    """
+    if not isinstance(body, str) or len(body) > 12_000:
+        raise ValueError("LEDGER_WAKE_INVALID")
+    match = re.fullmatch(
+        r"<!-- onecompany-ledger-v1 -->\n```json\n(\{.*\})\n```",
+        body,
+        flags=re.DOTALL,
+    )
+    if match is None:
+        raise ValueError("LEDGER_WAKE_INVALID")
+    event = json.loads(match.group(1))
+    if (
+        not isinstance(event, dict)
+        or event.get("version") != 2
+        or event.get("type") != "ROLE_LEASE_ASSIGNED"
+        or event.get("actor") != "mistral-vibe"
+    ):
+        raise ValueError("LEDGER_WAKE_NOT_MISTRAL_IMPLEMENTATION")
+    payload = event.get("payload")
+    if not isinstance(payload, dict) or payload.get("role") != "implementation":
+        raise ValueError("LEDGER_WAKE_NOT_IMPLEMENTATION")
+    values = {
+        "pr": payload.get("pr"),
+        "head_sha": payload.get("start_head"),
+        "work_unit": payload.get("work_unit"),
+        "lease_id": payload.get("lease_id"),
+        "branch": payload.get("branch"),
+    }
+    if (
+        type(values["pr"]) is not int
+        or values["pr"] < 1
+        or not SHA.fullmatch(str(values["head_sha"] or ""))
+        or not re.fullmatch(r"WU-[A-Z0-9-]{3,64}", str(values["work_unit"] or ""))
+        or not re.fullmatch(r"[A-Za-z0-9_-]{12,80}", str(values["lease_id"] or ""))
+        or not re.fullmatch(
+            r"[A-Za-z0-9][A-Za-z0-9_.-]{0,100}", str(values["branch"] or "")
+        )
+        or values["branch"] == "main"
+    ):
+        raise ValueError("LEDGER_WAKE_FIELDS_INVALID")
+
+    if event_path:
+        envelope = json.loads(Path(event_path).read_text(encoding="utf-8"))
+        if (
+            envelope.get("action") != "created"
+            or (envelope.get("issue") or {}).get("number") != LEDGER_ISSUE
+            or ((envelope.get("comment") or {}).get("user") or {}).get("login") != OWNER
+            or (envelope.get("comment") or {}).get("body") != body
+        ):
+            raise ValueError("LEDGER_WAKE_ENVELOPE_UNTRUSTED")
+
+    pr = api(f"repos/{REPO}/pulls/{values['pr']}")
+    base = (pr.get("base") or {}).get("sha")
+    if (
+        pr.get("state") != "open"
+        or (pr.get("head") or {}).get("sha") != values["head_sha"]
+        or (pr.get("head") or {}).get("ref") != values["branch"]
+        or (pr.get("head") or {}).get("repo", {}).get("full_name") != REPO
+        or (pr.get("base") or {}).get("ref") != "main"
+        or (pr.get("base") or {}).get("repo", {}).get("full_name") != REPO
+        or not SHA.fullmatch(str(base or ""))
+        or base == values["head_sha"]
+    ):
+        raise ValueError("LEDGER_WAKE_PR_STALE_OR_FOREIGN")
+    return {
+        "pr": values["pr"],
+        "head_sha": values["head_sha"],
+        "base_sha": base,
+        "work_unit": values["work_unit"],
+        "lease_id": values["lease_id"],
+    }
 
 
 def zero_spend() -> None:
@@ -342,18 +502,43 @@ def publish(ticket: dict, *, stage: Path = STAGE,
 def main() -> int:
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
     try:
-        if mode == "prepare":
+        if mode in {"prepare", "prepare-ledger"}:
             if os.environ.get("GITHUB_ACTOR") != OWNER:
                 raise ValueError("UNTRUSTED_DISPATCH_AUTHOR")
-            ticket = live_ticket(assignment(os.environ["DISPATCH_BODY"]))
+            if mode == "prepare-ledger":
+                value = ledger_assignment(
+                    os.environ["DISPATCH_BODY"],
+                    event_path=os.environ.get("GITHUB_EVENT_PATH"),
+                )
+            else:
+                value = assignment(os.environ["DISPATCH_BODY"])
+            ticket = live_ticket(value)
             (TRUSTED).mkdir(parents=True, mode=0o700, exist_ok=True)
             (TRUSTED / "ticket.json").write_text(json.dumps(ticket))
-            actions_output(ready="true", status="WORK_TICKET_VERIFIED")
+            actions_output(
+                ready="true",
+                status=(
+                    "WORK_TICKET_VERIFIED_FROM_DURABLE_LEASE"
+                    if mode == "prepare-ledger"
+                    else "WORK_TICKET_VERIFIED"
+                ),
+            )
         elif mode == "stage":
             ticket = json.loads((TRUSTED / "ticket.json").read_text())
             live_ticket(ticket)
             stage_files(ticket)
             actions_output(ready="true", status="MODEL_STAGE_READY")
+        elif mode == "assess-model":
+            exit_code = safe_cli_exit(os.environ.get("MODEL_CLI_EXIT", "255"))
+            ready, failure_class = assess_model_result(exit_code)
+            actions_output(
+                ready=str(ready).lower(),
+                status="MODEL_EDIT_VERIFIED" if ready else "MODEL_EDIT_FAILED",
+                failure_class=failure_class,
+                cli_exit=exit_code,
+            )
+            if not ready:
+                return 2
         elif mode == "publish":
             ticket = json.loads((TRUSTED / "ticket.json").read_text())
             new_sha = publish(ticket)
@@ -364,6 +549,7 @@ def main() -> int:
     except (ValueError, OSError, UnicodeError, json.JSONDecodeError, KeyError,
             subprocess.CalledProcessError, subprocess.TimeoutExpired):
         actions_output(ready="false", status="MISTRAL_WORK_BLOCKED")
+        return 2
     return 0
 
 

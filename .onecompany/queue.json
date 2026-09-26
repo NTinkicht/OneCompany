@@ -181,6 +181,44 @@
         "Grok-authored independent exact-head review of a non-Grok-authored PR, with verified bot/provider provenance and non-self authorship, published as distinct reviewer qualification evidence",
         "No cross-repo permission expansion or paid provider fallback"
       ]
+    },
+    {
+      "id": "WU-MISTRAL-RECOVERY-001",
+      "title": "Recover and re-qualify Mistral cloud developer with fail-closed model evidence",
+      "work_kind": "ENABLER",
+      "status": "READY",
+      "priority": 100,
+      "dependencies": [
+        "WU-PFC-001"
+      ],
+      "issue": 231,
+      "pr": null,
+      "branch": "wu-mistral-recovery-001",
+      "risk_class": "LOW",
+      "planning_refs": [
+        "EPIC-001",
+        "CAP-001"
+      ],
+      "requirement_ids": [
+        "FR-001",
+        "SEC-001"
+      ],
+      "write_scope": [
+        "examples/agent-qualification/demo.py",
+        "tests/test_agent_qualification.py"
+      ],
+      "resource_locks": [
+        "onecompany:mistral-cloud-recovery-qualification"
+      ],
+      "parallelism": "disjoint_only",
+      "qualification_exit": [
+        "Canonical recovery PR is created only from trusted protected-main admission after this queue binding is merged",
+        "Model process must produce both a material source edit and executable deterministic test edit; scaffold-only or exit-zero/no-edit fails closed",
+        "Structured sanitized model failure class and bounded CLI exit are machine-verifiable; raw stderr/model output never becomes public evidence",
+        "Exact-head OneCompany Validate succeeds on the model-authored commit",
+        "Independent non-Mistral exact-head review passes before qualification or readiness promotion",
+        "Mistral implementation readiness remains zero until all evidence is verified; no PAYG, Codespace or model-held GitHub token"
+      ]
     }
   ]
 }

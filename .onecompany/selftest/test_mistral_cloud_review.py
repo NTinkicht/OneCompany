@@ -181,6 +181,44 @@ class MistralCloudReviewTests(unittest.TestCase):
                 bad.write_text("on:\n  pull_request:\n    branches: [main]\n")
                 target.ledger_trigger_paths(bad)
 
+    def test_auto_review_dedupe_requires_actions_binding_marker(self):
+        valid_body = (
+            f"<!-- ONECOMPANY_MISTRAL_BINDING_REVIEW_V1 pr=137 "
+            f"head={HEAD} base={BASE} run=42 run_sha={'c' * 40} verdict=PASS -->"
+        )
+
+        def reviews(route):
+            if route.endswith("/pulls/137/reviews?per_page=100"):
+                return [{
+                    "commit_id": HEAD,
+                    "state": "APPROVED",
+                    "user": {"login": "github-actions[bot]"},
+                    "body": valid_body,
+                }]
+            return fake_api(route)
+
+        with patch.object(target, "github_json", side_effect=reviews):
+            self.assertTrue(target.existing_exact_mistral_review(137, HEAD, BASE))
+
+        for login, body in (
+            ("someone-else", valid_body),
+            ("github-actions[bot]", "Mistral Vibe says PASS"),
+            ("github-actions[bot]", valid_body.replace("base=" + BASE, "base=" + HEAD)),
+        ):
+            def forged(route, login=login, body=body):
+                if route.endswith("/pulls/137/reviews?per_page=100"):
+                    return [{
+                        "commit_id": HEAD,
+                        "state": "APPROVED",
+                        "user": {"login": login},
+                        "body": body,
+                    }]
+                return fake_api(route)
+            with self.subTest(login=login, body=body[:40]), patch.object(
+                target, "github_json", side_effect=forged
+            ):
+                self.assertFalse(target.existing_exact_mistral_review(137, HEAD, BASE))
+
     def test_prepare_never_promotes_invalid_dispatch(self):
         with tempfile.TemporaryDirectory() as temp:
             outputs = Path(temp) / "output"

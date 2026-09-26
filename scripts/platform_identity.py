@@ -366,14 +366,19 @@ def verified_mistral_review_publisher(
         f"{MISTRAL_WORKFLOW}@refs/heads/main",
     }:
         return None, ["mistral_binding_workflow_invalid"]
+    event = run.get("event")
+    event_provenance_ok = event in {"issue_comment", "workflow_run"}
+    if event == "issue_comment":
+        event_provenance_ok = (
+            ((run.get("actor") or {}).get("login")) == "NTinkicht"
+            and ((run.get("triggering_actor") or {}).get("login")) == "NTinkicht"
+        )
     if any([
-        run.get("event") != "issue_comment",
+        not event_provenance_ok,
         run.get("head_branch") != "main",
         run.get("head_sha") != run_sha,
         run.get("status") != "completed",
         run.get("conclusion") != "success",
-        ((run.get("actor") or {}).get("login")) != "NTinkicht",
-        ((run.get("triggering_actor") or {}).get("login")) != "NTinkicht",
         ((run.get("repository") or {}).get("full_name")) != repo,
     ]):
         return None, ["mistral_binding_run_provenance_invalid"]

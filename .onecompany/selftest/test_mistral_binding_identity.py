@@ -91,6 +91,23 @@ class MistralBindingIdentityTests(unittest.TestCase):
         self.assertFalse(identity.require_authority(
             reviewer, "merge_execution")[0])
 
+    def test_protected_workflow_run_model_approval_is_binding(self):
+        with patch.object(
+            identity,
+            "_gh_json",
+            side_effect=self.fake_api({
+                "run": {
+                    "event": "workflow_run",
+                    "actor": {"login": "github-actions[bot]"},
+                    "triggering_actor": {"login": "github-actions[bot]"},
+                }
+            }),
+        ):
+            reviewer, errors = identity.review_platform_identity(
+                REPO, 220, 14, HEAD, BASE)
+        self.assertEqual(errors, [])
+        self.assertEqual(reviewer["actor_id"], "mistral-vibe")
+
     def test_plain_actions_bot_or_fake_marker_never_grants_review(self):
         for body in ("", "I approve", MARKER.replace("verdict=PASS", "verdict=FAIL"),
                      MARKER.replace("base=" + BASE, "base=" + HEAD),

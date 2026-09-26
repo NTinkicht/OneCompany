@@ -54,6 +54,34 @@ class MistralCanonicalIntakeTests(unittest.TestCase):
         self.assertNotIn("pull_request_target:", workflow)
         self.assertIn("PR_PREPARED_NOT_MODEL_QUALIFIED", workflow)
 
+    def test_recovery_wu_uses_fresh_scaffold_paths(self):
+        command = (
+            f"@mistral-vibe\nMISTRAL_START_V1\n"
+            f"work_unit: WU-MISTRAL-RECOVERY-001\nmain_sha: {SHA}"
+        )
+        with patch.dict(os.environ, {
+            "GITHUB_REPOSITORY": start.REPO,
+            "ONECOMPANY_EMERGENCY_STOP": "false",
+        }):
+            ticket = start.policy_ticket(
+                start.assignment(command),
+                queue=self.live_queue,
+                budget=self.budget,
+                config=self.config,
+                actual_main_sha=SHA,
+            )
+        self.assertEqual(ticket["branch"], "wu-mistral-recovery-001")
+        self.assertEqual(
+            ticket["scope"],
+            [
+                "examples/agent-qualification/recovery_demo.py",
+                "tests/test_agent_qualification_recovery.py",
+            ],
+        )
+        self.assertEqual(
+            ticket["test_path"], "tests/test_agent_qualification_recovery.py"
+        )
+
     def test_strict_owner_assignment_cannot_inject_other_scope(self):
         for body in (
             COMMAND + "\nbranch: main",

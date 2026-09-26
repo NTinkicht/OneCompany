@@ -116,6 +116,15 @@ class MistralReviewPacketTests(unittest.TestCase):
             self.assertIn("x" * 8500, prompt)
             self.assertIn("y" * 8500, prompt)
 
+    def test_bounded_long_line_excerpt_within_source_ceiling_passes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            stage, trusted = self.fixture(Path(tmp))
+            source = stage / "review_sources" / "src" / "demo.py"
+            source.write_text("x" * 12_200)
+            prompt = self.build(stage, trusted)
+            self.assertIn("x" * 256, prompt)
+            self.assertGreater(packet.MAX_SOURCE_BYTES, 12_000)
+
     def test_total_inline_byte_ceiling_blocks_before_inference(self):
         with tempfile.TemporaryDirectory() as tmp:
             stage, trusted = self.fixture(Path(tmp))

@@ -34,7 +34,8 @@ MATERIAL_AUTHOR = re.compile(r"(?im)^Material-Author:[ \t]*([a-z0-9_-]+)[ \t]*$"
 DIFF_NAME = ".onecompany_mistral_review.diff"
 MAX_DIFF_BYTES = 100_000
 MAX_REVIEW_STAGE_DIFF_BYTES = 32_000
-MAX_REVIEW_STAGE_SOURCE_BYTES = 12_000
+MAX_REVIEW_STAGE_FULL_SOURCE_BYTES = 4_096
+MAX_REVIEW_STAGE_SOURCE_BYTES = 13_000
 MAX_REVIEW_STAGE_SOURCE_FILE_BYTES = 96_000
 MAX_REVIEW_STAGE_CONTEXT_LINES = 12
 MAX_REVIEW_STAGE_TOTAL_BYTES = 48_000
@@ -291,7 +292,7 @@ def bounded_review_source(name: str, source: bytes, base: str, head: str) -> byt
     hard stage failure, not silent omission or a false full-source review.
     Excerpts preserve original source line numbers for grounded findings.
     """
-    if len(source) <= MAX_REVIEW_STAGE_SOURCE_BYTES:
+    if len(source) <= MAX_REVIEW_STAGE_FULL_SOURCE_BYTES:
         return source
     patch = subprocess.check_output(
         ["git", "diff", "--no-ext-diff", "--no-textconv", "--no-color",

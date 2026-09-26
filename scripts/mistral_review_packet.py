@@ -17,6 +17,7 @@ FILE = re.compile(r"(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\Z")
 MAX_INLINE_BYTES = 50_000
 MAX_INPUT_BYTES = 64_000
 MAX_SOURCE_FILES = 16
+MAX_SOURCE_BYTES = 13_000
 MAX_POLICY_BYTES = 8_000
 
 INSTRUCTIONS = """You are Mistral Vibe, the independent NON-MATERIAL-AUTHOR advisory reviewer.
@@ -100,7 +101,7 @@ def build_packet(stage: Path, trusted: Path, number: int,
         if not FILE.fullmatch(name):
             raise ValueError("REVIEW_PACKET_SOURCE_PATH_INVALID")
         data = _regular_file(source, source_root)
-        if not data or len(data) > 12_000:
+        if not data or len(data) > MAX_SOURCE_BYTES:
             raise ValueError("REVIEW_PACKET_SOURCE_OVERSIZED")
         parts.extend([
             f"\nBEGIN UNTRUSTED SOURCE {name}\n",

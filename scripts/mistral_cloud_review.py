@@ -31,6 +31,12 @@ TRUSTED_LEDGER_WORKFLOW = Path(os.environ.get(
 ))
 MISTRAL_ALIASES = frozenset({"mistral", "mistral-vibe", "mistral_vibe"})
 MATERIAL_AUTHOR = re.compile(r"(?im)^Material-Author:[ \t]*([a-z0-9_-]+)[ \t]*$")
+MISTRAL_BINDING_REVIEW = re.compile(
+    r"(?m)^<!-- ONECOMPANY_MISTRAL_BINDING_REVIEW_V1 "
+    r"pr=([1-9][0-9]{0,5}) head=([a-f0-9]{40}) base=([a-f0-9]{40}) "
+    r"run=([1-9][0-9]{0,19}) run_sha=([a-f0-9]{40}) "
+    r"verdict=(PASS|FAIL) -->$"
+)
 DIFF_NAME = ".onecompany_mistral_review.diff"
 MAX_DIFF_BYTES = 100_000
 MAX_REVIEW_STAGE_DIFF_BYTES = 32_000
@@ -231,6 +237,63 @@ def output(**fields: object) -> None:
             stream.write(f"{key}={value}\n")
 
 
+def existing_exact_mistral_review(number: int, head: str, base: str) -> bool:
+    reviews = github_json(f"repos/{REPO}/pulls/{number}/reviews?per_page=100")
+    if not isinstance(reviews, list):
+        raise ValueError("REVIEW_HISTORY_UNAVAILABLE")
+    for review in reviews:
+        if (
+            review.get("commit_id") != head
+            or review.get("state") not in {"APPROVED", "CHANGES_REQUESTED"}
+            or (review.get("user") or {}).get("login") != "github-actions[bot]"
+        ):
+            continue
+        body = review.get("body")
+        matches = MISTRAL_BINDING_REVIEW.findall(body) if isinstance(body, str) else []
+        if len(matches) != 1:
+            continue
+        target_pr, target_head, target_base, _run, _run_sha, _verdict = matches[0]
+        if int(target_pr) == number and target_head == head and target_base == base:
+            return True
+    return False
+
+
+def auto_prepare() -> None:
+    try:
+        if os.environ["GITHUB_REPOSITORY"] != REPO:
+            raise ValueError("FOREIGN_REVIEW_REPOSITORY")
+        head = os.environ.get("AUTO_REVIEW_SHA", "")
+        if not SHA.fullmatch(head):
+            raise ValueError("AUTO_REVIEW_SHA_INVALID")
+        matches = github_json(f"repos/{REPO}/commits/{head}/pulls?per_page=20")
+        matches = [
+            p for p in matches
+            if p.get("state") == "open"
+            and p.get("head", {}).get("sha") == head
+            and p.get("head", {}).get("repo", {}).get("full_name") == REPO
+            and p.get("base", {}).get("repo", {}).get("full_name") == REPO
+            and p.get("base", {}).get("ref") == "main"
+        ]
+        if len(matches) != 1:
+            raise ValueError("AUTO_REVIEW_PR_AMBIGUOUS")
+        number = int(matches[0]["number"])
+        base = matches[0].get("base", {}).get("sha", "")
+        if not SHA.fullmatch(base) or base == head:
+            raise ValueError("AUTO_REVIEW_BASE_INVALID")
+        current_pr(number, head, base)
+        if existing_exact_mistral_review(number, head, base):
+            output(ready="false", status="EXACT_HEAD_REVIEW_ALREADY_EXISTS")
+            return
+        if not independent_material_authors(number, head):
+            raise ValueError("REVIEW_HAS_NO_COMMITS")
+        if not latest_ci_green(number, head):
+            raise ValueError("REVIEW_CI_NOT_GREEN")
+    except (ValueError, subprocess.CalledProcessError, subprocess.TimeoutExpired, KeyError):
+        output(ready="false", status="REVIEW_TARGET_BLOCKED")
+        return
+    output(ready="true", status="OK", pr=number, sha=head, base=base)
+
+
 def prepare() -> None:
     try:
         if os.environ["GITHUB_REPOSITORY"] != REPO:
@@ -418,6 +481,8 @@ if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else ""
     if mode == "prepare":
         prepare()
+    elif mode == "auto-prepare":
+        auto_prepare()
     elif mode == "evidence":
         evidence()
     elif mode == "stage":

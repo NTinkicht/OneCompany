@@ -6,6 +6,9 @@ name: OneCompany Mistral Exact-Head Technical Review
 on:
   issue_comment:
     types: [created]
+  workflow_run:
+    workflows: ["OneCompany Validate", "OneCompany Handoff Supervision"]
+    types: [completed]
 
 permissions:
   contents: read
@@ -16,11 +19,17 @@ permissions:
 jobs:
   mistral-vibe:
     if: >-
-      github.event.issue.number == 130 &&
-      github.event.issue.pull_request == null &&
-      github.actor == 'NTinkicht' &&
-      contains(github.event.comment.body, '@mistral-vibe') &&
-      contains(github.event.comment.body, 'MISTRAL_REVIEW_V1')
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.number == 130 &&
+       github.event.issue.pull_request == null &&
+       github.actor == 'NTinkicht' &&
+       contains(github.event.comment.body, '@mistral-vibe') &&
+       contains(github.event.comment.body, 'MISTRAL_REVIEW_V1')) ||
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.status == 'completed' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'pull_request' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     env:
       ONECOMPANY_LEDGER_RULES_FILE: /tmp/onecompany-mistral-trusted/ledger-workflow.yml
@@ -40,6 +49,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           DISPATCH_BODY: ${{ github.event.comment.body }}
+          AUTO_REVIEW_SHA: ${{ github.event.workflow_run.head_sha }}
         shell: bash
         run: |
           set -euo pipefail
@@ -51,7 +61,11 @@ jobs:
           cp AGENTS.md /tmp/onecompany-mistral-trusted/AGENTS.md
           cp docs/CLOUD-AGENT-QUALIFICATION.md /tmp/onecompany-mistral-trusted/CLOUD-AGENT-QUALIFICATION.md
           cp .github/workflows/onecompany-ledger-read-smoke.yml /tmp/onecompany-mistral-trusted/ledger-workflow.yml
-          python -I /tmp/onecompany-mistral-review-trusted.py prepare
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_run" ]]; then
+            python -I /tmp/onecompany-mistral-review-trusted.py auto-prepare
+          else
+            python -I /tmp/onecompany-mistral-review-trusted.py prepare
+          fi
 
       - name: Checkout the validated same-repository PR head
         if: steps.target.outputs.ready == 'true'

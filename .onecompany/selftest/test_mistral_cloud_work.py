@@ -297,6 +297,87 @@ class MistralFencedWorkerTests(unittest.TestCase):
             finally:
                 os.chdir(original)
 
+    def test_model_failure_classification_is_structured_and_sanitized(self):
+        cases = (
+            (124, "", "TIMEOUT"),
+            (1, "HTTP 401 unauthorized", "AUTH"),
+            (1, "429 quota exceeded", "QUOTA"),
+            (2, "Error: no such option --bad", "CLI_USAGE"),
+            (70, "provider crashed internally", "MODEL_RUNTIME"),
+        )
+        for code, stderr, expected in cases:
+            with self.subTest(expected=expected):
+                self.assertEqual(w.classify_model_failure(code, stderr), expected)
+                self.assertIn(expected, w.MODEL_FAILURE_CLASSES)
+        self.assertEqual(w.safe_cli_exit("7"), 7)
+        self.assertEqual(w.safe_cli_exit("secret-not-an-exit"), 255)
+
+    def test_trusted_assessment_requires_source_and_executable_test_edits(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stderr = root / "stderr.txt"
+            stderr.write_text("")
+            stage = root / "stage"
+            manifest = root / "trusted" / "manifest.json"
+            with patch.object(w, "git_file", side_effect=[b"x=1\n", b""]):
+                w.stage_files(TICKET, stage=stage, manifest=manifest)
+
+            # Exit zero plus no edit is still a hard model failure.
+            self.assertEqual(
+                w.assess_model_result(
+                    0, stderr_path=stderr, stage=stage, manifest=manifest
+                ),
+                (False, "MODEL_NO_EDIT"),
+            )
+
+            # Source-only edits are not developer/tester qualification.
+            (stage / "source" / SCOPE[0]).write_text("x=2\n")
+            self.assertEqual(
+                w.assess_model_result(
+                    0, stderr_path=stderr, stage=stage, manifest=manifest
+                ),
+                (False, "MODEL_NO_EDIT"),
+            )
+
+            # Comment/scaffold-only test content is not executable evidence.
+            (stage / "source" / SCOPE[1]).write_text(
+                "# placeholder test scaffold only\n"
+            )
+            self.assertEqual(
+                w.assess_model_result(
+                    0, stderr_path=stderr, stage=stage, manifest=manifest
+                ),
+                (False, "MODEL_NO_EDIT"),
+            )
+
+            (stage / "source" / SCOPE[1]).write_text(
+                "def test_real_behavior():\n    assert True\n"
+            )
+            self.assertEqual(
+                w.assess_model_result(
+                    0, stderr_path=stderr, stage=stage, manifest=manifest
+                ),
+                (True, "NONE"),
+            )
+
+    def test_merged_scaffold_never_promotes_mistral_readiness(self):
+        queue = json.loads((ROOT / ".onecompany/queue.json").read_text())
+        readiness = json.loads((ROOT / ".onecompany/readiness.json").read_text())
+        wu = next(
+            item for item in queue["work_units"]
+            if item["id"] == "WU-CLOUD-MISTRAL-DEV-001"
+        )
+        actor = next(
+            item for item in readiness["actors"]
+            if item["actor_id"] == "mistral-vibe"
+        )
+        self.assertEqual(wu["pr"], 224)
+        self.assertEqual(wu["status"], "READY")
+        self.assertEqual(actor["capacity"]["implementation_streams"], 0)
+        self.assertNotIn("implementation", actor["verified_capabilities"])
+        self.assertFalse(actor["repository_access"]["write"])
+        self.assertFalse(actor["repository_access"]["review"])
+
     def test_workflow_separates_model_from_publisher_and_source_installer(self):
         """Keep model editing, protected publication, and installer scopes separate."""
         from bootstrap import SOURCE_INSTALLATION_EXCLUSIONS

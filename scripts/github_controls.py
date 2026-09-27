@@ -17,6 +17,7 @@ from onecompany_lib import CONTROL, ROOT, load_json, path_matches_any, run
 # None means NO trusted server-side review gate is installed; fail closed.
 REVIEW_GATE_CONTEXT = "onecompany-independent-review"
 REVIEW_GATE_APP_ID: int | None = None
+REVIEW_AUTH_WORKFLOW_PATH = ".github/workflows/onecompany-review-authorization.yml"
 
 
 def gh_api(path: str) -> tuple[int, Any | None, str]:
@@ -318,11 +319,16 @@ def _pull_request_rule_is_fresh_review(rule: dict[str, Any]) -> bool:
         and params["required_approving_review_count"] >= 1
         and params.get("dismiss_stale_reviews_on_push") is True
         and params.get("require_last_push_approval") is True
+        and params.get("required_review_thread_resolution") is True
     )
 
 
 def strict_merge_platform_enforcement(
-    repo: str, branch: str, required_specs: list[dict[str, str]]
+    repo: str,
+    branch: str,
+    required_specs: list[dict[str, str]],
+    *,
+    trusted_ref: str | None = None,
 ) -> bool:
     """Require the GitHub platform baseline used by the L4 merge transaction.
 
@@ -339,51 +345,35 @@ def strict_merge_platform_enforcement(
         return False
     encoded_ref = quote(branch, safe="")
 
-    code, protection, _ = gh_api(f"repos/{repo}/branches/{encoded_ref}/protection")
-    if code == 0 and isinstance(protection, dict):
-        checks = protection.get("required_status_checks")
-        reviews = protection.get("required_pull_request_reviews")
-        force_pushes = protection.get("allow_force_pushes")
-        deletions = protection.get("allow_deletions")
-        configured_checks = checks.get("checks") if isinstance(checks, dict) else None
-        publisher_bound = bool(
-            isinstance(configured_checks, list)
-            and all(
-                any(
-                    isinstance(item, dict)
-                    and item.get("context") == name
-                    and item.get("app_id") == app_id
-                    for item in configured_checks
-                )
-                for name, app_id in publishers.items()
-            )
-        )
-        fresh_reviews = bool(
-            isinstance(reviews, dict)
-            and type(reviews.get("required_approving_review_count")) is int
-            and reviews["required_approving_review_count"] >= 1
-            and reviews.get("dismiss_stale_reviews") is True
-            and reviews.get("require_last_push_approval") is True
-        )
-        if (
-            isinstance(checks, dict)
-            and checks.get("strict") is True
-            and publisher_bound
-            and fresh_reviews
-            and isinstance(force_pushes, dict)
-            and force_pushes.get("enabled") is False
-            and isinstance(deletions, dict)
-            and deletions.get("enabled") is False
-            and not _classic_has_bypass(protection)
-        ):
-            return True
+    # Classic branch protection cannot bind a required check to a protected
+    # workflow definition. For L4, a candidate could preserve a context/app ID
+    # while replacing the workflow implementation, so classic protection alone
+    # is deliberately insufficient for autonomous merge.
+    code, _protection, _ = gh_api(
+        f"repos/{repo}/branches/{encoded_ref}/protection"
+    )
+    _ = code  # retained for audit/diagnostic parity; ruleset proof is required.
 
     rulesets = _repo_rulesets(repo)
     if rulesets is None:
         return False
 
+    repo_code, repository, _ = gh_api(f"repos/{repo}")
+    repo_id = repository.get("id") if isinstance(repository, dict) else None
+    if repo_code != 0 or type(repo_id) is not int or repo_id <= 0:
+        return False
+
+    required_workflow_paths = {
+        str(spec.get("workflow_path"))
+        for spec in required_specs
+        if isinstance(spec.get("workflow_path"), str)
+        and spec.get("workflow_path")
+    }
+    required_workflow_paths.add(REVIEW_AUTH_WORKFLOW_PATH)
+
     aggregate_rule_types: set[str] = set()
     aggregate_checks: set[tuple[str, int]] = set()
+    aggregate_workflows: set[str] = set()
     pull_request_ok = False
     strict_checks_seen = False
 
@@ -433,13 +423,51 @@ def strict_merge_platform_enforcement(
                     if isinstance(context, str) and type(integration_id) is int:
                         aggregate_checks.add((context, integration_id))
 
+            if kind == "workflows":
+                params = rule.get("parameters")
+                configured = params.get("workflows") if isinstance(params, dict) else None
+                if not isinstance(configured, list):
+                    return False
+                for item in configured:
+                    if not isinstance(item, dict):
+                        return False
+                    path = item.get("path")
+                    repository_id = item.get("repository_id")
+                    ref = item.get("ref")
+                    sha = item.get("sha")
+                    if (
+                        not isinstance(path, str)
+                        or repository_id != repo_id
+                        or (
+                            ref not in {branch, f"refs/heads/{branch}"}
+                            and not (
+                                trusted_ref
+                                and isinstance(sha, str)
+                                and sha == trusted_ref
+                            )
+                        )
+                        or (
+                            isinstance(sha, str)
+                            and trusted_ref
+                            and sha != trusted_ref
+                        )
+                    ):
+                        continue
+                    aggregate_workflows.add(path)
+
     required_pairs = set(publishers.items())
     return bool(
         pull_request_ok
         and strict_checks_seen
-        and {"pull_request", "required_status_checks", "deletion", "non_fast_forward"}
-        .issubset(aggregate_rule_types)
+        and {
+            "pull_request",
+            "required_status_checks",
+            "deletion",
+            "non_fast_forward",
+            "workflows",
+        }.issubset(aggregate_rule_types)
         and required_pairs.issubset(aggregate_checks)
+        and required_workflow_paths.issubset(aggregate_workflows)
     )
 
 

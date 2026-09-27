@@ -363,6 +363,21 @@ def bounded_review_source(name: str, source: bytes, base: str, head: str) -> byt
         stderr=subprocess.DEVNULL, timeout=20, env=clean_git_env(),
     ).decode("utf-8")
     lines = source.decode("utf-8").splitlines()
+    added_file = (
+        bool(re.search(r"(?m)^new file mode [0-7]{6}$", patch))
+        and bool(re.search(r"(?m)^@@ -0,0 \+[0-9]+(?:,[0-9]+)? @@", patch))
+    )
+    if added_file:
+        note = (
+            f"REVIEW SOURCE NOTE: {name} is newly added in the trusted "
+            f"{base}...{head} review range. review.diff contains the complete "
+            "file content, so duplicate source staging is intentionally omitted. "
+            "This is complete evidence for this added file, not source truncation.\n"
+        ).encode("utf-8")
+        if len(note) > MAX_REVIEW_STAGE_SOURCE_BYTES:
+            raise ValueError("REVIEW_SOURCE_EXCERPT_BOUND_EXCEEDED")
+        return note
+
     hunk = re.compile(r"^@@ -[0-9]+(?:,[0-9]+)? \+([0-9]+)(?:,([0-9]+))? @@")
     selected: set[int] = set()
     for patch_line in patch.splitlines():

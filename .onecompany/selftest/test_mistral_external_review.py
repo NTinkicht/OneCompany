@@ -167,22 +167,104 @@ class ExternalMistralReviewTests(unittest.TestCase):
             )
 
 
-    def test_dedupe_is_exact_base_specific(self):
-        marker = (
-            f"{m.EXTERNAL_MARKER} repo=NTinkicht/veritas-atlas pr=21 "
-            f"head={'a' * 40} base={'b' * 40} "
+    def test_dedupe_marker_is_exact_base_specific(self):
+        body = (
+            "<!-- " + m.EXTERNAL_MARKER
+            + " repo=NTinkicht/veritas-atlas pr=21 "
+            + "head=" + "a" * 40 + " base=" + "b" * 40
+            + " run=123 dispatch=456 verdict=PASS result_sha256=" + "c" * 64
+            + " -->"
         )
-        comments = [{
-            "user": {"login": "github-actions[bot]"},
-            "body": marker + "run=1",
-        }]
-        with mock.patch.object(m, "onecompany_api", return_value=comments):
+        item = {"user": {"login": "github-actions[bot]"}, "body": body}
+        run = {
+            "id": 123, "path": m.EXTERNAL_WORKFLOW_PATH, "event": "issue_comment",
+            "status": "completed", "conclusion": "success",
+        }
+        with mock.patch.object(m, "onecompany_api", return_value=run):
+            self.assertTrue(m._trusted_evidence_comment(
+                item, repo="NTinkicht/veritas-atlas", number=21,
+                head="a" * 40, base="b" * 40,
+            ))
+            self.assertFalse(m._trusted_evidence_comment(
+                item, repo="NTinkicht/veritas-atlas", number=21,
+                head="a" * 40, base="d" * 40,
+            ))
+
+
+    def test_dedupe_requires_trusted_successful_external_workflow_run(self):
+        body = (
+            "<!-- "
+            + m.EXTERNAL_MARKER
+            + " repo=NTinkicht/veritas-atlas pr=21 "
+            + "head=" + "a" * 40 + " base=" + "b" * 40
+            + " run=123 dispatch=456 verdict=PASS result_sha256=" + "c" * 64
+            + " -->"
+        )
+        comments = [{"user": {"login": "github-actions[bot]"}, "body": body}]
+        trusted_run = {
+            "id": 123,
+            "path": m.EXTERNAL_WORKFLOW_PATH,
+            "event": "issue_comment",
+            "status": "completed",
+            "conclusion": "success",
+        }
+        def api(route):
+            if "/actions/runs/123" in route:
+                return trusted_run
+            return comments
+        with mock.patch.object(m, "onecompany_api", side_effect=api):
             self.assertTrue(m.existing_result(
                 "NTinkicht/veritas-atlas", 21, "a" * 40, "b" * 40
             ))
+        untrusted = dict(trusted_run, path=".github/workflows/other.yml")
+        def bad_api(route):
+            if "/actions/runs/123" in route:
+                return untrusted
+            return comments
+        with mock.patch.object(m, "onecompany_api", side_effect=bad_api):
             self.assertFalse(m.existing_result(
-                "NTinkicht/veritas-atlas", 21, "a" * 40, "c" * 40
+                "NTinkicht/veritas-atlas", 21, "a" * 40, "b" * 40
             ))
+
+    def test_mistral_committer_is_rejected(self):
+        commits = [{
+            "sha": "a" * 40,
+            "author": {"login": "NTinkicht"},
+            "committer": {"login": "mistral-vibe"},
+            "commit": {"message": "change\n\nMaterial-Author: chatgpt"},
+        }]
+        with mock.patch.object(m, "public_api", return_value=commits):
+            with self.assertRaisesRegex(ValueError, "MISTRAL_SELF_REVIEW_BLOCKED"):
+                m.verify_material_authors(
+                    "NTinkicht/veritas-atlas", 21, "a" * 40, ("chatgpt",)
+                )
+
+    def test_xml_and_maven_credentials_fail_closed(self):
+        with self.assertRaisesRegex(ValueError, "EXTERNAL_REVIEW_SENSITIVE_PATH_BLOCKED"):
+            m.validate_diff([".m2/settings.xml"], "+ordinary=true")
+        with self.assertRaisesRegex(ValueError, "EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED"):
+            m.validate_diff(
+                ["config/settings.xml"],
+                "+<password>VerySecretPassword123</password>",
+            )
+
+    def test_boolean_schema_version_is_rejected(self):
+        value = {
+            "version": True,
+            "repo": "NTinkicht/veritas-atlas",
+            "pr": 21,
+            "head_sha": "a" * 40,
+            "base_sha": "b" * 40,
+            "verdict": "NO_BLOCKING_FINDINGS",
+            "summary": "No blocking issue found.",
+            "findings": [],
+        }
+        with self.assertRaises(ValueError):
+            m.parse_result(
+                json.dumps(value).encode(),
+                repo=value["repo"], pr=21, head=value["head_sha"],
+                base=value["base_sha"], changed={"src/app.py"},
+            )
 
     def test_result_requires_exact_target_and_consistent_verdict(self):
         value = {

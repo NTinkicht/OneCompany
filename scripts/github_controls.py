@@ -17,6 +17,7 @@ from onecompany_lib import CONTROL, ROOT, load_json, path_matches_any, run
 # None means NO trusted server-side review gate is installed; fail closed.
 REVIEW_GATE_CONTEXT = "onecompany-independent-review"
 REVIEW_GATE_APP_ID: int | None = None
+TRUSTED_CONTROL_CODEOWNER = "@NTinkicht"
 
 
 def gh_api(path: str) -> tuple[int, Any | None, str]:
@@ -308,6 +309,29 @@ def _required_publishers(
     return publishers if len(publishers) == len(specs) else None
 
 
+def _trusted_workflows_are_codeowned(
+    repo: str,
+    branch: str,
+    required_specs: list[dict[str, str]],
+) -> bool:
+    encoded_ref = quote(branch, safe="")
+    code, payload, _ = gh_api(
+        f"repos/{repo}/contents/.github/CODEOWNERS?ref={encoded_ref}"
+    )
+    text = _decode_contents_payload(payload) if code == 0 else None
+    if text is None:
+        return False
+    rules = _parse_codeowners(text)
+    for spec in required_specs:
+        workflow_path = spec.get("workflow_path")
+        if not isinstance(workflow_path, str) or not workflow_path:
+            return False
+        owners = _effective_codeowners(rules, workflow_path)
+        if not owners or TRUSTED_CONTROL_CODEOWNER not in owners:
+            return False
+    return True
+
+
 def _pull_request_rule_is_fresh_non_author(rule: dict[str, Any]) -> bool:
     if rule.get("type") != "pull_request":
         return False
@@ -317,6 +341,7 @@ def _pull_request_rule_is_fresh_non_author(rule: dict[str, Any]) -> bool:
         and int(params.get("required_approving_review_count") or 0) >= 1
         and params.get("dismiss_stale_reviews_on_push") is True
         and params.get("require_last_push_approval") is True
+        and params.get("require_code_owner_review") is True
     )
 
 
@@ -326,6 +351,8 @@ def strict_merge_platform_enforcement(
     """Require non-bypassable, publisher-bound, fresh-review GitHub enforcement."""
     publishers = _required_publishers(required_specs)
     if not publishers:
+        return False
+    if not _trusted_workflows_are_codeowned(repo, branch, required_specs):
         return False
     encoded_ref = quote(branch, safe="")
 
@@ -353,6 +380,7 @@ def strict_merge_platform_enforcement(
             and int(reviews.get("required_approving_review_count") or 0) >= 1
             and reviews.get("dismiss_stale_reviews") is True
             and reviews.get("require_last_push_approval") is True
+            and reviews.get("require_code_owner_reviews") is True
         )
         if (
             isinstance(checks, dict)
@@ -370,6 +398,12 @@ def strict_merge_platform_enforcement(
     rulesets = _repo_rulesets(repo)
     if rulesets is None:
         return False
+
+    aggregate_rule_types: set[str] = set()
+    aggregate_checks: set[tuple[str, int]] = set()
+    pull_request_ok = False
+    strict_checks_seen = False
+
     for summary in rulesets:
         if (
             not isinstance(summary, dict)
@@ -385,44 +419,43 @@ def strict_merge_platform_enforcement(
             or _ruleset_has_bypass(detail)
         ):
             continue
-        rule_types: set[str] = set()
-        status_rule: dict[str, Any] | None = None
-        pr_rule: dict[str, Any] | None = None
+
         for rule in detail.get("rules") or []:
             if not isinstance(rule, dict):
                 return False
             kind = rule.get("type")
             if isinstance(kind, str):
-                rule_types.add(kind)
+                aggregate_rule_types.add(kind)
+
+            if kind == "pull_request" and _pull_request_rule_is_fresh_non_author(rule):
+                pull_request_ok = True
+
             if kind == "required_status_checks":
-                status_rule = rule
-            elif kind == "pull_request":
-                pr_rule = rule
-        if status_rule is None or pr_rule is None:
-            continue
-        params = status_rule.get("parameters") or {}
-        configured = params.get("required_status_checks")
-        publisher_bound = bool(
-            isinstance(configured, list)
-            and all(
-                any(
-                    isinstance(item, dict)
-                    and item.get("context") == name
-                    and item.get("integration_id") == app_id
-                    for item in configured
-                )
-                for name, app_id in publishers.items()
-            )
-        )
-        if (
-            {"pull_request", "required_status_checks", "deletion", "non_fast_forward"}
-            .issubset(rule_types)
-            and params.get("strict_required_status_checks_policy") is True
-            and publisher_bound
-            and _pull_request_rule_is_fresh_non_author(pr_rule)
-        ):
-            return True
-    return False
+                params = rule.get("parameters")
+                if not isinstance(params, dict):
+                    return False
+                if params.get("strict_required_status_checks_policy") is True:
+                    strict_checks_seen = True
+                configured = params.get("required_status_checks")
+                if not isinstance(configured, list):
+                    return False
+                for item in configured:
+                    if not isinstance(item, dict):
+                        return False
+                    context = item.get("context")
+                    integration_id = item.get("integration_id")
+                    if isinstance(context, str) and type(integration_id) is int:
+                        aggregate_checks.add((context, integration_id))
+
+    required_pairs = set(publishers.items())
+    return bool(
+        pull_request_ok
+        and strict_checks_seen
+        and {"pull_request", "required_status_checks", "deletion", "non_fast_forward"}
+        .issubset(aggregate_rule_types)
+        and required_pairs.issubset(aggregate_checks)
+    )
+
 
 
 

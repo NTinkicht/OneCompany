@@ -19,7 +19,9 @@ jobs:
     if: >-
       github.event.issue.number == 130 &&
       github.event.issue.pull_request == null &&
-      github.actor == 'NTinkicht' &&
+      (github.actor == 'NTinkicht' ||
+       (github.actor == 'github-actions[bot]' &&
+        contains(github.event.comment.body, 'ONECOMPANY_L4_AUTO_DISPATCH_V1'))) &&
       contains(github.event.comment.body, '@mistral-vibe') &&
       contains(github.event.comment.body, 'MISTRAL_EXTERNAL_REVIEW_V1')
     runs-on: ubuntu-latest

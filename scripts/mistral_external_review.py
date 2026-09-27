@@ -221,12 +221,10 @@ def _mistral_identity(value: object) -> bool:
         return False
     text = text.replace("[bot]", "")
     local = text.split("@", 1)[0]
-    compact = re.sub(r"[^a-z0-9_-]+", "-", local).strip("-")
-    return (
-        compact in MISTRAL_ALIASES
-        or "mistral-vibe" in compact
-        or compact == "mistral"
-    )
+    compact = re.sub(r"[^a-z0-9]+", "", local)
+    # Fail closed for the whole Mistral identity namespace, not only a
+    # handful of aliases (for example mistral-reviewer / mistral_vibe_worker).
+    return compact.startswith("mistral")
 
 
 def verify_material_authors(repo: str, number: int, head: str, declared: tuple[str, ...]) -> None:

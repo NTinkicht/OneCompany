@@ -602,6 +602,22 @@ def initialize_control_plane(
     chatgpt_tasks["may_mutate"] = False
     write_json(supervision_path, supervision)
 
+    # The source repository may operate at a higher autonomy level than a
+    # freshly bootstrapped target. Candidate/source handoff runtime claims must
+    # never leak authority into a new company whose config is deliberately
+    # reset to L1.
+    handoffs_path = target / ".onecompany" / "handoffs.json"
+    handoffs = json.loads(handoffs_path.read_text(encoding="utf-8"))
+    runtime = handoffs.setdefault("runtime", {})
+    runtime["current_autonomy_level"] = "L1"
+    runtime["github_actions_behavior"] = "reconcile_and_notify_only"
+    runtime["github_actions_mutation_allowed"] = False
+    runtime["scheduled_chatgpt_mutation_allowed"] = False
+    runtime["automatic_failover_allowed"] = False
+    runtime["automatic_merge_allowed"] = False
+    runtime["continuous_next_work_allowed"] = False
+    write_json(handoffs_path, handoffs)
+
     write_json(target / ".onecompany" / "queue.json", {"$schema": "./schemas/queue.schema.json", "schema_version": "1.1", "work_units": []})
     write_json(target / ".onecompany" / "portfolio.json", {"$schema": "./schemas/portfolio.schema.json", "schema_version": "1.0", "entities": [], "links": []})
     write_json(target / ".onecompany" / "requirements-catalog.json", {"$schema": "./schemas/requirements-catalog.schema.json", "schema_version": "1.0", "requirements": [], "acceptance_criteria": []})

@@ -273,6 +273,82 @@ def _codeowners_coverage(text: str) -> tuple[bool, list[str]]:
     return not missing, missing
 
 
+
+def strict_merge_platform_enforcement(
+    repo: str, branch: str, required_checks: set[str]
+) -> bool:
+    """Require non-bypassable PR flow and strict deterministic checks."""
+    encoded_ref = quote(branch, safe="")
+
+    code, protection, _ = gh_api(f"repos/{repo}/branches/{encoded_ref}/protection")
+    if code == 0 and isinstance(protection, dict):
+        checks = protection.get("required_status_checks")
+        reviews = protection.get("required_pull_request_reviews")
+        force_pushes = protection.get("allow_force_pushes")
+        deletions = protection.get("allow_deletions")
+        contexts: set[str] = set()
+        if isinstance(checks, dict):
+            contexts.update(str(value) for value in checks.get("contexts", []) if value)
+            contexts.update(
+                str(item.get("context"))
+                for item in checks.get("checks", [])
+                if isinstance(item, dict) and item.get("context")
+            )
+        if (
+            isinstance(checks, dict)
+            and checks.get("strict") is True
+            and required_checks.issubset(contexts)
+            and isinstance(reviews, dict)
+            and int(reviews.get("required_approving_review_count") or 0) >= 1
+            and isinstance(force_pushes, dict)
+            and force_pushes.get("enabled") is False
+            and isinstance(deletions, dict)
+            and deletions.get("enabled") is False
+            and not _classic_has_bypass(protection)
+        ):
+            return True
+
+    code, rulesets, _ = gh_api(f"repos/{repo}/rulesets")
+    if code != 0 or not isinstance(rulesets, list):
+        return False
+    for summary in rulesets:
+        if (
+            not isinstance(summary, dict)
+            or summary.get("enforcement") != "active"
+            or not summary.get("id")
+        ):
+            continue
+        detail_code, detail, _ = gh_api(f"repos/{repo}/rulesets/{summary['id']}")
+        if (
+            detail_code != 0
+            or not isinstance(detail, dict)
+            or not _ruleset_applies_to_branch(detail, branch)
+            or _ruleset_has_bypass(detail)
+        ):
+            continue
+        rule_types: set[str] = set()
+        contexts: set[str] = set()
+        strict = False
+        for rule in detail.get("rules") or []:
+            if not isinstance(rule, dict):
+                return False
+            kind = rule.get("type")
+            if isinstance(kind, str):
+                rule_types.add(kind)
+            if kind == "required_status_checks":
+                params = rule.get("parameters") or {}
+                strict = params.get("strict_required_status_checks_policy") is True
+                contexts.update(_required_contexts_from_rule(rule))
+        if (
+            {"pull_request", "required_status_checks", "deletion", "non_fast_forward"}
+            .issubset(rule_types)
+            and strict
+            and required_checks.issubset(contexts)
+        ):
+            return True
+    return False
+
+
 def inspect_enforcement(
     repo: str, branch: str, required_checks: set[str]
 ) -> dict[str, Any]:

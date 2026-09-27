@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 
-from onecompany_lib import CONTROL, load_json
+from onecompany_lib import CONTROL, autonomy_number, load_json
 
 
 def check(name: str, condition: bool) -> bool:
@@ -14,6 +14,8 @@ def check(name: str, condition: bool) -> bool:
 
 def main() -> int:
     supervision = load_json(CONTROL / "supervision.json")
+    config = load_json(CONTROL / "config.json")
+    level = autonomy_number(config.get("autonomy", {}).get("level", "L0"))
     safety = supervision.get("safety", {})
     liveness = supervision.get("liveness_policy", {})
     github = supervision.get("github_actions", {})
@@ -44,18 +46,32 @@ def main() -> int:
         results.append(check("four hourly supervisors approximate 15-minute cadence", max(gaps) <= 16 and min(gaps) >= 14))
 
     if enabled:
-        results.append(check("active L1 supervision is notify-only", supervision.get("mode") == "notify"))
-        results.append(check("active L1 GitHub reconciliation is enabled", github.get("enabled") is True))
-        results.append(check("active L1 supervisor may emit bounded Team Room signals", github.get("may_post_team_room") is True))
+        results.append(check("active GitHub reconciliation is enabled", github.get("enabled") is True))
+        results.append(check("active supervisor may emit bounded Team Room signals", github.get("may_post_team_room") is True))
+        if level >= 4:
+            results.append(check("L4 supervision orchestrates", supervision.get("mode") == "orchestrate"))
+            results.append(check("L4 GitHub supervisor may fail over", github.get("may_failover") is True))
+            results.append(check("L4 GitHub supervisor may merge", github.get("may_merge") is True))
+            results.append(check("L4 ChatGPT scheduled supervisors are enabled", chatgpt.get("enabled") is True))
+            results.append(check("L4 ChatGPT scheduled supervisors may mutate", chatgpt.get("may_mutate") is True))
+            results.append(check(
+                "L4 continuous selection is enabled",
+                config.get("autonomy", {}).get("continue_when_ready_work_exists") is True,
+            ))
+            results.append(check(
+                "L4 no-idle is enabled",
+                config.get("no_idle", {}).get("enabled") is True,
+            ))
+        elif level == 1:
+            results.append(check("active L1 supervision is notify-only", supervision.get("mode") == "notify"))
+            results.append(check("L1 GitHub supervisor has no failover authority", github.get("may_failover") is False))
+            results.append(check("L1 GitHub supervisor has no merge authority", github.get("may_merge") is False))
+            results.append(check("L1 ChatGPT scheduled supervisors have no mutation authority", chatgpt.get("may_mutate") is False))
     else:
         results.append(check("fresh supervision remains observe-only", supervision.get("mode") == "observe_only"))
         results.append(check("fresh GitHub reconciliation remains disabled", github.get("enabled") is False))
         results.append(check("fresh supervisor cannot post Team Room signals", github.get("may_post_team_room") is False))
         results.append(check("fresh ChatGPT scheduled tasks remain disabled", chatgpt.get("enabled") is False))
-
-    results.append(check("GitHub supervisor has no failover authority at L1", github.get("may_failover") is False))
-    results.append(check("GitHub supervisor has no merge authority at L1", github.get("may_merge") is False))
-    results.append(check("ChatGPT scheduled supervisors have no mutation authority", chatgpt.get("may_mutate") is False))
 
     failed = len([value for value in results if not value])
     state = "active" if enabled else "safe-inactive"

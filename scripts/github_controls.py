@@ -314,7 +314,8 @@ def _pull_request_rule_is_fresh_review(rule: dict[str, Any]) -> bool:
     params = rule.get("parameters")
     return bool(
         isinstance(params, dict)
-        and int(params.get("required_approving_review_count") or 0) >= 1
+        and type(params.get("required_approving_review_count")) is int
+        and params["required_approving_review_count"] >= 1
         and params.get("dismiss_stale_reviews_on_push") is True
         and params.get("require_last_push_approval") is True
     )
@@ -359,7 +360,8 @@ def strict_merge_platform_enforcement(
         )
         fresh_reviews = bool(
             isinstance(reviews, dict)
-            and int(reviews.get("required_approving_review_count") or 0) >= 1
+            and type(reviews.get("required_approving_review_count")) is int
+            and reviews["required_approving_review_count"] >= 1
             and reviews.get("dismiss_stale_reviews") is True
             and reviews.get("require_last_push_approval") is True
         )
@@ -393,15 +395,16 @@ def strict_merge_platform_enforcement(
         ):
             continue
         detail_code, detail, _ = gh_api(f"repos/{repo}/rulesets/{summary['id']}")
+        if detail_code != 0 or not isinstance(detail, dict):
+            return False
         if (
-            detail_code != 0
-            or not isinstance(detail, dict)
-            or detail.get("enforcement") != "active"
+            detail.get("enforcement") != "active"
             or detail.get("target") != "branch"
             or not _ruleset_applies_to_branch(detail, branch)
-            or _ruleset_has_bypass(detail)
         ):
             continue
+        if _ruleset_has_bypass(detail):
+            return False
 
         for rule in detail.get("rules") or []:
             if not isinstance(rule, dict):

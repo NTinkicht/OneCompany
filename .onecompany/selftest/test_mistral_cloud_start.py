@@ -59,13 +59,19 @@ class MistralCanonicalIntakeTests(unittest.TestCase):
             f"@mistral-vibe\nMISTRAL_START_V1\n"
             f"work_unit: WU-MISTRAL-RECOVERY-001\nmain_sha: {SHA}"
         )
+        recovery_queue = copy.deepcopy(self.live_queue)
+        recovery_row = next(
+            w for w in recovery_queue["work_units"]
+            if w["id"] == "WU-MISTRAL-RECOVERY-001"
+        )
+        recovery_row["pr"] = None
         with patch.dict(os.environ, {
             "GITHUB_REPOSITORY": start.REPO,
             "ONECOMPANY_EMERGENCY_STOP": "false",
         }):
             ticket = start.policy_ticket(
                 start.assignment(command),
-                queue=self.live_queue,
+                queue=recovery_queue,
                 budget=self.budget,
                 config=self.config,
                 actual_main_sha=SHA,
@@ -81,6 +87,23 @@ class MistralCanonicalIntakeTests(unittest.TestCase):
         self.assertEqual(
             ticket["test_path"], "tests/test_agent_qualification_recovery.py"
         )
+
+    def test_bound_recovery_unit_cannot_start_second_pr(self):
+        command = (
+            f"@mistral-vibe\nMISTRAL_START_V1\n"
+            f"work_unit: WU-MISTRAL-RECOVERY-001\nmain_sha: {SHA}"
+        )
+        row = next(w for w in self.live_queue["work_units"]
+                   if w["id"] == "WU-MISTRAL-RECOVERY-001")
+        if row.get("pr") is not None:
+            with patch.dict(os.environ, {
+                "GITHUB_REPOSITORY": start.REPO,
+                "ONECOMPANY_EMERGENCY_STOP": "false",
+            }), self.assertRaisesRegex(ValueError, "START_WU_ALREADY_BOUND"):
+                start.policy_ticket(
+                    start.assignment(command), queue=self.live_queue,
+                    budget=self.budget, config=self.config,
+                    actual_main_sha=SHA)
 
     def test_strict_owner_assignment_cannot_inject_other_scope(self):
         for body in (

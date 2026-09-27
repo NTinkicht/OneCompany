@@ -40,17 +40,25 @@ MAX_WAKE_PAGES = 50
 EXTERNAL_MARKER = "ONECOMPANY_EXTERNAL_MISTRAL_REVIEW_V1"
 
 SENSITIVE_PATH = re.compile(
-    r"(^|/)(?:\.env(?:\.|$)|(?:secrets?|credentials?)(?:/|(?:\.[A-Za-z0-9_.-]+)?$)|"
-    r"auth\.json$|.*\.(?:pem|key|p12|pfx|jks)$)",
-    re.IGNORECASE,
+    r"(?ix)(^|/)(?:"
+    r"\.env(?:\.|$)|\.npmrc$|\.netrc$|\.pypirc$|\.git-credentials$|"
+    r"id_(?:rsa|dsa|ecdsa|ed25519)$|"
+    r"(?:secrets?|credentials?)(?:/|(?:\.[A-Za-z0-9_.-]+)?$)|"
+    r"(?:auth|token|keyring)\.json$|"
+    r"(?:docker/)?config\.json$|"
+    r"application_default_credentials\.json$|"
+    r".*\.(?:pem|key|p12|pfx|jks)$"
+    r")"
 )
-SECRET_ASSIGNMENT = re.compile(
-    r"(?i)[\"']?"
-    r"(?:[a-z0-9_-]*(?:secret|token|password|credential|"
-    r"api[_-]?key|access[_-]?key|private[_-]?key)[a-z0-9_-]*)"
-    r"[\"']?\s*[:=]\s*[\"']?([^\"'\s,;}{]{8,})"
+SENSITIVE_KEY = re.compile(
+    r"(?ix)"
+    r"(?:^|[\s{,])[\"']?"
+    r"([a-z0-9_-]*(?:secret|token|password|credential|"
+    r"api[_-]?key|access[_-]?key|private[_-]?key|auth)[a-z0-9_-]*)"
+    r"[\"']?\s*[:=]\s*(.+?)\s*[,;]?\s*$"
 )
 BEARER_LITERAL = re.compile(r"(?i)\bbearer\s+([A-Za-z0-9._~+/=-]{16,})")
+BASIC_LITERAL = re.compile(r"(?i)\bbasic\s+([A-Za-z0-9+/=]{12,})")
 CREDENTIAL_URL = re.compile(
     r"(?i)\b[a-z][a-z0-9+.-]*://[^\s/:@]+:([^\s/@]{8,})@"
 )
@@ -63,6 +71,7 @@ SAFE_REFERENCE_PATTERNS = (
     re.compile(r"^(?:env|secrets)\.[A-Za-z_][A-Za-z0-9_]*$"),
     re.compile(r"^(?:\[redacted\]|<redacted>|placeholder|example)$", re.IGNORECASE),
 )
+
 
 REVIEW_INSTRUCTIONS = """You are Mistral Vibe acting as an independent NON-MATERIAL-AUTHOR external technical reviewer.
 The trusted OneCompany parent verified the owner dispatch, exact public target PR head/base,
@@ -231,7 +240,13 @@ def prepare() -> None:
 
 
 def _safe_reference(value: str) -> bool:
-    candidate = value.strip()
+    candidate = value.strip().rstrip(",;").strip()
+    if (
+        len(candidate) >= 2
+        and candidate[0] == candidate[-1]
+        and candidate[0] in {"\"", "'"}
+    ):
+        candidate = candidate[1:-1].strip()
     return any(pattern.fullmatch(candidate) for pattern in SAFE_REFERENCE_PATTERNS)
 
 
@@ -248,18 +263,23 @@ def validate_diff(paths: list[str], diff: str) -> None:
         or re.search(r"(?m)^[+-]Subproject commit [0-9a-f]{40}(?:-dirty)?$", diff)
     ):
         raise ValueError("EXTERNAL_REVIEW_NON_TEXT_CONTENT_BLOCKED")
-    for line in diff.splitlines():
-        if line.startswith((
-            "+++ ", "--- ", "diff --git ", "index ", "@@ ",
-            "new file mode ", "deleted file mode ", "old mode ", "new mode ",
-            "similarity index ", "dissimilarity index ", "rename from ",
-            "rename to ",
-        )):
-            continue
-        for match in SECRET_ASSIGNMENT.finditer(line):
-            if not _safe_reference(match.group(1)):
+
+    # Scan every textual diff line, including context lines. Do not skip lines
+    # merely because they begin with +++/---: changed source can legitimately
+    # contain those prefixes. Git metadata is harmless unless it itself matches
+    # a credential signature, in which case fail closed.
+    for raw_line in diff.splitlines():
+        line = raw_line
+        if line.startswith(("+", "-", " ")):
+            line = line[1:]
+
+        for match in SENSITIVE_KEY.finditer(line):
+            if not _safe_reference(match.group(2)):
                 raise ValueError("EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED")
         for match in BEARER_LITERAL.finditer(line):
+            if not _safe_reference(match.group(1)):
+                raise ValueError("EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED")
+        for match in BASIC_LITERAL.finditer(line):
             if not _safe_reference(match.group(1)):
                 raise ValueError("EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED")
         for match in CREDENTIAL_URL.finditer(line):

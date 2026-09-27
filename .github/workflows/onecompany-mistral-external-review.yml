@@ -1,0 +1,272 @@
+name: OneCompany Mistral External Exact-Head Review
+run-name: External Mistral review dispatch ${{ github.event.comment.id }}
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: read
+  issues: write
+  actions: read
+
+concurrency:
+  group: onecompany-mistral-external-review
+  cancel-in-progress: false
+
+jobs:
+  external-review:
+    if: >-
+      github.event.issue.number == 130 &&
+      github.event.issue.pull_request == null &&
+      github.actor == 'NTinkicht' &&
+      contains(github.event.comment.body, '@mistral-vibe') &&
+      contains(github.event.comment.body, 'MISTRAL_EXTERNAL_REVIEW_V1')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout immutable trusted OneCompany workflow source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Verify trusted source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+
+      - name: Validate owner-dispatched public target
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DISPATCH_BODY: ${{ github.event.comment.body }}
+        run: python -I scripts/mistral_external_review.py prepare
+
+      - name: Checkout exact public target without credentials
+        if: steps.target.outputs.ready == 'true'
+        env:
+          TARGET_REPO: ${{ steps.target.outputs.repo }}
+          TARGET_PR: ${{ steps.target.outputs.pr }}
+          TARGET_HEAD: ${{ steps.target.outputs.head }}
+          TARGET_BASE: ${{ steps.target.outputs.base }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -m 700 /tmp/onecompany-external-target
+          git -C /tmp/onecompany-external-target init
+          git -C /tmp/onecompany-external-target remote add origin "https://github.com/$TARGET_REPO.git"
+          git -C /tmp/onecompany-external-target fetch --no-tags --filter=blob:none origin             main "pull/$TARGET_PR/head:refs/remotes/origin/review-head"
+          test "$(git -C /tmp/onecompany-external-target rev-parse refs/remotes/origin/review-head)" = "$TARGET_HEAD"
+          git -C /tmp/onecompany-external-target cat-file -e "$TARGET_BASE^{commit}"
+          MERGE_BASE="$(git -C /tmp/onecompany-external-target merge-base "$TARGET_BASE" "$TARGET_HEAD")"
+          test "$MERGE_BASE" != ""
+          git -C /tmp/onecompany-external-target cat-file -e "$MERGE_BASE^{commit}"
+          git -C /tmp/onecompany-external-target checkout --detach "$TARGET_HEAD"
+
+      - name: Build bounded complete-diff review packet
+        id: evidence
+        if: steps.target.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_REPO: ${{ steps.target.outputs.repo }}
+          TARGET_PR: ${{ steps.target.outputs.pr }}
+          TARGET_HEAD: ${{ steps.target.outputs.head }}
+          TARGET_BASE: ${{ steps.target.outputs.base }}
+          TARGET_DIR: /tmp/onecompany-external-target
+        run: python -I scripts/mistral_external_review.py build
+
+      - name: Verify zero-additional-spend Mistral entitlement
+        id: preflight
+        if: steps.evidence.outputs.ready == 'true'
+        env:
+          PAYG_DISABLED_CONFIRMED: ${{ vars.ONECOMPANY_MISTRAL_PAYG_DISABLED_CONFIRMED }}
+          PROVIDER_KEY: ${{ secrets.MISTRAL_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -I - <<'PY'
+          import json
+          budget = json.load(open(".onecompany/budget.json", encoding="utf-8"))
+          ai = budget["ai"]
+          assert ai["additional_monthly_spend_cap"] == 0
+          assert all(ai[k] is False for k in (
+              "allow_paid_fallback", "allow_overage",
+              "allow_auto_topup", "allow_new_paid_vendor"
+          ))
+          PY
+          if [[ "${PAYG_DISABLED_CONFIRMED:-}" != "true" || -z "${PROVIDER_KEY:-}" ]]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "status=CONFIG_BLOCKED" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          set +e
+          code="$(curl --silent --show-error --connect-timeout 10 --max-time 20             --output /dev/null --write-out '%{http_code}'             --header "Authorization: Bearer ${PROVIDER_KEY}"             'https://console.mistral.ai/api/vibe/whoami')"
+          rc=$?
+          set -e
+          if [[ "$rc" == "0" && "$code" == "200" ]]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "status=OK" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "status=CAPACITY_OR_AUTH_BLOCKED" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install pinned Mistral Vibe
+        if: steps.preflight.outputs.ready == 'true'
+        run: python -I -m pip install --disable-pip-version-check 'mistral-vibe==2.25.3'
+
+      - name: Run isolated no-tool external review
+        if: steps.preflight.outputs.ready == 'true'
+        id: actor
+        env:
+          MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+          VIBE_HOME: /tmp/onecompany-external-vibe-home
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -m 700 -p "$VIBE_HOME" /tmp/onecompany-external-empty
+          cat > "$VIBE_HOME/config.toml" <<'EOF'
+          enable_auto_update = false
+          enable_notifications = false
+          enable_telemetry = false
+          enabled_tools = ["re:^(?!)"]
+          EOF
+          set +e
+          timeout --signal=TERM --kill-after=15s 600s             vibe --trust --agent plan --workdir /tmp/onecompany-external-empty               --enabled-tools 're:^(?!)' --max-turns 2 --max-tokens 64000               --output text               --prompt "$(cat /tmp/onecompany-external-review-prompt.txt)"               > /tmp/onecompany-external-review-output.txt               2> /tmp/onecompany-external-review-error.txt
+          code=$?
+          set -e
+          echo "exit_code=$code" >> "$GITHUB_OUTPUT"
+          if [[ "$code" != "0" ]]; then
+            exit "$code"
+          fi
+
+      - name: Validate exact-target model result
+        id: result
+        if: steps.actor.outputs.exit_code == '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          SOURCE_COMMENT_ID: ${{ github.event.comment.id }}
+        run: python -I scripts/mistral_external_review.py validate
+
+      - name: Recheck target before durable publication
+        if: steps.result.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DISPATCH_BODY: ${{ github.event.comment.body }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(mktemp)"
+          GITHUB_OUTPUT="$status" python -I scripts/mistral_external_review.py prepare
+          grep -qx 'ready=true' "$status"
+
+      - name: Publish exact external review evidence on OneCompany wake bus
+        if: steps.result.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          body = Path("/tmp/onecompany-external-review-public.txt").read_text(encoding="utf-8")
+          Path("/tmp/onecompany-external-review-payload.json").write_text(
+              json.dumps({"body": body}), encoding="utf-8"
+          )
+          PY
+          gh api -X POST "repos/$GITHUB_REPOSITORY/issues/130/comments"             --input /tmp/onecompany-external-review-payload.json             > /tmp/onecompany-external-review-comment.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          value = json.load(open(
+              "/tmp/onecompany-external-review-comment.json", encoding="utf-8"
+          ))
+          body = Path(
+              "/tmp/onecompany-external-review-public.txt"
+          ).read_text(encoding="utf-8")
+          assert value["user"]["login"] == "github-actions[bot]"
+          assert int(value["id"]) > 0
+          assert value["body"] == body
+          PY
+
+      - name: Seal published comment identity into run-scoped proof
+        if: steps.result.outputs.ready == 'true'
+        env:
+          RESULT_SHA256: ${{ steps.result.outputs.result_sha256 }}
+          BODY_SHA256: ${{ steps.result.outputs.body_sha256 }}
+          VERDICT: ${{ steps.result.outputs.verdict }}
+          SOURCE_COMMENT_ID: ${{ github.event.comment.id }}
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          published = json.load(open(
+              "/tmp/onecompany-external-review-comment.json", encoding="utf-8"
+          ))
+          body = Path(
+              "/tmp/onecompany-external-review-public.txt"
+          ).read_text(encoding="utf-8")
+          assert hashlib.sha256(
+              body.encode("utf-8")
+          ).hexdigest() == os.environ["BODY_SHA256"]
+          assert published["body"] == body, "PUBLISHED_BODY_MISMATCH"
+          meta = json.load(open(
+              "/tmp/onecompany-external-review-meta.json", encoding="utf-8"
+          ))
+          proof = {
+              "version": 1,
+              "target": meta,
+              "run_id": int(os.environ["GITHUB_RUN_ID"]),
+              "dispatch_comment_id": int(os.environ["SOURCE_COMMENT_ID"]),
+              "published_comment_id": int(published["id"]),
+              "published_comment_url": published["html_url"],
+              "publisher": published["user"]["login"],
+              "verdict": os.environ["VERDICT"],
+              "result_sha256": os.environ["RESULT_SHA256"],
+              "body_sha256": os.environ["BODY_SHA256"],
+          }
+          assert proof["publisher"] == "github-actions[bot]"
+          json.dump(
+              proof,
+              open(
+                  "/tmp/onecompany-external-review-proof.json",
+                  "w",
+                  encoding="utf-8",
+              ),
+              indent=2,
+              sort_keys=True,
+          )
+          PY
+
+      - name: Upload run-scoped validated external review proof
+        if: steps.result.outputs.ready == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: mistral-external-review-proof
+          path: |
+            /tmp/onecompany-external-review-meta.json
+            /tmp/onecompany-external-review-validated.json
+            /tmp/onecompany-external-review-public.txt
+            /tmp/onecompany-external-review-comment.json
+            /tmp/onecompany-external-review-proof.json
+          if-no-files-found: error
+
+      - name: Make successful workflow conclusion equivalent to validated PASS
+        if: always()
+        env:
+          VERDICT: ${{ steps.result.outputs.verdict }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$VERDICT" = "PASS"

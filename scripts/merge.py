@@ -7,17 +7,140 @@ import datetime as dt
 import hashlib
 import json
 import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
-_MERGE_SCRIPT_DIR = Path(__file__).resolve().parent
-if __name__ == "__main__" and not sys.flags.isolated:
-    print(
-        "REFUSED: privileged merge executor must run in Python isolated mode "
-        "(use `python onecompany.py merge ...`)"
+_EARLY_DANGEROUS_SUFFIXES = {
+    ".py", ".pyc", ".pyo", ".pth", ".so", ".pyd", ".dll", ".dylib",
+}
+
+
+def _early_command(args: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(args, text=True, capture_output=True, check=False)
+
+
+def _early_arg(name: str) -> str | None:
+    try:
+        index = sys.argv.index(name)
+    except ValueError:
+        return None
+    return sys.argv[index + 1] if index + 1 < len(sys.argv) else None
+
+
+def _early_repo() -> str | None:
+    configured = os.environ.get("GITHUB_REPOSITORY", "").strip()
+    if configured:
+        return configured
+    remote = _early_command(["git", "remote", "get-url", "origin"])
+    if remote.returncode:
+        return None
+    value = remote.stdout.strip()
+    for prefix in ("https://github.com/", "git@github.com:"):
+        if value.startswith(prefix):
+            value = value[len(prefix):]
+            if value.endswith(".git"):
+                value = value[:-4]
+            return value if value.count("/") == 1 else None
+    return None
+
+
+def _early_privileged_execution_guard() -> None:
+    """Authenticate the checkout before importing any repository-controlled module."""
+    if __name__ != "__main__":
+        return
+    if not sys.flags.isolated:
+        print(
+            "REFUSED: privileged merge executor must run in Python isolated mode "
+            "(use `python onecompany.py merge ...`)"
+        )
+        raise SystemExit(2)
+
+    raw_pr = _early_arg("--pr")
+    repo = _early_repo()
+    if not raw_pr or not raw_pr.isdigit() or not repo:
+        print("REFUSED: cannot establish explicit PR/repository before privileged imports")
+        raise SystemExit(2)
+
+    api = _early_command(["gh", "api", f"repos/{repo}/pulls/{int(raw_pr)}"])
+    if api.returncode:
+        print("REFUSED: cannot resolve live PR before privileged imports")
+        raise SystemExit(2)
+    try:
+        pr = json.loads(api.stdout)
+        base_sha = (pr.get("base") or {}).get("sha")
+    except (json.JSONDecodeError, AttributeError):
+        base_sha = None
+    if not isinstance(base_sha, str) or len(base_sha) != 40:
+        print("REFUSED: live PR has no exact base SHA before privileged imports")
+        raise SystemExit(2)
+
+    head = _early_command(["git", "rev-parse", "HEAD"])
+    if head.returncode or head.stdout.strip() != base_sha:
+        print("REFUSED: privileged executor checkout is not the exact PR base")
+        raise SystemExit(2)
+
+    for command, label in (
+        (["git", "diff", "--quiet", "--"], "tracked"),
+        (["git", "diff", "--cached", "--quiet", "--"], "staged"),
+    ):
+        result = _early_command(command)
+        if result.returncode:
+            print(f"REFUSED: {label} privileged-executor files are modified")
+            raise SystemExit(2)
+
+    allowed_untracked: set[str] = set()
+    packet = _early_arg("--assurance-packet")
+    if packet:
+        root = Path.cwd().resolve()
+        candidate = Path(packet)
+        if not candidate.is_absolute():
+            candidate = root / candidate
+        try:
+            allowed_untracked.add(candidate.resolve().relative_to(root).as_posix())
+        except (OSError, ValueError):
+            pass
+
+    untracked = _early_command(["git", "ls-files", "--others", "--exclude-standard"])
+    if untracked.returncode:
+        print("REFUSED: cannot enumerate untracked privileged-executor files")
+        raise SystemExit(2)
+    unexpected = [
+        line.strip()
+        for line in untracked.stdout.splitlines()
+        if line.strip() and line.strip() not in allowed_untracked
+    ]
+    if unexpected:
+        print("REFUSED: untracked files exist in privileged executor checkout")
+        raise SystemExit(2)
+
+    ignored = _early_command(
+        ["git", "ls-files", "--others", "--ignored", "--exclude-standard"]
     )
-    raise SystemExit(2)
+    if ignored.returncode:
+        print("REFUSED: cannot enumerate ignored privileged-executor files")
+        raise SystemExit(2)
+    dangerous = []
+    for raw in ignored.stdout.splitlines():
+        value = raw.strip().replace("\\", "/")
+        if not value:
+            continue
+        path = Path(value)
+        if (
+            path.suffix.lower() in _EARLY_DANGEROUS_SUFFIXES
+            or path.name in {"sitecustomize.py", "usercustomize.py"}
+        ):
+            dangerous.append(value)
+    if dangerous:
+        print("REFUSED: ignored execution-capable files exist before privileged imports")
+        raise SystemExit(2)
+
+
+_early_privileged_execution_guard()
+
+
+_MERGE_SCRIPT_DIR = Path(__file__).resolve().parent
 if str(_MERGE_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_MERGE_SCRIPT_DIR))
 
@@ -557,14 +680,6 @@ def main() -> int:
         != protected_context.get("default_branch")
     ):
         print("REFUSED: base-configured default branch differs from GitHub protected default branch")
-        return 2
-
-    executor_errors = _trusted_executor_surface_errors(
-        live_base, args.assurance_packet
-    )
-    if executor_errors:
-        for error in executor_errors:
-            print(f"REFUSED: {error}")
         return 2
 
     required_platform_specs, required_platform_error = trusted_required_check_specs(

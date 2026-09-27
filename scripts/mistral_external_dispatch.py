@@ -2,6 +2,7 @@
 """Bounded autonomous dispatcher for OneCompany external Mistral review failover."""
 from __future__ import annotations
 
+import calendar
 import json
 import os
 import re
@@ -162,7 +163,7 @@ def terminal_or_pending(
         if not isinstance(created, str):
             continue
         try:
-            epoch = int(time.mktime(time.strptime(created, "%Y-%m-%dT%H:%M:%SZ")))
+            epoch = int(calendar.timegm(time.strptime(created, "%Y-%m-%dT%H:%M:%SZ")))
         except ValueError:
             continue
         if now - epoch < PENDING_TTL_SECONDS:

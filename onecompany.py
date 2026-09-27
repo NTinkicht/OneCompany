@@ -78,7 +78,8 @@ def main() -> int:
     if command in source_only and not helper.is_file():
         print(f"{command} is available from the OneCompany source checkout only; no target is modified.")
         return 2
-    argv = [sys.executable, str(helper), *spec[1:], *sys.argv[2:]]
+    python_prefix = [sys.executable, "-I"] if command == "merge" else [sys.executable]
+    argv = [*python_prefix, str(helper), *spec[1:], *sys.argv[2:]]
     if command in {"preview-local", "mission-control"}:
         child = subprocess.Popen(argv, cwd=str(ROOT))
 

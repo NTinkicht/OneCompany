@@ -1,0 +1,52 @@
+name: OneCompany Review Authorization
+
+on:
+  pull_request_review:
+    types: [submitted, dismissed]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  onecompany-independent-review:
+    name: onecompany-independent-review
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Resolve exact PR target
+        id: target
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          test -n "$PR_NUMBER"
+          test -n "$HEAD_SHA"
+          test -n "$BASE_SHA"
+          echo "pr=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          echo "head=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+          echo "base=$BASE_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout exact trusted PR base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ steps.target.outputs.base }}
+          fetch-depth: 1
+          persist-credentials: false
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+
+      - name: Authorize cumulative non-author exact-head review
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/review_authorization.py \
+            --repo "$GITHUB_REPOSITORY" \
+            --pr "${{ steps.target.outputs.pr }}" \
+            --head "${{ steps.target.outputs.head }}" \
+            --base "${{ steps.target.outputs.base }}"

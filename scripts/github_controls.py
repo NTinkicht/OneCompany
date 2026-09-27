@@ -17,6 +17,7 @@ from onecompany_lib import CONTROL, ROOT, load_json, path_matches_any, run
 # None means NO trusted server-side review gate is installed; fail closed.
 REVIEW_GATE_CONTEXT = "onecompany-independent-review"
 REVIEW_GATE_APP_ID: int | None = None
+REVIEW_AUTH_WORKFLOW_PATH = ".github/workflows/onecompany-review-authorization.yml"
 
 
 def gh_api(path: str) -> tuple[int, Any | None, str]:
@@ -271,6 +272,207 @@ def _codeowners_coverage(text: str) -> tuple[bool, list[str]]:
 
     missing = sorted(set(missing))
     return not missing, missing
+
+
+
+
+def _repo_rulesets(repo: str, *, max_pages: int = 10) -> list[dict[str, Any]] | None:
+    """Read every repository ruleset page within a bounded fail-closed limit."""
+    values: list[dict[str, Any]] = []
+    for page in range(1, max_pages + 1):
+        code, payload, _ = gh_api(
+            f"repos/{repo}/rulesets?per_page=100&page={page}"
+        )
+        if code != 0 or not isinstance(payload, list):
+            return None
+        values.extend(item for item in payload if isinstance(item, dict))
+        if len(payload) < 100:
+            return values
+    return None
+
+
+def _required_publishers(
+    specs: list[dict[str, str]],
+) -> dict[str, int] | None:
+    """Resolve trusted manifest app slugs to immutable GitHub App IDs."""
+    publishers: dict[str, int] = {}
+    for spec in specs:
+        name = spec.get("name")
+        slug = spec.get("app_slug")
+        if not isinstance(name, str) or not name or not isinstance(slug, str) or not slug:
+            return None
+        code, app, _ = gh_api(f"apps/{quote(slug, safe='')}")
+        app_id = app.get("id") if isinstance(app, dict) else None
+        if code != 0 or type(app_id) is not int or app_id <= 0:
+            return None
+        publishers[name] = app_id
+    return publishers if len(publishers) == len(specs) else None
+
+
+def _pull_request_rule_is_fresh_review(rule: dict[str, Any]) -> bool:
+    if rule.get("type") != "pull_request":
+        return False
+    params = rule.get("parameters")
+    return bool(
+        isinstance(params, dict)
+        and type(params.get("required_approving_review_count")) is int
+        and params["required_approving_review_count"] >= 1
+        and params.get("dismiss_stale_reviews_on_push") is True
+        and params.get("require_last_push_approval") is True
+        and params.get("required_review_thread_resolution") is True
+    )
+
+
+def strict_merge_platform_enforcement(
+    repo: str,
+    branch: str,
+    required_specs: list[dict[str, str]],
+    *,
+    trusted_ref: str | None = None,
+) -> bool:
+    """Require the GitHub platform baseline used by the L4 merge transaction.
+
+    This verifies PR flow, strict publisher-bound checks, fresh review semantics,
+    no force-push/deletion and no bypass principals. It deliberately does NOT
+    claim that GitHub alone proves cumulative material-author independence or
+    workflow-blob identity. The caller's same exact-head merge transaction
+    separately enforces those stronger L4 invariants via reviewer provenance and
+    base-trusted workflow verification before this guard is rechecked immediately
+    before mutation.
+    """
+    publishers = _required_publishers(required_specs)
+    if not publishers:
+        return False
+    encoded_ref = quote(branch, safe="")
+
+    # Classic branch protection cannot bind a required check to a protected
+    # workflow definition. For L4, a candidate could preserve a context/app ID
+    # while replacing the workflow implementation, so classic protection alone
+    # is deliberately insufficient for autonomous merge.
+    code, _protection, _ = gh_api(
+        f"repos/{repo}/branches/{encoded_ref}/protection"
+    )
+    _ = code  # retained for audit/diagnostic parity; ruleset proof is required.
+
+    rulesets = _repo_rulesets(repo)
+    if rulesets is None:
+        return False
+
+    repo_code, repository, _ = gh_api(f"repos/{repo}")
+    repo_id = repository.get("id") if isinstance(repository, dict) else None
+    if repo_code != 0 or type(repo_id) is not int or repo_id <= 0:
+        return False
+
+    required_workflow_paths = {
+        str(spec.get("workflow_path"))
+        for spec in required_specs
+        if isinstance(spec.get("workflow_path"), str)
+        and spec.get("workflow_path")
+    }
+    required_workflow_paths.add(REVIEW_AUTH_WORKFLOW_PATH)
+
+    aggregate_rule_types: set[str] = set()
+    aggregate_checks: set[tuple[str, int]] = set()
+    strict_aggregate_checks: set[tuple[str, int]] = set()
+    aggregate_workflows: set[str] = set()
+    pull_request_ok = False
+
+    for summary in rulesets:
+        if (
+            not isinstance(summary, dict)
+            or summary.get("enforcement") != "active"
+            or not summary.get("id")
+        ):
+            continue
+        detail_code, detail, _ = gh_api(f"repos/{repo}/rulesets/{summary['id']}")
+        if detail_code != 0 or not isinstance(detail, dict):
+            return False
+        if (
+            detail.get("enforcement") != "active"
+            or detail.get("target") != "branch"
+            or not _ruleset_applies_to_branch(detail, branch)
+        ):
+            continue
+        if _ruleset_has_bypass(detail):
+            return False
+
+        for rule in detail.get("rules") or []:
+            if not isinstance(rule, dict):
+                return False
+            kind = rule.get("type")
+            if isinstance(kind, str):
+                aggregate_rule_types.add(kind)
+
+            if kind == "pull_request" and _pull_request_rule_is_fresh_review(rule):
+                pull_request_ok = True
+
+            if kind == "required_status_checks":
+                params = rule.get("parameters")
+                if not isinstance(params, dict):
+                    return False
+                strict_rule = params.get("strict_required_status_checks_policy") is True
+                configured = params.get("required_status_checks")
+                if not isinstance(configured, list):
+                    return False
+                for item in configured:
+                    if not isinstance(item, dict):
+                        return False
+                    context = item.get("context")
+                    integration_id = item.get("integration_id")
+                    if isinstance(context, str) and type(integration_id) is int:
+                        pair = (context, integration_id)
+                        aggregate_checks.add(pair)
+                        if strict_rule:
+                            strict_aggregate_checks.add(pair)
+
+            if kind == "workflows":
+                params = rule.get("parameters")
+                configured = params.get("workflows") if isinstance(params, dict) else None
+                if not isinstance(configured, list):
+                    return False
+                for item in configured:
+                    if not isinstance(item, dict):
+                        return False
+                    path = item.get("path")
+                    repository_id = item.get("repository_id")
+                    ref = item.get("ref")
+                    sha = item.get("sha")
+                    if (
+                        not isinstance(path, str)
+                        or repository_id != repo_id
+                        or (
+                            ref not in {branch, f"refs/heads/{branch}"}
+                            and not (
+                                trusted_ref
+                                and isinstance(sha, str)
+                                and sha == trusted_ref
+                            )
+                        )
+                        or (
+                            isinstance(sha, str)
+                            and trusted_ref
+                            and sha != trusted_ref
+                        )
+                    ):
+                        continue
+                    aggregate_workflows.add(path)
+
+    required_pairs = set(publishers.items())
+    return bool(
+        pull_request_ok
+        and {
+            "pull_request",
+            "required_status_checks",
+            "deletion",
+            "non_fast_forward",
+            "workflows",
+        }.issubset(aggregate_rule_types)
+        and required_pairs.issubset(aggregate_checks)
+        and required_pairs.issubset(strict_aggregate_checks)
+        and required_workflow_paths.issubset(aggregate_workflows)
+    )
+
+
 
 
 def inspect_enforcement(

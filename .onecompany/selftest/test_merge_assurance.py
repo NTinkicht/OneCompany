@@ -136,9 +136,11 @@ class MergeAssuranceTests(unittest.TestCase):
             raise AssertionError(f"unexpected load_json: {path}")
 
         if run_side_effect is None:
-            run_side_effect = lambda command, cwd=None: subprocess.CompletedProcess(
-                command, 0, stdout="", stderr=""
-            )
+            def run_side_effect(command, cwd=None):
+                stdout = BASE + "\n" if command == ["git", "rev-parse", "HEAD"] else ""
+                return subprocess.CompletedProcess(
+                    command, 0, stdout=stdout, stderr=""
+                )
 
         stack.enter_context(patch.object(merge, "emergency_stop_active", return_value=False))
         stack.enter_context(patch.object(merge, "command_exists", return_value=True))
@@ -164,6 +166,27 @@ class MergeAssuranceTests(unittest.TestCase):
                 return_value=(
                     {"default_branch": "main", "tip": "c" * 40, "trusted_ref": BASE},
                     [],
+                ),
+            )
+        )
+        stack.enter_context(
+            patch.object(
+                merge,
+                "strict_merge_platform_enforcement",
+                return_value=True,
+            )
+        )
+        stack.enter_context(
+            patch.object(
+                merge,
+                "trusted_required_check_specs",
+                return_value=(
+                    [{
+                        "name": "validate",
+                        "app_slug": "github-actions",
+                        "workflow_path": ".github/workflows/onecompany-validate.yml",
+                    }],
+                    None,
                 ),
             )
         )
@@ -213,6 +236,13 @@ class MergeAssuranceTests(unittest.TestCase):
                     },
                     [],
                 ),
+            )
+        )
+        stack.enter_context(
+            patch.object(
+                merge,
+                "_trusted_executor_surface_errors",
+                return_value=[],
             )
         )
         stack.enter_context(
@@ -271,6 +301,47 @@ class MergeAssuranceTests(unittest.TestCase):
             )
             result = merge.main()
         self.assertEqual(result, 2)
+
+    def test_untrusted_executor_surface_is_rejected(self):
+        state = self.state()
+        with ExitStack() as stack:
+            self.common(stack, state)
+            stack.enter_context(
+                patch.object(
+                    merge,
+                    "_trusted_executor_surface_errors",
+                    return_value=["tracked merge-executor files are modified"],
+                )
+            )
+            stack.enter_context(patch.object(sys, "argv", ["merge.py", "--pr", "1"]))
+            self.assertEqual(merge.main(), 2)
+
+
+    def test_executor_surface_rejects_untracked_code(self):
+        def fake_run(command, cwd=None):
+            if command == ["git", "rev-parse", "HEAD"]:
+                return subprocess.CompletedProcess(command, 0, stdout=BASE + "\n", stderr="")
+            if command in (
+                ["git", "diff", "--quiet", "--"],
+                ["git", "diff", "--cached", "--quiet", "--"],
+            ):
+                return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+            if command == ["git", "ls-files", "--others", "--exclude-standard"]:
+                return subprocess.CompletedProcess(
+                    command, 0, stdout="scripts/json.py\n", stderr=""
+                )
+            if command == [
+                "git", "ls-files", "--others", "--ignored", "--exclude-standard"
+            ]:
+                return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+            raise AssertionError(f"unexpected command: {command}")
+
+        with (
+            patch.object(merge, "_isolated_runtime_ok", return_value=True),
+            patch.object(merge, "run", side_effect=fake_run),
+        ):
+            errors = merge._trusted_executor_surface_errors(BASE, None)
+        self.assertTrue(any("untracked files" in error for error in errors))
 
     def test_unverified_gate_reviewer_blocks_merge(self):
         state = self.state()

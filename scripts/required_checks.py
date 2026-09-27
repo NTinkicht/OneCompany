@@ -65,6 +65,41 @@ def _manifest_from_ref(repo: str, ref: str) -> tuple[dict[str, Any] | None, str 
     return manifest, None
 
 
+
+def trusted_required_check_specs(
+    repo: str, trusted_ref: str
+) -> tuple[list[dict[str, str]] | None, str | None]:
+    """Return validated required-check identities from the base-trusted manifest."""
+    manifest, error = _manifest_from_ref(repo, trusted_ref)
+    if manifest is None:
+        return None, error or "cannot load base-trusted required-check manifest"
+    checks = manifest.get("checks")
+    if not isinstance(checks, list) or not checks:
+        return None, "base-trusted required-check manifest is empty"
+    specs: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in checks:
+        if not isinstance(item, dict):
+            return None, "base-trusted required-check entry is not an object"
+        name = item.get("name")
+        app_slug = item.get("app_slug")
+        workflow_path = item.get("workflow_path")
+        if (
+            not isinstance(name, str) or not name
+            or not isinstance(app_slug, str) or not app_slug
+            or not isinstance(workflow_path, str) or not workflow_path
+            or name in seen
+        ):
+            return None, "base-trusted required-check identity is invalid or duplicated"
+        seen.add(name)
+        specs.append({
+            "name": name,
+            "app_slug": app_slug,
+            "workflow_path": workflow_path,
+        })
+    return specs, None
+
+
 def _check_runs(repo: str, sha: str) -> tuple[list[dict[str, Any]] | None, str | None]:
     if not command_exists("gh"):
         return None, "gh CLI is required to verify check runs"

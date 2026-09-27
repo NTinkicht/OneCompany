@@ -6,12 +6,147 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
+_EARLY_DANGEROUS_SUFFIXES = {
+    ".py", ".pyc", ".pyo", ".pth", ".so", ".pyd", ".dll", ".dylib",
+}
+
+
+def _early_command(args: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(args, text=True, capture_output=True, check=False)
+
+
+def _early_arg(name: str) -> str | None:
+    try:
+        index = sys.argv.index(name)
+    except ValueError:
+        return None
+    return sys.argv[index + 1] if index + 1 < len(sys.argv) else None
+
+
+def _early_repo() -> str | None:
+    configured = os.environ.get("GITHUB_REPOSITORY", "").strip()
+    if configured:
+        return configured
+    remote = _early_command(["git", "remote", "get-url", "origin"])
+    if remote.returncode:
+        return None
+    value = remote.stdout.strip()
+    for prefix in ("https://github.com/", "git@github.com:"):
+        if value.startswith(prefix):
+            value = value[len(prefix):]
+            if value.endswith(".git"):
+                value = value[:-4]
+            return value if value.count("/") == 1 else None
+    return None
+
+
+def _early_privileged_execution_guard() -> None:
+    """Authenticate the checkout before importing any repository-controlled module."""
+    if __name__ != "__main__":
+        return
+    if not sys.flags.isolated:
+        print(
+            "REFUSED: privileged merge executor must run in Python isolated mode "
+            "(use `python onecompany.py merge ...`)"
+        )
+        raise SystemExit(2)
+
+    raw_pr = _early_arg("--pr")
+    repo = _early_repo()
+    if not raw_pr or not raw_pr.isdigit() or not repo:
+        print("REFUSED: cannot establish explicit PR/repository before privileged imports")
+        raise SystemExit(2)
+
+    api = _early_command(["gh", "api", f"repos/{repo}/pulls/{int(raw_pr)}"])
+    if api.returncode:
+        print("REFUSED: cannot resolve live PR before privileged imports")
+        raise SystemExit(2)
+    try:
+        pr = json.loads(api.stdout)
+        base_sha = (pr.get("base") or {}).get("sha")
+    except (json.JSONDecodeError, AttributeError):
+        base_sha = None
+    if not isinstance(base_sha, str) or len(base_sha) != 40:
+        print("REFUSED: live PR has no exact base SHA before privileged imports")
+        raise SystemExit(2)
+
+    head = _early_command(["git", "rev-parse", "HEAD"])
+    if head.returncode or head.stdout.strip() != base_sha:
+        print("REFUSED: privileged executor checkout is not the exact PR base")
+        raise SystemExit(2)
+
+    for command, label in (
+        (["git", "diff", "--quiet", "--"], "tracked"),
+        (["git", "diff", "--cached", "--quiet", "--"], "staged"),
+    ):
+        result = _early_command(command)
+        if result.returncode:
+            print(f"REFUSED: {label} privileged-executor files are modified")
+            raise SystemExit(2)
+
+    allowed_untracked: set[str] = set()
+    packet = _early_arg("--assurance-packet")
+    if packet:
+        root = Path.cwd().resolve()
+        candidate = Path(packet)
+        if not candidate.is_absolute():
+            candidate = root / candidate
+        try:
+            allowed_untracked.add(candidate.resolve().relative_to(root).as_posix())
+        except (OSError, ValueError):
+            pass
+
+    untracked = _early_command(["git", "ls-files", "--others", "--exclude-standard"])
+    if untracked.returncode:
+        print("REFUSED: cannot enumerate untracked privileged-executor files")
+        raise SystemExit(2)
+    unexpected = [
+        line.strip()
+        for line in untracked.stdout.splitlines()
+        if line.strip() and line.strip() not in allowed_untracked
+    ]
+    if unexpected:
+        print("REFUSED: untracked files exist in privileged executor checkout")
+        raise SystemExit(2)
+
+    ignored = _early_command(
+        ["git", "ls-files", "--others", "--ignored", "--exclude-standard"]
+    )
+    if ignored.returncode:
+        print("REFUSED: cannot enumerate ignored privileged-executor files")
+        raise SystemExit(2)
+    dangerous = []
+    for raw in ignored.stdout.splitlines():
+        value = raw.strip().replace("\\", "/")
+        if not value:
+            continue
+        path = Path(value)
+        if (
+            path.suffix.lower() in _EARLY_DANGEROUS_SUFFIXES
+            or path.name in {"sitecustomize.py", "usercustomize.py"}
+        ):
+            dangerous.append(value)
+    if dangerous:
+        print("REFUSED: ignored execution-capable files exist before privileged imports")
+        raise SystemExit(2)
+
+
+_early_privileged_execution_guard()
+
+
+_MERGE_SCRIPT_DIR = Path(__file__).resolve().parent
+if str(_MERGE_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_MERGE_SCRIPT_DIR))
+
 from assurance_gate import validate_structure
 from lease_lifecycle import append_coordination_event, coordination_view
+from github_controls import strict_merge_platform_enforcement
 from ledger_lib import ledger_enabled
 from onecompany_lib import (
     CONTROL,
@@ -34,7 +169,7 @@ from platform_identity import (
     require_authority,
     review_platform_identity,
 )
-from required_checks import evaluate_required_checks
+from required_checks import evaluate_required_checks, trusted_required_check_specs
 from scope_guard import changed_files, live_pr, scope_errors
 from trusted_assurance import _base_json, verify_trusted_packet
 
@@ -44,6 +179,87 @@ AUTOMATION_FROZEN_POLICY_FILES = {
     "ledger": ".onecompany/ledger.json",
 }
 BASE_QUEUE_PATH = ".onecompany/queue.json"
+
+
+_DANGEROUS_EXECUTION_SUFFIXES = {
+    ".py", ".pyc", ".pyo", ".pth", ".so", ".pyd", ".dll", ".dylib",
+}
+
+
+def _isolated_runtime_ok() -> bool:
+    return bool(sys.flags.isolated)
+
+
+def _trusted_executor_surface_errors(
+    base_sha: str,
+    assurance_packet: str | None,
+) -> list[str]:
+    """Prove the privileged interpreter is executing an exact clean base surface."""
+    errors: list[str] = []
+    if not _isolated_runtime_ok():
+        errors.append("merge executor is not running in Python isolated mode")
+        return errors
+
+    head = run(["git", "rev-parse", "HEAD"])
+    if head.returncode != 0 or head.stdout.strip() != base_sha:
+        errors.append("merge executor checkout is not the exact protected PR base")
+        return errors
+
+    for command, message in (
+        (["git", "diff", "--quiet", "--"], "tracked merge-executor files are modified"),
+        (["git", "diff", "--cached", "--quiet", "--"], "staged merge-executor files are modified"),
+    ):
+        result = run(command)
+        if result.returncode != 0:
+            errors.append(message)
+
+    allowed_untracked: set[str] = set()
+    if assurance_packet:
+        packet = Path(assurance_packet)
+        if not packet.is_absolute():
+            packet = ROOT / packet
+        try:
+            relative = packet.resolve().relative_to(ROOT.resolve()).as_posix()
+            allowed_untracked.add(relative)
+        except (OSError, ValueError):
+            pass
+
+    untracked = run(["git", "ls-files", "--others", "--exclude-standard"])
+    if untracked.returncode != 0:
+        errors.append("cannot enumerate untracked files in merge executor checkout")
+    else:
+        unexpected = sorted(
+            line.strip()
+            for line in untracked.stdout.splitlines()
+            if line.strip() and line.strip() not in allowed_untracked
+        )
+        if unexpected:
+            errors.append(
+                "untracked files exist in privileged merge checkout: "
+                + ",".join(unexpected[:20])
+            )
+
+    ignored = run(["git", "ls-files", "--others", "--ignored", "--exclude-standard"])
+    if ignored.returncode != 0:
+        errors.append("cannot enumerate ignored files in merge executor checkout")
+    else:
+        dangerous = []
+        for raw in ignored.stdout.splitlines():
+            value = raw.strip().replace("\\", "/")
+            if not value:
+                continue
+            path = Path(value)
+            if (
+                path.suffix.lower() in _DANGEROUS_EXECUTION_SUFFIXES
+                or path.name in {"sitecustomize.py", "usercustomize.py"}
+            ):
+                dangerous.append(value)
+        if dangerous:
+            errors.append(
+                "ignored execution-capable files exist in privileged checkout: "
+                + ",".join(sorted(dangerous)[:20])
+            )
+    return errors
 
 
 def _work_unit_for_pr(queue: dict, pr: int, active: list[dict]) -> dict | None:
@@ -466,6 +682,27 @@ def main() -> int:
         print("REFUSED: base-configured default branch differs from GitHub protected default branch")
         return 2
 
+    required_platform_specs, required_platform_error = trusted_required_check_specs(
+        repo, live_base
+    )
+    if required_platform_specs is None:
+        print(
+            "REFUSED: cannot load base-trusted platform-check identities: "
+            + str(required_platform_error)
+        )
+        return 2
+    if not strict_merge_platform_enforcement(
+        repo,
+        str(protected_context.get("default_branch")),
+        required_platform_specs,
+        trusted_ref=live_base,
+    ):
+        print(
+            "REFUSED: PLATFORM_ENFORCEMENT_BLOCKED — main lacks provable "
+            "non-bypassable PR flow with strict required checks"
+        )
+        return 2
+
     drift = _automation_policy_drift_errors(base)
     if drift:
         for error in drift:
@@ -739,6 +976,18 @@ def main() -> int:
     if active is None:
         for error in final_errors:
             print(f"REFUSED: final authority reconciliation: {error}")
+        return 2
+
+    if not strict_merge_platform_enforcement(
+        repo,
+        str(protected_context.get("default_branch")),
+        required_platform_specs,
+        trusted_ref=approved_base,
+    ):
+        print(
+            "REFUSED: FINAL_PLATFORM_ENFORCEMENT_BLOCKED — GitHub enforcement "
+            "changed before merge mutation"
+        )
         return 2
 
     merge = run(

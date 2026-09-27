@@ -243,6 +243,8 @@ class ChecksOnlyEnforcementTests(unittest.TestCase):
             def api(path):
                 if path == "apps/github-actions":
                     return 0, {"id": 15368, "slug": "github-actions"}, ""
+                if path == "repos/example/app":
+                    return 0, {"id": REPO_ID, "full_name": "example/app"}, ""
                 if "/contents/.github/CODEOWNERS?ref=" in path:
                     return 0, {"encoding": "base64", "content": STRICT_CODEOWNERS}, ""
                 if path.endswith("/protection"):
@@ -269,6 +271,23 @@ class ChecksOnlyEnforcementTests(unittest.TestCase):
                             },
                             {"type": "deletion"},
                             {"type": "non_fast_forward"},
+                            {
+                                "type": "workflows",
+                                "parameters": {
+                                    "workflows": [
+                                        {
+                                            "path": ".github/workflows/onecompany-validate.yml",
+                                            "repository_id": REPO_ID,
+                                            "ref": "main",
+                                        },
+                                        {
+                                            "path": controls.REVIEW_AUTH_WORKFLOW_PATH,
+                                            "repository_id": REPO_ID,
+                                            "ref": "main",
+                                        },
+                                    ],
+                                },
+                            },
                             {
                                 "type": "required_status_checks",
                                 "parameters": {

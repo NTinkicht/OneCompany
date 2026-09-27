@@ -50,8 +50,7 @@ def main() -> int:
         results.append(check("active supervisor may emit bounded Team Room signals", github.get("may_post_team_room") is True))
         if level >= 4:
             results.append(check("L4 supervision orchestrates", supervision.get("mode") == "orchestrate"))
-            results.append(check("L4 GitHub supervisor may fail over", github.get("may_failover") is True))
-            results.append(check("L4 GitHub supervisor may merge", github.get("may_merge") is True))
+            results.append(check("L4 GitHub reconciliation remains non-mutating", github.get("may_failover") is False and github.get("may_merge") is False))
             results.append(check("L4 ChatGPT scheduled supervisors are enabled", chatgpt.get("enabled") is True))
             results.append(check("L4 ChatGPT scheduled supervisors may mutate", chatgpt.get("may_mutate") is True))
             results.append(check(

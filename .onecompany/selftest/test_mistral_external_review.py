@@ -243,6 +243,59 @@ class ExternalMistralReviewTests(unittest.TestCase):
                 "NTinkicht/veritas-atlas", 21, "a" * 40, "b" * 40
             ))
 
+    def test_orphan_published_comment_without_run_proof_is_retryable(self):
+        item, _proof = self._proof()
+        comments = [item]
+        run = {
+            "id": 123,
+            "path": m.EXTERNAL_WORKFLOW_PATH,
+            "event": "issue_comment",
+            "status": "completed",
+            "conclusion": "success",
+        }
+
+        def api(route):
+            if "/issues/130/comments" in route:
+                return comments
+            if "/actions/runs/123" in route:
+                return run
+            raise AssertionError(route)
+
+        with mock.patch.object(m, "onecompany_api", side_effect=api), \
+             mock.patch.object(m, "_artifact_proof", return_value=None):
+            self.assertFalse(m.existing_result(
+                "NTinkicht/veritas-atlas", 21, "a" * 40, "b" * 40
+            ))
+
+    def test_result_text_bounds_keep_total_contract_bounded(self):
+        value = {
+            "version": 1,
+            "repo": "NTinkicht/veritas-atlas",
+            "pr": 21,
+            "head_sha": "a" * 40,
+            "base_sha": "b" * 40,
+            "verdict": "NO_BLOCKING_FINDINGS",
+            "summary": "s" * 1201,
+            "findings": [],
+        }
+        with self.assertRaises(ValueError):
+            m.parse_result(
+                json.dumps(value).encode(),
+                repo=value["repo"], pr=21, head=value["head_sha"],
+                base=value["base_sha"], changed={"src/app.py"},
+            )
+        value["summary"] = "ok"
+        value["findings"] = [{
+            "severity": "LOW", "path": "src/app.py", "line": 1,
+            "description": "d" * 801,
+        }]
+        with self.assertRaises(ValueError):
+            m.parse_result(
+                json.dumps(value).encode(),
+                repo=value["repo"], pr=21, head=value["head_sha"],
+                base=value["base_sha"], changed={"src/app.py"},
+            )
+
     def test_mistral_committer_is_rejected(self):
         commits = [{
             "sha": "a" * 40,
@@ -455,6 +508,11 @@ class ExternalMistralReviewTests(unittest.TestCase):
         self.assertIn('test "$(git rev-parse HEAD)" = "$GITHUB_SHA"', workflow)
         self.assertIn("--filter=blob:none", workflow)
         self.assertIn('merge-base "$TARGET_BASE" "$TARGET_HEAD"', workflow)
+        self.assertNotIn('test "$MERGE_BASE" = "$TARGET_BASE"', workflow)
+        helper = (ROOT / "scripts/mistral_external_review.py").read_text(encoding="utf-8")
+        self.assertIn('"merge-base", base, head', helper)
+        self.assertIn('"--name-only", merge_base, head', helper)
+        self.assertIn('"merge_base_sha": merge_base', helper)
         self.assertIn("group: onecompany-mistral-external-review", workflow)
 
     def test_bootstrap_excludes_source_only_external_review_surfaces(self):

@@ -136,9 +136,11 @@ class MergeAssuranceTests(unittest.TestCase):
             raise AssertionError(f"unexpected load_json: {path}")
 
         if run_side_effect is None:
-            run_side_effect = lambda command, cwd=None: subprocess.CompletedProcess(
-                command, 0, stdout="", stderr=""
-            )
+            def run_side_effect(command, cwd=None):
+                stdout = BASE + "\n" if command == ["git", "rev-parse", "HEAD"] else ""
+                return subprocess.CompletedProcess(
+                    command, 0, stdout=stdout, stderr=""
+                )
 
         stack.enter_context(patch.object(merge, "emergency_stop_active", return_value=False))
         stack.enter_context(patch.object(merge, "command_exists", return_value=True))
@@ -262,7 +264,7 @@ class MergeAssuranceTests(unittest.TestCase):
             )
             result = merge.main()
         self.assertEqual(result, 2)
-        self.assertEqual(run_mock.call_count, 1)
+        self.assertEqual(run_mock.call_count, 2)
 
     def test_spoofed_human_owner_label_cannot_replace_authenticated_principal(self):
         state = self.state()
@@ -292,6 +294,23 @@ class MergeAssuranceTests(unittest.TestCase):
             )
             result = merge.main()
         self.assertEqual(result, 2)
+
+    def test_candidate_executor_checkout_is_rejected(self):
+        state = self.state()
+
+        def fake_run(command, cwd=None):
+            if command[:3] == ["gh", "auth", "status"]:
+                return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+            if command == ["git", "rev-parse", "HEAD"]:
+                return subprocess.CompletedProcess(
+                    command, 0, stdout=HEAD + "\n", stderr=""
+                )
+            raise AssertionError(f"unexpected command: {command}")
+
+        with ExitStack() as stack:
+            self.common(stack, state, run_side_effect=fake_run)
+            stack.enter_context(patch.object(sys, "argv", ["merge.py", "--pr", "1"]))
+            self.assertEqual(merge.main(), 2)
 
     def test_unverified_gate_reviewer_blocks_merge(self):
         state = self.state()
@@ -356,7 +375,7 @@ class MergeAssuranceTests(unittest.TestCase):
             )
             result = merge.main()
         self.assertEqual(result, 2)
-        self.assertEqual(run_mock.call_count, 1)
+        self.assertEqual(run_mock.call_count, 2)
 
     def test_pass_attestation_allows_exact_head_merge_with_platform_principal(self):
         state = self.state()
@@ -364,6 +383,10 @@ class MergeAssuranceTests(unittest.TestCase):
         def fake_run(command, cwd=None):
             if command[:3] == ["gh", "auth", "status"]:
                 return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+            if command == ["git", "rev-parse", "HEAD"]:
+                return subprocess.CompletedProcess(
+                    command, 0, stdout=BASE + "\n", stderr=""
+                )
             if command[:4] == ["gh", "api", "--method", "PUT"]:
                 return subprocess.CompletedProcess(
                     command,
@@ -411,7 +434,7 @@ class MergeAssuranceTests(unittest.TestCase):
             )
             result = merge.main()
         self.assertEqual(result, 0)
-        self.assertEqual(run_mock.call_count, 2)
+        self.assertEqual(run_mock.call_count, 3)
         self.assertEqual(state["last_merge"]["approved_head"], HEAD)
         self.assertEqual(state["last_merge"]["approved_base"], BASE)
         self.assertEqual(state["last_merge"]["actor"], "human-owner")

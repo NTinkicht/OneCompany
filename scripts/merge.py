@@ -35,7 +35,7 @@ from platform_identity import (
     require_authority,
     review_platform_identity,
 )
-from required_checks import evaluate_required_checks, required_check_names
+from required_checks import evaluate_required_checks, trusted_required_check_specs
 from scope_guard import changed_files, live_pr, scope_errors
 from trusted_assurance import _base_json, verify_trusted_packet
 
@@ -467,11 +467,19 @@ def main() -> int:
         print("REFUSED: base-configured default branch differs from GitHub protected default branch")
         return 2
 
-    required_platform_checks = set(required_check_names())
+    required_platform_specs, required_platform_error = trusted_required_check_specs(
+        repo, live_base
+    )
+    if required_platform_specs is None:
+        print(
+            "REFUSED: cannot load base-trusted platform-check identities: "
+            + str(required_platform_error)
+        )
+        return 2
     if not strict_merge_platform_enforcement(
         repo,
         str(protected_context.get("default_branch")),
-        required_platform_checks,
+        required_platform_specs,
     ):
         print(
             "REFUSED: PLATFORM_ENFORCEMENT_BLOCKED — main lacks provable "
@@ -752,6 +760,17 @@ def main() -> int:
     if active is None:
         for error in final_errors:
             print(f"REFUSED: final authority reconciliation: {error}")
+        return 2
+
+    if not strict_merge_platform_enforcement(
+        repo,
+        str(protected_context.get("default_branch")),
+        required_platform_specs,
+    ):
+        print(
+            "REFUSED: FINAL_PLATFORM_ENFORCEMENT_BLOCKED — GitHub enforcement "
+            "changed before merge mutation"
+        )
         return 2
 
     merge = run(

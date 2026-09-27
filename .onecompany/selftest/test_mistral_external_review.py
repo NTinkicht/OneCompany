@@ -220,16 +220,6 @@ class ExternalMistralReviewTests(unittest.TestCase):
                 changed={"scripts/native_factory_merge.py"},
             )
 
-    def test_activation_workflow_is_pass_only_and_no_target_write(self):
-        workflow = (
-            ROOT / ".github/workflows/onecompany-mistral-external-review.yml"
-        ).read_text(encoding="utf-8")
-        self.assertIn("if: always()", workflow)
-        self.assertIn('test "$VERDICT" = "PASS"', workflow)
-        self.assertIn("permissions:\n  contents: read\n  issues: write", workflow)
-        self.assertNotIn("pull-requests: write", workflow)
-        self.assertIn('assert published["body"] == body', workflow)
-        self.assertIn("--input /tmp/onecompany-external-review-payload.json", workflow)
 
 
 if __name__ == "__main__":

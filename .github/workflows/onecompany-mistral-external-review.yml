@@ -64,7 +64,8 @@ jobs:
           git -C /tmp/onecompany-external-target fetch --no-tags --filter=blob:none origin             main "pull/$TARGET_PR/head:refs/remotes/origin/review-head"
           test "$(git -C /tmp/onecompany-external-target rev-parse refs/remotes/origin/review-head)" = "$TARGET_HEAD"
           git -C /tmp/onecompany-external-target cat-file -e "$TARGET_BASE^{commit}"
-          git -C /tmp/onecompany-external-target merge-base "$TARGET_BASE" "$TARGET_HEAD" >/dev/null
+          MERGE_BASE="$(git -C /tmp/onecompany-external-target merge-base "$TARGET_BASE" "$TARGET_HEAD")"
+          test "$MERGE_BASE" = "$TARGET_BASE"
           git -C /tmp/onecompany-external-target checkout --detach "$TARGET_HEAD"
 
       - name: Build bounded complete-diff review packet

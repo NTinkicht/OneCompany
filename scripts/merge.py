@@ -12,6 +12,7 @@ from typing import Any
 
 from assurance_gate import validate_structure
 from lease_lifecycle import append_coordination_event, coordination_view
+from github_controls import strict_merge_platform_enforcement
 from ledger_lib import ledger_enabled
 from onecompany_lib import (
     CONTROL,
@@ -34,7 +35,7 @@ from platform_identity import (
     require_authority,
     review_platform_identity,
 )
-from required_checks import evaluate_required_checks
+from required_checks import evaluate_required_checks, required_check_names
 from scope_guard import changed_files, live_pr, scope_errors
 from trusted_assurance import _base_json, verify_trusted_packet
 
@@ -464,6 +465,18 @@ def main() -> int:
         != protected_context.get("default_branch")
     ):
         print("REFUSED: base-configured default branch differs from GitHub protected default branch")
+        return 2
+
+    required_platform_checks = set(required_check_names())
+    if not strict_merge_platform_enforcement(
+        repo,
+        str(protected_context.get("default_branch")),
+        required_platform_checks,
+    ):
+        print(
+            "REFUSED: PLATFORM_ENFORCEMENT_BLOCKED — main lacks provable "
+            "non-bypassable PR flow with strict required checks"
+        )
         return 2
 
     drift = _automation_policy_drift_errors(base)

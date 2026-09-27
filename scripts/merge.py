@@ -580,6 +580,7 @@ def main() -> int:
         repo,
         str(protected_context.get("default_branch")),
         required_platform_specs,
+        trusted_ref=live_base,
     ):
         print(
             "REFUSED: PLATFORM_ENFORCEMENT_BLOCKED — main lacks provable "
@@ -866,6 +867,7 @@ def main() -> int:
         repo,
         str(protected_context.get("default_branch")),
         required_platform_specs,
+        trusted_ref=approved_base,
     ):
         print(
             "REFUSED: FINAL_PLATFORM_ENFORCEMENT_BLOCKED — GitHub enforcement "

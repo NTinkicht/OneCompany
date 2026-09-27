@@ -274,10 +274,43 @@ def _codeowners_coverage(text: str) -> tuple[bool, list[str]]:
 
 
 
+def _required_publishers(
+    specs: list[dict[str, str]],
+) -> dict[str, int] | None:
+    """Resolve trusted manifest app slugs to immutable GitHub App IDs."""
+    publishers: dict[str, int] = {}
+    for spec in specs:
+        name = spec.get("name")
+        slug = spec.get("app_slug")
+        if not isinstance(name, str) or not name or not isinstance(slug, str) or not slug:
+            return None
+        code, app, _ = gh_api(f"apps/{quote(slug, safe='')}")
+        app_id = app.get("id") if isinstance(app, dict) else None
+        if code != 0 or type(app_id) is not int or app_id <= 0:
+            return None
+        publishers[name] = app_id
+    return publishers if len(publishers) == len(specs) else None
+
+
+def _pull_request_rule_is_fresh_non_author(rule: dict[str, Any]) -> bool:
+    if rule.get("type") != "pull_request":
+        return False
+    params = rule.get("parameters")
+    return bool(
+        isinstance(params, dict)
+        and int(params.get("required_approving_review_count") or 0) >= 1
+        and params.get("dismiss_stale_reviews_on_push") is True
+        and params.get("require_last_push_approval") is True
+    )
+
+
 def strict_merge_platform_enforcement(
-    repo: str, branch: str, required_checks: set[str]
+    repo: str, branch: str, required_specs: list[dict[str, str]]
 ) -> bool:
-    """Require non-bypassable PR flow and strict deterministic checks."""
+    """Require non-bypassable, publisher-bound, fresh-review GitHub enforcement."""
+    publishers = _required_publishers(required_specs)
+    if not publishers:
+        return False
     encoded_ref = quote(branch, safe="")
 
     code, protection, _ = gh_api(f"repos/{repo}/branches/{encoded_ref}/protection")
@@ -286,20 +319,30 @@ def strict_merge_platform_enforcement(
         reviews = protection.get("required_pull_request_reviews")
         force_pushes = protection.get("allow_force_pushes")
         deletions = protection.get("allow_deletions")
-        contexts: set[str] = set()
-        if isinstance(checks, dict):
-            contexts.update(str(value) for value in checks.get("contexts", []) if value)
-            contexts.update(
-                str(item.get("context"))
-                for item in checks.get("checks", [])
-                if isinstance(item, dict) and item.get("context")
+        configured_checks = checks.get("checks") if isinstance(checks, dict) else None
+        publisher_bound = bool(
+            isinstance(configured_checks, list)
+            and all(
+                any(
+                    isinstance(item, dict)
+                    and item.get("context") == name
+                    and item.get("app_id") == app_id
+                    for item in configured_checks
+                )
+                for name, app_id in publishers.items()
             )
+        )
+        fresh_reviews = bool(
+            isinstance(reviews, dict)
+            and int(reviews.get("required_approving_review_count") or 0) >= 1
+            and reviews.get("dismiss_stale_reviews") is True
+            and reviews.get("require_last_push_approval") is True
+        )
         if (
             isinstance(checks, dict)
             and checks.get("strict") is True
-            and required_checks.issubset(contexts)
-            and isinstance(reviews, dict)
-            and int(reviews.get("required_approving_review_count") or 0) >= 1
+            and publisher_bound
+            and fresh_reviews
             and isinstance(force_pushes, dict)
             and force_pushes.get("enabled") is False
             and isinstance(deletions, dict)
@@ -327,8 +370,8 @@ def strict_merge_platform_enforcement(
         ):
             continue
         rule_types: set[str] = set()
-        contexts: set[str] = set()
-        strict = False
+        status_rule: dict[str, Any] | None = None
+        pr_rule: dict[str, Any] | None = None
         for rule in detail.get("rules") or []:
             if not isinstance(rule, dict):
                 return False
@@ -336,17 +379,35 @@ def strict_merge_platform_enforcement(
             if isinstance(kind, str):
                 rule_types.add(kind)
             if kind == "required_status_checks":
-                params = rule.get("parameters") or {}
-                strict = params.get("strict_required_status_checks_policy") is True
-                contexts.update(_required_contexts_from_rule(rule))
+                status_rule = rule
+            elif kind == "pull_request":
+                pr_rule = rule
+        if status_rule is None or pr_rule is None:
+            continue
+        params = status_rule.get("parameters") or {}
+        configured = params.get("required_status_checks")
+        publisher_bound = bool(
+            isinstance(configured, list)
+            and all(
+                any(
+                    isinstance(item, dict)
+                    and item.get("context") == name
+                    and item.get("integration_id") == app_id
+                    for item in configured
+                )
+                for name, app_id in publishers.items()
+            )
+        )
         if (
             {"pull_request", "required_status_checks", "deletion", "non_fast_forward"}
             .issubset(rule_types)
-            and strict
-            and required_checks.issubset(contexts)
+            and params.get("strict_required_status_checks_policy") is True
+            and publisher_bound
+            and _pull_request_rule_is_fresh_non_author(pr_rule)
         ):
             return True
     return False
+
 
 
 def inspect_enforcement(

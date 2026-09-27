@@ -221,6 +221,8 @@ class ChecksOnlyEnforcementTests(unittest.TestCase):
             def api(path):
                 if path == "apps/github-actions":
                     return 0, {"id": 15368, "slug": "github-actions"}, ""
+                if "/contents/.github/CODEOWNERS?ref=" in path:
+                    return 0, {"encoding": "base64", "content": STRICT_CODEOWNERS}, ""
                 if path.endswith("/protection"):
                     return 1, None, "no classic protection"
                 if path.endswith("/rulesets") or "/rulesets?" in path:

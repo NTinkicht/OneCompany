@@ -47,24 +47,42 @@ def main() -> int:
             and supervision.get("chatgpt_tasks", {}).get("enabled") is True
             and supervision.get("chatgpt_tasks", {}).get("may_mutate") is True
         )
-        required_runtime = {
-            "event_reconciliation_enabled": True,
-            "current_autonomy_level": f"L{level}",
-            "github_actions_behavior": "reconcile_and_notify_only",
-            "mutation_requires_preexisting_authority": True,
-            "read_only_unattended_dispatch_allowed": True,
-            "write_dispatch_requires_canonical_lease": True,
-            "github_actions_mutation_allowed": False,
-            "scheduled_chatgpt_mutation_allowed": scheduled_mutation,
-            "automatic_failover_allowed": scheduled_mutation and level >= 3,
-            "automatic_merge_allowed": scheduled_mutation and level >= 3,
-            "continuous_next_work_allowed": (
-                scheduled_mutation
-                and level >= 4
-                and config.get("autonomy", {}).get("continue_when_ready_work_exists") is True
-                and config.get("no_idle", {}).get("enabled") is True
-            ),
-        }
+        if level == 1:
+            # Fresh/customer installations intentionally retain the original
+            # fail-closed L1 handoff contract. Promoting the OneCompany source
+            # repository to L4 must never make a fresh target inherit L4.
+            required_runtime = {
+                "event_reconciliation_enabled": True,
+                "current_autonomy_level": "L1",
+                "l1_behavior": "reconcile_and_notify_only",
+                "mutation_requires_preexisting_authority": True,
+                "read_only_unattended_dispatch_allowed": True,
+                "write_dispatch_requires_canonical_lease": True,
+                "automatic_failover_allowed": False,
+                "automatic_merge_allowed": False,
+            }
+        else:
+            required_runtime = {
+                "event_reconciliation_enabled": True,
+                "current_autonomy_level": f"L{level}",
+                "github_actions_behavior": "reconcile_and_notify_only",
+                "mutation_requires_preexisting_authority": True,
+                "read_only_unattended_dispatch_allowed": True,
+                "write_dispatch_requires_canonical_lease": True,
+                "github_actions_mutation_allowed": False,
+                "scheduled_chatgpt_mutation_allowed": scheduled_mutation,
+                "automatic_failover_allowed": scheduled_mutation and level >= 3,
+                "automatic_merge_allowed": scheduled_mutation and level >= 3,
+                "continuous_next_work_allowed": (
+                    scheduled_mutation
+                    and level >= 4
+                    and config.get("autonomy", {}).get(
+                        "continue_when_ready_work_exists"
+                    )
+                    is True
+                    and config.get("no_idle", {}).get("enabled") is True
+                ),
+            }
         for key, expected in required_runtime.items():
             if runtime.get(key) != expected:
                 errors.append(f"handoff runtime invariant mismatch:{key}")

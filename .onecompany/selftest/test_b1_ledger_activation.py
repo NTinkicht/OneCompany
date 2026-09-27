@@ -65,16 +65,20 @@ class B1LedgerActivationTests(unittest.TestCase):
         self.assertNotIn("chatgpt-codex-connector[bot]", trusted)
         self.assertNotIn("dependabot[bot]", trusted)
 
-    def test_later_supervision_activation_does_not_expand_b1_authority(self):
+    def test_l4_supervision_keeps_b1_publisher_boundary_while_enabling_delivery(self):
         self.assertTrue(self.supervision["enabled"])
-        self.assertEqual(self.supervision["mode"], "notify")
+        self.assertEqual(self.supervision["mode"], "orchestrate")
         self.assertEqual(self.supervision["coordination"]["team_room_issue_number"], 45)
         self.assertTrue(self.supervision["github_actions"]["enabled"])
         self.assertTrue(self.supervision["github_actions"]["may_post_team_room"])
-        self.assertFalse(self.supervision["github_actions"]["may_failover"])
-        self.assertFalse(self.supervision["github_actions"]["may_merge"])
-        self.assertFalse(self.supervision["chatgpt_tasks"]["may_mutate"])
+        self.assertTrue(self.supervision["github_actions"]["may_failover"])
+        self.assertTrue(self.supervision["github_actions"]["may_merge"])
+        self.assertTrue(self.supervision["chatgpt_tasks"]["may_mutate"])
         self.assertEqual(self.ledger["trusted_publisher_logins"], ["NTinkicht"])
+        self.assertEqual(self.config["autonomy"]["level"], "L4")
+        self.assertTrue(self.config["autonomy"]["continue_when_ready_work_exists"])
+        self.assertTrue(self.config["no_idle"]["enabled"])
+        self.assertEqual(self.supervision["chatgpt_tasks"]["offset_minutes"], [0, 15, 30, 45])
 
     def test_read_smoke_is_read_only_and_uses_one_immutable_snapshot(self):
         workflow = ROOT / ".github" / "workflows" / "onecompany-ledger-read-smoke.yml"

@@ -60,6 +60,7 @@ SOURCE_INSTALLATION_SELFTESTS = frozenset({
     ".onecompany/selftest/test_mistral_pilot_lease.py",
     ".onecompany/selftest/test_grok_cloud_bridge.py",
     ".onecompany/selftest/test_local_quality_evidence.py",
+    ".onecompany/selftest/test_gemma_l4_worker.py",
     ".onecompany/selftest/test_phase1_preview_bundle.py",
     ".onecompany/selftest/test_phase1_vertical_smoke.py",
     ".onecompany/selftest/test_phase1_mission_evidence.py",
@@ -90,6 +91,9 @@ SOURCE_ONLY_PLANNING_FILES = frozenset({
     "scripts/phase1_mission_evidence.py",
     "docs/PHASE1-MISSION-EVIDENCE.md",
     "docs/PHASE1-VERTICAL-SMOKE.md",
+    "scripts/gemma_l4_worker.py",
+    ".github/prompts/gemma-l4-worker.md",
+    ".github/workflows/gemma-l4-worker.yml",
 })
 SOURCE_INSTALLATION_EXCLUSIONS = SOURCE_INSTALLATION_SELFTESTS | SOURCE_ONLY_PLANNING_FILES
 

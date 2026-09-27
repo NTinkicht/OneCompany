@@ -11,12 +11,14 @@ from __future__ import annotations
 
 import hashlib
 import html
+import io
 import json
 import os
 import re
 import subprocess
 import sys
 import urllib.request
+import zipfile
 from pathlib import Path
 
 WAKE_REPO = "NTinkicht/OneCompany"
@@ -60,13 +62,19 @@ SENSITIVE_PATH = re.compile(
     r".*\.(?:pem|key|p12|pfx|jks)$"
     r")"
 )
-SENSITIVE_KEY = re.compile(
-    r"(?ix)"
-    r"(?:^|[\s{,])[\"']?"
-    r"([a-z0-9_-]*(?:secret|token|password|credential|"
-    r"api[_-]?key|access[_-]?key|private[_-]?key|auth)[a-z0-9_-]*)"
-    r"[\"']?\s*[:=]\s*(.+?)\s*[,;]?\s*$"
+ASSIGNMENT = re.compile(
+    r"""(?ix)(?:^|[\s{,])["']?([A-Za-z0-9_.-]+)["']?\s*[:=]\s*(.+?)\s*[,;]?\s*$"""
 )
+SENSITIVE_SEGMENTS = frozenset({
+    "secret", "secrets", "token", "tokens", "password", "passwd",
+    "credential", "credentials",
+})
+SENSITIVE_COMPOUNDS = frozenset({
+    "api_key", "apikey", "access_key", "accesskey", "private_key",
+    "privatekey", "client_secret", "clientsecret", "auth_token",
+    "authtoken", "authorization",
+})
+
 BEARER_LITERAL = re.compile(r"(?i)\bbearer\s+([A-Za-z0-9._~+/=-]{16,})")
 BASIC_LITERAL = re.compile(r"(?i)\bbasic\s+([A-Za-z0-9+/=]{12,})")
 CREDENTIAL_URL = re.compile(
@@ -179,6 +187,11 @@ def current_pr(repo: str, number: int, head: str, base: str) -> dict:
     return pr
 
 
+def _normalized_login(value: object) -> str:
+    login = str(value or "").strip().lower()
+    return login[:-5] if login.endswith("[bot]") else login
+
+
 def verify_material_authors(repo: str, number: int, head: str, declared: tuple[str, ...]) -> None:
     observed: set[str] = set()
     count = 0
@@ -192,8 +205,8 @@ def verify_material_authors(repo: str, number: int, head: str, declared: tuple[s
             last_sha = item.get("sha")
             if not SHA.fullmatch(last_sha or ""):
                 raise ValueError("EXTERNAL_REVIEW_COMMIT_SHA_INVALID")
-            account = ((item.get("author") or {}).get("login") or "").lower()
-            committer = ((item.get("committer") or {}).get("login") or "").lower()
+            account = _normalized_login((item.get("author") or {}).get("login"))
+            committer = _normalized_login((item.get("committer") or {}).get("login"))
             if account in MISTRAL_ALIASES or committer in MISTRAL_ALIASES:
                 raise ValueError("MISTRAL_SELF_REVIEW_BLOCKED")
             tags = MATERIAL_AUTHOR.findall((item.get("commit") or {}).get("message", ""))
@@ -212,6 +225,48 @@ def verify_material_authors(repo: str, number: int, head: str, declared: tuple[s
         raise ValueError("EXTERNAL_REVIEW_DECLARED_AUTHORS_MISMATCH")
 
 
+def _artifact_proof(run_id: str) -> dict | None:
+    try:
+        payload = onecompany_api(
+            f"repos/{WAKE_REPO}/actions/runs/{run_id}/artifacts?per_page=100"
+        )
+        artifacts = [
+            item for item in payload.get("artifacts", [])
+            if isinstance(item, dict)
+            and item.get("name") == "mistral-external-review-proof"
+            and item.get("expired") is not True
+        ]
+        if len(artifacts) != 1:
+            return None
+        artifact_id = artifacts[0].get("id")
+        if type(artifact_id) is not int or artifact_id < 1:
+            return None
+        raw = subprocess.check_output(
+            ["gh", "api", f"repos/{WAKE_REPO}/actions/artifacts/{artifact_id}/zip"],
+            stderr=subprocess.DEVNULL,
+            timeout=30,
+        )
+        if not 1 <= len(raw) <= 1_000_000:
+            return None
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            names = [
+                name for name in archive.namelist()
+                if Path(name).name == "onecompany-external-review-proof.json"
+            ]
+            if len(names) != 1:
+                return None
+            info = archive.getinfo(names[0])
+            if info.file_size > 64_000:
+                return None
+            value = json.loads(archive.read(info).decode("utf-8"))
+        return value if type(value) is dict else None
+    except (
+        OSError, ValueError, KeyError, json.JSONDecodeError,
+        subprocess.CalledProcessError, subprocess.TimeoutExpired, zipfile.BadZipFile,
+    ):
+        return None
+
+
 def _trusted_evidence_comment(
     item: dict,
     *,
@@ -228,7 +283,7 @@ def _trusted_evidence_comment(
         return False
     (
         marker_repo, marker_pr, marker_head, marker_base,
-        run_id, dispatch_id, verdict, _result_digest,
+        run_id, dispatch_id, verdict, result_digest,
     ) = matches[0]
     if (
         marker_repo != repo
@@ -241,13 +296,36 @@ def _trusted_evidence_comment(
         run = onecompany_api(f"repos/{WAKE_REPO}/actions/runs/{run_id}")
     except Exception:
         return False
-    return (
+    expected_conclusion = "success" if verdict == "PASS" else "failure"
+    if not (
         run.get("path") == EXTERNAL_WORKFLOW_PATH
         and run.get("event") == "issue_comment"
         and run.get("status") == "completed"
-        and run.get("conclusion") == "success"
+        and run.get("conclusion") == expected_conclusion
         and str(run.get("id")) == run_id
-        and verdict == "PASS"
+    ):
+        return False
+    proof = _artifact_proof(run_id)
+    if proof is None:
+        return False
+    target = proof.get("target")
+    if type(target) is not dict:
+        return False
+    body_digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    return (
+        proof.get("version") == 1
+        and proof.get("run_id") == int(run_id)
+        and proof.get("dispatch_comment_id") == int(dispatch_id)
+        and proof.get("published_comment_id") == item.get("id")
+        and proof.get("published_comment_url") == item.get("html_url")
+        and proof.get("publisher") == "github-actions[bot]"
+        and proof.get("verdict") == verdict
+        and proof.get("result_sha256") == result_digest
+        and proof.get("body_sha256") == body_digest
+        and target.get("repo") == repo
+        and target.get("pr") == number
+        and target.get("head_sha") == head
+        and target.get("base_sha") == base
     )
 
 
@@ -305,6 +383,18 @@ def _safe_reference(value: str) -> bool:
     return any(pattern.fullmatch(candidate) for pattern in SAFE_REFERENCE_PATTERNS)
 
 
+def _sensitive_key(value: str) -> bool:
+    # Normalize camelCase and dotted/property-style keys without treating
+    # ordinary words like "author" or "authentication_required" as secrets.
+    normalized = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", value).lower()
+    segments = [part for part in re.split(r"[._-]+", normalized) if part]
+    if any(part in SENSITIVE_SEGMENTS for part in segments):
+        return True
+    compact = "_".join(segments)
+    squashed = "".join(segments)
+    return compact in SENSITIVE_COMPOUNDS or squashed in SENSITIVE_COMPOUNDS
+
+
 def validate_diff(paths: list[str], diff: str) -> None:
     if not paths or len(paths) > MAX_CHANGED_FILES:
         raise ValueError("EXTERNAL_REVIEW_FILE_COUNT_BLOCKED")
@@ -328,8 +418,8 @@ def validate_diff(paths: list[str], diff: str) -> None:
         if line.startswith(("+", "-", " ")):
             line = line[1:]
 
-        for match in SENSITIVE_KEY.finditer(line):
-            if not _safe_reference(match.group(2)):
+        for match in ASSIGNMENT.finditer(line):
+            if _sensitive_key(match.group(1)) and not _safe_reference(match.group(2)):
                 raise ValueError("EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED")
         for match in BEARER_LITERAL.finditer(line):
             if not _safe_reference(match.group(1)):
@@ -426,7 +516,8 @@ def parse_result(raw: bytes, *, repo: str, pr: int, head: str, base: str, change
         raise ValueError("EXTERNAL_REVIEW_RESULT_FIELDS_INVALID")
     if (
         type(value["version"]) is not int or value["version"] != 1
-        or value["repo"] != repo or value["pr"] != pr
+        or value["repo"] != repo
+        or type(value["pr"]) is not int or value["pr"] != pr
         or value["head_sha"] != head or value["base_sha"] != base
         or value["verdict"] not in VERDICTS or not _plain(value["summary"], 1800)
         or type(value["findings"]) is not list or len(value["findings"]) > 12

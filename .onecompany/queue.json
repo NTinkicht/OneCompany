@@ -204,8 +204,8 @@
         "SEC-001"
       ],
       "write_scope": [
-        "examples/agent-qualification/demo.py",
-        "tests/test_agent_qualification.py"
+        "examples/agent-qualification/recovery_demo.py",
+        "tests/test_agent_qualification_recovery.py"
       ],
       "resource_locks": [
         "onecompany:mistral-cloud-recovery-qualification"

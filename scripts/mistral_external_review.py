@@ -45,15 +45,23 @@ SENSITIVE_PATH = re.compile(
     re.IGNORECASE,
 )
 SECRET_ASSIGNMENT = re.compile(
-    r"(?i)[\"']?(?:api[_-]?key|access[_-]?token|refresh[_-]?token|"
-    r"client[_-]?secret|token|secret|password|authorization)[\"']?"
-    r"\s*[:=]\s*[\"']?([^\"'\s,;}{]{16,})"
+    r"(?i)[\"']?"
+    r"(?:[a-z0-9_-]*(?:secret|token|password|credential|"
+    r"api[_-]?key|access[_-]?key|private[_-]?key)[a-z0-9_-]*)"
+    r"[\"']?\s*[:=]\s*[\"']?([^\"'\s,;}{]{8,})"
 )
 BEARER_LITERAL = re.compile(r"(?i)\bbearer\s+([A-Za-z0-9._~+/=-]{16,})")
+CREDENTIAL_URL = re.compile(
+    r"(?i)\b[a-z][a-z0-9+.-]*://[^\s/:@]+:([^\s/@]{8,})@"
+)
 PRIVATE_KEY = re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----")
-SAFE_VALUE_PREFIXES = (
-    "os.environ", "os.getenv", "getenv(", "env.", "secrets.", "${{",
-    "[redacted]", "<redacted>", "placeholder", "example",
+SAFE_REFERENCE_PATTERNS = (
+    re.compile(r"^\$\{\{\s*secrets\.[A-Za-z_][A-Za-z0-9_]*\s*\}\}$"),
+    re.compile(r"^os\.environ\[[\"'][A-Za-z_][A-Za-z0-9_]*[\"']\]$"),
+    re.compile(r"^os\.getenv\([\"'][A-Za-z_][A-Za-z0-9_]*[\"']\)$"),
+    re.compile(r"^getenv\([\"'][A-Za-z_][A-Za-z0-9_]*[\"']\)$"),
+    re.compile(r"^(?:env|secrets)\.[A-Za-z_][A-Za-z0-9_]*$"),
+    re.compile(r"^(?:\[redacted\]|<redacted>|placeholder|example)$", re.IGNORECASE),
 )
 
 REVIEW_INSTRUCTIONS = """You are Mistral Vibe acting as an independent NON-MATERIAL-AUTHOR external technical reviewer.
@@ -223,8 +231,8 @@ def prepare() -> None:
 
 
 def _safe_reference(value: str) -> bool:
-    lowered = value.strip().lower()
-    return any(lowered.startswith(prefix) for prefix in SAFE_VALUE_PREFIXES)
+    candidate = value.strip()
+    return any(pattern.fullmatch(candidate) for pattern in SAFE_REFERENCE_PATTERNS)
 
 
 def validate_diff(paths: list[str], diff: str) -> None:
@@ -234,6 +242,12 @@ def validate_diff(paths: list[str], diff: str) -> None:
         raise ValueError("EXTERNAL_REVIEW_SENSITIVE_PATH_BLOCKED")
     if PRIVATE_KEY.search(diff):
         raise ValueError("EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED")
+    if (
+        "GIT binary patch" in diff
+        or re.search(r"(?m)^Binary files .+ differ$", diff)
+        or re.search(r"(?m)^[+-]Subproject commit [0-9a-f]{40}(?:-dirty)?$", diff)
+    ):
+        raise ValueError("EXTERNAL_REVIEW_NON_TEXT_CONTENT_BLOCKED")
     for line in diff.splitlines():
         if line.startswith((
             "+++ ", "--- ", "diff --git ", "index ", "@@ ",
@@ -246,6 +260,9 @@ def validate_diff(paths: list[str], diff: str) -> None:
             if not _safe_reference(match.group(1)):
                 raise ValueError("EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED")
         for match in BEARER_LITERAL.finditer(line):
+            if not _safe_reference(match.group(1)):
+                raise ValueError("EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED")
+        for match in CREDENTIAL_URL.finditer(line):
             if not _safe_reference(match.group(1)):
                 raise ValueError("EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED")
 

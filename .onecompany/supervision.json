@@ -8,7 +8,7 @@
     "scheduled_reconciliation": true,
     "quiet_when_no_action": true,
     "stale_candidate_minutes": 30,
-    "target_effective_cadence_minutes": 15
+    "target_effective_cadence_minutes": 60
   },
   "github_actions": {
     "enabled": true,

@@ -38,7 +38,7 @@ class ChecksOnlyEnforcementTests(unittest.TestCase):
             return 0, {"errors": []}, ""
         if path.endswith("/protection"):
             return 1, None, "no classic protection"
-        if path.endswith("/rulesets"):
+        if "/rulesets?" in path:
             return 0, [{"id": 1, "enforcement": "active"}], ""
         if path.endswith("/rulesets/1"):
             return 0, {
@@ -168,7 +168,7 @@ class ChecksOnlyEnforcementTests(unittest.TestCase):
                 return 0, {"id": 15368, "slug": "github-actions"}, ""
             if path.endswith("/protection"):
                 return 1, None, "no classic protection"
-            if path.endswith("/rulesets"):
+            if "/rulesets?" in path:
                 return 0, [{"id": 7, "enforcement": "active"}], ""
             if path.endswith("/rulesets/7"):
                 return 0, {
@@ -215,7 +215,7 @@ class ChecksOnlyEnforcementTests(unittest.TestCase):
                     return 0, {"id": 15368, "slug": "github-actions"}, ""
                 if path.endswith("/protection"):
                     return 1, None, "no classic protection"
-                if path.endswith("/rulesets"):
+                if "/rulesets?" in path:
                     return 0, [{"id": 8, "enforcement": "active"}], ""
                 if path.endswith("/rulesets/8"):
                     return 0, {

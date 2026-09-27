@@ -2,28 +2,33 @@
   "$schema": "./schemas/supervision.schema.json",
   "schema_version": "1.0",
   "enabled": true,
-  "mode": "notify",
+  "mode": "orchestrate",
   "continuous_operation": {
     "event_driven_first": true,
     "scheduled_reconciliation": true,
     "quiet_when_no_action": true,
     "stale_candidate_minutes": 30,
-    "target_effective_cadence_minutes": 60
+    "target_effective_cadence_minutes": 15
   },
   "github_actions": {
     "enabled": true,
     "default_cron": "17 * * * *",
     "responsive_cron_example": "2,17,32,47 * * * *",
     "may_post_team_room": true,
-    "may_failover": false,
-    "may_merge": false
+    "may_failover": true,
+    "may_merge": true
   },
   "chatgpt_tasks": {
-    "enabled": false,
+    "enabled": true,
     "strategy": "four_staggered_hourly_supervisors",
-    "offset_minutes": [2, 17, 32, 47],
+    "offset_minutes": [
+      0,
+      15,
+      30,
+      45
+    ],
     "required_connected_app": "GitHub",
-    "may_mutate": false
+    "may_mutate": true
   },
   "scheduler_health": {
     "verify_active_daily": true,

@@ -181,6 +181,7 @@ class ChecksOnlyEnforcementTests(unittest.TestCase):
                 return 0, {
                     "id": 7,
                     "enforcement": "active",
+                    "target": "branch",
                     "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
                     "bypass_actors": [],
                     "rules": [
@@ -231,6 +232,7 @@ class ChecksOnlyEnforcementTests(unittest.TestCase):
                     return 0, {
                         "id": 8,
                         "enforcement": "active",
+                        "target": "branch",
                         "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
                         "bypass_actors": ([{"actor_id": 1}] if bypass else []),
                         "rules": [
@@ -280,6 +282,7 @@ class ChecksOnlyEnforcementTests(unittest.TestCase):
             11: {
                 "id": 11,
                 "enforcement": "active",
+                "target": "branch",
                 "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
                 "bypass_actors": [],
                 "rules": [{
@@ -295,6 +298,7 @@ class ChecksOnlyEnforcementTests(unittest.TestCase):
             12: {
                 "id": 12,
                 "enforcement": "active",
+                "target": "branch",
                 "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
                 "bypass_actors": [],
                 "rules": [

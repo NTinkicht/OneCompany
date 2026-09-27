@@ -522,6 +522,10 @@ def initialize_control_plane(
     config.setdefault("project", {})["name"] = project_name
     config["project"]["repository"] = repository
     config["project"]["default_branch"] = default_branch
+    config.setdefault("autonomy", {})["level"] = "L1"
+    config["autonomy"]["continue_when_ready_work_exists"] = False
+    config.setdefault("no_idle", {})["enabled"] = False
+    config.setdefault("safety", {})["emergency_stop"] = False
     write_json(config_path, config)
 
     readiness_path = target / ".onecompany" / "readiness.json"

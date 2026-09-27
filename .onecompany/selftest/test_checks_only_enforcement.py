@@ -14,6 +14,11 @@ if str(SCRIPTS) not in sys.path:
 import github_controls as controls
 
 
+STRICT_CODEOWNERS = base64.b64encode(
+    b"/.github/ @NTinkicht\n"
+).decode("ascii")
+
+
 STRICT_SPECS = [{
     "name": "validate",
     "app_slug": "github-actions",
@@ -166,6 +171,8 @@ class ChecksOnlyEnforcementTests(unittest.TestCase):
         def strict_api(path):
             if path == "apps/github-actions":
                 return 0, {"id": 15368, "slug": "github-actions"}, ""
+            if "/contents/.github/CODEOWNERS?ref=" in path:
+                return 0, {"encoding": "base64", "content": STRICT_CODEOWNERS}, ""
             if path.endswith("/protection"):
                 return 1, None, "no classic protection"
             if path.endswith("/rulesets") or "/rulesets?" in path:
@@ -183,6 +190,7 @@ class ChecksOnlyEnforcementTests(unittest.TestCase):
                                 "required_approving_review_count": 1,
                                 "dismiss_stale_reviews_on_push": True,
                                 "require_last_push_approval": True,
+                                "require_code_owner_review": True,
                             },
                         },
                         {"type": "deletion"},
@@ -230,6 +238,7 @@ class ChecksOnlyEnforcementTests(unittest.TestCase):
                                     "required_approving_review_count": 1,
                                     "dismiss_stale_reviews_on_push": fresh,
                                     "require_last_push_approval": fresh,
+                                    "require_code_owner_review": fresh,
                                 },
                             },
                             {"type": "deletion"},
@@ -263,6 +272,69 @@ class ChecksOnlyEnforcementTests(unittest.TestCase):
                             "example/app", "main", STRICT_SPECS
                         )
                     )
+
+    def test_strict_merge_platform_aggregates_non_bypassable_rulesets(self):
+        details = {
+            11: {
+                "id": 11,
+                "enforcement": "active",
+                "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+                "bypass_actors": [],
+                "rules": [{
+                    "type": "pull_request",
+                    "parameters": {
+                        "required_approving_review_count": 1,
+                        "dismiss_stale_reviews_on_push": True,
+                        "require_last_push_approval": True,
+                        "require_code_owner_review": True,
+                    },
+                }],
+            },
+            12: {
+                "id": 12,
+                "enforcement": "active",
+                "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+                "bypass_actors": [],
+                "rules": [
+                    {"type": "deletion"},
+                    {"type": "non_fast_forward"},
+                    {
+                        "type": "required_status_checks",
+                        "parameters": {
+                            "strict_required_status_checks_policy": True,
+                            "required_status_checks": [{
+                                "context": "validate",
+                                "integration_id": 15368,
+                            }],
+                        },
+                    },
+                ],
+            },
+        }
+
+        def api(path):
+            if path == "apps/github-actions":
+                return 0, {"id": 15368, "slug": "github-actions"}, ""
+            if "/contents/.github/CODEOWNERS?ref=" in path:
+                return 0, {"encoding": "base64", "content": STRICT_CODEOWNERS}, ""
+            if path.endswith("/protection"):
+                return 1, None, "no classic protection"
+            if path.endswith("/rulesets") or "/rulesets?" in path:
+                return 0, [
+                    {"id": 11, "enforcement": "active"},
+                    {"id": 12, "enforcement": "active"},
+                ], ""
+            for ruleset_id, detail in details.items():
+                if path.endswith(f"/rulesets/{ruleset_id}"):
+                    return 0, detail, ""
+            raise AssertionError(path)
+
+        with patch.object(controls, "gh_api", side_effect=api):
+            self.assertTrue(
+                controls.strict_merge_platform_enforcement(
+                    "example/app", "main", STRICT_SPECS
+                )
+            )
 
     def test_missing_required_check_is_a_blocker_even_without_review_gate(self):
         """Keep exact-head status checks mechanically required."""

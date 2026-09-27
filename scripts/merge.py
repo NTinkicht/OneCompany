@@ -6,9 +6,20 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
+
+_MERGE_SCRIPT_DIR = Path(__file__).resolve().parent
+if __name__ == "__main__" and not sys.flags.isolated:
+    print(
+        "REFUSED: privileged merge executor must run in Python isolated mode "
+        "(use `python onecompany.py merge ...`)"
+    )
+    raise SystemExit(2)
+if str(_MERGE_SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(_MERGE_SCRIPT_DIR))
 
 from assurance_gate import validate_structure
 from lease_lifecycle import append_coordination_event, coordination_view
@@ -45,6 +56,87 @@ AUTOMATION_FROZEN_POLICY_FILES = {
     "ledger": ".onecompany/ledger.json",
 }
 BASE_QUEUE_PATH = ".onecompany/queue.json"
+
+
+_DANGEROUS_EXECUTION_SUFFIXES = {
+    ".py", ".pyc", ".pyo", ".pth", ".so", ".pyd", ".dll", ".dylib",
+}
+
+
+def _isolated_runtime_ok() -> bool:
+    return bool(sys.flags.isolated)
+
+
+def _trusted_executor_surface_errors(
+    base_sha: str,
+    assurance_packet: str | None,
+) -> list[str]:
+    """Prove the privileged interpreter is executing an exact clean base surface."""
+    errors: list[str] = []
+    if not _isolated_runtime_ok():
+        errors.append("merge executor is not running in Python isolated mode")
+        return errors
+
+    head = run(["git", "rev-parse", "HEAD"])
+    if head.returncode != 0 or head.stdout.strip() != base_sha:
+        errors.append("merge executor checkout is not the exact protected PR base")
+        return errors
+
+    for command, message in (
+        (["git", "diff", "--quiet", "--"], "tracked merge-executor files are modified"),
+        (["git", "diff", "--cached", "--quiet", "--"], "staged merge-executor files are modified"),
+    ):
+        result = run(command)
+        if result.returncode != 0:
+            errors.append(message)
+
+    allowed_untracked: set[str] = set()
+    if assurance_packet:
+        packet = Path(assurance_packet)
+        if not packet.is_absolute():
+            packet = ROOT / packet
+        try:
+            relative = packet.resolve().relative_to(ROOT.resolve()).as_posix()
+            allowed_untracked.add(relative)
+        except (OSError, ValueError):
+            pass
+
+    untracked = run(["git", "ls-files", "--others", "--exclude-standard"])
+    if untracked.returncode != 0:
+        errors.append("cannot enumerate untracked files in merge executor checkout")
+    else:
+        unexpected = sorted(
+            line.strip()
+            for line in untracked.stdout.splitlines()
+            if line.strip() and line.strip() not in allowed_untracked
+        )
+        if unexpected:
+            errors.append(
+                "untracked files exist in privileged merge checkout: "
+                + ",".join(unexpected[:20])
+            )
+
+    ignored = run(["git", "ls-files", "--others", "--ignored", "--exclude-standard"])
+    if ignored.returncode != 0:
+        errors.append("cannot enumerate ignored files in merge executor checkout")
+    else:
+        dangerous = []
+        for raw in ignored.stdout.splitlines():
+            value = raw.strip().replace("\\", "/")
+            if not value:
+                continue
+            path = Path(value)
+            if (
+                path.suffix.lower() in _DANGEROUS_EXECUTION_SUFFIXES
+                or path.name in {"sitecustomize.py", "usercustomize.py"}
+            ):
+                dangerous.append(value)
+        if dangerous:
+            errors.append(
+                "ignored execution-capable files exist in privileged checkout: "
+                + ",".join(sorted(dangerous)[:20])
+            )
+    return errors
 
 
 def _work_unit_for_pr(queue: dict, pr: int, active: list[dict]) -> dict | None:
@@ -467,15 +559,12 @@ def main() -> int:
         print("REFUSED: base-configured default branch differs from GitHub protected default branch")
         return 2
 
-    executor_head = run(["git", "rev-parse", "HEAD"])
-    if executor_head.returncode != 0:
-        print("REFUSED: cannot establish merge-executor checkout SHA")
-        return 2
-    if executor_head.stdout.strip() != live_base:
-        print(
-            "REFUSED: native merge executor is not running from the exact protected "
-            "PR base; control-plane authority must come from trusted base code"
-        )
+    executor_errors = _trusted_executor_surface_errors(
+        live_base, args.assurance_packet
+    )
+    if executor_errors:
+        for error in executor_errors:
+            print(f"REFUSED: {error}")
         return 2
 
     required_platform_specs, required_platform_error = trusted_required_check_specs(

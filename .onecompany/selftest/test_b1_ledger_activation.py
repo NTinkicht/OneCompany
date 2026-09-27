@@ -48,6 +48,7 @@ class B1LedgerActivationTests(unittest.TestCase):
             self.skipTest("B1 activation evidence is specific to the OneCompany source repository")
         self.ledger = json.loads((CONTROL / "ledger.json").read_text(encoding="utf-8"))
         self.supervision = json.loads((CONTROL / "supervision.json").read_text(encoding="utf-8"))
+        self.governance = json.loads((CONTROL / "governance.json").read_text(encoding="utf-8"))
 
     def test_team_room_is_activated_with_minimal_verified_publisher_set(self):
         self.assertTrue(self.ledger["enabled"])
@@ -161,6 +162,26 @@ class B1LedgerActivationTests(unittest.TestCase):
         self.assertIn("increase_autonomy_level", self.config["human_only_decisions"])
         self.assertIn("change_budget_policy", self.config["human_only_decisions"])
         self.assertIn("add_or_expand_credentials", self.config["human_only_decisions"])
+        self.assertIn("export_credentials_or_secrets", self.config["human_only_decisions"])
+        self.assertIn(
+            "amend_runtime_authority_or_control_plane",
+            self.config["human_only_decisions"],
+        )
+        always_human = set(self.governance["control_plane"]["always_human_paths"])
+        for path in {
+            ".onecompany/config.json",
+            ".onecompany/supervision.json",
+            ".onecompany/handoffs.json",
+            ".onecompany/selftest/**",
+            "scripts/autonomy_guard.py",
+            "scripts/merge.py",
+            "scripts/handoff_runtime.py",
+            "scripts/handoff_validate.py",
+            "scripts/supervise.py",
+            "scripts/supervision_validate.py",
+            "scripts/simulate_supervision.py",
+        }:
+            self.assertIn(path, always_human)
 
 
 if __name__ == "__main__":

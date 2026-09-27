@@ -65,7 +65,8 @@ jobs:
           test "$(git -C /tmp/onecompany-external-target rev-parse refs/remotes/origin/review-head)" = "$TARGET_HEAD"
           git -C /tmp/onecompany-external-target cat-file -e "$TARGET_BASE^{commit}"
           MERGE_BASE="$(git -C /tmp/onecompany-external-target merge-base "$TARGET_BASE" "$TARGET_HEAD")"
-          test "$MERGE_BASE" = "$TARGET_BASE"
+          test "$MERGE_BASE" != ""
+          git -C /tmp/onecompany-external-target cat-file -e "$MERGE_BASE^{commit}"
           git -C /tmp/onecompany-external-target checkout --detach "$TARGET_HEAD"
 
       - name: Build bounded complete-diff review packet

@@ -195,6 +195,7 @@ class ChecksOnlyEnforcementTests(unittest.TestCase):
                                 "required_approving_review_count": 1,
                                 "dismiss_stale_reviews_on_push": True,
                                 "require_last_push_approval": True,
+                                "required_review_thread_resolution": True,
                                 "require_code_owner_review": True,
                             },
                         },

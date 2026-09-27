@@ -90,6 +90,7 @@ def reset_control_plane(
     )
     config["autonomy"]["level"] = "L1"
     config["autonomy"]["continue_when_ready_work_exists"] = False
+    config.setdefault("no_idle", {})["enabled"] = False
     config["safety"]["emergency_stop"] = False
     save_json(CONTROL / "config.json", config)
 

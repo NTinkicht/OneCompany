@@ -87,6 +87,15 @@ CREDENTIAL_URL = re.compile(
     r"(?i)\b[a-z][a-z0-9+.-]*://[^\s/:@]+:([^\s/@]{8,})@"
 )
 PRIVATE_KEY = re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----")
+STANDALONE_CREDENTIAL = re.compile(
+    r"(?x)(?:"
+    r"\bgh[pousr]_[A-Za-z0-9]{20,255}\b|"
+    r"\bgithub_pat_[A-Za-z0-9_]{20,255}\b|"
+    r"\b(?:AKIA|ASIA|AIDA|AROA|AIPA|ANPA|ANVA|ASCA)[A-Z0-9]{16}\b|"
+    r"\bsk-[A-Za-z0-9_-]{20,255}\b|"
+    r"\bxox[baprs]-[A-Za-z0-9-]{20,255}\b"
+    r")"
+)
 XML_SECRET = re.compile(
     r"(?is)<(?:password|secret|token|api[-_]?key|access[-_]?key|private[-_]?key)>"
     r"\s*([^<]{8,})\s*</(?:password|secret|token|api[-_]?key|access[-_]?key|private[-_]?key)>"
@@ -174,7 +183,7 @@ def parse_dispatch(body: str) -> tuple[str, int, str, str, tuple[str, ...]]:
     authors = tuple(sorted({part.strip().lower() for part in fields["material_authors"].split(",") if part.strip()}))
     if not authors or any(not AUTHOR.fullmatch(actor) for actor in authors):
         raise ValueError("EXTERNAL_REVIEW_AUTHORS_INVALID")
-    if any(actor in MISTRAL_ALIASES for actor in authors):
+    if any(_mistral_identity(actor) for actor in authors):
         raise ValueError("MISTRAL_SELF_REVIEW_BLOCKED")
     return repo, int(fields["pr"]), head, base, authors
 
@@ -252,7 +261,7 @@ def verify_material_authors(repo: str, number: int, head: str, declared: tuple[s
             if len(tags) > 1:
                 raise ValueError("EXTERNAL_REVIEW_AUTHOR_AMBIGUOUS")
             observed.update(tag.lower() for tag in tags)
-            if any(tag.lower() in MISTRAL_ALIASES for tag in tags):
+            if any(_mistral_identity(tag) for tag in tags):
                 raise ValueError("MISTRAL_SELF_REVIEW_BLOCKED")
         if len(commits) < 100:
             break
@@ -439,7 +448,11 @@ def validate_diff(paths: list[str], diff: str) -> None:
         raise ValueError("EXTERNAL_REVIEW_FILE_COUNT_BLOCKED")
     if any(not FILE.fullmatch(path) or SENSITIVE_PATH.search(path) for path in paths):
         raise ValueError("EXTERNAL_REVIEW_SENSITIVE_PATH_BLOCKED")
-    if PRIVATE_KEY.search(diff) or XML_SECRET.search(diff):
+    if (
+        PRIVATE_KEY.search(diff)
+        or XML_SECRET.search(diff)
+        or STANDALONE_CREDENTIAL.search(diff)
+    ):
         raise ValueError("EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED")
     if (
         "GIT binary patch" in diff

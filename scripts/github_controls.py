@@ -274,6 +274,22 @@ def _codeowners_coverage(text: str) -> tuple[bool, list[str]]:
 
 
 
+
+def _repo_rulesets(repo: str, *, max_pages: int = 10) -> list[dict[str, Any]] | None:
+    """Read every repository ruleset page within a bounded fail-closed limit."""
+    values: list[dict[str, Any]] = []
+    for page in range(1, max_pages + 1):
+        code, payload, _ = gh_api(
+            f"repos/{repo}/rulesets?per_page=100&page={page}"
+        )
+        if code != 0 or not isinstance(payload, list):
+            return None
+        values.extend(item for item in payload if isinstance(item, dict))
+        if len(payload) < 100:
+            return values
+    return None
+
+
 def _required_publishers(
     specs: list[dict[str, str]],
 ) -> dict[str, int] | None:
@@ -351,8 +367,8 @@ def strict_merge_platform_enforcement(
         ):
             return True
 
-    code, rulesets, _ = gh_api(f"repos/{repo}/rulesets")
-    if code != 0 or not isinstance(rulesets, list):
+    rulesets = _repo_rulesets(repo)
+    if rulesets is None:
         return False
     for summary in rulesets:
         if (

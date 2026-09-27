@@ -112,6 +112,20 @@ def main() -> int:
                 is False,
                 "init must disable supervision",
             )
+            handoffs = json.loads(
+                (target / ".onecompany" / "handoffs.json").read_text()
+            )
+            require(
+                handoffs["runtime"]["current_autonomy_level"] == "L1",
+                "init must reset handoff runtime autonomy to L1",
+            )
+            require(
+                handoffs["runtime"]["scheduled_chatgpt_mutation_allowed"] is False
+                and handoffs["runtime"]["automatic_failover_allowed"] is False
+                and handoffs["runtime"]["automatic_merge_allowed"] is False
+                and handoffs["runtime"]["continuous_next_work_allowed"] is False,
+                "init must clear inherited L4 handoff mutation authority",
+            )
 
             root_principals = [
                 item

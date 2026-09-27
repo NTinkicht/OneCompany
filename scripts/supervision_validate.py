@@ -89,6 +89,15 @@ def main() -> int:
                 errors.append("supervision below L3 must not grant automatic failover")
             if gh.get("may_merge") is not False:
                 errors.append("supervision below L3 must not grant automatic merge")
+        if level >= 4:
+            if gh.get("may_failover") is not False or gh.get("may_merge") is not False:
+                errors.append("L4 keeps GitHub Actions reconciliation non-mutating; ChatGPT supervisors execute mutations")
+            if chatgpt.get("enabled") is not True or chatgpt.get("may_mutate") is not True:
+                errors.append("L4 requires enabled mutating ChatGPT scheduled supervisors")
+            if config.get("autonomy", {}).get("continue_when_ready_work_exists") is not True:
+                errors.append("L4 requires continuous next-work selection")
+            if config.get("no_idle", {}).get("enabled") is not True:
+                errors.append("L4 requires no-idle policy enabled")
         if level == 1:
             if mode != "notify":
                 errors.append("L1 B3 supervision must remain notify-only")

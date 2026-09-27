@@ -1,8 +1,6 @@
 name: OneCompany Review Authorization
 
 on:
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
   pull_request_review:
     types: [submitted, dismissed]
 

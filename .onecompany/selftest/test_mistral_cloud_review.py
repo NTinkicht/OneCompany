@@ -353,6 +353,28 @@ class MistralCloudReviewTests(unittest.TestCase):
         self.assertNotIn(b"line_5000", staged)
         self.assertIn(b"2499:", staged)
 
+    def test_new_large_file_uses_complete_diff_without_source_duplication(self):
+        source = b"added_line = 1\n" * 3000
+        patch_text = (
+            b"diff --git a/scripts/new.py b/scripts/new.py\n"
+            b"new file mode 100644\n"
+            b"--- /dev/null\n"
+            b"+++ b/scripts/new.py\n"
+            b"@@ -0,0 +1,3000 @@\n"
+        )
+        with patch.object(
+            target.subprocess, "check_output", return_value=patch_text
+        ):
+            staged = target.bounded_review_source(
+                "scripts/new.py", source, BASE, HEAD
+            )
+        self.assertLessEqual(
+            len(staged), target.MAX_REVIEW_STAGE_SOURCE_BYTES
+        )
+        self.assertIn(b"newly added", staged)
+        self.assertIn(b"review.diff contains the complete file content", staged)
+        self.assertNotIn(b"added_line = 1", staged)
+
     def test_large_source_missing_changed_hunks_fails_closed(self):
         """A truncated or malformed diff cannot create a false source review."""
         source = b"line = 1\n" * 3000

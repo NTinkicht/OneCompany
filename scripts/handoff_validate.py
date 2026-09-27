@@ -48,19 +48,34 @@ def main() -> int:
             and supervision.get("chatgpt_tasks", {}).get("may_mutate") is True
         )
         if level == 1:
-            # Fresh/customer installations intentionally retain the original
-            # fail-closed L1 handoff contract. Promoting the OneCompany source
-            # repository to L4 must never make a fresh target inherit L4.
-            required_runtime = {
-                "event_reconciliation_enabled": True,
-                "current_autonomy_level": "L1",
-                "l1_behavior": "reconcile_and_notify_only",
-                "mutation_requires_preexisting_authority": True,
-                "read_only_unattended_dispatch_allowed": True,
-                "write_dispatch_requires_canonical_lease": True,
-                "automatic_failover_allowed": False,
-                "automatic_merge_allowed": False,
-            }
+            # Fresh/customer installations intentionally remain fail-closed at
+            # L1. Accept both the historical L1 runtime shape and the newer
+            # normalized runtime shape produced by current bootstrap code.
+            if "github_actions_behavior" in runtime:
+                required_runtime = {
+                    "event_reconciliation_enabled": True,
+                    "current_autonomy_level": "L1",
+                    "github_actions_behavior": "reconcile_and_notify_only",
+                    "mutation_requires_preexisting_authority": True,
+                    "read_only_unattended_dispatch_allowed": True,
+                    "write_dispatch_requires_canonical_lease": True,
+                    "github_actions_mutation_allowed": False,
+                    "scheduled_chatgpt_mutation_allowed": False,
+                    "automatic_failover_allowed": False,
+                    "automatic_merge_allowed": False,
+                    "continuous_next_work_allowed": False,
+                }
+            else:
+                required_runtime = {
+                    "event_reconciliation_enabled": True,
+                    "current_autonomy_level": "L1",
+                    "l1_behavior": "reconcile_and_notify_only",
+                    "mutation_requires_preexisting_authority": True,
+                    "read_only_unattended_dispatch_allowed": True,
+                    "write_dispatch_requires_canonical_lease": True,
+                    "automatic_failover_allowed": False,
+                    "automatic_merge_allowed": False,
+                }
         else:
             required_runtime = {
                 "event_reconciliation_enabled": True,

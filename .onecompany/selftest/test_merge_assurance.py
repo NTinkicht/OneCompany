@@ -177,6 +177,20 @@ class MergeAssuranceTests(unittest.TestCase):
         stack.enter_context(
             patch.object(
                 merge,
+                "trusted_required_check_specs",
+                return_value=(
+                    [{
+                        "name": "validate",
+                        "app_slug": "github-actions",
+                        "workflow_path": ".github/workflows/onecompany-validate.yml",
+                    }],
+                    None,
+                ),
+            )
+        )
+        stack.enter_context(
+            patch.object(
+                merge,
                 "_platform_authors",
                 return_value=({"implementer-example"}, []),
             )

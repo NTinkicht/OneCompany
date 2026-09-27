@@ -49,6 +49,8 @@
     "publish_sensitive_data",
     "disable_required_security_or_ci_gate",
     "amend_company_constitution",
-    "relax_control_plane_guardrails"
+    "relax_control_plane_guardrails",
+    "export_credentials_or_secrets",
+    "amend_runtime_authority_or_control_plane"
   ]
 }

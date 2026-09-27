@@ -71,7 +71,7 @@ def main() -> int:
             for error in errors:
                 print(f"- {error}")
             return 1
-        print("B2 handoff validation PASS (active reconciliation, L1 notify-only mutation boundary).")
+        print("B2 handoff validation PASS (active reconciliation; autonomy mutation boundary enforced by current policy).")
         return 0
     except Exception as exc:
         print(f"B2 handoff validation FAIL: {exc}")

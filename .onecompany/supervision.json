@@ -15,8 +15,8 @@
     "default_cron": "17 * * * *",
     "responsive_cron_example": "2,17,32,47 * * * *",
     "may_post_team_room": true,
-    "may_failover": true,
-    "may_merge": true
+    "may_failover": false,
+    "may_merge": false
   },
   "chatgpt_tasks": {
     "enabled": true,

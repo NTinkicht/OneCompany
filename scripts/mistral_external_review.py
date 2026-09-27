@@ -38,10 +38,20 @@ MAX_RESULT_BYTES = 15_000
 MAX_CHANGED_FILES = 24
 MAX_WAKE_PAGES = 50
 EXTERNAL_MARKER = "ONECOMPANY_EXTERNAL_MISTRAL_REVIEW_V1"
+EXTERNAL_WORKFLOW_PATH = ".github/workflows/onecompany-mistral-external-review.yml"
+EVIDENCE_MARKER = re.compile(
+    r"ONECOMPANY_EXTERNAL_MISTRAL_REVIEW_V1 "
+    r"repo=(NTinkicht/[A-Za-z0-9_.-]+) pr=([1-9][0-9]{0,5}) "
+    r"head=([0-9a-f]{40}) base=([0-9a-f]{40}) "
+    r"run=([1-9][0-9]*) dispatch=([1-9][0-9]*) "
+    r"verdict=(PASS|CHANGES_REQUIRED|INSUFFICIENT_EVIDENCE) "
+    r"result_sha256=([0-9a-f]{64})"
+)
 
 SENSITIVE_PATH = re.compile(
     r"(?ix)(^|/)(?:"
     r"\.env(?:\.|$)|\.npmrc$|\.netrc$|\.pypirc$|\.git-credentials$|"
+    r"\.m2/settings\.xml$|\.aws/credentials$|\.azure/accessTokens\.json$|"
     r"id_(?:rsa|dsa|ecdsa|ed25519)$|"
     r"(?:secrets?|credentials?)(?:/|(?:\.[A-Za-z0-9_.-]+)?$)|"
     r"(?:auth|token|keyring)\.json$|"
@@ -63,6 +73,10 @@ CREDENTIAL_URL = re.compile(
     r"(?i)\b[a-z][a-z0-9+.-]*://[^\s/:@]+:([^\s/@]{8,})@"
 )
 PRIVATE_KEY = re.compile(r"-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----")
+XML_SECRET = re.compile(
+    r"(?is)<(?:password|secret|token|api[-_]?key|access[-_]?key|private[-_]?key)>"
+    r"\s*([^<]{8,})\s*</(?:password|secret|token|api[-_]?key|access[-_]?key|private[-_]?key)>"
+)
 SAFE_REFERENCE_PATTERNS = (
     re.compile(r"^\$\{\{\s*secrets\.[A-Za-z_][A-Za-z0-9_]*\s*\}\}$"),
     re.compile(r"^os\.environ\[[\"'][A-Za-z_][A-Za-z0-9_]*[\"']\]$"),
@@ -179,7 +193,8 @@ def verify_material_authors(repo: str, number: int, head: str, declared: tuple[s
             if not SHA.fullmatch(last_sha or ""):
                 raise ValueError("EXTERNAL_REVIEW_COMMIT_SHA_INVALID")
             account = ((item.get("author") or {}).get("login") or "").lower()
-            if account in MISTRAL_ALIASES:
+            committer = ((item.get("committer") or {}).get("login") or "").lower()
+            if account in MISTRAL_ALIASES or committer in MISTRAL_ALIASES:
                 raise ValueError("MISTRAL_SELF_REVIEW_BLOCKED")
             tags = MATERIAL_AUTHOR.findall((item.get("commit") or {}).get("message", ""))
             if len(tags) > 1:
@@ -197,11 +212,46 @@ def verify_material_authors(repo: str, number: int, head: str, declared: tuple[s
         raise ValueError("EXTERNAL_REVIEW_DECLARED_AUTHORS_MISMATCH")
 
 
-def existing_result(repo: str, number: int, head: str, base: str) -> bool:
-    marker = (
-        f"{EXTERNAL_MARKER} repo={repo} pr={number} "
-        f"head={head} base={base} "
+def _trusted_evidence_comment(
+    item: dict,
+    *,
+    repo: str,
+    number: int,
+    head: str,
+    base: str,
+) -> bool:
+    if (item.get("user") or {}).get("login") != "github-actions[bot]":
+        return False
+    body = str(item.get("body") or "")
+    matches = EVIDENCE_MARKER.findall(body)
+    if len(matches) != 1:
+        return False
+    (
+        marker_repo, marker_pr, marker_head, marker_base,
+        run_id, dispatch_id, verdict, _result_digest,
+    ) = matches[0]
+    if (
+        marker_repo != repo
+        or int(marker_pr) != number
+        or marker_head != head
+        or marker_base != base
+    ):
+        return False
+    try:
+        run = onecompany_api(f"repos/{WAKE_REPO}/actions/runs/{run_id}")
+    except Exception:
+        return False
+    return (
+        run.get("path") == EXTERNAL_WORKFLOW_PATH
+        and run.get("event") == "issue_comment"
+        and run.get("status") == "completed"
+        and run.get("conclusion") == "success"
+        and str(run.get("id")) == run_id
+        and verdict == "PASS"
     )
+
+
+def existing_result(repo: str, number: int, head: str, base: str) -> bool:
     for page in range(1, MAX_WAKE_PAGES + 1):
         comments = onecompany_api(
             f"repos/{WAKE_REPO}/issues/{WAKE_ISSUE}/comments?per_page=100&page={page}"
@@ -209,8 +259,13 @@ def existing_result(repo: str, number: int, head: str, base: str) -> bool:
         if not isinstance(comments, list):
             raise ValueError("EXTERNAL_REVIEW_HISTORY_UNAVAILABLE")
         if any(
-            (item.get("user") or {}).get("login") == "github-actions[bot]"
-            and marker in str(item.get("body") or "")
+            _trusted_evidence_comment(
+                item,
+                repo=repo,
+                number=number,
+                head=head,
+                base=base,
+            )
             for item in comments
             if isinstance(item, dict)
         ):
@@ -255,7 +310,7 @@ def validate_diff(paths: list[str], diff: str) -> None:
         raise ValueError("EXTERNAL_REVIEW_FILE_COUNT_BLOCKED")
     if any(not FILE.fullmatch(path) or SENSITIVE_PATH.search(path) for path in paths):
         raise ValueError("EXTERNAL_REVIEW_SENSITIVE_PATH_BLOCKED")
-    if PRIVATE_KEY.search(diff):
+    if PRIVATE_KEY.search(diff) or XML_SECRET.search(diff):
         raise ValueError("EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED")
     if (
         "GIT binary patch" in diff
@@ -370,7 +425,8 @@ def parse_result(raw: bytes, *, repo: str, pr: int, head: str, base: str, change
     }:
         raise ValueError("EXTERNAL_REVIEW_RESULT_FIELDS_INVALID")
     if (
-        value["version"] != 1 or value["repo"] != repo or value["pr"] != pr
+        type(value["version"]) is not int or value["version"] != 1
+        or value["repo"] != repo or value["pr"] != pr
         or value["head_sha"] != head or value["base_sha"] != base
         or value["verdict"] not in VERDICTS or not _plain(value["summary"], 1800)
         or type(value["findings"]) is not list or len(value["findings"]) > 12

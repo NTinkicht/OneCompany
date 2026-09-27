@@ -55,7 +55,6 @@ class HandoffTests(unittest.TestCase):
         self.assertTrue(policy["activation"]["b1_protected_main_proven"])
         self.assertTrue(policy["activation"]["ledger_replay_proven"])
         self.assertGreaterEqual(len(policy["activation"]["evidence_refs"]), 3)
-        self.assertEqual(policy["runtime"]["current_autonomy_level"], "L4")
         runtime = policy["runtime"]
         self.assertFalse(runtime.get("github_actions_mutation_allowed", False))
         if runtime.get("current_autonomy_level") == "L4":

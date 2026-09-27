@@ -8,8 +8,8 @@
     "default_branch": "main"
   },
   "autonomy": {
-    "level": "L1",
-    "continue_when_ready_work_exists": false,
+    "level": "L4",
+    "continue_when_ready_work_exists": true,
     "human_must_approve_autonomy_increase": true
   },
   "delivery": {
@@ -29,7 +29,7 @@
     "state_file_is_cache": true
   },
   "no_idle": {
-    "enabled": false,
+    "enabled": true,
     "fault_when_ready_work_has_no_valid_lease": true,
     "measure_progress_by_durable_artifacts": true,
     "allow_idle_specialists": true

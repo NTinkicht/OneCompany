@@ -396,6 +396,8 @@ def strict_merge_platform_enforcement(
         if (
             detail_code != 0
             or not isinstance(detail, dict)
+            or detail.get("enforcement") != "active"
+            or detail.get("target") != "branch"
             or not _ruleset_applies_to_branch(detail, branch)
             or _ruleset_has_bypass(detail)
         ):

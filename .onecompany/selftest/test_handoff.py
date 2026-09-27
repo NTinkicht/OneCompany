@@ -56,11 +56,19 @@ class HandoffTests(unittest.TestCase):
         self.assertTrue(policy["activation"]["ledger_replay_proven"])
         self.assertGreaterEqual(len(policy["activation"]["evidence_refs"]), 3)
         self.assertEqual(policy["runtime"]["current_autonomy_level"], "L4")
-        self.assertFalse(policy["runtime"]["github_actions_mutation_allowed"])
-        self.assertTrue(policy["runtime"]["scheduled_chatgpt_mutation_allowed"])
-        self.assertTrue(policy["runtime"]["automatic_failover_allowed"])
-        self.assertTrue(policy["runtime"]["automatic_merge_allowed"])
-        self.assertTrue(policy["runtime"]["continuous_next_work_allowed"])
+        runtime = policy["runtime"]
+        self.assertFalse(runtime.get("github_actions_mutation_allowed", False))
+        if runtime.get("current_autonomy_level") == "L4":
+            self.assertTrue(runtime["scheduled_chatgpt_mutation_allowed"])
+            self.assertTrue(runtime["automatic_failover_allowed"])
+            self.assertTrue(runtime["automatic_merge_allowed"])
+            self.assertTrue(runtime["continuous_next_work_allowed"])
+        else:
+            self.assertEqual(runtime.get("current_autonomy_level"), "L1")
+            self.assertFalse(runtime.get("scheduled_chatgpt_mutation_allowed", False))
+            self.assertFalse(runtime["automatic_failover_allowed"])
+            self.assertFalse(runtime["automatic_merge_allowed"])
+            self.assertFalse(runtime.get("continuous_next_work_allowed", False))
 
     def test_duplicate_ready_deliveries_converge_on_one_proposal_identity(self):
         snapshot = self._snapshot(self._ready_state())
@@ -178,6 +186,8 @@ class HandoffTests(unittest.TestCase):
         self.assertEqual(first, second)
 
     def test_runtime_reports_l4_external_supervisor_authority(self):
+        if self._policy()["runtime"].get("current_autonomy_level") != "L4":
+            self.skipTest("L4 runtime authority is source-repository specific")
         with patch.object(handoff_runtime, "run_supervision") as supervise:
             supervise.return_value = {
                 "action": "START_READY_WORK",

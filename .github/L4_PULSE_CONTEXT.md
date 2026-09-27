@@ -13,6 +13,21 @@ This file is the shared handoff ledger for the four staggered L4 engineering pul
 
 ## Rolling entries
 
+### 2026-09-27T11:28Z — manual remediation checkpoint while schedules paused
+- pulse_id: manual-remediation
+- schedules: PAUSED
+- verified actions:
+  - PR #239 merged at 1296cfd50be3e79621a40131df7cbf98e5eae11c after green validation and current-base Mistral exact-head PASS.
+  - PR #237 was rebased onto post-#239 main; the rebase initially preserved a stale whole bootstrap.py and dropped the fresh-install L1 safety reset, which exact-head CI caught.
+  - PR #237 bootstrap was rebuilt from current main with only Gemma exclusions applied; final head 0f4067c1e1bc5930731b05a008162e580d4deea9 passed full OneCompany Validate and exact-head Mistral PASS, then merged.
+- integrity findings:
+  - worker summaries and old-head reviews were treated as non-authoritative until actual branch/CI/review evidence matched the exact current SHA/base.
+- blockers:
+  - none for #237/#239; both are merged.
+- next executable action: none for these repaired streams; keep schedules paused until owner explicitly resumes them.
+- completion checklist: reconciled=yes; direct_fix=yes; CI_checked=yes; reviews_checked=yes; merge_checked=yes; WU_floor_checked=deferred_while_paused; ledger_written=yes
+
+
 ### 2026-09-27T09:20Z — manual remediation while schedules paused
 - pulse_id: manual-remediation
 - schedules: PAUSED

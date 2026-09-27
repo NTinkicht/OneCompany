@@ -8,8 +8,8 @@
     "default_branch": "main"
   },
   "autonomy": {
-    "level": "L1",
-    "continue_when_ready_work_exists": false,
+    "level": "L4",
+    "continue_when_ready_work_exists": true,
     "human_must_approve_autonomy_increase": true
   },
   "delivery": {
@@ -29,7 +29,7 @@
     "state_file_is_cache": true
   },
   "no_idle": {
-    "enabled": false,
+    "enabled": true,
     "fault_when_ready_work_has_no_valid_lease": true,
     "measure_progress_by_durable_artifacts": true,
     "allow_idle_specialists": true
@@ -49,6 +49,8 @@
     "publish_sensitive_data",
     "disable_required_security_or_ci_gate",
     "amend_company_constitution",
-    "relax_control_plane_guardrails"
+    "relax_control_plane_guardrails",
+    "export_credentials_or_secrets",
+    "amend_runtime_authority_or_control_plane"
   ]
 }

@@ -26,7 +26,18 @@
       ".onecompany/governance.json",
       ".onecompany/required-checks.json",
       ".github/CODEOWNERS",
-      ".github/workflows/**"
+      ".github/workflows/**",
+      ".onecompany/config.json",
+      ".onecompany/supervision.json",
+      ".onecompany/handoffs.json",
+      ".onecompany/selftest/**",
+      "scripts/autonomy_guard.py",
+      "scripts/merge.py",
+      "scripts/handoff_runtime.py",
+      "scripts/handoff_validate.py",
+      "scripts/supervise.py",
+      "scripts/supervision_validate.py",
+      "scripts/simulate_supervision.py"
     ]
   },
   "supply_chain": {

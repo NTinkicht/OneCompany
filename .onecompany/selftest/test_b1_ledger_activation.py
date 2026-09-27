@@ -48,6 +48,7 @@ class B1LedgerActivationTests(unittest.TestCase):
             self.skipTest("B1 activation evidence is specific to the OneCompany source repository")
         self.ledger = json.loads((CONTROL / "ledger.json").read_text(encoding="utf-8"))
         self.supervision = json.loads((CONTROL / "supervision.json").read_text(encoding="utf-8"))
+        self.governance = json.loads((CONTROL / "governance.json").read_text(encoding="utf-8"))
 
     def test_team_room_is_activated_with_minimal_verified_publisher_set(self):
         self.assertTrue(self.ledger["enabled"])
@@ -65,16 +66,20 @@ class B1LedgerActivationTests(unittest.TestCase):
         self.assertNotIn("chatgpt-codex-connector[bot]", trusted)
         self.assertNotIn("dependabot[bot]", trusted)
 
-    def test_later_supervision_activation_does_not_expand_b1_authority(self):
+    def test_l4_supervision_keeps_b1_publisher_boundary_while_enabling_delivery(self):
         self.assertTrue(self.supervision["enabled"])
-        self.assertEqual(self.supervision["mode"], "notify")
+        self.assertEqual(self.supervision["mode"], "orchestrate")
         self.assertEqual(self.supervision["coordination"]["team_room_issue_number"], 45)
         self.assertTrue(self.supervision["github_actions"]["enabled"])
         self.assertTrue(self.supervision["github_actions"]["may_post_team_room"])
         self.assertFalse(self.supervision["github_actions"]["may_failover"])
         self.assertFalse(self.supervision["github_actions"]["may_merge"])
-        self.assertFalse(self.supervision["chatgpt_tasks"]["may_mutate"])
+        self.assertTrue(self.supervision["chatgpt_tasks"]["may_mutate"])
         self.assertEqual(self.ledger["trusted_publisher_logins"], ["NTinkicht"])
+        self.assertEqual(self.config["autonomy"]["level"], "L4")
+        self.assertTrue(self.config["autonomy"]["continue_when_ready_work_exists"])
+        self.assertTrue(self.config["no_idle"]["enabled"])
+        self.assertEqual(self.supervision["chatgpt_tasks"]["offset_minutes"], [0, 15, 30, 45])
 
     def test_read_smoke_is_read_only_and_uses_one_immutable_snapshot(self):
         workflow = ROOT / ".github" / "workflows" / "onecompany-ledger-read-smoke.yml"
@@ -157,6 +162,26 @@ class B1LedgerActivationTests(unittest.TestCase):
         self.assertIn("increase_autonomy_level", self.config["human_only_decisions"])
         self.assertIn("change_budget_policy", self.config["human_only_decisions"])
         self.assertIn("add_or_expand_credentials", self.config["human_only_decisions"])
+        self.assertIn("export_credentials_or_secrets", self.config["human_only_decisions"])
+        self.assertIn(
+            "amend_runtime_authority_or_control_plane",
+            self.config["human_only_decisions"],
+        )
+        always_human = set(self.governance["control_plane"]["always_human_paths"])
+        for path in {
+            ".onecompany/config.json",
+            ".onecompany/supervision.json",
+            ".onecompany/handoffs.json",
+            ".onecompany/selftest/**",
+            "scripts/autonomy_guard.py",
+            "scripts/merge.py",
+            "scripts/handoff_runtime.py",
+            "scripts/handoff_validate.py",
+            "scripts/supervise.py",
+            "scripts/supervision_validate.py",
+            "scripts/simulate_supervision.py",
+        }:
+            self.assertIn(path, always_human)
 
 
 if __name__ == "__main__":

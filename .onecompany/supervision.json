@@ -2,7 +2,7 @@
   "$schema": "./schemas/supervision.schema.json",
   "schema_version": "1.0",
   "enabled": true,
-  "mode": "notify",
+  "mode": "orchestrate",
   "continuous_operation": {
     "event_driven_first": true,
     "scheduled_reconciliation": true,
@@ -19,11 +19,16 @@
     "may_merge": false
   },
   "chatgpt_tasks": {
-    "enabled": false,
+    "enabled": true,
     "strategy": "four_staggered_hourly_supervisors",
-    "offset_minutes": [2, 17, 32, 47],
+    "offset_minutes": [
+      0,
+      15,
+      30,
+      45
+    ],
     "required_connected_app": "GitHub",
-    "may_mutate": false
+    "may_mutate": true
   },
   "scheduler_health": {
     "verify_active_daily": true,

@@ -90,6 +90,7 @@ def reset_control_plane(
     )
     config["autonomy"]["level"] = "L1"
     config["autonomy"]["continue_when_ready_work_exists"] = False
+    config.setdefault("no_idle", {})["enabled"] = False
     config["safety"]["emergency_stop"] = False
     save_json(CONTROL / "config.json", config)
 
@@ -142,6 +143,20 @@ def reset_control_plane(
     supervision["chatgpt_tasks"]["may_mutate"] = False
     supervision["coordination"]["team_room_issue_number"] = None
     save_json(CONTROL / "supervision.json", supervision)
+
+    # A repository created from the L4 source template starts at safe L1.
+    # Reset handoff runtime claims together with config/supervision so target
+    # validation cannot inherit source-repository mutation authority.
+    handoffs = load_json(CONTROL / "handoffs.json")
+    runtime = handoffs.setdefault("runtime", {})
+    runtime["current_autonomy_level"] = "L1"
+    runtime["github_actions_behavior"] = "reconcile_and_notify_only"
+    runtime["github_actions_mutation_allowed"] = False
+    runtime["scheduled_chatgpt_mutation_allowed"] = False
+    runtime["automatic_failover_allowed"] = False
+    runtime["automatic_merge_allowed"] = False
+    runtime["continuous_next_work_allowed"] = False
+    save_json(CONTROL / "handoffs.json", handoffs)
 
     save_json(
         CONTROL / "queue.json",

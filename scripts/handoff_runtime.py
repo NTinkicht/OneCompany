@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any
 
 import handoff
-from onecompany_lib import CONTROL, load_json
+from onecompany_lib import CONTROL, autonomy_number, load_json
 
 ROOT = Path(__file__).resolve().parents[1]
 SUPERVISE = ROOT / "scripts" / "supervise.py"
@@ -99,10 +99,31 @@ def reconcile_event(
 ) -> dict[str, Any]:
     policy = handoff.load_policy()
     supervision = load_json(CONTROL / "supervision.json")
+    config = load_json(CONTROL / "config.json")
     if not handoff.activation_ready(policy):
         raise RuntimeError("B2 handoff activation is not ready")
-    if supervision.get("enabled") is not True:
+    if supervision.get("enabled") is not True and not integration_smoke:
         raise RuntimeError("B3 supervision is not enabled")
+
+    try:
+        level = autonomy_number(config.get("autonomy", {}).get("level", "L0"))
+    except ValueError as exc:
+        raise RuntimeError(f"invalid autonomy policy: {exc}") from exc
+    level_name = f"L{level}"
+    chatgpt = supervision.get("chatgpt_tasks", {})
+    github = supervision.get("github_actions", {})
+    scheduled_mutation = bool(
+        level >= 3
+        and supervision.get("mode") == "orchestrate"
+        and chatgpt.get("enabled") is True
+        and chatgpt.get("may_mutate") is True
+    )
+    continuous_next = bool(
+        scheduled_mutation
+        and level >= 4
+        and config.get("autonomy", {}).get("continue_when_ready_work_exists") is True
+        and config.get("no_idle", {}).get("enabled") is True
+    )
 
     kind = event_kind(event_name, action, payload)
     subject = event_subject(event_name, payload)
@@ -123,10 +144,12 @@ def reconcile_event(
             "activation_state": "INTEGRATION_SMOKE",
             "trusted_default_branch_reconciliation_performed": False,
             "reason": "candidate checkout cannot derive durable authority",
-            "autonomy_level": "L1",
+            "autonomy_level": "UNTRUSTED_CANDIDATE",
+            "runtime_actor": "candidate_integration_smoke",
             "mutation_authorized": False,
             "automatic_failover_authorized": False,
             "automatic_merge_authorized": False,
+            "continuous_next_work_authorized": False,
             "human_sovereignty_preserved": True,
             "zero_extra_spend_required": True,
         }
@@ -141,10 +164,13 @@ def reconcile_event(
         "activation_state": "ACTIVE",
         "trusted_default_branch_reconciliation_performed": True,
         "supervision": snapshot,
-        "autonomy_level": "L1",
-        "mutation_authorized": False,
-        "automatic_failover_authorized": False,
-        "automatic_merge_authorized": False,
+        "autonomy_level": level_name,
+        "runtime_actor": "github_actions_reconciler",
+        "mutation_authorized": bool(github.get("may_failover") or github.get("may_merge")),
+        "scheduled_chatgpt_mutation_authorized": scheduled_mutation,
+        "automatic_failover_authorized": scheduled_mutation and level >= 3,
+        "automatic_merge_authorized": scheduled_mutation and level >= 3,
+        "continuous_next_work_authorized": continuous_next,
         "human_sovereignty_preserved": True,
         "zero_extra_spend_required": True,
     }

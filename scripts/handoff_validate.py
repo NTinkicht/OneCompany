@@ -5,11 +5,14 @@ from __future__ import annotations
 import sys
 
 import handoff
+from onecompany_lib import CONTROL, autonomy_number, load_json
 
 
 def main() -> int:
     try:
         policy = handoff.load_policy()
+        config = load_json(CONTROL / "config.json")
+        supervision = load_json(CONTROL / "supervision.json")
         errors: list[str] = []
         activation = policy.get("activation") or {}
         safety = policy.get("safety") or {}
@@ -37,16 +40,64 @@ def main() -> int:
         elif any(not isinstance(v, list) or not v for v in mapping.values()):
             errors.append("every trusted automation publisher requires scoped event types")
 
-        required_runtime = {
-            "event_reconciliation_enabled": True,
-            "current_autonomy_level": "L1",
-            "l1_behavior": "reconcile_and_notify_only",
-            "mutation_requires_preexisting_authority": True,
-            "read_only_unattended_dispatch_allowed": True,
-            "write_dispatch_requires_canonical_lease": True,
-            "automatic_failover_allowed": False,
-            "automatic_merge_allowed": False,
-        }
+        level = autonomy_number(config.get("autonomy", {}).get("level", "L0"))
+        scheduled_mutation = bool(
+            level >= 3
+            and supervision.get("mode") == "orchestrate"
+            and supervision.get("chatgpt_tasks", {}).get("enabled") is True
+            and supervision.get("chatgpt_tasks", {}).get("may_mutate") is True
+        )
+        if level == 1:
+            # Fresh/customer installations intentionally remain fail-closed at
+            # L1. Accept both the historical L1 runtime shape and the newer
+            # normalized runtime shape produced by current bootstrap code.
+            if "github_actions_behavior" in runtime:
+                required_runtime = {
+                    "event_reconciliation_enabled": True,
+                    "current_autonomy_level": "L1",
+                    "github_actions_behavior": "reconcile_and_notify_only",
+                    "mutation_requires_preexisting_authority": True,
+                    "read_only_unattended_dispatch_allowed": True,
+                    "write_dispatch_requires_canonical_lease": True,
+                    "github_actions_mutation_allowed": False,
+                    "scheduled_chatgpt_mutation_allowed": False,
+                    "automatic_failover_allowed": False,
+                    "automatic_merge_allowed": False,
+                    "continuous_next_work_allowed": False,
+                }
+            else:
+                required_runtime = {
+                    "event_reconciliation_enabled": True,
+                    "current_autonomy_level": "L1",
+                    "l1_behavior": "reconcile_and_notify_only",
+                    "mutation_requires_preexisting_authority": True,
+                    "read_only_unattended_dispatch_allowed": True,
+                    "write_dispatch_requires_canonical_lease": True,
+                    "automatic_failover_allowed": False,
+                    "automatic_merge_allowed": False,
+                }
+        else:
+            required_runtime = {
+                "event_reconciliation_enabled": True,
+                "current_autonomy_level": f"L{level}",
+                "github_actions_behavior": "reconcile_and_notify_only",
+                "mutation_requires_preexisting_authority": True,
+                "read_only_unattended_dispatch_allowed": True,
+                "write_dispatch_requires_canonical_lease": True,
+                "github_actions_mutation_allowed": False,
+                "scheduled_chatgpt_mutation_allowed": scheduled_mutation,
+                "automatic_failover_allowed": scheduled_mutation and level >= 3,
+                "automatic_merge_allowed": scheduled_mutation and level >= 3,
+                "continuous_next_work_allowed": (
+                    scheduled_mutation
+                    and level >= 4
+                    and config.get("autonomy", {}).get(
+                        "continue_when_ready_work_exists"
+                    )
+                    is True
+                    and config.get("no_idle", {}).get("enabled") is True
+                ),
+            }
         for key, expected in required_runtime.items():
             if runtime.get(key) != expected:
                 errors.append(f"handoff runtime invariant mismatch:{key}")
@@ -71,7 +122,7 @@ def main() -> int:
             for error in errors:
                 print(f"- {error}")
             return 1
-        print("B2 handoff validation PASS (active reconciliation, L1 notify-only mutation boundary).")
+        print("B2 handoff validation PASS (active reconciliation; autonomy mutation boundary enforced by current policy).")
         return 0
     except Exception as exc:
         print(f"B2 handoff validation FAIL: {exc}")

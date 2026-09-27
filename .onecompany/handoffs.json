@@ -30,13 +30,16 @@
   },
   "runtime": {
     "event_reconciliation_enabled": true,
-    "current_autonomy_level": "L1",
-    "l1_behavior": "reconcile_and_notify_only",
+    "current_autonomy_level": "L4",
+    "github_actions_behavior": "reconcile_and_notify_only",
     "mutation_requires_preexisting_authority": true,
     "read_only_unattended_dispatch_allowed": true,
     "write_dispatch_requires_canonical_lease": true,
-    "automatic_failover_allowed": false,
-    "automatic_merge_allowed": false
+    "github_actions_mutation_allowed": false,
+    "scheduled_chatgpt_mutation_allowed": true,
+    "automatic_failover_allowed": true,
+    "automatic_merge_allowed": true,
+    "continuous_next_work_allowed": true
   },
   "safety": {
     "events_are_wake_hints_only": true,

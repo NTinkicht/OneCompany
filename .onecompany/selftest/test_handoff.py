@@ -55,8 +55,19 @@ class HandoffTests(unittest.TestCase):
         self.assertTrue(policy["activation"]["b1_protected_main_proven"])
         self.assertTrue(policy["activation"]["ledger_replay_proven"])
         self.assertGreaterEqual(len(policy["activation"]["evidence_refs"]), 3)
-        self.assertFalse(policy["runtime"]["automatic_failover_allowed"])
-        self.assertFalse(policy["runtime"]["automatic_merge_allowed"])
+        runtime = policy["runtime"]
+        self.assertFalse(runtime.get("github_actions_mutation_allowed", False))
+        if runtime.get("current_autonomy_level") == "L4":
+            self.assertTrue(runtime["scheduled_chatgpt_mutation_allowed"])
+            self.assertTrue(runtime["automatic_failover_allowed"])
+            self.assertTrue(runtime["automatic_merge_allowed"])
+            self.assertTrue(runtime["continuous_next_work_allowed"])
+        else:
+            self.assertEqual(runtime.get("current_autonomy_level"), "L1")
+            self.assertFalse(runtime.get("scheduled_chatgpt_mutation_allowed", False))
+            self.assertFalse(runtime["automatic_failover_allowed"])
+            self.assertFalse(runtime["automatic_merge_allowed"])
+            self.assertFalse(runtime.get("continuous_next_work_allowed", False))
 
     def test_duplicate_ready_deliveries_converge_on_one_proposal_identity(self):
         snapshot = self._snapshot(self._ready_state())
@@ -172,6 +183,41 @@ class HandoffTests(unittest.TestCase):
         first = handoff_runtime.wake_id("delivery", "pull_request", "synchronize", "pr:61")
         second = handoff_runtime.wake_id("delivery", "pull_request", "synchronize", "pr:61")
         self.assertEqual(first, second)
+
+    def test_runtime_reports_l4_external_supervisor_authority(self):
+        if self._policy()["runtime"].get("current_autonomy_level") != "L4":
+            self.skipTest("L4 runtime authority is source-repository specific")
+        with patch.object(handoff_runtime, "run_supervision") as supervise:
+            supervise.return_value = {
+                "action": "START_READY_WORK",
+                "dispatchable_start_candidates": ["WU-L4-TEST"],
+            }
+            result = handoff_runtime.reconcile_event(
+                "workflow_run",
+                None,
+                {"workflow_run": {"id": 123}},
+                "delivery-l4",
+            )
+        self.assertEqual(result["autonomy_level"], "L4")
+        self.assertEqual(result["runtime_actor"], "github_actions_reconciler")
+        self.assertFalse(result["mutation_authorized"])
+        self.assertTrue(result["scheduled_chatgpt_mutation_authorized"])
+        self.assertTrue(result["automatic_failover_authorized"])
+        self.assertTrue(result["automatic_merge_authorized"])
+        self.assertTrue(result["continuous_next_work_authorized"])
+
+    def test_integration_smoke_never_derives_candidate_authority(self):
+        result = handoff_runtime.reconcile_event(
+            "workflow_dispatch",
+            None,
+            {},
+            "candidate-smoke",
+            integration_smoke=True,
+        )
+        self.assertEqual(result["autonomy_level"], "UNTRUSTED_CANDIDATE")
+        self.assertFalse(result["mutation_authorized"])
+        self.assertFalse(result["automatic_merge_authorized"])
+        self.assertFalse(result["continuous_next_work_authorized"])
 
     def test_runtime_supervision_posts_with_one_invocation(self):
         """Use one live supervision snapshot when Team Room posting is enabled."""

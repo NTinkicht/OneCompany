@@ -113,9 +113,10 @@ insufficient for a defensible conclusion, return INSUFFICIENT_EVIDENCE, never as
 Return ONLY one compact UTF-8 JSON object, no markdown. Exact keys:
 version=1; repo=<trusted repo>; pr=<trusted integer>; head_sha=<trusted head>;
 base_sha=<trusted base>; verdict=NO_BLOCKING_FINDINGS or CHANGES_REQUIRED or
-INSUFFICIENT_EVIDENCE; summary=string <=1800 chars; findings=up to 12 objects with
+INSUFFICIENT_EVIDENCE; summary=string <=1200 chars; findings=up to 12 objects with
 exact keys severity (INFO/LOW/MEDIUM/MAJOR/HIGH/CRITICAL), path (changed path),
-line (positive integer), description (<=1200 chars).
+line (positive integer), description (<=800 chars). The complete UTF-8 JSON
+result must remain within 15000 bytes.
 """
 
 
@@ -487,9 +488,15 @@ def build_prompt() -> None:
         ).strip()
         if actual != head:
             raise ValueError("EXTERNAL_REVIEW_CHECKOUT_STALE")
+        merge_base = subprocess.check_output(
+            ["git", "-C", str(root), "merge-base", base, head],
+            text=True, timeout=20,
+        ).strip()
+        if not SHA.fullmatch(merge_base):
+            raise ValueError("EXTERNAL_REVIEW_MERGE_BASE_INVALID")
         diff = subprocess.check_output(
             ["git", "-C", str(root), "diff", "--no-ext-diff", "--no-textconv",
-             "--no-color", "--no-renames", base, head, "--"],
+             "--no-color", "--no-renames", merge_base, head, "--"],
             text=True, timeout=30,
         )
         encoded = diff.encode("utf-8")
@@ -497,14 +504,15 @@ def build_prompt() -> None:
             raise ValueError("EXTERNAL_REVIEW_DIFF_BOUND_BLOCKED")
         names = subprocess.check_output(
             ["git", "-C", str(root), "diff", "--no-ext-diff", "--no-renames",
-             "--name-only", base, head, "--"],
+             "--name-only", merge_base, head, "--"],
             text=True, timeout=20,
         ).splitlines()
         validate_diff(names, diff)
         prompt = (
             REVIEW_INSTRUCTIONS
-            + f"\nTRUSTED TARGET: repo={repo}; pr={number}; head={head}; base={base}.\n"
-            + "BEGIN UNTRUSTED COMPLETE BOUNDED DIFF\n"
+            + f"\nTRUSTED TARGET: repo={repo}; pr={number}; head={head}; "
+              f"base={base}; merge_base={merge_base}.\n"
+            + "BEGIN UNTRUSTED COMPLETE BOUNDED PR DIFF\n"
             + diff
             + "\nEND UNTRUSTED COMPLETE BOUNDED DIFF\n"
         )
@@ -514,7 +522,7 @@ def build_prompt() -> None:
         Path("/tmp/onecompany-external-review-meta.json").write_text(
             json.dumps({
                 "repo": repo, "pr": number, "head_sha": head, "base_sha": base,
-                "changed_files": names,
+                "merge_base_sha": merge_base, "changed_files": names,
             }, sort_keys=True) + "\n",
             encoding="utf-8",
         )
@@ -560,7 +568,7 @@ def parse_result(raw: bytes, *, repo: str, pr: int, head: str, base: str, change
         or value["repo"] != repo
         or type(value["pr"]) is not int or value["pr"] != pr
         or value["head_sha"] != head or value["base_sha"] != base
-        or value["verdict"] not in VERDICTS or not _plain(value["summary"], 1800)
+        or value["verdict"] not in VERDICTS or not _plain(value["summary"], 1200)
         or type(value["findings"]) is not list or len(value["findings"]) > 12
     ):
         raise ValueError("EXTERNAL_REVIEW_RESULT_CONTENT_INVALID")
@@ -571,7 +579,7 @@ def parse_result(raw: bytes, *, repo: str, pr: int, head: str, base: str, change
             finding["severity"] not in SEVERITIES
             or finding["path"] not in changed
             or type(finding["line"]) is not int or not 1 <= finding["line"] <= 1_000_000
-            or not _plain(finding["description"], 1200)
+            or not _plain(finding["description"], 800)
         ):
             raise ValueError("EXTERNAL_REVIEW_FINDING_INVALID")
     blocking = {"MEDIUM", "MAJOR", "HIGH", "CRITICAL"}

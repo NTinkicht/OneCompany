@@ -19,6 +19,8 @@ STRICT_CODEOWNERS = base64.b64encode(
 ).decode("ascii")
 
 
+REPO_ID = 4242
+
 STRICT_SPECS = [{
     "name": "validate",
     "app_slug": "github-actions",
@@ -171,6 +173,8 @@ class ChecksOnlyEnforcementTests(unittest.TestCase):
         def strict_api(path):
             if path == "apps/github-actions":
                 return 0, {"id": 15368, "slug": "github-actions"}, ""
+            if path == "repos/example/app":
+                return 0, {"id": REPO_ID, "full_name": "example/app"}, ""
             if "/contents/.github/CODEOWNERS?ref=" in path:
                 return 0, {"encoding": "base64", "content": STRICT_CODEOWNERS}, ""
             if path.endswith("/protection"):
@@ -196,6 +200,23 @@ class ChecksOnlyEnforcementTests(unittest.TestCase):
                         },
                         {"type": "deletion"},
                         {"type": "non_fast_forward"},
+                    {
+                        "type": "workflows",
+                        "parameters": {
+                            "workflows": [
+                                {
+                                    "path": ".github/workflows/onecompany-validate.yml",
+                                    "repository_id": REPO_ID,
+                                    "ref": "main",
+                                },
+                                {
+                                    "path": controls.REVIEW_AUTH_WORKFLOW_PATH,
+                                    "repository_id": REPO_ID,
+                                    "ref": "main",
+                                },
+                            ],
+                        },
+                    },
                         {
                             "type": "required_status_checks",
                             "parameters": {
@@ -242,6 +263,7 @@ class ChecksOnlyEnforcementTests(unittest.TestCase):
                                     "required_approving_review_count": 1,
                                     "dismiss_stale_reviews_on_push": fresh,
                                     "require_last_push_approval": fresh,
+                                    "required_review_thread_resolution": fresh,
                                     "require_code_owner_review": fresh,
                                 },
                             },
@@ -291,6 +313,7 @@ class ChecksOnlyEnforcementTests(unittest.TestCase):
                         "required_approving_review_count": 1,
                         "dismiss_stale_reviews_on_push": True,
                         "require_last_push_approval": True,
+                        "required_review_thread_resolution": True,
                         "require_code_owner_review": True,
                     },
                 }],
@@ -304,6 +327,23 @@ class ChecksOnlyEnforcementTests(unittest.TestCase):
                 "rules": [
                     {"type": "deletion"},
                     {"type": "non_fast_forward"},
+                    {
+                        "type": "workflows",
+                        "parameters": {
+                            "workflows": [
+                                {
+                                    "path": ".github/workflows/onecompany-validate.yml",
+                                    "repository_id": REPO_ID,
+                                    "ref": "main",
+                                },
+                                {
+                                    "path": controls.REVIEW_AUTH_WORKFLOW_PATH,
+                                    "repository_id": REPO_ID,
+                                    "ref": "main",
+                                },
+                            ],
+                        },
+                    },
                     {
                         "type": "required_status_checks",
                         "parameters": {
@@ -321,6 +361,8 @@ class ChecksOnlyEnforcementTests(unittest.TestCase):
         def api(path):
             if path == "apps/github-actions":
                 return 0, {"id": 15368, "slug": "github-actions"}, ""
+            if path == "repos/example/app":
+                return 0, {"id": REPO_ID, "full_name": "example/app"}, ""
             if "/contents/.github/CODEOWNERS?ref=" in path:
                 return 0, {"encoding": "base64", "content": STRICT_CODEOWNERS}, ""
             if path.endswith("/protection"):

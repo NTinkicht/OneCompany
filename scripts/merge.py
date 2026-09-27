@@ -467,6 +467,17 @@ def main() -> int:
         print("REFUSED: base-configured default branch differs from GitHub protected default branch")
         return 2
 
+    executor_head = run(["git", "rev-parse", "HEAD"])
+    if executor_head.returncode != 0:
+        print("REFUSED: cannot establish merge-executor checkout SHA")
+        return 2
+    if executor_head.stdout.strip() != live_base:
+        print(
+            "REFUSED: native merge executor is not running from the exact protected "
+            "PR base; control-plane authority must come from trusted base code"
+        )
+        return 2
+
     required_platform_specs, required_platform_error = trusted_required_check_specs(
         repo, live_base
     )

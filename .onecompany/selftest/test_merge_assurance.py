@@ -170,6 +170,13 @@ class MergeAssuranceTests(unittest.TestCase):
         stack.enter_context(
             patch.object(
                 merge,
+                "strict_merge_platform_enforcement",
+                return_value=True,
+            )
+        )
+        stack.enter_context(
+            patch.object(
+                merge,
                 "_platform_authors",
                 return_value=({"implementer-example"}, []),
             )

@@ -155,6 +155,78 @@ class ChecksOnlyEnforcementTests(unittest.TestCase):
         bypassable["enforce_admins"] = {"enabled": False}
         self.assertFalse(check(bypassable)["review_gate_enforced"])
 
+    def test_strict_merge_platform_ruleset_passes_only_with_non_bypassable_pr_flow(self):
+        def strict_api(path):
+            if path.endswith("/protection"):
+                return 1, None, "no classic protection"
+            if path.endswith("/rulesets"):
+                return 0, [{"id": 7, "enforcement": "active"}], ""
+            if path.endswith("/rulesets/7"):
+                return 0, {
+                    "id": 7,
+                    "enforcement": "active",
+                    "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+                    "bypass_actors": [],
+                    "rules": [
+                        {"type": "pull_request", "parameters": {}},
+                        {"type": "deletion"},
+                        {"type": "non_fast_forward"},
+                        {
+                            "type": "required_status_checks",
+                            "parameters": {
+                                "strict_required_status_checks_policy": True,
+                                "required_status_checks": [{"context": "validate"}],
+                            },
+                        },
+                    ],
+                }, ""
+            raise AssertionError(path)
+
+        with patch.object(controls, "gh_api", side_effect=strict_api):
+            self.assertTrue(
+                controls.strict_merge_platform_enforcement(
+                    "example/app", "main", {"validate"}
+                )
+            )
+
+    def test_strict_merge_platform_ruleset_rejects_bypass_or_non_strict_checks(self):
+        def make_api(*, bypass=False, strict=True):
+            def api(path):
+                if path.endswith("/protection"):
+                    return 1, None, "no classic protection"
+                if path.endswith("/rulesets"):
+                    return 0, [{"id": 8, "enforcement": "active"}], ""
+                if path.endswith("/rulesets/8"):
+                    return 0, {
+                        "id": 8,
+                        "enforcement": "active",
+                        "conditions": {"ref_name": {"include": ["~DEFAULT_BRANCH"], "exclude": []}},
+                        "bypass_actors": ([{"actor_id": 1}] if bypass else []),
+                        "rules": [
+                            {"type": "pull_request", "parameters": {}},
+                            {"type": "deletion"},
+                            {"type": "non_fast_forward"},
+                            {
+                                "type": "required_status_checks",
+                                "parameters": {
+                                    "strict_required_status_checks_policy": strict,
+                                    "required_status_checks": [{"context": "validate"}],
+                                },
+                            },
+                        ],
+                    }, ""
+                raise AssertionError(path)
+            return api
+
+        for kwargs in ({"bypass": True}, {"strict": False}):
+            with self.subTest(**kwargs):
+                with patch.object(controls, "gh_api", side_effect=make_api(**kwargs)):
+                    self.assertFalse(
+                        controls.strict_merge_platform_enforcement(
+                            "example/app", "main", {"validate"}
+                        )
+                    )
+
     def test_missing_required_check_is_a_blocker_even_without_review_gate(self):
         """Keep exact-head status checks mechanically required."""
         with (

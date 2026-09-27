@@ -42,6 +42,36 @@ class ExternalMistralReviewTests(unittest.TestCase):
                 )
             )
 
+    def test_dispatch_rejects_normalized_mistral_identity_variants(self):
+        template = (
+            "MISTRAL_EXTERNAL_REVIEW_V1\n"
+            "repo: NTinkicht/veritas-atlas\npr: 21\nhead_sha: " + "a" * 40
+            + "\nbase_sha: " + "b" * 40 + "\nmaterial_authors: {author}\n"
+        )
+        for author in ("mistral-vibe-cloud", "mistral_vibe_worker", "mistral-reviewer"):
+            with self.subTest(author=author):
+                with self.assertRaisesRegex(ValueError, "MISTRAL_SELF_REVIEW_BLOCKED"):
+                    m.parse_dispatch(template.format(author=author))
+
+    def test_secret_guard_blocks_standalone_provider_credentials(self):
+        samples = (
+            "ghp_" + "A" * 36,
+            "github_pat_" + "A" * 30,
+            "AKIA" + "A" * 16,
+            "sk-" + "A" * 32,
+            "xoxb-" + "A" * 30,
+        )
+        for secret in samples:
+            with self.subTest(prefix=secret[:8]):
+                with self.assertRaisesRegex(
+                    ValueError, "EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED"
+                ):
+                    m.validate_diff(
+                        ["src/client.py"],
+                        "diff --git a/src/client.py b/src/client.py\n"
+                        "@@ -1 +1 @@\n+client.connect(\"" + secret + "\")",
+                    )
+
     def test_secret_guard_blocks_sensitive_path_literal_and_context(self):
         with self.assertRaises(ValueError):
             m.validate_diff(

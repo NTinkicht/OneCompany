@@ -63,6 +63,7 @@ SOURCE_INSTALLATION_SELFTESTS = frozenset({
     ".onecompany/selftest/test_phase1_preview_bundle.py",
     ".onecompany/selftest/test_phase1_vertical_smoke.py",
     ".onecompany/selftest/test_phase1_mission_evidence.py",
+    ".onecompany/selftest/test_gemma_l4_worker.py",
 })
 
 # The source company's strategic plan must never become another company's
@@ -90,6 +91,9 @@ SOURCE_ONLY_PLANNING_FILES = frozenset({
     "scripts/phase1_mission_evidence.py",
     "docs/PHASE1-MISSION-EVIDENCE.md",
     "docs/PHASE1-VERTICAL-SMOKE.md",
+    "scripts/gemma_l4_worker.py",
+    ".github/prompts/gemma-l4-worker.md",
+    ".github/workflows/gemma-l4-worker.yml",
 })
 SOURCE_INSTALLATION_EXCLUSIONS = SOURCE_INSTALLATION_SELFTESTS | SOURCE_ONLY_PLANNING_FILES
 
@@ -522,10 +526,6 @@ def initialize_control_plane(
     config.setdefault("project", {})["name"] = project_name
     config["project"]["repository"] = repository
     config["project"]["default_branch"] = default_branch
-    config.setdefault("autonomy", {})["level"] = "L1"
-    config["autonomy"]["continue_when_ready_work_exists"] = False
-    config.setdefault("no_idle", {})["enabled"] = False
-    config.setdefault("safety", {})["emergency_stop"] = False
     write_json(config_path, config)
 
     readiness_path = target / ".onecompany" / "readiness.json"
@@ -601,22 +601,6 @@ def initialize_control_plane(
     chatgpt_tasks["enabled"] = False
     chatgpt_tasks["may_mutate"] = False
     write_json(supervision_path, supervision)
-
-    # The source repository may operate at a higher autonomy level than a
-    # freshly bootstrapped target. Candidate/source handoff runtime claims must
-    # never leak authority into a new company whose config is deliberately
-    # reset to L1.
-    handoffs_path = target / ".onecompany" / "handoffs.json"
-    handoffs = json.loads(handoffs_path.read_text(encoding="utf-8"))
-    runtime = handoffs.setdefault("runtime", {})
-    runtime["current_autonomy_level"] = "L1"
-    runtime["github_actions_behavior"] = "reconcile_and_notify_only"
-    runtime["github_actions_mutation_allowed"] = False
-    runtime["scheduled_chatgpt_mutation_allowed"] = False
-    runtime["automatic_failover_allowed"] = False
-    runtime["automatic_merge_allowed"] = False
-    runtime["continuous_next_work_allowed"] = False
-    write_json(handoffs_path, handoffs)
 
     write_json(target / ".onecompany" / "queue.json", {"$schema": "./schemas/queue.schema.json", "schema_version": "1.1", "work_units": []})
     write_json(target / ".onecompany" / "portfolio.json", {"$schema": "./schemas/portfolio.schema.json", "schema_version": "1.0", "entities": [], "links": []})

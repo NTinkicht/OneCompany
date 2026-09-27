@@ -1,0 +1,50 @@
+name: Gemma L4 Worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: "Bounded engineering task"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  gemma:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+      - name: Run offline Gemma worker regression tests
+        run: python -m unittest discover -s .onecompany/selftest -p 'test_gemma_l4_worker.py'
+      - name: Run bounded zero-cost Gemma task
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          TASK: ${{ inputs.task }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "${OPENROUTER_API_KEY:-}" || { echo "OPENROUTER_API_KEY is not configured"; exit 78; }
+          git diff --quiet && git diff --cached --quiet || { echo "Checkout must start clean"; exit 1; }
+          HEAD_BEFORE="$(git rev-parse HEAD)"
+          git fetch --no-tags origin "$DEFAULT_BRANCH"
+          python scripts/gemma_l4_worker.py \
+            --task "$TASK" \
+            --base-ref "origin/$DEFAULT_BRANCH" \
+            --output gemma-l4-result.md
+          test "$(git rev-parse HEAD)" = "$HEAD_BEFORE"
+          git diff --exit-code -- . ':!gemma-l4-result.md'
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: gemma-l4-result
+          path: gemma-l4-result.md
+          if-no-files-found: error

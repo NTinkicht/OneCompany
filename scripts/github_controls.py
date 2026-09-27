@@ -373,9 +373,9 @@ def strict_merge_platform_enforcement(
 
     aggregate_rule_types: set[str] = set()
     aggregate_checks: set[tuple[str, int]] = set()
+    strict_aggregate_checks: set[tuple[str, int]] = set()
     aggregate_workflows: set[str] = set()
     pull_request_ok = False
-    strict_checks_seen = False
 
     for summary in rulesets:
         if (
@@ -410,8 +410,7 @@ def strict_merge_platform_enforcement(
                 params = rule.get("parameters")
                 if not isinstance(params, dict):
                     return False
-                if params.get("strict_required_status_checks_policy") is True:
-                    strict_checks_seen = True
+                strict_rule = params.get("strict_required_status_checks_policy") is True
                 configured = params.get("required_status_checks")
                 if not isinstance(configured, list):
                     return False
@@ -421,7 +420,10 @@ def strict_merge_platform_enforcement(
                     context = item.get("context")
                     integration_id = item.get("integration_id")
                     if isinstance(context, str) and type(integration_id) is int:
-                        aggregate_checks.add((context, integration_id))
+                        pair = (context, integration_id)
+                        aggregate_checks.add(pair)
+                        if strict_rule:
+                            strict_aggregate_checks.add(pair)
 
             if kind == "workflows":
                 params = rule.get("parameters")
@@ -458,7 +460,6 @@ def strict_merge_platform_enforcement(
     required_pairs = set(publishers.items())
     return bool(
         pull_request_ok
-        and strict_checks_seen
         and {
             "pull_request",
             "required_status_checks",
@@ -467,6 +468,7 @@ def strict_merge_platform_enforcement(
             "workflows",
         }.issubset(aggregate_rule_types)
         and required_pairs.issubset(aggregate_checks)
+        and required_pairs.issubset(strict_aggregate_checks)
         and required_workflow_paths.issubset(aggregate_workflows)
     )
 

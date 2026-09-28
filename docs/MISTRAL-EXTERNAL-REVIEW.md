@@ -17,7 +17,7 @@ material_authors: chatgpt
 
 The workflow verifies the owner dispatch and exact public target, checks material
 author independence, checks out the target without credentials, builds a bounded
-complete base-to-head diff, rejects sensitive paths and secret-like evidence,
+complete merge-base-to-head diff (with the current base SHA retained as provenance), rejects sensitive paths and secret-like evidence,
 enforces zero-additional-spend Mistral preflight, and gives the model no tools.
 
 The workflow publishes a github-actions[bot] result on Issue #130 and seals the

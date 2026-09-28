@@ -128,13 +128,9 @@ jobs:
 
       - name: Recheck live emergency stop before provider invocation
         if: steps.preflight.outputs.ready == 'true'
-        shell: bash
-        run: |
-          python -I - <<'PY'
-          import json
-          config = json.load(open(".onecompany/config.json", encoding="utf-8"))
-          assert config["safety"]["emergency_stop"] is False, "EMERGENCY_STOP_ACTIVE"
-          PY
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -I scripts/mistral_external_review.py safety
 
       - name: Install pinned Mistral Vibe
         if: steps.preflight.outputs.ready == 'true'
@@ -187,6 +183,12 @@ jobs:
           status="$(mktemp)"
           GITHUB_OUTPUT="$status" python -I scripts/mistral_external_review.py prepare
           grep -qx 'ready=true' "$status"
+
+      - name: Recheck live emergency stop before publication
+        if: steps.result.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -I scripts/mistral_external_review.py safety
 
       - name: Publish exact external review evidence on OneCompany wake bus
         if: steps.result.outputs.ready == 'true'

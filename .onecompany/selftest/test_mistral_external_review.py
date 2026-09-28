@@ -557,5 +557,55 @@ class ExternalMistralReviewTests(unittest.TestCase):
         self.assertIn('"docs/MISTRAL-EXTERNAL-REVIEW.md"', bootstrap)
 
 
+    def test_additional_standalone_credentials_fail_closed(self):
+        samples = [
+            "AIza" + "A" * 35,
+            "glpat-" + "A" * 24,
+            "npm_" + "A" * 32,
+        ]
+        for value in samples:
+            with self.subTest(value=value[:8]):
+                with self.assertRaisesRegex(
+                    ValueError, "EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED"
+                ):
+                    m.validate_diff(["src/app.py"], f"+client.connect({value!r})")
+
+    def test_mistral_domain_display_name_and_coauthor_are_rejected(self):
+        cases = [
+            {
+                "sha": "a" * 40,
+                "author": {"login": "NTinkicht"},
+                "committer": {"login": "web-flow"},
+                "commit": {
+                    "message": "change\n\nMaterial-Author: chatgpt",
+                    "author": {"name": "Alice", "email": "vibe@mistral.ai"},
+                    "committer": {"name": "GitHub", "email": "noreply@github.com"},
+                },
+            },
+            {
+                "sha": "a" * 40,
+                "author": {"login": "NTinkicht"},
+                "committer": {"login": "web-flow"},
+                "commit": {
+                    "message": (
+                        "change\n\nMaterial-Author: chatgpt\n"
+                        "Co-authored-by: Mistral Vibe <worker@example.com>"
+                    ),
+                    "author": {"name": "Alice", "email": "alice@example.com"},
+                    "committer": {"name": "GitHub", "email": "noreply@github.com"},
+                },
+            },
+        ]
+        for commits in cases:
+            with self.subTest(message=commits["commit"]["message"]):
+                with mock.patch.object(m, "public_api", return_value=[commits]):
+                    with self.assertRaisesRegex(
+                        ValueError, "MISTRAL_SELF_REVIEW_BLOCKED"
+                    ):
+                        m.verify_material_authors(
+                            "NTinkicht/veritas-atlas", 21, "a" * 40, ("chatgpt",)
+                        )
+
+
 if __name__ == "__main__":
     unittest.main()

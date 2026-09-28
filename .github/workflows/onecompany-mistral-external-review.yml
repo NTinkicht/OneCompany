@@ -1,9 +1,19 @@
 name: OneCompany Mistral External Exact-Head Review
-run-name: External Mistral review dispatch ${{ github.event.comment.id }}
+run-name: External Mistral review dispatch ${{ github.event.comment.id || inputs.source_comment_id }}
 
 on:
   issue_comment:
     types: [created]
+  workflow_dispatch:
+    inputs:
+      dispatch_body:
+        description: Authenticated bounded external-review dispatch body
+        required: true
+        type: string
+      source_comment_id:
+        description: Durable OneCompany wake-bus comment id
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -17,13 +27,16 @@ concurrency:
 jobs:
   external-review:
     if: >-
-      github.event.issue.number == 130 &&
-      github.event.issue.pull_request == null &&
-      (github.actor == 'NTinkicht' ||
-       (github.actor == 'github-actions[bot]' &&
-        contains(github.event.comment.body, 'ONECOMPANY_L4_AUTO_DISPATCH_V1'))) &&
-      contains(github.event.comment.body, '@mistral-vibe') &&
-      contains(github.event.comment.body, 'MISTRAL_EXTERNAL_REVIEW_V1')
+      (github.event_name == 'issue_comment' &&
+       github.event.issue.number == 130 &&
+       github.event.issue.pull_request == null &&
+       github.actor == 'NTinkicht' &&
+       contains(github.event.comment.body, '@mistral-vibe') &&
+       contains(github.event.comment.body, 'MISTRAL_EXTERNAL_REVIEW_V1')) ||
+      (github.event_name == 'workflow_dispatch' &&
+       contains(inputs.dispatch_body, 'ONECOMPANY_L4_AUTO_DISPATCH_V1') &&
+       contains(inputs.dispatch_body, '@mistral-vibe') &&
+       contains(inputs.dispatch_body, 'MISTRAL_EXTERNAL_REVIEW_V1'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -47,7 +60,7 @@ jobs:
         id: target
         env:
           GH_TOKEN: ${{ github.token }}
-          DISPATCH_BODY: ${{ github.event.comment.body }}
+          DISPATCH_BODY: ${{ github.event.comment.body || inputs.dispatch_body }}
         run: python -I scripts/mistral_external_review.py prepare
 
       - name: Checkout exact public target without credentials
@@ -154,14 +167,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_RUN_ID: ${{ github.run_id }}
-          SOURCE_COMMENT_ID: ${{ github.event.comment.id }}
+          SOURCE_COMMENT_ID: ${{ github.event.comment.id || inputs.source_comment_id }}
         run: python -I scripts/mistral_external_review.py validate
 
       - name: Recheck target before durable publication
         if: steps.result.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          DISPATCH_BODY: ${{ github.event.comment.body }}
+          DISPATCH_BODY: ${{ github.event.comment.body || inputs.dispatch_body }}
         shell: bash
         run: |
           set -euo pipefail

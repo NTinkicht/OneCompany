@@ -15,6 +15,7 @@ HOST_ISSUE = 130
 TARGETS = ("NTinkicht/Tabibi", "NTinkicht/veritas-atlas")
 MAX_OPEN_PRS_PER_REPO = 12
 MAX_DISPATCHES_PER_RUN = 6
+MAX_WAKE_PAGES = 100
 PENDING_TTL_SECONDS = 45 * 60
 AUTO_MARKER = "ONECOMPANY_L4_AUTO_DISPATCH_V1"
 EVIDENCE_MARKER = "ONECOMPANY_EXTERNAL_MISTRAL_REVIEW_V1"
@@ -54,7 +55,8 @@ def request_json(route: str, *, method: str = "GET", body: dict | None = None):
         method=method,
     )
     with urllib.request.urlopen(req, timeout=25) as response:
-        return json.load(response)
+        raw = response.read()
+        return json.loads(raw.decode("utf-8")) if raw else {}
 
 
 def normalize_actor(value: object) -> str:
@@ -120,8 +122,9 @@ def material_authors(repo: str, number: int, head: str) -> tuple[str, ...]:
 
 
 def recent_bus_comments() -> list[dict]:
+    """Read the complete bounded wake bus or fail closed before dispatch."""
     comments: list[dict] = []
-    for page in range(1, 11):
+    for page in range(1, MAX_WAKE_PAGES + 1):
         batch = request_json(
             f"repos/{HOST_REPO}/issues/{HOST_ISSUE}/comments?per_page=100&page={page}"
         )
@@ -129,8 +132,8 @@ def recent_bus_comments() -> list[dict]:
             raise ValueError("WAKE_BUS_UNAVAILABLE")
         comments.extend(item for item in batch if isinstance(item, dict))
         if len(batch) < 100:
-            break
-    return comments
+            return comments
+    raise ValueError("WAKE_BUS_HISTORY_OVER_LIMIT")
 
 
 def terminal_or_pending(
@@ -187,9 +190,38 @@ def dispatch_body(repo: str, number: int, head: str, base: str, authors: tuple[s
     )
 
 
+def emergency_stop_active() -> bool:
+    with open(".onecompany/config.json", encoding="utf-8") as stream:
+        config = json.load(stream)
+    safety = config.get("safety")
+    if not isinstance(safety, dict) or type(safety.get("emergency_stop")) is not bool:
+        raise ValueError("EMERGENCY_STOP_STATE_INVALID")
+    return safety["emergency_stop"]
+
+
+def dispatch_review_workflow(*, body: str, source_comment_id: int) -> None:
+    if source_comment_id < 1:
+        raise ValueError("DISPATCH_COMMENT_ID_INVALID")
+    request_json(
+        f"repos/{HOST_REPO}/actions/workflows/"
+        "onecompany-mistral-external-review.yml/dispatches",
+        method="POST",
+        body={
+            "ref": "main",
+            "inputs": {
+                "dispatch_body": body,
+                "source_comment_id": str(source_comment_id),
+            },
+        },
+    )
+
+
 def main() -> int:
     if os.environ.get("GITHUB_REPOSITORY") != HOST_REPO:
         raise SystemExit("WRONG_HOST_REPOSITORY")
+    if emergency_stop_active():
+        print("AUTO_DISPATCH_EMERGENCY_STOP_ACTIVE")
+        return 0
     comments = recent_bus_comments()
     now = int(time.time())
     dispatched = 0
@@ -223,6 +255,10 @@ def main() -> int:
                     or posted.get("body") != body
                 ):
                     raise ValueError("DISPATCH_PUBLICATION_NOT_VERIFIED")
+                dispatch_review_workflow(
+                    body=body,
+                    source_comment_id=int(posted["id"]),
+                )
                 comments.append(posted)
                 dispatched += 1
                 print(f"AUTO_DISPATCHED repo={repo} pr={number} head={head} base={base}")

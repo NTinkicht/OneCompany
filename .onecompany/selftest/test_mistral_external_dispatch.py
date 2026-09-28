@@ -142,6 +142,10 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
         self.assertIn("workflow_dispatch:", reviewer)
         self.assertIn("inputs.dispatch_body", reviewer)
         self.assertIn("inputs.source_comment_id", reviewer)
+        self.assertIn(
+            "group: onecompany-mistral-external-review-$" + "{{ github.event.comment.id || inputs.source_comment_id }}",
+            reviewer,
+        )
         self.assertIn("ONECOMPANY_L4_AUTO_DISPATCH_V1", reviewer)
 
 

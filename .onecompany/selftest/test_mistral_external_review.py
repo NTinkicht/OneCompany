@@ -651,6 +651,17 @@ class ExternalMistralReviewTests(unittest.TestCase):
                             "NTinkicht/veritas-atlas", 21, "a" * 40, ("chatgpt",)
                         )
 
+    def test_first_call_argument_secrets_fail_closed(self):
+        for line in (
+            '+db.connect(password="VerySecretPassword123")',
+            '+client.login(api_key="unprefixed-secret-value-123456")',
+        ):
+            with self.subTest(line=line):
+                with self.assertRaisesRegex(
+                    ValueError, "EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED"
+                ):
+                    m.validate_diff(["src/app.py"], line)
+
 
 if __name__ == "__main__":
     unittest.main()

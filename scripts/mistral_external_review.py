@@ -29,7 +29,7 @@ PR_NUMBER = re.compile(r"[1-9][0-9]{0,5}\Z")
 REPO = re.compile(r"NTinkicht/[A-Za-z0-9_.-]+\Z")
 FIELD = re.compile(r"(?m)^([a-z_]+):[ \t]*([^\r\n]*?)[ \t]*$")
 AUTHOR = re.compile(r"[a-z0-9_-]+\Z")
-MATERIAL_AUTHOR = re.compile(r"(?im)^Material-Author:[ \t]*([a-z0-9_-]+)[ \t]*$")
+MATERIAL_AUTHOR = re.compile(r"(?im)^Material-Author:[ \t]*([a-z0-9_-]+)[ \t]*$")\nCO_AUTHOR = re.compile(r"(?im)^Co-authored-by:[ \t]*(.+?)[ \t]*$")
 MISTRAL_ALIASES = frozenset({"mistral", "mistral-vibe", "mistral_vibe"})
 VERDICTS = frozenset({"NO_BLOCKING_FINDINGS", "CHANGES_REQUIRED", "INSUFFICIENT_EVIDENCE"})
 SEVERITIES = frozenset({"INFO", "LOW", "MEDIUM", "MAJOR", "HIGH", "CRITICAL"})
@@ -93,7 +93,10 @@ STANDALONE_CREDENTIAL = re.compile(
     r"\bgithub_pat_[A-Za-z0-9_]{20,255}\b|"
     r"\b(?:AKIA|ASIA|AIDA|AROA|AIPA|ANPA|ANVA|ASCA)[A-Z0-9]{16}\b|"
     r"\bsk-[A-Za-z0-9_-]{20,255}\b|"
-    r"\bxox[baprs]-[A-Za-z0-9-]{20,255}\b"
+    r"\bxox[baprs]-[A-Za-z0-9-]{20,255}\b|"
+    r"\bAIza[0-9A-Za-z_-]{30,255}\b|"
+    r"\bglpat-[0-9A-Za-z_-]{20,255}\b|"
+    r"\bnpm_[0-9A-Za-z]{20,255}\b"
     r")"
 )
 XML_SECRET = re.compile(
@@ -220,11 +223,11 @@ def _mistral_identity(value: object) -> bool:
     if not text:
         return False
     text = text.replace("[bot]", "")
-    local = text.split("@", 1)[0]
-    compact = re.sub(r"[^a-z0-9]+", "", local)
-    # Fail closed for the whole Mistral identity namespace, not only a
-    # handful of aliases (for example mistral-reviewer / mistral_vibe_worker).
-    return compact.startswith("mistral")
+    local, separator, domain = text.partition("@")
+    if separator and (domain == "mistral.ai" or domain.endswith(".mistral.ai")):
+        return True
+    compact = re.sub(r"[^a-z0-9]+", "", text)
+    return "mistral" in compact
 
 
 def verify_material_authors(repo: str, number: int, head: str, declared: tuple[str, ...]) -> None:
@@ -255,12 +258,17 @@ def verify_material_authors(repo: str, number: int, head: str, declared: tuple[s
             )
             if any(_mistral_identity(value) for value in identities):
                 raise ValueError("MISTRAL_SELF_REVIEW_BLOCKED")
-            tags = MATERIAL_AUTHOR.findall((item.get("commit") or {}).get("message", ""))
+            message = commit_meta.get("message", "")
+            tags = MATERIAL_AUTHOR.findall(message)
             if len(tags) > 1:
                 raise ValueError("EXTERNAL_REVIEW_AUTHOR_AMBIGUOUS")
             observed.update(tag.lower() for tag in tags)
             if any(_mistral_identity(tag) for tag in tags):
                 raise ValueError("MISTRAL_SELF_REVIEW_BLOCKED")
+            for coauthor in CO_AUTHOR.findall(message):
+                parts = [part.strip() for part in re.split(r"[<>]", coauthor) if part.strip()]
+                if any(_mistral_identity(part) for part in parts):
+                    raise ValueError("MISTRAL_SELF_REVIEW_BLOCKED")
         if len(commits) < 100:
             break
     else:

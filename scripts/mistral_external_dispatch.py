@@ -13,7 +13,8 @@ import urllib.request
 HOST_REPO = "NTinkicht/OneCompany"
 HOST_ISSUE = 130
 TARGETS = ("NTinkicht/Tabibi", "NTinkicht/veritas-atlas")
-MAX_OPEN_PRS_PER_REPO = 12
+MAX_PR_PAGES = 5
+MAX_REVIEW_ATTEMPTS_PER_TARGET = 3
 MAX_DISPATCHES_PER_RUN = 6
 MAX_WAKE_PAGES = 100
 PENDING_TTL_SECONDS = 45 * 60
@@ -66,13 +67,20 @@ def normalize_actor(value: object) -> str:
 
 
 def same_repo_open_prs(repo: str) -> list[dict]:
-    pulls = request_json(
-        f"repos/{repo}/pulls?state=open&base=main&sort=updated&direction=desc"
-        f"&per_page={MAX_OPEN_PRS_PER_REPO}"
-    )
-    if not isinstance(pulls, list):
-        raise ValueError("TARGET_PULLS_UNAVAILABLE")
     result = []
+    pulls = []
+    for page in range(1, MAX_PR_PAGES + 1):
+        batch = request_json(
+            f"repos/{repo}/pulls?state=open&base=main&sort=updated&direction=asc"
+            f"&per_page=100&page={page}"
+        )
+        if not isinstance(batch, list):
+            raise ValueError("TARGET_PULLS_UNAVAILABLE")
+        pulls.extend(batch)
+        if len(batch) < 100:
+            break
+    else:
+        raise ValueError("TARGET_PULLS_OVER_LIMIT")
     for pr in pulls:
         if (
             isinstance(pr, dict)
@@ -139,6 +147,7 @@ def recent_bus_comments() -> list[dict]:
 def terminal_or_pending(
     comments: list[dict], *, repo: str, number: int, head: str, base: str, now: int
 ) -> bool:
+    attempts = 0
     for item in reversed(comments):
         login = ((item.get("user") or {}).get("login") or "").lower()
         if login not in {"github-actions[bot]", "ntinkicht"}:
@@ -162,6 +171,9 @@ def terminal_or_pending(
             and dispatch.group("base") == base
         ):
             continue
+        attempts += 1
+        if attempts >= MAX_REVIEW_ATTEMPTS_PER_TARGET:
+            return True
         created = item.get("created_at")
         if not isinstance(created, str):
             continue
@@ -199,16 +211,35 @@ def emergency_stop_active() -> bool:
     return safety["emergency_stop"]
 
 
+def review_capability_approved() -> bool:
+    with open(".onecompany/actors.json", encoding="utf-8") as stream:
+        actors = json.load(stream)
+    with open(".onecompany/readiness.json", encoding="utf-8") as stream:
+        readiness = json.load(stream)
+    with open(".onecompany/dispatch.json", encoding="utf-8") as stream:
+        dispatch = json.load(stream)
+    actor = next((x for x in actors.get("actors", []) if x.get("id") == "mistral-vibe"), {})
+    ready = next((x for x in readiness.get("actors", []) if x.get("actor_id") == "mistral-vibe"), {})
+    route = next((x for x in dispatch.get("actors", []) if x.get("actor_id") == "mistral-vibe"), {})
+    mech = next((x for x in route.get("mechanisms", []) if x.get("id") == "vibe-exact-head-review"), {})
+    return (
+        "code_review" in actor.get("capabilities", [])
+        and "code_review" in ready.get("verified_capabilities", [])
+        and ready.get("repository_access", {}).get("review") is True
+        and mech.get("configured") is True
+        and "code_review" in mech.get("capabilities", [])
+    )
+
+
 def dispatch_review_workflow(*, body: str, source_comment_id: int) -> None:
     if source_comment_id < 1:
         raise ValueError("DISPATCH_COMMENT_ID_INVALID")
     request_json(
-        f"repos/{HOST_REPO}/actions/workflows/"
-        "onecompany-mistral-external-review.yml/dispatches",
+        f"repos/{HOST_REPO}/dispatches",
         method="POST",
         body={
-            "ref": "main",
-            "inputs": {
+            "event_type": "onecompany_mistral_external_review",
+            "client_payload": {
                 "dispatch_body": body,
                 "source_comment_id": str(source_comment_id),
             },
@@ -221,6 +252,9 @@ def main() -> int:
         raise SystemExit("WRONG_HOST_REPOSITORY")
     if emergency_stop_active():
         print("AUTO_DISPATCH_EMERGENCY_STOP_ACTIVE")
+        return 0
+    if not review_capability_approved():
+        print("AUTO_DISPATCH_REVIEW_CAPABILITY_NOT_APPROVED")
         return 0
     comments = recent_bus_comments()
     now = int(time.time())

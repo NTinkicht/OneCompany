@@ -157,7 +157,7 @@ class MistralCloudWakeTests(unittest.TestCase):
             ))
         for capability, actor_ids in routing["preference_by_capability"].items():
             if "mistral-vibe" in actor_ids:
-                self.assertIn(capability, {"repository_intelligence", "test_design"})
+                self.assertIn(capability, {"repository_intelligence", "test_design", "code_review"})
 
     def test_readiness_not_inflated_by_workflow_presence(self):
         readiness = json.loads(READINESS.read_text(encoding="utf-8"))

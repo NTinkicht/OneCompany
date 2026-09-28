@@ -21,7 +21,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: onecompany-mistral-external-review
+  group: onecompany-mistral-external-review-${{ github.event.comment.id || inputs.source_comment_id }}
   cancel-in-progress: false
 
 jobs:
@@ -61,6 +61,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           DISPATCH_BODY: ${{ github.event.comment.body || inputs.dispatch_body }}
+          SOURCE_COMMENT_ID: ${{ github.event.comment.id || inputs.source_comment_id }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
         run: python -I scripts/mistral_external_review.py prepare
 
       - name: Checkout exact public target without credentials
@@ -175,6 +177,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           DISPATCH_BODY: ${{ github.event.comment.body || inputs.dispatch_body }}
+          SOURCE_COMMENT_ID: ${{ github.event.comment.id || inputs.source_comment_id }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
         shell: bash
         run: |
           set -euo pipefail

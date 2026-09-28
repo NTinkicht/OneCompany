@@ -464,7 +464,8 @@ class MistralFencedWorkerTests(unittest.TestCase):
         self.assertEqual(actor["capacity"]["implementation_streams"], 0)
         self.assertNotIn("implementation", actor["verified_capabilities"])
         self.assertFalse(actor["repository_access"]["write"])
-        self.assertTrue(actor["repository_access"]["review"])\n        self.assertIn("code_review", actor["verified_capabilities"])
+        self.assertTrue(actor["repository_access"]["review"])
+        self.assertIn("code_review", actor["verified_capabilities"])
 
     def test_workflow_separates_model_from_publisher_and_source_installer(self):
         """Keep model editing, protected publication, and installer scopes separate."""

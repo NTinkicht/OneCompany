@@ -83,7 +83,14 @@ BASIC_LITERAL = re.compile(
     r"(?i)\b(?:proxy-)?authorization\s*:\s*basic\s+([A-Za-z0-9+/=]{12,})"
 )
 CONNECTION_SECRET = re.compile(
-    r"(?i)(?:^|[;\s(,])(?:password|pwd)\s*=\s*([^;\s,)]+)"
+    r"""(?ix)(?:^|[;\s(,])(?:password|pwd)\s*=\s*(
+        os\.getenv\(["'][A-Za-z_][A-Za-z0-9_]*["']\)
+        |os\.environ\[["'][A-Za-z_][A-Za-z0-9_]*["']\]
+        |getenv\(["'][A-Za-z_][A-Za-z0-9_]*["']\)
+        |\$\{\{\s*secrets\.[A-Za-z_][A-Za-z0-9_]*\s*\}\}
+        |["'][^"']+["']
+        |[^;\s,)]+
+    ))"""
 )
 CREDENTIAL_URL = re.compile(
     r"(?i)\b[a-z][a-z0-9+.-]*://[^\s/:@]+:([^\s/@]{8,})@"

@@ -135,8 +135,9 @@ class MistralCloudWakeTests(unittest.TestCase):
             ["repository_intelligence", "test_design"],
         )
         self.assertIn("35540501655", " ".join(mistral["vibe-readonly-wake"]["evidence"]))
+        self.assertTrue(mistral["vibe-exact-head-review"]["configured"])
+        self.assertEqual(mistral["vibe-exact-head-review"]["capabilities"], ["code_review"])
         for mechanism in (
-            mistral["vibe-exact-head-review"],
             mistral["vibe-lease-implementation"],
             grok["grok-supergrok-cloud-wake"],
         ):
@@ -147,13 +148,11 @@ class MistralCloudWakeTests(unittest.TestCase):
         dispatch = json.loads(DISPATCH.read_text(encoding="utf-8"))
         mistral = next(x for x in dispatch["actors"] if x["actor_id"] == "mistral-vibe")
         configured = [m for m in mistral["mechanisms"] if m["configured"]]
-        self.assertEqual(len(configured), 1)
-        self.assertEqual(configured[0]["id"], "vibe-readonly-wake")
-        self.assertEqual(configured[0]["capabilities"],
-                         ["repository_intelligence", "test_design"])
+        self.assertEqual({m["id"] for m in configured},
+                         {"vibe-readonly-wake", "vibe-exact-head-review"})
         for mechanism in mistral["mechanisms"]:
             self.assertTrue(set(mechanism["capabilities"]).issubset(
-                {"repository_intelligence", "test_design"}
+                {"repository_intelligence", "test_design", "code_review"}
             ))
         for capability, actor_ids in routing["preference_by_capability"].items():
             if "mistral-vibe" in actor_ids:
@@ -164,11 +163,12 @@ class MistralCloudWakeTests(unittest.TestCase):
         by_actor = {a["actor_id"]: a for a in readiness["actors"]}
         mistral = by_actor["mistral-vibe"]
         self.assertEqual(mistral["verified_capabilities"],
-                         ["repository_intelligence", "test_design"])
+                         ["repository_intelligence", "test_design", "code_review"])
         self.assertTrue(mistral["unattended"]["verified"])
         self.assertTrue(mistral["repository_access"]["read"])
-        for prohibited in ("write", "review", "merge"):
-            self.assertFalse(mistral["repository_access"][prohibited])
+        self.assertFalse(mistral["repository_access"]["write"])
+        self.assertTrue(mistral["repository_access"]["review"])
+        self.assertFalse(mistral["repository_access"]["merge"])
         self.assertEqual(mistral["capacity"]["implementation_streams"], 0)
         self.assertIn("35540501655", " ".join(mistral["evidence"]))
         grok = by_actor["grok-4-6-interactive"]

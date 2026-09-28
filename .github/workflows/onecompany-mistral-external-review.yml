@@ -117,6 +117,12 @@ jobs:
             echo "status=CAPACITY_OR_AUTH_BLOCKED" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Recheck live emergency stop before provider invocation
+        if: steps.preflight.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -I scripts/mistral_external_review.py safety
+
       - name: Install pinned Mistral Vibe
         if: steps.preflight.outputs.ready == 'true'
         run: python -I -m pip install --disable-pip-version-check 'mistral-vibe==2.25.3'
@@ -166,6 +172,12 @@ jobs:
           status="$(mktemp)"
           GITHUB_OUTPUT="$status" python -I scripts/mistral_external_review.py prepare
           grep -qx 'ready=true' "$status"
+
+      - name: Recheck live emergency stop before publication
+        if: steps.result.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -I scripts/mistral_external_review.py safety
 
       - name: Publish exact external review evidence on OneCompany wake bus
         if: steps.result.outputs.ready == 'true'

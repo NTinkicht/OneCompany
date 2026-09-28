@@ -109,7 +109,7 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "WAKE_BUS_HISTORY_OVER_LIMIT"):
                 d.recent_bus_comments()
 
-    def test_explicit_workflow_dispatch_carries_comment_provenance(self):
+    def test_repository_dispatch_carries_comment_provenance(self):
         calls = []
         def request(route, **kwargs):
             calls.append((route, kwargs))
@@ -119,7 +119,7 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
             d.dispatch_review_workflow(body=body, source_comment_id=789)
         route, kwargs = calls[0]
         self.assertIn(
-            "actions/workflows/onecompany-mistral-external-review.yml/dispatches",
+            "repos/NTinkicht/OneCompany/dispatches",
             route,
         )
         self.assertEqual(kwargs["method"], "POST")
@@ -143,10 +143,31 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
         self.assertIn("inputs.dispatch_body", reviewer)
         self.assertIn("inputs.source_comment_id", reviewer)
         self.assertIn(
-            "group: onecompany-mistral-external-review-$" + "{{ github.event.comment.id || inputs.source_comment_id }}",
+            "group: onecompany-mistral-external-review-$" + "{{ github.event.comment.id || github.event.client_payload.source_comment_id }}",
             reviewer,
         )
         self.assertIn("ONECOMPANY_L4_AUTO_DISPATCH_V1", reviewer)
+
+    def test_retry_attempts_are_capped(self):
+        now = int(time.time())
+        old = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - d.PENDING_TTL_SECONDS - 100))
+        comments = []
+        for run in range(d.MAX_REVIEW_ATTEMPTS_PER_TARGET):
+            comments.append({
+                "user": {"login": "github-actions[bot]"},
+                "created_at": old,
+                "body": (
+                    "@mistral-vibe\nMISTRAL_EXTERNAL_REVIEW_V1\n"
+                    "repo: NTinkicht/veritas-atlas\npr: 22\n"
+                    "head_sha: " + "a" * 40 + "\nbase_sha: " + "b" * 40 + "\n"
+                    "material_authors: chatgpt\n"
+                    f"<!-- ONECOMPANY_L4_AUTO_DISPATCH_V1 run={run + 1} -->\n"
+                ),
+            })
+        self.assertTrue(d.terminal_or_pending(
+            comments, repo="NTinkicht/veritas-atlas", number=22,
+            head="a" * 40, base="b" * 40, now=now,
+        ))
 
 
 if __name__ == "__main__":

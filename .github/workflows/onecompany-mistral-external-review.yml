@@ -1,19 +1,11 @@
 name: OneCompany Mistral External Exact-Head Review
-run-name: External Mistral review dispatch ${{ github.event.comment.id || inputs.source_comment_id }}
+run-name: External Mistral review dispatch ${{ github.event.comment.id || github.event.client_payload.source_comment_id }}
 
 on:
   issue_comment:
     types: [created]
-  workflow_dispatch:
-    inputs:
-      dispatch_body:
-        description: Authenticated bounded external-review dispatch body
-        required: true
-        type: string
-      source_comment_id:
-        description: Durable OneCompany wake-bus comment id
-        required: true
-        type: string
+  repository_dispatch:
+    types: [onecompany_mistral_external_review]
 
 permissions:
   contents: read
@@ -21,7 +13,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: onecompany-mistral-external-review-${{ github.event.comment.id || inputs.source_comment_id }}
+  group: onecompany-mistral-external-review-${{ github.event.comment.id || github.event.client_payload.source_comment_id }}
   cancel-in-progress: false
 
 jobs:
@@ -33,10 +25,10 @@ jobs:
        github.actor == 'NTinkicht' &&
        contains(github.event.comment.body, '@mistral-vibe') &&
        contains(github.event.comment.body, 'MISTRAL_EXTERNAL_REVIEW_V1')) ||
-      (github.event_name == 'workflow_dispatch' &&
-       contains(inputs.dispatch_body, 'ONECOMPANY_L4_AUTO_DISPATCH_V1') &&
-       contains(inputs.dispatch_body, '@mistral-vibe') &&
-       contains(inputs.dispatch_body, 'MISTRAL_EXTERNAL_REVIEW_V1'))
+      (github.event_name == 'repository_dispatch' &&
+       contains(github.event.client_payload.dispatch_body, 'ONECOMPANY_L4_AUTO_DISPATCH_V1') &&
+       contains(github.event.client_payload.dispatch_body, '@mistral-vibe') &&
+       contains(github.event.client_payload.dispatch_body, 'MISTRAL_EXTERNAL_REVIEW_V1'))
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -60,8 +52,8 @@ jobs:
         id: target
         env:
           GH_TOKEN: ${{ github.token }}
-          DISPATCH_BODY: ${{ github.event.comment.body || inputs.dispatch_body }}
-          SOURCE_COMMENT_ID: ${{ github.event.comment.id || inputs.source_comment_id }}
+          DISPATCH_BODY: ${{ github.event.comment.body || github.event.client_payload.dispatch_body }}
+          SOURCE_COMMENT_ID: ${{ github.event.comment.id || github.event.client_payload.source_comment_id }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
         run: python -I scripts/mistral_external_review.py prepare
 
@@ -134,6 +126,16 @@ jobs:
             echo "status=CAPACITY_OR_AUTH_BLOCKED" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Recheck live emergency stop before provider invocation
+        if: steps.preflight.outputs.ready == 'true'
+        shell: bash
+        run: |
+          python -I - <<'PY'
+          import json
+          config = json.load(open(".onecompany/config.json", encoding="utf-8"))
+          assert config["safety"]["emergency_stop"] is False, "EMERGENCY_STOP_ACTIVE"
+          PY
+
       - name: Install pinned Mistral Vibe
         if: steps.preflight.outputs.ready == 'true'
         run: python -I -m pip install --disable-pip-version-check 'mistral-vibe==2.25.3'
@@ -169,15 +171,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_RUN_ID: ${{ github.run_id }}
-          SOURCE_COMMENT_ID: ${{ github.event.comment.id || inputs.source_comment_id }}
+          SOURCE_COMMENT_ID: ${{ github.event.comment.id || github.event.client_payload.source_comment_id }}
         run: python -I scripts/mistral_external_review.py validate
 
       - name: Recheck target before durable publication
         if: steps.result.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          DISPATCH_BODY: ${{ github.event.comment.body || inputs.dispatch_body }}
-          SOURCE_COMMENT_ID: ${{ github.event.comment.id || inputs.source_comment_id }}
+          DISPATCH_BODY: ${{ github.event.comment.body || github.event.client_payload.dispatch_body }}
+          SOURCE_COMMENT_ID: ${{ github.event.comment.id || github.event.client_payload.source_comment_id }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
         shell: bash
         run: |
@@ -266,7 +268,7 @@ jobs:
           RESULT_SHA256: ${{ steps.result.outputs.result_sha256 }}
           BODY_SHA256: ${{ steps.result.outputs.body_sha256 }}
           VERDICT: ${{ steps.result.outputs.verdict }}
-          SOURCE_COMMENT_ID: ${{ github.event.comment.id || inputs.source_comment_id }}
+          SOURCE_COMMENT_ID: ${{ github.event.comment.id || github.event.client_payload.source_comment_id }}
         run: |
           python - <<'PY'
           import hashlib

@@ -67,7 +67,7 @@ SENSITIVE_PATH = re.compile(
     r")"
 )
 ASSIGNMENT = re.compile(
-    r"""(?ix)(?:^|[\s{,(])["']?([A-Za-z0-9_.-]+)["']?\s*[:=]\s*(.+?)\s*[,;)]?\s*$"""
+    r"""(?ix)(?:^|[\s{,(])["']?([A-Za-z0-9_.-]+)["']?\s*[:=]\s*(.+?)\s*[,;]?\s*$"""
 )
 SENSITIVE_SEGMENTS = frozenset({
     "secret", "secrets", "token", "tokens", "password", "passwd",

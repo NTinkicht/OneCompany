@@ -39,7 +39,7 @@ MAX_PROMPT_BYTES = 64_000
 MAX_RESULT_BYTES = 15_000
 MAX_CHANGED_FILES = 24
 MAX_WAKE_PAGES = 50
-EXTERNAL_MARKER = "ONECOMPANY_EXTERNAL_MISTRAL_REVIEW_V1"
+EXTERNAL_MARKER = "ONECOMPANY_EXTERNAL_MISTRAL_REVIEW_V1"\nAUTO_DISPATCH_MARKER = "ONECOMPANY_L4_AUTO_DISPATCH_V1"
 EXTERNAL_WORKFLOW_PATH = ".github/workflows/onecompany-mistral-external-review.yml"
 EVIDENCE_MARKER = re.compile(
     r"ONECOMPANY_EXTERNAL_MISTRAL_REVIEW_V1 "
@@ -345,7 +345,7 @@ def _trusted_evidence_comment(
     expected_conclusion = "success" if verdict == "PASS" else "failure"
     if not (
         run.get("path") == EXTERNAL_WORKFLOW_PATH
-        and run.get("event") == "issue_comment"
+        and run.get("event") in {"issue_comment", "workflow_dispatch"}
         and run.get("status") == "completed"
         and run.get("conclusion") == expected_conclusion
         and str(run.get("id")) == run_id
@@ -399,11 +399,34 @@ def existing_result(repo: str, number: int, head: str, base: str) -> bool:
     raise ValueError("EXTERNAL_REVIEW_HISTORY_OVER_LIMIT")
 
 
+def _validate_dispatch_source(body: str) -> None:
+    event = os.environ.get("GITHUB_EVENT_NAME", "")
+    if event == "issue_comment":
+        return
+    if event != "workflow_dispatch":
+        raise ValueError("EXTERNAL_REVIEW_EVENT_NOT_ALLOWED")
+    source_id = os.environ.get("SOURCE_COMMENT_ID", "")
+    if not source_id.isdigit() or int(source_id) < 1:
+        raise ValueError("EXTERNAL_REVIEW_SOURCE_COMMENT_INVALID")
+    item = onecompany_api(
+        f"repos/{WAKE_REPO}/issues/comments/{int(source_id)}"
+    )
+    if (
+        not isinstance(item, dict)
+        or (item.get("user") or {}).get("login") != "github-actions[bot]"
+        or item.get("body") != body
+        or AUTO_DISPATCH_MARKER not in body
+    ):
+        raise ValueError("EXTERNAL_REVIEW_SOURCE_COMMENT_UNTRUSTED")
+
+
 def prepare() -> None:
     try:
         if os.environ.get("GITHUB_REPOSITORY") != WAKE_REPO:
             raise ValueError("EXTERNAL_REVIEW_WRONG_HOST_REPO")
-        repo, number, head, base, authors = parse_dispatch(os.environ["DISPATCH_BODY"])
+        body = os.environ["DISPATCH_BODY"]
+        _validate_dispatch_source(body)
+        repo, number, head, base, authors = parse_dispatch(body)
         current_pr(repo, number, head, base)
         verify_material_authors(repo, number, head, authors)
         if existing_result(repo, number, head, base):

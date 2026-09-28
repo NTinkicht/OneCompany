@@ -557,7 +557,7 @@ class ExternalMistralReviewTests(unittest.TestCase):
         self.assertIn('"docs/MISTRAL-EXTERNAL-REVIEW.md"', bootstrap)
 
 
-    def test_workflow_dispatch_source_must_match_trusted_bot_comment(self):
+    def test_repository_dispatch_source_must_match_trusted_bot_comment(self):
         body = (
             "@mistral-vibe\nMISTRAL_EXTERNAL_REVIEW_V1\n"
             "repo: NTinkicht/veritas-atlas\npr: 21\n"
@@ -570,7 +570,7 @@ class ExternalMistralReviewTests(unittest.TestCase):
             "body": body,
         }
         env = {
-            "GITHUB_EVENT_NAME": "workflow_dispatch",
+            "GITHUB_EVENT_NAME": "repository_dispatch",
             "SOURCE_COMMENT_ID": "789",
         }
         with mock.patch.dict(os.environ, env, clear=False), \
@@ -585,12 +585,12 @@ class ExternalMistralReviewTests(unittest.TestCase):
             ):
                 m._validate_dispatch_source(body)
 
-    def test_trusted_evidence_accepts_authenticated_workflow_dispatch_run(self):
+    def test_trusted_evidence_accepts_authenticated_repository_dispatch_run(self):
         item, proof = self._proof()
         run = {
             "id": 123,
             "path": m.EXTERNAL_WORKFLOW_PATH,
-            "event": "workflow_dispatch",
+            "event": "repository_dispatch",
             "status": "completed",
             "conclusion": "success",
         }

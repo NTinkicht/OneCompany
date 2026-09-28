@@ -90,7 +90,7 @@ CONNECTION_SECRET = re.compile(
         |\$\{\{\s*secrets\.[A-Za-z_][A-Za-z0-9_]*\s*\}\}
         |["'][^"']+["']
         |[^;\s,)]+
-    ))"""
+    )"""
 )
 CREDENTIAL_URL = re.compile(
     r"(?i)\b[a-z][a-z0-9+.-]*://[^\s/:@]+:([^\s/@]{8,})@"

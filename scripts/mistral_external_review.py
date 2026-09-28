@@ -355,7 +355,7 @@ def _trusted_evidence_comment(
     expected_conclusion = "success" if verdict == "PASS" else "failure"
     if not (
         run.get("path") == EXTERNAL_WORKFLOW_PATH
-        and run.get("event") in {"issue_comment", "workflow_dispatch"}
+        and run.get("event") in {"issue_comment", "repository_dispatch"}
         and run.get("status") == "completed"
         and run.get("conclusion") == expected_conclusion
         and str(run.get("id")) == run_id
@@ -413,7 +413,7 @@ def _validate_dispatch_source(body: str) -> None:
     event = os.environ.get("GITHUB_EVENT_NAME", "")
     if event == "issue_comment":
         return
-    if event != "workflow_dispatch":
+    if event != "repository_dispatch":
         raise ValueError("EXTERNAL_REVIEW_EVENT_NOT_ALLOWED")
     source_id = os.environ.get("SOURCE_COMMENT_ID", "")
     if not source_id.isdigit() or int(source_id) < 1:
@@ -430,10 +430,21 @@ def _validate_dispatch_source(body: str) -> None:
         raise ValueError("EXTERNAL_REVIEW_SOURCE_COMMENT_UNTRUSTED")
 
 
+def emergency_stop_active() -> bool:
+    with open(".onecompany/config.json", encoding="utf-8") as stream:
+        config = json.load(stream)
+    safety = config.get("safety")
+    if not isinstance(safety, dict) or type(safety.get("emergency_stop")) is not bool:
+        raise ValueError("EMERGENCY_STOP_STATE_INVALID")
+    return safety["emergency_stop"]
+
+
 def prepare() -> None:
     try:
         if os.environ.get("GITHUB_REPOSITORY") != WAKE_REPO:
             raise ValueError("EXTERNAL_REVIEW_WRONG_HOST_REPO")
+        if emergency_stop_active():
+            raise ValueError("EXTERNAL_REVIEW_EMERGENCY_STOP_ACTIVE")
         body = os.environ["DISPATCH_BODY"]
         _validate_dispatch_source(body)
         repo, number, head, base, authors = parse_dispatch(body)

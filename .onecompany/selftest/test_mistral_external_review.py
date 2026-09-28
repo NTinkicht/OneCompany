@@ -557,5 +557,50 @@ class ExternalMistralReviewTests(unittest.TestCase):
         self.assertIn('"docs/MISTRAL-EXTERNAL-REVIEW.md"', bootstrap)
 
 
+    def test_workflow_dispatch_source_must_match_trusted_bot_comment(self):
+        body = (
+            "@mistral-vibe\nMISTRAL_EXTERNAL_REVIEW_V1\n"
+            "repo: NTinkicht/veritas-atlas\npr: 21\n"
+            "head_sha: " + "a" * 40 + "\nbase_sha: " + "b" * 40 + "\n"
+            "material_authors: chatgpt\n"
+            "<!-- ONECOMPANY_L4_AUTO_DISPATCH_V1 run=123 -->\n"
+        )
+        trusted = {
+            "user": {"login": "github-actions[bot]"},
+            "body": body,
+        }
+        env = {
+            "GITHUB_EVENT_NAME": "workflow_dispatch",
+            "SOURCE_COMMENT_ID": "789",
+        }
+        with mock.patch.dict(os.environ, env, clear=False), \
+             mock.patch.object(m, "onecompany_api", return_value=trusted):
+            m._validate_dispatch_source(body)
+
+        bad = dict(trusted, body=body + "tampered")
+        with mock.patch.dict(os.environ, env, clear=False), \
+             mock.patch.object(m, "onecompany_api", return_value=bad):
+            with self.assertRaisesRegex(
+                ValueError, "EXTERNAL_REVIEW_SOURCE_COMMENT_UNTRUSTED"
+            ):
+                m._validate_dispatch_source(body)
+
+    def test_trusted_evidence_accepts_authenticated_workflow_dispatch_run(self):
+        item, proof = self._proof()
+        run = {
+            "id": 123,
+            "path": m.EXTERNAL_WORKFLOW_PATH,
+            "event": "workflow_dispatch",
+            "status": "completed",
+            "conclusion": "success",
+        }
+        with mock.patch.object(m, "onecompany_api", return_value=run), \
+             mock.patch.object(m, "_artifact_proof", return_value=proof):
+            self.assertTrue(m._trusted_evidence_comment(
+                item, repo="NTinkicht/veritas-atlas", number=21,
+                head="a" * 40, base="b" * 40,
+            ))
+
+
 if __name__ == "__main__":
     unittest.main()

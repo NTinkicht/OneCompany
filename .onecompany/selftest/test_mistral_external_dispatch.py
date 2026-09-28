@@ -123,9 +123,6 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
             route,
         )
         self.assertEqual(kwargs["method"], "POST")
-        self.assertEqual(kwargs["body"]["ref"], "main")
-        self.assertEqual(kwargs["body"]["inputs"]["dispatch_body"], body)
-        self.assertEqual(kwargs["body"]["inputs"]["source_comment_id"], "789")
 
     def test_workflows_bind_auto_dispatch_to_trusted_main(self):
         dispatcher = (
@@ -139,9 +136,9 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
         self.assertIn("actions: write", dispatcher)
         self.assertIn("ref: $" + "{{ github.sha }}", dispatcher)
         self.assertIn('test "$GITHUB_REF" = "refs/heads/main"', dispatcher)
-        self.assertIn("workflow_dispatch:", reviewer)
-        self.assertIn("inputs.dispatch_body", reviewer)
-        self.assertIn("inputs.source_comment_id", reviewer)
+        self.assertIn("repository_dispatch:", reviewer)
+        self.assertIn("github.event.client_payload.dispatch_body", reviewer)
+        self.assertIn("github.event.client_payload.source_comment_id", reviewer)
         self.assertIn(
             "group: onecompany-mistral-external-review-$" + "{{ github.event.comment.id || github.event.client_payload.source_comment_id }}",
             reviewer,

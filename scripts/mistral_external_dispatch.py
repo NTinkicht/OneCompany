@@ -223,10 +223,17 @@ def review_capability_approved() -> bool:
     route = next((x for x in dispatch.get("actors", []) if x.get("actor_id") == "mistral-vibe"), {})
     mech = next((x for x in route.get("mechanisms", []) if x.get("id") == "vibe-exact-head-review"), {})
     return (
-        "code_review" in actor.get("capabilities", [])
+        actor.get("enabled") is True
+        and actor.get("configured") is True
+        and ready.get("setup_state") == "ready"
+        and ready.get("unattended", {}).get("configured") is True
+        and ready.get("unattended", {}).get("verified") is True
+        and "code_review" not in ready.get("temporarily_unavailable_capabilities", [])
+        and "code_review" in actor.get("capabilities", [])
         and "code_review" in ready.get("verified_capabilities", [])
         and ready.get("repository_access", {}).get("review") is True
         and mech.get("configured") is True
+        and mech.get("unattended") is True
         and "code_review" in mech.get("capabilities", [])
     )
 

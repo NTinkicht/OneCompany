@@ -9,6 +9,7 @@ own CI, exact head/base, findings and merge policy before using a PASS.
 """
 from __future__ import annotations
 
+import base64
 import hashlib
 import html
 import io
@@ -65,7 +66,7 @@ SENSITIVE_PATH = re.compile(
     r")"
 )
 ASSIGNMENT = re.compile(
-    r"""(?ix)(?:^|[\s{,])["']?([A-Za-z0-9_.-]+)["']?\s*[:=]\s*(.+?)\s*[,;]?\s*$"""
+    r"""(?ix)(?:^|[\s{,(])["']?([A-Za-z0-9_.-]+)["']?\s*[:=]\s*(.+?)\s*[,;)]?\s*$"""
 )
 SENSITIVE_SEGMENTS = frozenset({
     "secret", "secrets", "token", "tokens", "password", "passwd",
@@ -82,7 +83,7 @@ BASIC_LITERAL = re.compile(
     r"(?i)\b(?:proxy-)?authorization\s*:\s*basic\s+([A-Za-z0-9+/=]{12,})"
 )
 CONNECTION_SECRET = re.compile(
-    r"(?i)(?:^|[;\s])(?:password|pwd)\s*=\s*([^;\s]{8,})"
+    r"(?i)(?:^|[;\s(,])(?:password|pwd)\s*=\s*([^;\s,)]+)"
 )
 CREDENTIAL_URL = re.compile(
     r"(?i)\b[a-z][a-z0-9+.-]*://[^\s/:@]+:([^\s/@]{8,})@"
@@ -409,10 +410,33 @@ def existing_result(repo: str, number: int, head: str, base: str) -> bool:
     raise ValueError("EXTERNAL_REVIEW_HISTORY_OVER_LIMIT")
 
 
+def live_emergency_stop_active() -> bool:
+    payload = onecompany_api(
+        f"repos/{WAKE_REPO}/contents/.onecompany/config.json?ref=main"
+    )
+    if not isinstance(payload, dict) or payload.get("encoding") != "base64":
+        raise ValueError("LIVE_CONFIG_UNAVAILABLE")
+    raw = base64.b64decode(str(payload.get("content") or ""), validate=False)
+    config = json.loads(raw.decode("utf-8"))
+    safety = config.get("safety")
+    if not isinstance(safety, dict) or type(safety.get("emergency_stop")) is not bool:
+        raise ValueError("LIVE_EMERGENCY_STOP_STATE_INVALID")
+    return safety["emergency_stop"]
+
+
+def safety() -> None:
+    if os.environ.get("GITHUB_REPOSITORY") != WAKE_REPO:
+        raise SystemExit("EXTERNAL_REVIEW_WRONG_HOST_REPO")
+    if live_emergency_stop_active():
+        raise SystemExit("EXTERNAL_REVIEW_EMERGENCY_STOP_ACTIVE")
+
+
 def prepare() -> None:
     try:
         if os.environ.get("GITHUB_REPOSITORY") != WAKE_REPO:
             raise ValueError("EXTERNAL_REVIEW_WRONG_HOST_REPO")
+        if live_emergency_stop_active():
+            raise ValueError("EXTERNAL_REVIEW_EMERGENCY_STOP_ACTIVE")
         repo, number, head, base, authors = parse_dispatch(os.environ["DISPATCH_BODY"])
         current_pr(repo, number, head, base)
         verify_material_authors(repo, number, head, authors)
@@ -687,5 +711,7 @@ if __name__ == "__main__":
         build_prompt()
     elif mode == "validate":
         validate_result()
+    elif mode == "safety":
+        safety()
     else:
-        raise SystemExit("usage: mistral_external_review.py prepare|build|validate")
+        raise SystemExit("usage: mistral_external_review.py prepare|build|validate|safety")

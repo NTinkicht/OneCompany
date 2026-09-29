@@ -378,6 +378,8 @@ def main() -> int:
                 continue
             try:
                 body = dispatch_body(repo, number, head, base, authors)
+                if emergency_stop_active():
+                    raise ValueError("EMERGENCY_STOP_ACTIVE_BEFORE_SOURCE_WRITE")
                 posted = request_json(
                     f"repos/{HOST_REPO}/issues/{HOST_ISSUE}/comments",
                     method="POST",
@@ -391,6 +393,8 @@ def main() -> int:
                     or posted.get("body") != body
                 ):
                     raise ValueError("DISPATCH_PUBLICATION_NOT_VERIFIED")
+                if emergency_stop_active():
+                    raise ValueError("EMERGENCY_STOP_ACTIVE_BEFORE_HANDOFF")
                 dispatch_review_workflow(
                     body=body,
                     source_comment_id=int(posted["id"]),
@@ -399,6 +403,8 @@ def main() -> int:
                     f"<!-- {HANDOFF_MARKER} source={int(posted['id'])} "
                     f"repo={repo} pr={number} head={head} base={base} -->"
                 )
+                if emergency_stop_active():
+                    raise ValueError("EMERGENCY_STOP_ACTIVE_BEFORE_RECEIPT_WRITE")
                 receipt = request_json(
                     f"repos/{HOST_REPO}/issues/{HOST_ISSUE}/comments",
                     method="POST",

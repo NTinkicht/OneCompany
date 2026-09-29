@@ -2,7 +2,7 @@ name: OneCompany L4 External Review Auto Dispatch
 
 on:
   schedule:
-    - cron: "7,22,37,52 * * * *"
+    - cron: "7 * * * *"
   workflow_dispatch:
 
 permissions:

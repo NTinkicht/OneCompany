@@ -20,6 +20,7 @@ import subprocess
 import sys
 import urllib.request
 import zipfile
+import unicodedata
 from pathlib import Path
 
 WAKE_REPO = "NTinkicht/OneCompany"
@@ -501,6 +502,8 @@ def live_review_authority_approved() -> bool:
         (x for x in route.get("mechanisms", []) if x.get("id") == "vibe-exact-head-review"), {}
     )
     ai = budget.get("ai", {})
+    allowed_cost_classes = set(budget.get("cost_classes", {}).get("allowed", []))
+    actor_cost_allowed = actor.get("cost_class") in allowed_cost_classes
     zero_spend = (
         ai.get("additional_monthly_spend_cap") == 0
         and all(
@@ -515,6 +518,7 @@ def live_review_authority_approved() -> bool:
         actor.get("enabled") is True
         and actor.get("configured") is True
         and "code_review" in actor.get("capabilities", [])
+        and actor_cost_allowed
         and ready.get("setup_state") == "ready"
         and ready.get("unattended", {}).get("configured") is True
         and ready.get("unattended", {}).get("verified") is True
@@ -535,15 +539,6 @@ def safety() -> None:
         raise SystemExit("EXTERNAL_REVIEW_EMERGENCY_STOP_ACTIVE")
     if not live_review_authority_approved():
         raise SystemExit("EXTERNAL_REVIEW_AUTHORITY_REVOKED")
-
-
-def emergency_stop_active() -> bool:
-    with open(".onecompany/config.json", encoding="utf-8") as stream:
-        config = json.load(stream)
-    safety = config.get("safety")
-    if not isinstance(safety, dict) or type(safety.get("emergency_stop")) is not bool:
-        raise ValueError("EMERGENCY_STOP_STATE_INVALID")
-    return safety["emergency_stop"]
 
 
 def prepare() -> None:
@@ -735,7 +730,12 @@ def _plain(value: object, maximum: int) -> bool:
     return (
         type(value) is str and 1 <= len(value) <= maximum
         and value.strip() == value
-        and not any(ord(char) < 32 or ord(char) == 127 for char in value)
+        and not any(
+            ord(char) < 32
+            or ord(char) == 127
+            or unicodedata.category(char) in {"Cc", "Cf", "Cs"}
+            for char in value
+        )
     )
 
 

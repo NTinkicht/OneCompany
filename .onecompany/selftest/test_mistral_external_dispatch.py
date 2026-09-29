@@ -374,6 +374,62 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
             self.assertTrue(d.repository_dispatch_run_exists(789))
             self.assertFalse(d.repository_dispatch_run_exists(790))
 
+    def test_emergency_stop_rechecked_before_each_write(self):
+        body = (
+            "@mistral-vibe\nMISTRAL_EXTERNAL_REVIEW_V1\n"
+            "repo: NTinkicht/veritas-atlas\npr: 22\n"
+            "head_sha: " + "a" * 40 + "\nbase_sha: " + "b" * 40 + "\n"
+            "material_authors: chatgpt\n"
+            "<!-- ONECOMPANY_L4_AUTO_DISPATCH_V1 run=123 -->\n"
+        )
+        pr = {
+            "number": 22, "draft": False, "state": "open",
+            "head": {"sha": "a" * 40, "repo": {"full_name": "NTinkicht/veritas-atlas"}},
+            "base": {"sha": "b" * 40, "ref": "main",
+                     "repo": {"full_name": "NTinkicht/veritas-atlas"}},
+        }
+        with mock.patch.dict(os.environ, {
+            "GITHUB_REPOSITORY": d.HOST_REPO, "GITHUB_RUN_ID": "123"
+        }, clear=False), \
+             mock.patch.object(d, "emergency_stop_active", side_effect=[False, True]), \
+             mock.patch.object(d, "review_capability_approved", return_value=True), \
+             mock.patch.object(d, "recent_bus_comments", return_value=[]), \
+             mock.patch.object(d, "same_repo_open_prs", side_effect=[[], [pr]]), \
+             mock.patch.object(d, "material_authors", return_value=("chatgpt",)), \
+             mock.patch.object(d, "request_json") as request, \
+             mock.patch.object(d, "dispatch_body", return_value=body):
+            self.assertEqual(d.main(), 0)
+        request.assert_not_called()
+
+    def test_stop_after_source_write_blocks_handoff(self):
+        body = (
+            "@mistral-vibe\nMISTRAL_EXTERNAL_REVIEW_V1\n"
+            "repo: NTinkicht/veritas-atlas\npr: 22\n"
+            "head_sha: " + "a" * 40 + "\nbase_sha: " + "b" * 40 + "\n"
+            "material_authors: chatgpt\n"
+            "<!-- ONECOMPANY_L4_AUTO_DISPATCH_V1 run=123 -->\n"
+        )
+        posted = {"id": 789, "user": {"login": "github-actions[bot]"}, "body": body}
+        pr = {
+            "number": 22, "draft": False, "state": "open",
+            "head": {"sha": "a" * 40, "repo": {"full_name": "NTinkicht/veritas-atlas"}},
+            "base": {"sha": "b" * 40, "ref": "main",
+                     "repo": {"full_name": "NTinkicht/veritas-atlas"}},
+        }
+        with mock.patch.dict(os.environ, {
+            "GITHUB_REPOSITORY": d.HOST_REPO, "GITHUB_RUN_ID": "123"
+        }, clear=False), \
+             mock.patch.object(d, "emergency_stop_active", side_effect=[False, False, True]), \
+             mock.patch.object(d, "review_capability_approved", return_value=True), \
+             mock.patch.object(d, "recent_bus_comments", return_value=[]), \
+             mock.patch.object(d, "same_repo_open_prs", side_effect=[[], [pr]]), \
+             mock.patch.object(d, "material_authors", return_value=("chatgpt",)), \
+             mock.patch.object(d, "request_json", return_value=posted) as request, \
+             mock.patch.object(d, "dispatch_review_workflow") as handoff:
+            self.assertEqual(d.main(), 0)
+        self.assertEqual(request.call_count, 1)
+        handoff.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

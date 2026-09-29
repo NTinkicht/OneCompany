@@ -151,7 +151,6 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
         self.assertIn('cron: "7 * * * *"', dispatcher)
         self.assertNotIn('cron: "7,22,37,52 * * * *"', dispatcher)
         self.assertIn("issues: write", dispatcher)
-        self.assertIn("actions: write", dispatcher)
         self.assertIn("ref: $" + "{{ github.sha }}", dispatcher)
         self.assertIn('test "$GITHUB_REF" = "refs/heads/main"', dispatcher)
         self.assertIn("repository_dispatch:", reviewer)

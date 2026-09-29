@@ -132,7 +132,6 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
         with mock.patch.object(d, "request_json", side_effect=request):
             d.dispatch_review_workflow(
                 body=body, source_comment_id=789,
-                target_key="veritas-atlas-22-" + "a" * 40 + "-" + "b" * 40,
             )
         route, kwargs = calls[0]
         self.assertIn(
@@ -149,6 +148,8 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
             ROOT / ".github/workflows/onecompany-mistral-external-review.yml"
         ).read_text(encoding="utf-8")
         self.assertIn("schedule:", dispatcher)
+        self.assertIn('cron: "7 * * * *"', dispatcher)
+        self.assertNotIn('cron: "7,22,37,52 * * * *"', dispatcher)
         self.assertIn("issues: write", dispatcher)
         self.assertIn("actions: write", dispatcher)
         self.assertIn("ref: $" + "{{ github.sha }}", dispatcher)
@@ -157,9 +158,10 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
         self.assertIn("github.event.client_payload.dispatch_body", reviewer)
         self.assertIn("github.event.client_payload.source_comment_id", reviewer)
         self.assertIn(
-            "github.event.client_payload.target_key",
+            "group: onecompany-mistral-external-review",
             reviewer,
         )
+        self.assertNotIn("client_payload.target_key", reviewer)
         self.assertIn("ONECOMPANY_L4_AUTO_DISPATCH_V1", reviewer)
 
     def test_retry_attempts_are_capped(self):

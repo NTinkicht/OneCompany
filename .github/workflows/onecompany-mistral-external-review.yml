@@ -78,6 +78,7 @@ jobs:
           TARGET_PR: ${{ steps.target.outputs.pr }}
           TARGET_HEAD: ${{ steps.target.outputs.head }}
           TARGET_BASE: ${{ steps.target.outputs.base }}
+          TARGET_AUTHORS: ${{ steps.target.outputs.authors }}
           TARGET_DIR: /tmp/onecompany-external-target
         run: python -I scripts/mistral_external_review.py build
 

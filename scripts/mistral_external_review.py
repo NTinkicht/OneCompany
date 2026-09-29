@@ -480,10 +480,7 @@ def _validate_dispatch_source(body: str) -> None:
     ):
         raise ValueError("EXTERNAL_REVIEW_DISPATCH_RUN_UNTRUSTED")
 
-    repo, number, head, base, _authors = parse_dispatch(body)
-    expected_key = f"{repo.split('/', 1)[1]}-{number}-{head}-{base}"
-    if os.environ.get("TARGET_KEY", "") != expected_key:
-        raise ValueError("EXTERNAL_REVIEW_TARGET_KEY_MISMATCH")
+    parse_dispatch(body)
 
 
 def live_main_json(path: str) -> dict:

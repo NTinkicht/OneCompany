@@ -75,7 +75,7 @@ NESTED_ASSIGNMENT = re.compile(
         |os\.environ\[["'][A-Za-z_][A-Za-z0-9_]*["']\]
         |getenv\(["'][A-Za-z_][A-Za-z0-9_]*["']\)
         |\$\{\{\s*secrets\.[A-Za-z_][A-Za-z0-9_]*\s*\}\}
-        |["'][^"']+["']
+        |(?:[rubf]{1,3})?["'][^"']+["']
         |[A-Za-z0-9._~+/=-]{8,}
     )"""
 )
@@ -441,18 +441,71 @@ def existing_result(
     raise ValueError("EXTERNAL_REVIEW_HISTORY_OVER_LIMIT")
 
 
-def live_emergency_stop_active() -> bool:
+def live_main_json(path: str) -> dict:
     payload = onecompany_api(
-        f"repos/{WAKE_REPO}/contents/.onecompany/config.json?ref=main"
+        f"repos/{WAKE_REPO}/contents/{path}?ref=main"
     )
     if not isinstance(payload, dict) or payload.get("encoding") != "base64":
-        raise ValueError("LIVE_CONFIG_UNAVAILABLE")
+        raise ValueError("LIVE_CONTROL_FILE_UNAVAILABLE")
     raw = base64.b64decode(str(payload.get("content") or ""), validate=False)
-    config = json.loads(raw.decode("utf-8"))
+    value = json.loads(raw.decode("utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError("LIVE_CONTROL_FILE_INVALID")
+    return value
+
+
+def live_emergency_stop_active() -> bool:
+    config = live_main_json(".onecompany/config.json")
     safety = config.get("safety")
     if not isinstance(safety, dict) or type(safety.get("emergency_stop")) is not bool:
         raise ValueError("LIVE_EMERGENCY_STOP_STATE_INVALID")
     return safety["emergency_stop"]
+
+
+def live_review_authority_approved() -> bool:
+    actors = live_main_json(".onecompany/actors.json")
+    readiness = live_main_json(".onecompany/readiness.json")
+    dispatch = live_main_json(".onecompany/dispatch.json")
+    budget = live_main_json(".onecompany/budget.json")
+
+    actor = next(
+        (x for x in actors.get("actors", []) if x.get("id") == "mistral-vibe"), {}
+    )
+    ready = next(
+        (x for x in readiness.get("actors", []) if x.get("actor_id") == "mistral-vibe"), {}
+    )
+    route = next(
+        (x for x in dispatch.get("actors", []) if x.get("actor_id") == "mistral-vibe"), {}
+    )
+    mech = next(
+        (x for x in route.get("mechanisms", []) if x.get("id") == "vibe-exact-head-review"), {}
+    )
+    ai = budget.get("ai", {})
+    zero_spend = (
+        ai.get("additional_monthly_spend_cap") == 0
+        and all(
+            ai.get(key) is False
+            for key in (
+                "allow_paid_fallback", "allow_overage",
+                "allow_auto_topup", "allow_new_paid_vendor",
+            )
+        )
+    )
+    return (
+        actor.get("enabled") is True
+        and actor.get("configured") is True
+        and "code_review" in actor.get("capabilities", [])
+        and ready.get("setup_state") == "ready"
+        and ready.get("unattended", {}).get("configured") is True
+        and ready.get("unattended", {}).get("verified") is True
+        and "code_review" not in ready.get("temporarily_unavailable_capabilities", [])
+        and "code_review" in ready.get("verified_capabilities", [])
+        and ready.get("repository_access", {}).get("review") is True
+        and mech.get("configured") is True
+        and mech.get("unattended") is True
+        and "code_review" in mech.get("capabilities", [])
+        and zero_spend
+    )
 
 
 def safety() -> None:
@@ -460,6 +513,8 @@ def safety() -> None:
         raise SystemExit("EXTERNAL_REVIEW_WRONG_HOST_REPO")
     if live_emergency_stop_active():
         raise SystemExit("EXTERNAL_REVIEW_EMERGENCY_STOP_ACTIVE")
+    if not live_review_authority_approved():
+        raise SystemExit("EXTERNAL_REVIEW_AUTHORITY_REVOKED")
 
 
 def prepare() -> None:
@@ -468,6 +523,8 @@ def prepare() -> None:
             raise ValueError("EXTERNAL_REVIEW_WRONG_HOST_REPO")
         if live_emergency_stop_active():
             raise ValueError("EXTERNAL_REVIEW_EMERGENCY_STOP_ACTIVE")
+        if not live_review_authority_approved():
+            raise ValueError("EXTERNAL_REVIEW_AUTHORITY_REVOKED")
         repo, number, head, base, authors = parse_dispatch(os.environ["DISPATCH_BODY"])
         current_pr(repo, number, head, base)
         verify_material_authors(repo, number, head, authors)

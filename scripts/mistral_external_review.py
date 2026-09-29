@@ -623,6 +623,12 @@ def validate_diff(paths: list[str], diff: str) -> None:
             pending_sensitive_value = True
             continue
 
+        for match in re.finditer(
+            r'''["']((?:\\u[0-9A-Fa-f]{4}|\\["'\\/bfnrt]|[^"'\\])+?)["']\s*:\s*(.+?)(?:[,}]|$)''',
+            line,
+        ):
+            if _sensitive_key(match.group(1)) and not _safe_reference(match.group(2)):
+                raise ValueError("EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED")
         for match in NESTED_ASSIGNMENT.finditer(line):
             if _sensitive_key(match.group(1)) and not _safe_reference(match.group(2)):
                 raise ValueError("EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED")

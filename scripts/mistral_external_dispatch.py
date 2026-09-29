@@ -357,7 +357,11 @@ def dispatch_review_workflow(
 def main() -> int:
     if os.environ.get("GITHUB_REPOSITORY") != HOST_REPO:
         raise SystemExit("WRONG_HOST_REPOSITORY")
-    ensure_live_dispatch_allowed()
+    try:
+        ensure_live_dispatch_allowed()
+    except ValueError as exc:
+        print(str(exc))
+        return 0
     comments = recent_bus_comments()
     now = int(time.time())
     prepared: list[dict] = []

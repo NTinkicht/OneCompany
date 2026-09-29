@@ -599,7 +599,8 @@ class ExternalMistralReviewTests(unittest.TestCase):
                 return trusted_run
             raise AssertionError(route)
         with mock.patch.dict(os.environ, env, clear=False), \
-             mock.patch.object(m, "onecompany_api", side_effect=trusted_api):
+             mock.patch.object(m, "onecompany_api", side_effect=trusted_api), \
+             mock.patch.object(m, "_dispatcher_source_proof", return_value=True):
             m._validate_dispatch_source(body)
 
         bad = dict(trusted, body=body + "tampered")
@@ -610,9 +611,18 @@ class ExternalMistralReviewTests(unittest.TestCase):
                 return trusted_run
             raise AssertionError(route)
         with mock.patch.dict(os.environ, env, clear=False), \
-             mock.patch.object(m, "onecompany_api", side_effect=bad_api):
+             mock.patch.object(m, "onecompany_api", side_effect=bad_api), \
+             mock.patch.object(m, "_dispatcher_source_proof", return_value=True):
             with self.assertRaisesRegex(
                 ValueError, "EXTERNAL_REVIEW_SOURCE_COMMENT_UNTRUSTED"
+            ):
+                m._validate_dispatch_source(body)
+
+        with mock.patch.dict(os.environ, env, clear=False), \
+             mock.patch.object(m, "onecompany_api", side_effect=trusted_api), \
+             mock.patch.object(m, "_dispatcher_source_proof", return_value=False):
+            with self.assertRaisesRegex(
+                ValueError, "EXTERNAL_REVIEW_DISPATCH_RUN_UNTRUSTED"
             ):
                 m._validate_dispatch_source(body)
 
@@ -858,6 +868,34 @@ class ExternalMistralReviewTests(unittest.TestCase):
                 ["config/settings.json"],
                 '+{"api\\u005fkey":"VerySecretUnprefixedValue123456789"}\n',
             )
+
+    def test_yaml_escaped_sensitive_keys_are_blocked(self):
+        for key in (r"api\x5fkey", r"api\u005fkey", r"api\U0000005fkey"):
+            with self.subTest(key=key):
+                with self.assertRaisesRegex(
+                    ValueError, "EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED"
+                ):
+                    m.validate_diff(
+                        ["config/settings.yml"],
+                        f'+{{"{key}": "VerySecretUnprefixedValue123456789"}}\n',
+                    )
+
+    def test_collection_wrapped_sensitive_multiline_value_is_blocked(self):
+        with self.assertRaisesRegex(
+            ValueError, "EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED"
+        ):
+            m.validate_diff(
+                ["config/settings.json"],
+                '+"api_key":\n+[\n+"VerySecretUnprefixedValue123456789"\n+]\n',
+            )
+
+    def test_prompt_uses_diff_bound_untrusted_boundary(self):
+        source = (ROOT / "scripts/mistral_external_review.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('boundary = f"ONECOMPANY_UNTRUSTED_DIFF_{diff_digest}"', source)
+        self.assertIn('if boundary in diff:', source)
+        self.assertNotIn("BEGIN UNTRUSTED COMPLETE BOUNDED PR DIFF", source)
 
 
 if __name__ == "__main__":

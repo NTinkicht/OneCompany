@@ -619,12 +619,15 @@ def validate_diff(paths: list[str], diff: str) -> None:
 
         stripped = line.strip()
         if pending_sensitive_value:
-            if stripped and stripped not in {"{", "}", "[", "]", ",", "-"}:
-                candidate = stripped.rstrip(",")
+            if stripped in {"{", "[", "(", "-", ","}:
+                continue
+            if stripped in {"}", "]", ")", "},", "],", "),"}:
+                pending_sensitive_value = False
+                continue
+            if stripped:
+                candidate = stripped.lstrip("- ").rstrip(",")
                 if not _safe_reference(candidate):
                     raise ValueError("EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED")
-                pending_sensitive_value = False
-            elif stripped:
                 pending_sensitive_value = False
 
         key_only = re.fullmatch(

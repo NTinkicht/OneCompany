@@ -453,13 +453,37 @@ def _validate_dispatch_source(body: str) -> None:
     item = onecompany_api(
         f"repos/{WAKE_REPO}/issues/comments/{int(source_id)}"
     )
+    marker = re.search(
+        r"<!-- ONECOMPANY_L4_AUTO_DISPATCH_V1 run=([1-9][0-9]*) -->",
+        body,
+    )
     if (
         not isinstance(item, dict)
         or (item.get("user") or {}).get("login") != "github-actions[bot]"
         or item.get("body") != body
-        or AUTO_DISPATCH_MARKER not in body
+        or marker is None
     ):
         raise ValueError("EXTERNAL_REVIEW_SOURCE_COMMENT_UNTRUSTED")
+
+    dispatch_run_id = int(marker.group(1))
+    run = onecompany_api(
+        f"repos/{WAKE_REPO}/actions/runs/{dispatch_run_id}"
+    )
+    if not (
+        isinstance(run, dict)
+        and int(run.get("id") or 0) == dispatch_run_id
+        and run.get("path") == ".github/workflows/onecompany-mistral-external-dispatch.yml"
+        and run.get("event") in {"schedule", "workflow_dispatch"}
+        and run.get("head_branch") == "main"
+        and (run.get("repository") or {}).get("full_name") == WAKE_REPO
+        and run.get("status") in {"queued", "in_progress", "completed"}
+    ):
+        raise ValueError("EXTERNAL_REVIEW_DISPATCH_RUN_UNTRUSTED")
+
+    repo, number, head, base, _authors = parse_dispatch(body)
+    expected_key = f"{repo.split('/', 1)[1]}-{number}-{head}-{base}"
+    if os.environ.get("TARGET_KEY", "") != expected_key:
+        raise ValueError("EXTERNAL_REVIEW_TARGET_KEY_MISMATCH")
 
 
 def live_main_json(path: str) -> dict:

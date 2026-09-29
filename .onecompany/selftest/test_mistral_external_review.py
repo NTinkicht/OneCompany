@@ -655,6 +655,18 @@ class ExternalMistralReviewTests(unittest.TestCase):
                     "NTinkicht/veritas-atlas", 21, "a" * 40, ("chatgpt",)
                 )
 
+    def test_nested_sensitive_assignments_are_blocked(self):
+        samples = [
+            '+config = {"api_key": "VerySecretUnprefixedValue123456789"}',
+            '+request(headers={"token": "VerySecretToken123456789"})',
+        ]
+        for line in samples:
+            with self.subTest(line=line):
+                with self.assertRaisesRegex(
+                    ValueError, "EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED"
+                ):
+                    m.validate_diff(["src/app.py"], line)
+
 
 if __name__ == "__main__":
     unittest.main()

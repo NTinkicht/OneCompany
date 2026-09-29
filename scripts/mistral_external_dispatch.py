@@ -327,12 +327,9 @@ def review_capability_approved() -> bool:
 
 
 def dispatch_review_workflow(
-    *, body: str, source_comment_id: int, target_key: str
+    *, body: str, source_comment_id: int
 ) -> None:
-    if source_comment_id < 1 or not re.fullmatch(
-        r"[A-Za-z0-9_.-]+-[1-9][0-9]{0,5}-[0-9a-f]{40}-[0-9a-f]{40}",
-        target_key,
-    ):
+    if source_comment_id < 1:
         raise ValueError("DISPATCH_IDENTITY_INVALID")
     request_json(
         f"repos/{HOST_REPO}/dispatches",

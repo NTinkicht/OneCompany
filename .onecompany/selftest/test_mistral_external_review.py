@@ -276,7 +276,7 @@ class ExternalMistralReviewTests(unittest.TestCase):
         with mock.patch.object(m, "onecompany_api", side_effect=api), \
              mock.patch.object(m, "_artifact_proof", return_value=proof):
             self.assertTrue(m.existing_result(
-                "NTinkicht/veritas-atlas", 21, "a" * 40, "b" * 40
+                "NTinkicht/veritas-atlas", 21, "a" * 40, "b" * 40, ("chatgpt",)
             ))
 
     def test_orphan_published_comment_without_run_proof_is_retryable(self):
@@ -300,7 +300,7 @@ class ExternalMistralReviewTests(unittest.TestCase):
         with mock.patch.object(m, "onecompany_api", side_effect=api), \
              mock.patch.object(m, "_artifact_proof", return_value=None):
             self.assertFalse(m.existing_result(
-                "NTinkicht/veritas-atlas", 21, "a" * 40, "b" * 40
+                "NTinkicht/veritas-atlas", 21, "a" * 40, "b" * 40, ("chatgpt",)
             ))
 
     def test_result_text_bounds_keep_total_contract_bounded(self):

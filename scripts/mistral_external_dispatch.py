@@ -159,6 +159,32 @@ def recent_bus_comments() -> list[dict]:
     raise ValueError("WAKE_BUS_HISTORY_OVER_LIMIT")
 
 
+def repository_dispatch_run_exists(source_comment_id: int) -> bool:
+    if source_comment_id < 1:
+        return False
+    expected = f"External Mistral review dispatch {source_comment_id}"
+    for page in range(1, 6):
+        payload = request_json(
+            f"repos/{HOST_REPO}/actions/workflows/"
+            "onecompany-mistral-external-review.yml/runs"
+            f"?event=repository_dispatch&per_page=100&page={page}"
+        )
+        runs = payload.get("workflow_runs") if isinstance(payload, dict) else None
+        if not isinstance(runs, list):
+            raise ValueError("DISPATCH_RUN_RECONCILIATION_UNAVAILABLE")
+        for run in runs:
+            if (
+                isinstance(run, dict)
+                and run.get("event") == "repository_dispatch"
+                and run.get("path") == ".github/workflows/onecompany-mistral-external-review.yml"
+                and run.get("display_title") == expected
+            ):
+                return True
+        if len(runs) < 100:
+            return False
+    raise ValueError("DISPATCH_RUN_RECONCILIATION_OVER_LIMIT")
+
+
 def terminal_or_pending(
     comments: list[dict], *, repo: str, number: int, head: str, base: str,
     authors: tuple[str, ...], now: int
@@ -205,7 +231,10 @@ def terminal_or_pending(
         ):
             continue
         source_id = int(item.get("id") or 0)
-        if source_id not in confirmed_sources:
+        if (
+            source_id not in confirmed_sources
+            and not repository_dispatch_run_exists(source_id)
+        ):
             continue
         attempts += 1
         if attempts >= MAX_REVIEW_ATTEMPTS_PER_TARGET:

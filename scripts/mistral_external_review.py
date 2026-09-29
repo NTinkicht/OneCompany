@@ -729,7 +729,7 @@ def validate_diff(paths: list[str], diff: str) -> None:
             continue
 
         for match in re.finditer(
-            r'''["']((?:\\u[0-9A-Fa-f]{4}|\\["'\\/bfnrt]|[^"'\\])+?)["']\s*:\s*(.+?)(?:[,}]|$)''',
+            r'''["']((?:\\U[0-9A-Fa-f]{8}|\\u[0-9A-Fa-f]{4}|\\x[0-9A-Fa-f]{2}|\\["'\\/bfnrt]|[^"'\\])+?)["']\s*:\s*(.+?)(?:[,}]|$)''',
             line,
         ):
             if _sensitive_key(match.group(1)) and not _safe_reference(match.group(2)):

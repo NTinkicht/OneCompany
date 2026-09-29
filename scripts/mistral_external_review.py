@@ -599,10 +599,15 @@ def _safe_reference(value: str) -> bool:
 
 
 def _decode_structured_key(value: str) -> str:
-    try:
-        return json.loads(f'"{value.replace(chr(34), chr(92) + chr(34))}"')
-    except Exception:
-        return value
+    def replace_hex(match: re.Match[str]) -> str:
+        return chr(int(match.group(1), 16))
+    decoded = re.sub(r"\\U([0-9A-Fa-f]{8})", replace_hex, value)
+    decoded = re.sub(r"\\u([0-9A-Fa-f]{4})", replace_hex, decoded)
+    decoded = re.sub(r"\\x([0-9A-Fa-f]{2})", replace_hex, decoded)
+    decoded = decoded.replace(r"\\", "\\")
+    if "\\" in decoded:
+        raise ValueError("EXTERNAL_REVIEW_STRUCTURED_KEY_ESCAPE_UNSUPPORTED")
+    return decoded
 
 
 def _sensitive_key(value: str) -> bool:
@@ -648,7 +653,9 @@ def validate_diff(paths: list[str], diff: str) -> None:
 
         stripped = line.strip()
         if pending_sensitive_value:
-            if stripped in {"{", "[", "(", "-", ","}:
+            if stripped in {"{", "[", "("}:
+                raise ValueError("EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED")
+            if stripped in {"-", ","}:
                 continue
             if stripped in {"}", "]", ")", "},", "],", "),"}:
                 pending_sensitive_value = False
@@ -660,7 +667,7 @@ def validate_diff(paths: list[str], diff: str) -> None:
                 pending_sensitive_value = False
 
         key_only = re.fullmatch(
-            r"""["']?((?:\\u[0-9A-Fa-f]{4}|\\["'\\/bfnrt]|[A-Za-z0-9_.-])+?)["']?\s*:\s*""", stripped
+            r"""["']?((?:\\U[0-9A-Fa-f]{8}|\\u[0-9A-Fa-f]{4}|\\x[0-9A-Fa-f]{2}|\\["'\\/bfnrt]|[A-Za-z0-9_.-])+?)["']?\s*:\s*""", stripped
         )
         if key_only and _sensitive_key(key_only.group(1)):
             pending_sensitive_value = True
@@ -728,13 +735,17 @@ def build_prompt() -> None:
             text=True, timeout=20,
         ).splitlines()
         validate_diff(names, diff)
+        diff_digest = hashlib.sha256(encoded).hexdigest()
+        boundary = f"ONECOMPANY_UNTRUSTED_DIFF_{diff_digest}"
+        if boundary in diff:
+            raise ValueError("EXTERNAL_REVIEW_DIFF_BOUNDARY_COLLISION")
         prompt = (
             REVIEW_INSTRUCTIONS
             + f"\nTRUSTED TARGET: repo={repo}; pr={number}; head={head}; "
-              f"base={base}; merge_base={merge_base}.\n"
-            + "BEGIN UNTRUSTED COMPLETE BOUNDED PR DIFF\n"
+              f"base={base}; merge_base={merge_base}; diff_sha256={diff_digest}.\n"
+            + f"BEGIN {boundary}\n"
             + diff
-            + "\nEND UNTRUSTED COMPLETE BOUNDED DIFF\n"
+            + f"\nEND {boundary}\n"
         )
         if len(prompt.encode("utf-8")) > MAX_PROMPT_BYTES:
             raise ValueError("EXTERNAL_REVIEW_PROMPT_BOUND_BLOCKED")

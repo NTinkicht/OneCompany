@@ -321,7 +321,7 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
              mock.patch.object(d, "emergency_stop_active", return_value=False), \
              mock.patch.object(d, "review_capability_approved", return_value=True), \
              mock.patch.object(d, "recent_bus_comments", return_value=[]), \
-             mock.patch.object(d, "same_repo_open_prs", side_effect=[[pr], []]), \
+             mock.patch.object(d, "same_repo_open_prs", side_effect=[[], [pr]]), \
              mock.patch.object(d, "material_authors", return_value=("chatgpt",)), \
              mock.patch.object(d, "request_json", side_effect=request):
             self.assertEqual(d.main(), 0)

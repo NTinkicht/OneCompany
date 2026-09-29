@@ -49,7 +49,8 @@ EVIDENCE_MARKER = re.compile(
     r"head=([0-9a-f]{40}) base=([0-9a-f]{40}) "
     r"run=([1-9][0-9]*) dispatch=([1-9][0-9]*) "
     r"verdict=(PASS|CHANGES_REQUIRED|INSUFFICIENT_EVIDENCE) "
-    r"result_sha256=([0-9a-f]{64})"
+    r"result_sha256=([0-9a-f]{64}) "
+    r"authors_sha256=([0-9a-f]{64})"
 )
 
 SENSITIVE_PATH = re.compile(
@@ -270,8 +271,8 @@ def verify_material_authors(repo: str, number: int, head: str, declared: tuple[s
                 raise ValueError("MISTRAL_SELF_REVIEW_BLOCKED")
             message = commit_meta.get("message", "")
             tags = MATERIAL_AUTHOR.findall(message)
-            if len(tags) > 1:
-                raise ValueError("EXTERNAL_REVIEW_AUTHOR_AMBIGUOUS")
+            if len(tags) != 1:
+                raise ValueError("EXTERNAL_REVIEW_AUTHOR_PROVENANCE_INCOMPLETE")
             observed.update(tag.lower() for tag in tags)
             if any(_mistral_identity(tag) for tag in tags):
                 raise ValueError("MISTRAL_SELF_REVIEW_BLOCKED")
@@ -285,7 +286,7 @@ def verify_material_authors(repo: str, number: int, head: str, declared: tuple[s
         raise ValueError("EXTERNAL_REVIEW_COMMITS_OVER_LIMIT")
     if count == 0 or last_sha != head:
         raise ValueError("EXTERNAL_REVIEW_COMMIT_PROVENANCE_STALE")
-    if not observed.issubset(set(declared)):
+    if observed != set(declared):
         raise ValueError("EXTERNAL_REVIEW_DECLARED_AUTHORS_MISMATCH")
 
 
@@ -338,6 +339,7 @@ def _trusted_evidence_comment(
     number: int,
     head: str,
     base: str,
+    authors: tuple[str, ...] | None = None,
 ) -> bool:
     if (item.get("user") or {}).get("login") != "github-actions[bot]":
         return False
@@ -347,7 +349,7 @@ def _trusted_evidence_comment(
         return False
     (
         marker_repo, marker_pr, marker_head, marker_base,
-        run_id, dispatch_id, verdict, result_digest,
+        run_id, dispatch_id, verdict, result_digest, authors_digest,
     ) = matches[0]
     if (
         marker_repo != repo
@@ -376,6 +378,10 @@ def _trusted_evidence_comment(
     if type(target) is not dict:
         return False
     body_digest = hashlib.sha256(body.encode("utf-8")).hexdigest()
+    target_authors = tuple(target.get("material_authors") or ())
+    expected_authors_digest = hashlib.sha256(
+        ",".join(target_authors).encode("utf-8")
+    ).hexdigest()
     return (
         proof.get("version") == 1
         and proof.get("run_id") == int(run_id)
@@ -386,14 +392,21 @@ def _trusted_evidence_comment(
         and proof.get("verdict") == verdict
         and proof.get("result_sha256") == result_digest
         and proof.get("body_sha256") == body_digest
+        and authors_digest == expected_authors_digest
         and target.get("repo") == repo
         and target.get("pr") == number
         and target.get("head_sha") == head
         and target.get("base_sha") == base
+        and (
+            authors is None
+            or tuple(target.get("material_authors") or ()) == tuple(authors)
+        )
     )
 
 
-def existing_result(repo: str, number: int, head: str, base: str) -> bool:
+def existing_result(
+    repo: str, number: int, head: str, base: str, authors: tuple[str, ...]
+) -> bool:
     for page in range(1, MAX_WAKE_PAGES + 1):
         comments = onecompany_api(
             f"repos/{WAKE_REPO}/issues/{WAKE_ISSUE}/comments?per_page=100&page={page}"
@@ -407,6 +420,7 @@ def existing_result(repo: str, number: int, head: str, base: str) -> bool:
                 number=number,
                 head=head,
                 base=base,
+                authors=authors,
             )
             for item in comments
             if isinstance(item, dict)
@@ -447,7 +461,7 @@ def prepare() -> None:
         repo, number, head, base, authors = parse_dispatch(os.environ["DISPATCH_BODY"])
         current_pr(repo, number, head, base)
         verify_material_authors(repo, number, head, authors)
-        if existing_result(repo, number, head, base):
+        if existing_result(repo, number, head, base, authors):
             output(ready="false", status="EXACT_HEAD_EXTERNAL_REVIEW_ALREADY_EXISTS")
             return
     except Exception:
@@ -504,10 +518,28 @@ def validate_diff(paths: list[str], diff: str) -> None:
     # merely because they begin with +++/---: changed source can legitimately
     # contain those prefixes. Git metadata is harmless unless it itself matches
     # a credential signature, in which case fail closed.
+    pending_sensitive_value = False
     for raw_line in diff.splitlines():
         line = raw_line
         if line.startswith(("+", "-", " ")):
             line = line[1:]
+
+        stripped = line.strip()
+        if pending_sensitive_value:
+            if stripped and stripped not in {"{", "}", "[", "]", ",", "-"}:
+                candidate = stripped.rstrip(",")
+                if not _safe_reference(candidate):
+                    raise ValueError("EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED")
+                pending_sensitive_value = False
+            elif stripped:
+                pending_sensitive_value = False
+
+        key_only = re.fullmatch(
+            r"""["']?([A-Za-z0-9_.-]+)["']?\s*:\s*""", stripped
+        )
+        if key_only and _sensitive_key(key_only.group(1)):
+            pending_sensitive_value = True
+            continue
 
         for match in ASSIGNMENT.finditer(line):
             if _sensitive_key(match.group(1)) and not _safe_reference(match.group(2)):
@@ -571,10 +603,17 @@ def build_prompt() -> None:
         if len(prompt.encode("utf-8")) > MAX_PROMPT_BYTES:
             raise ValueError("EXTERNAL_REVIEW_PROMPT_BOUND_BLOCKED")
         Path("/tmp/onecompany-external-review-prompt.txt").write_text(prompt, encoding="utf-8")
+        authors = tuple(sorted(
+            part for part in os.environ.get("TARGET_AUTHORS", "").split(",") if part
+        ))
+        if not authors or any(not AUTHOR.fullmatch(actor) for actor in authors):
+            raise ValueError("EXTERNAL_REVIEW_BUILD_AUTHORS_INVALID")
+        verify_material_authors(repo, number, head, authors)
         Path("/tmp/onecompany-external-review-meta.json").write_text(
             json.dumps({
                 "repo": repo, "pr": number, "head_sha": head, "base_sha": base,
                 "merge_base_sha": merge_base, "changed_files": names,
+                "material_authors": list(authors),
             }, sort_keys=True) + "\n",
             encoding="utf-8",
         )
@@ -669,10 +708,14 @@ def validate_result() -> None:
             value, sort_keys=True, separators=(",", ":"), ensure_ascii=False
         ).encode("utf-8")
         result_digest = hashlib.sha256(canonical_result).hexdigest()
+        authors_digest = hashlib.sha256(
+            ",".join(meta["material_authors"]).encode("utf-8")
+        ).hexdigest()
         marker = (
             f"{EXTERNAL_MARKER} repo={meta['repo']} pr={meta['pr']} "
             f"head={meta['head_sha']} base={meta['base_sha']} run={run_id} "
-            f"dispatch={dispatch_id} verdict={verdict} result_sha256={result_digest}"
+            f"dispatch={dispatch_id} verdict={verdict} result_sha256={result_digest} "
+            f"authors_sha256={authors_digest}"
         )
         lines = [
             "**OneCompany external Mistral exact-head review evidence**",

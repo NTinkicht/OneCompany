@@ -627,7 +627,7 @@ def mistral_qualification_pilot_admission(
             or not isinstance(access, dict)
             or access.get("read") is not True
             or access.get("write") is not False
-            or access.get("review") is not False
+            or type(access.get("review")) is not bool
             or not isinstance(unattended, dict)
             or unattended.get("configured") is not True
             or unattended.get("verified") is not True

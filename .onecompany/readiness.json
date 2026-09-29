@@ -224,17 +224,19 @@
       "actor_id": "mistral-vibe",
       "setup_state": "ready",
       "verified_surfaces": [
-        "github-actions-onecompany-mistral-vibe-readonly"
+        "github-actions-onecompany-mistral-vibe-readonly",
+        "github-actions-onecompany-mistral-exact-head-binding-review"
       ],
       "verified_capabilities": [
         "repository_intelligence",
-        "test_design"
+        "test_design",
+        "code_review"
       ],
       "temporarily_unavailable_capabilities": [],
       "repository_access": {
         "read": true,
         "write": false,
-        "review": false,
+        "review": true,
         "merge": false
       },
       "unattended": {
@@ -249,11 +251,13 @@
           "Live GitHub-hosted Actions run 35540501655; Vibe included entitlement check and actual inference succeeded without Codespace, no paid fallback"
         ]
       },
-      "last_verified_at": "2026-09-20T22:04:57Z",
+      "last_verified_at": "2026-09-27T06:52:14Z",
       "evidence": [
         "https://github.com/NTinkicht/OneCompany/actions/runs/35540501655",
         "https://github.com/NTinkicht/OneCompany/issues/130#issuecomment-5753004827",
-        "Model-generated evidence correctly reported protected main 9834c646eaa6ffb16b5471583ec4a554e14a5331, zero spend, no lease and bounded review test idea; no write/review/merge capability established"
+        "Model-generated evidence correctly reported protected main 9834c646eaa6ffb16b5471583ec4a554e14a5331, zero spend, no lease and bounded review test idea; no write/review/merge capability established",
+        "OneCompany Mistral exact-head binding review run 36301300826 published GitHub APPROVED PASS for PR #236 head 48089ee72cceec32c667cea2e57dd7628cb7537a",
+        "OneCompany Mistral exact-head binding review run 36284323852 published GitHub APPROVED PASS for PR #235 head 087ed7a7ee92eeefca74724fd12602c08b74fe0e"
       ]
     },
     {

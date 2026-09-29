@@ -76,10 +76,11 @@ class InteractiveActivationTests(unittest.TestCase):
         mistral = readiness["mistral-vibe"]
         self.assertEqual(mistral["setup_state"], "ready")
         self.assertEqual(mistral["verified_capabilities"],
-                         ["repository_intelligence", "test_design"])
+                         ["repository_intelligence", "test_design", "code_review"])
         self.assertTrue(mistral["repository_access"]["read"])
-        for prohibited in ("write", "review", "merge"):
-            self.assertFalse(mistral["repository_access"][prohibited])
+        self.assertFalse(mistral["repository_access"]["write"])
+        self.assertTrue(mistral["repository_access"]["review"])
+        self.assertFalse(mistral["repository_access"]["merge"])
         self.assertEqual(mistral["capacity"]["implementation_streams"], 0)
         self.assertIn("35540501655", " ".join(mistral["evidence"]))
         self.assertTrue(mistral["unattended"]["verified"])
@@ -187,6 +188,7 @@ class InteractiveActivationTests(unittest.TestCase):
             [
                 ("onecompany-local", "onecompany-actions-readonly"),
                 ("mistral-vibe", "vibe-readonly-wake"),
+                ("mistral-vibe", "vibe-exact-head-review"),
                 ("grok-4-6-interactive", "grok-supergrok-scheduled-readonly"),
             ],
         )

@@ -312,11 +312,16 @@
         {
           "id": "vibe-exact-head-review",
           "kind": "github_action",
-          "configured": false,
+          "configured": true,
           "unattended": true,
-          "capabilities": [],
-          "invocation_hint": "Planned #134: cloud reviewer with exact head/base CI and non-author qualification; no binding review until identity and trusted publisher/evidence proven.",
-          "evidence": []
+          "capabilities": [
+            "code_review"
+          ],
+          "invocation_hint": "Use the qualified exact-head/base, non-material-author Mistral review lane with trusted GitHub Actions publisher/evidence, zero-additional-spend preflight, and no model GitHub credentials. Review authority only; no target write or merge authority.",
+          "evidence": [
+            "OneCompany Mistral exact-head binding review run 36301300826 published GitHub APPROVED PASS for PR #236 head 48089ee72cceec32c667cea2e57dd7628cb7537a",
+            "OneCompany Mistral exact-head binding review run 36284323852 published GitHub APPROVED PASS for PR #235 head 087ed7a7ee92eeefca74724fd12602c08b74fe0e"
+          ]
         },
         {
           "id": "vibe-lease-implementation",

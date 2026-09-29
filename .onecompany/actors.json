@@ -210,7 +210,8 @@
       ],
       "capabilities": [
         "repository_intelligence",
-        "test_design"
+        "test_design",
+        "code_review"
       ],
       "may_independently_gate_own_material_authorship": false
     },

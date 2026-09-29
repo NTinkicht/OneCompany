@@ -23,6 +23,7 @@ MAX_WAKE_PAGES = 100
 PENDING_TTL_SECONDS = 45 * 60
 AUTO_MARKER = "ONECOMPANY_L4_AUTO_DISPATCH_V1"
 EVIDENCE_MARKER = "ONECOMPANY_EXTERNAL_MISTRAL_REVIEW_V1"
+HANDOFF_MARKER = "ONECOMPANY_L4_REVIEW_HANDOFF_V1"
 MATERIAL_AUTHOR = re.compile(r"(?im)^Material-Author:[ \t]*([a-z0-9_-]+)[ \t]*$")
 MISTRAL = re.compile(r"(?i)(?:^|[^a-z0-9])mistral(?:[-_ ]?vibe)?(?:[^a-z0-9]|$)")
 DISPATCH = re.compile(
@@ -36,6 +37,12 @@ EVIDENCE = re.compile(
     r"ONECOMPANY_EXTERNAL_MISTRAL_REVIEW_V1 "
     r"repo=(?P<repo>NTinkicht/[A-Za-z0-9_.-]+) pr=(?P<pr>[1-9][0-9]{0,5}) "
     r"head=(?P<head>[0-9a-f]{40}) base=(?P<base>[0-9a-f]{40}) "
+)
+HANDOFF = re.compile(
+    r"ONECOMPANY_L4_REVIEW_HANDOFF_V1 "
+    r"source=(?P<source>[1-9][0-9]{0,19}) "
+    r"repo=(?P<repo>NTinkicht/[A-Za-z0-9_.-]+) pr=(?P<pr>[1-9][0-9]{0,5}) "
+    r"head=(?P<head>[0-9a-f]{40}) base=(?P<base>[0-9a-f]{40})"
 )
 
 
@@ -156,6 +163,19 @@ def terminal_or_pending(
     comments: list[dict], *, repo: str, number: int, head: str, base: str,
     authors: tuple[str, ...], now: int
 ) -> bool:
+    confirmed_sources: set[int] = set()
+    for item in comments:
+        if ((item.get("user") or {}).get("login") or "").lower() != "github-actions[bot]":
+            continue
+        handoff = HANDOFF.search(str(item.get("body") or ""))
+        if handoff and (
+            handoff.group("repo") == repo
+            and int(handoff.group("pr")) == number
+            and handoff.group("head") == head
+            and handoff.group("base") == base
+        ):
+            confirmed_sources.add(int(handoff.group("source")))
+
     attempts = 0
     for item in reversed(comments):
         login = ((item.get("user") or {}).get("login") or "").lower()
@@ -175,7 +195,7 @@ def terminal_or_pending(
         ):
             return True
         dispatch = DISPATCH.search(body)
-        if not dispatch or AUTO_MARKER not in body or "handoff=ok" not in body:
+        if not dispatch or AUTO_MARKER not in body:
             continue
         if not (
             dispatch.group("repo") == repo
@@ -183,6 +203,9 @@ def terminal_or_pending(
             and dispatch.group("head") == head
             and dispatch.group("base") == base
         ):
+            continue
+        source_id = int(item.get("id") or 0)
+        if source_id not in confirmed_sources:
             continue
         attempts += 1
         if attempts >= MAX_REVIEW_ATTEMPTS_PER_TARGET:
@@ -335,23 +358,23 @@ def main() -> int:
                     source_comment_id=int(posted["id"]),
                     target_key=target_key,
                 )
-                confirmed_body = body.replace(
-                    f"<!-- {AUTO_MARKER} run={os.environ.get('GITHUB_RUN_ID', '')} -->",
-                    f"<!-- {AUTO_MARKER} run={os.environ.get('GITHUB_RUN_ID', '')} handoff=ok -->",
+                receipt_body = (
+                    f"<!-- {HANDOFF_MARKER} source={int(posted['id'])} "
+                    f"repo={repo} pr={number} head={head} base={base} -->"
                 )
-                confirmed = request_json(
-                    f"repos/{HOST_REPO}/issues/comments/{int(posted['id'])}",
-                    method="PATCH",
-                    body={"body": confirmed_body},
+                receipt = request_json(
+                    f"repos/{HOST_REPO}/issues/{HOST_ISSUE}/comments",
+                    method="POST",
+                    body={"body": receipt_body},
                 )
                 if (
-                    not isinstance(confirmed, dict)
-                    or confirmed.get("body") != confirmed_body
-                    or ((confirmed.get("user") or {}).get("login") or "").lower()
+                    not isinstance(receipt, dict)
+                    or receipt.get("body") != receipt_body
+                    or ((receipt.get("user") or {}).get("login") or "").lower()
                     != "github-actions[bot]"
                 ):
                     raise ValueError("DISPATCH_HANDOFF_CONFIRMATION_FAILED")
-                comments.append(confirmed)
+                comments.extend([posted, receipt])
                 dispatched += 1
                 print(f"AUTO_DISPATCHED repo={repo} pr={number} head={head} base={base}")
             except (ValueError, urllib.error.URLError, TimeoutError) as exc:

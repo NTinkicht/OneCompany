@@ -13,11 +13,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: >-
-    onecompany-mistral-external-review-${{
-      github.event.client_payload.target_key ||
-      github.event.comment.id
-    }}
+  group: onecompany-mistral-external-review
   cancel-in-progress: false
 
 jobs:
@@ -58,7 +54,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           DISPATCH_BODY: ${{ github.event.comment.body || github.event.client_payload.dispatch_body }}
           SOURCE_COMMENT_ID: ${{ github.event.comment.id || github.event.client_payload.source_comment_id }}
-          TARGET_KEY: ${{ github.event.client_payload.target_key }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
         run: python -I scripts/mistral_external_review.py prepare
 
@@ -188,7 +183,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           DISPATCH_BODY: ${{ github.event.comment.body || github.event.client_payload.dispatch_body }}
           SOURCE_COMMENT_ID: ${{ github.event.comment.id || github.event.client_payload.source_comment_id }}
-          TARGET_KEY: ${{ github.event.client_payload.target_key }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
         shell: bash
         run: |

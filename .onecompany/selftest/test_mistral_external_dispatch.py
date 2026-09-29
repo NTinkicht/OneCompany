@@ -258,6 +258,7 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
             ".onecompany/actors.json": {"actors": [{
                 "id": "mistral-vibe", "enabled": True, "configured": True,
                 "capabilities": ["code_review"],
+                "cost_class": "INCLUDED_SUBSCRIPTION",
             }]},
             ".onecompany/readiness.json": {"actors": [{
                 "actor_id": "mistral-vibe", "setup_state": "ready",
@@ -272,13 +273,19 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
                     "unattended": True, "capabilities": ["code_review"],
                 }],
             }]},
-            ".onecompany/budget.json": {"ai": {
-                "additional_monthly_spend_cap": 0,
-                "allow_paid_fallback": False,
-                "allow_overage": False,
-                "allow_auto_topup": False,
-                "allow_new_paid_vendor": False,
-            }},
+            ".onecompany/budget.json": {
+                "ai": {
+                    "additional_monthly_spend_cap": 0,
+                    "allow_paid_fallback": False,
+                    "allow_overage": False,
+                    "allow_auto_topup": False,
+                    "allow_new_paid_vendor": False,
+                },
+                "cost_classes": {
+                    "allowed": ["INCLUDED_SUBSCRIPTION"],
+                    "forbidden": ["UNKNOWN_COST"],
+                },
+            },
         }
         def request(route, **_kwargs):
             path = route.split("/contents/", 1)[1].split("?ref=main", 1)[0]

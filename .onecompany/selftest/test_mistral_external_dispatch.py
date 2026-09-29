@@ -42,11 +42,11 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
         }]
         self.assertTrue(d.terminal_or_pending(
             comments, repo="NTinkicht/veritas-atlas", number=22,
-            head="a" * 40, base="b" * 40, now=now,
+            head="a" * 40, base="b" * 40, authors=("chatgpt",), now=now,
         ))
         self.assertFalse(d.terminal_or_pending(
             comments, repo="NTinkicht/veritas-atlas", number=22,
-            head="a" * 40, base="b" * 40,
+            head="a" * 40, base="b" * 40, authors=("chatgpt",),
             now=now + d.PENDING_TTL_SECONDS + 61,
         ))
 
@@ -61,10 +61,14 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
                 "run=1 dispatch=2 verdict=PASS result_sha256=" + "c" * 64 + " -->"
             ),
         }]
-        self.assertTrue(d.terminal_or_pending(
-            comments, repo="NTinkicht/veritas-atlas", number=22,
-            head="a" * 40, base="b" * 40, now=int(time.time()),
-        ))
+        with mock.patch.object(
+            d.review_service, "_trusted_evidence_comment", return_value=True
+        ):
+            self.assertTrue(d.terminal_or_pending(
+                comments, repo="NTinkicht/veritas-atlas", number=22,
+                head="a" * 40, base="b" * 40,
+                authors=("chatgpt",), now=int(time.time()),
+            ))
 
     def test_material_authors_reject_mistral_self_review(self):
         commits = [{
@@ -140,7 +144,7 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
         self.assertIn("github.event.client_payload.dispatch_body", reviewer)
         self.assertIn("github.event.client_payload.source_comment_id", reviewer)
         self.assertIn(
-            "group: onecompany-mistral-external-review-$" + "{{ github.event.comment.id || github.event.client_payload.source_comment_id }}",
+            "group: onecompany-mistral-external-review",
             reviewer,
         )
         self.assertIn("ONECOMPANY_L4_AUTO_DISPATCH_V1", reviewer)
@@ -163,8 +167,22 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
             })
         self.assertTrue(d.terminal_or_pending(
             comments, repo="NTinkicht/veritas-atlas", number=22,
-            head="a" * 40, base="b" * 40, now=now,
+            head="a" * 40, base="b" * 40, authors=("chatgpt",), now=now,
         ))
+
+    def test_live_emergency_stop_reads_protected_main(self):
+        payload = {
+            "encoding": "base64",
+            "content": __import__("base64").b64encode(
+                b'{"safety":{"emergency_stop":true}}'
+            ).decode("ascii"),
+        }
+        with mock.patch.object(d, "request_json", return_value=payload) as request:
+            self.assertTrue(d.emergency_stop_active())
+        self.assertIn(
+            "contents/.onecompany/config.json?ref=main",
+            request.call_args.args[0],
+        )
 
 
 if __name__ == "__main__":

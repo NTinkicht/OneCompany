@@ -221,7 +221,8 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
             "commit": {"message": "x\n\nMaterial-Author: chatgpt"},
         }]
         def request(route, **_kwargs):
-            return first if "page=1" in route else second
+            page = int(route.rsplit("page=", 1)[1])
+            return first if page == 1 else second
         with mock.patch.object(d, "request_json", side_effect=request):
             self.assertEqual(
                 d.material_authors("NTinkicht/veritas-atlas", 22, "a" * 40),

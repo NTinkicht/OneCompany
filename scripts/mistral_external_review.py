@@ -69,6 +69,16 @@ SENSITIVE_PATH = re.compile(
 ASSIGNMENT = re.compile(
     r"""(?ix)(?:^|[\s{,(])["']?([A-Za-z0-9_.-]+)["']?\s*[:=]\s*(.+?)\s*[,;]?\s*$"""
 )
+NESTED_ASSIGNMENT = re.compile(
+    r"""(?ix)["']?([A-Za-z0-9_.-]+)["']?\s*[:=]\s*(
+        os\.getenv\(["'][A-Za-z_][A-Za-z0-9_]*["']\)
+        |os\.environ\[["'][A-Za-z_][A-Za-z0-9_]*["']\]
+        |getenv\(["'][A-Za-z_][A-Za-z0-9_]*["']\)
+        |\$\{\{\s*secrets\.[A-Za-z_][A-Za-z0-9_]*\s*\}\}
+        |["'][^"']+["']
+        |[A-Za-z0-9._~+/=-]{8,}
+    )"""
+)
 SENSITIVE_SEGMENTS = frozenset({
     "secret", "secrets", "token", "tokens", "password", "passwd",
     "credential", "credentials",
@@ -541,6 +551,9 @@ def validate_diff(paths: list[str], diff: str) -> None:
             pending_sensitive_value = True
             continue
 
+        for match in NESTED_ASSIGNMENT.finditer(line):
+            if _sensitive_key(match.group(1)) and not _safe_reference(match.group(2)):
+                raise ValueError("EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED")
         for match in ASSIGNMENT.finditer(line):
             if _sensitive_key(match.group(1)) and not _safe_reference(match.group(2)):
                 raise ValueError("EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED")

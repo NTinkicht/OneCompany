@@ -261,10 +261,22 @@ def review_capability_approved() -> bool:
     actors = live_main_json(".onecompany/actors.json")
     readiness = live_main_json(".onecompany/readiness.json")
     dispatch = live_main_json(".onecompany/dispatch.json")
+    budget = live_main_json(".onecompany/budget.json")
     actor = next((x for x in actors.get("actors", []) if x.get("id") == "mistral-vibe"), {})
     ready = next((x for x in readiness.get("actors", []) if x.get("actor_id") == "mistral-vibe"), {})
     route = next((x for x in dispatch.get("actors", []) if x.get("actor_id") == "mistral-vibe"), {})
     mech = next((x for x in route.get("mechanisms", []) if x.get("id") == "vibe-exact-head-review"), {})
+    ai = budget.get("ai", {})
+    zero_spend = (
+        ai.get("additional_monthly_spend_cap") == 0
+        and all(
+            ai.get(key) is False
+            for key in (
+                "allow_paid_fallback", "allow_overage",
+                "allow_auto_topup", "allow_new_paid_vendor",
+            )
+        )
+    )
     return (
         actor.get("enabled") is True
         and actor.get("configured") is True
@@ -278,6 +290,7 @@ def review_capability_approved() -> bool:
         and mech.get("configured") is True
         and mech.get("unattended") is True
         and "code_review" in mech.get("capabilities", [])
+        and zero_spend
     )
 
 

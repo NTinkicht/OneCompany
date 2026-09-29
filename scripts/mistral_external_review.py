@@ -547,6 +547,8 @@ def prepare() -> None:
             raise ValueError("EXTERNAL_REVIEW_WRONG_HOST_REPO")
         if live_emergency_stop_active():
             raise ValueError("EXTERNAL_REVIEW_EMERGENCY_STOP_ACTIVE")
+        if not live_review_authority_approved():
+            raise ValueError("EXTERNAL_REVIEW_AUTHORITY_REVOKED")
         body = os.environ["DISPATCH_BODY"]
         _validate_dispatch_source(body)
         repo, number, head, base, authors = parse_dispatch(body)

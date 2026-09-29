@@ -713,6 +713,56 @@ class ExternalMistralReviewTests(unittest.TestCase):
                 ):
                     m.validate_diff(["src/app.py"], line)
 
+    def test_prefixed_nested_sensitive_literal_is_blocked(self):
+        with self.assertRaisesRegex(
+            ValueError, "EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED"
+        ):
+            m.validate_diff(
+                ["src/app.py"],
+                '+config = {"api_key": f"VerySecretUnprefixedValue123456789"}',
+            )
+
+    def test_live_reviewer_authority_revocation_blocks_safety(self):
+        files = {
+            ".onecompany/config.json": {"safety": {"emergency_stop": False}},
+            ".onecompany/actors.json": {"actors": [{
+                "id": "mistral-vibe", "enabled": False, "configured": True,
+                "capabilities": ["code_review"],
+            }]},
+            ".onecompany/readiness.json": {"actors": [{
+                "actor_id": "mistral-vibe", "setup_state": "ready",
+                "unattended": {"configured": True, "verified": True},
+                "temporarily_unavailable_capabilities": [],
+                "verified_capabilities": ["code_review"],
+                "repository_access": {"review": True},
+            }]},
+            ".onecompany/dispatch.json": {"actors": [{
+                "actor_id": "mistral-vibe", "mechanisms": [{
+                    "id": "vibe-exact-head-review", "configured": True,
+                    "unattended": True, "capabilities": ["code_review"],
+                }],
+            }]},
+            ".onecompany/budget.json": {"ai": {
+                "additional_monthly_spend_cap": 0,
+                "allow_paid_fallback": False,
+                "allow_overage": False,
+                "allow_auto_topup": False,
+                "allow_new_paid_vendor": False,
+            }},
+        }
+        def api(route):
+            path = route.split("/contents/", 1)[1].split("?ref=main", 1)[0]
+            raw = json.dumps(files[path]).encode("utf-8")
+            return {
+                "encoding": "base64",
+                "content": __import__("base64").b64encode(raw).decode("ascii"),
+            }
+        with mock.patch.dict(
+            os.environ, {"GITHUB_REPOSITORY": m.WAKE_REPO}, clear=False
+        ), mock.patch.object(m, "onecompany_api", side_effect=api):
+            with self.assertRaisesRegex(SystemExit, "AUTHORITY_REVOKED"):
+                m.safety()
+
 
 if __name__ == "__main__":
     unittest.main()

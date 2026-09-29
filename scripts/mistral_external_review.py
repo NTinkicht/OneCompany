@@ -441,6 +441,58 @@ def existing_result(
     raise ValueError("EXTERNAL_REVIEW_HISTORY_OVER_LIMIT")
 
 
+def _dispatcher_source_proof(run_id: int, source_id: int, body: str) -> bool:
+    try:
+        payload = onecompany_api(
+            f"repos/{WAKE_REPO}/actions/runs/{run_id}/artifacts?per_page=100"
+        )
+        artifacts = [
+            item for item in payload.get("artifacts", [])
+            if isinstance(item, dict)
+            and item.get("name") == "onecompany-external-dispatch-proof"
+            and item.get("expired") is not True
+        ]
+        if len(artifacts) != 1:
+            return False
+        artifact_id = artifacts[0].get("id")
+        if type(artifact_id) is not int or artifact_id < 1:
+            return False
+        raw = subprocess.check_output(
+            ["gh", "api", f"repos/{WAKE_REPO}/actions/artifacts/{artifact_id}/zip"],
+            stderr=subprocess.DEVNULL,
+            timeout=30,
+        )
+        if not 1 <= len(raw) <= 1_000_000:
+            return False
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            names = [
+                name for name in archive.namelist()
+                if Path(name).name == "onecompany-external-dispatch-proof.json"
+            ]
+            if len(names) != 1:
+                return False
+            value = json.loads(archive.read(names[0]).decode("utf-8"))
+        if (
+            type(value) is not dict
+            or value.get("version") != 1
+            or value.get("run_id") != run_id
+            or type(value.get("sources")) is not list
+        ):
+            return False
+        matches = [
+            source for source in value["sources"]
+            if isinstance(source, dict)
+            and source.get("comment_id") == source_id
+            and source.get("body") == body
+        ]
+        return len(matches) == 1
+    except (
+        OSError, ValueError, KeyError, json.JSONDecodeError,
+        subprocess.CalledProcessError, subprocess.TimeoutExpired, zipfile.BadZipFile,
+    ):
+        return False
+
+
 def _validate_dispatch_source(body: str) -> None:
     event = os.environ.get("GITHUB_EVENT_NAME", "")
     if event == "issue_comment":
@@ -476,7 +528,10 @@ def _validate_dispatch_source(body: str) -> None:
         and run.get("event") in {"schedule", "workflow_dispatch"}
         and run.get("head_branch") == "main"
         and (run.get("repository") or {}).get("full_name") == WAKE_REPO
-        and run.get("status") in {"queued", "in_progress", "completed"}
+        and run.get("status") in {"in_progress", "completed"}
+        and _dispatcher_source_proof(
+            dispatch_run_id, int(source_id), body
+        )
     ):
         raise ValueError("EXTERNAL_REVIEW_DISPATCH_RUN_UNTRUSTED")
 

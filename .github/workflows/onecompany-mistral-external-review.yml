@@ -13,7 +13,11 @@ permissions:
   actions: read
 
 concurrency:
-  group: onecompany-mistral-external-review
+  group: >-
+    onecompany-mistral-external-review-${{
+      github.event.client_payload.target_key ||
+      github.event.comment.id
+    }}
   cancel-in-progress: false
 
 jobs:

@@ -192,18 +192,23 @@ class ExternalMistralReviewTests(unittest.TestCase):
         with mock.patch.object(m, "onecompany_api", return_value=comments):
             self.assertFalse(
                 m.existing_result(
-                    "NTinkicht/veritas-atlas", 21, "a" * 40, "b" * 40
+                    "NTinkicht/veritas-atlas", 21, "a" * 40, "b" * 40, ("chatgpt",)
                 )
             )
 
 
     def _proof(self, *, base=None):
         base = base or "b" * 40
+        authors = ("chatgpt",)
+        authors_digest = m.hashlib.sha256(
+            ",".join(authors).encode("utf-8")
+        ).hexdigest()
         body = (
             "<!-- " + m.EXTERNAL_MARKER
             + " repo=NTinkicht/veritas-atlas pr=21 "
             + "head=" + "a" * 40 + " base=" + base
             + " run=123 dispatch=456 verdict=PASS result_sha256=" + "c" * 64
+            + " authors_sha256=" + authors_digest
             + " -->"
         )
         item = {
@@ -219,6 +224,7 @@ class ExternalMistralReviewTests(unittest.TestCase):
                 "pr": 21,
                 "head_sha": "a" * 40,
                 "base_sha": base,
+                "material_authors": ["chatgpt"],
             },
             "run_id": 123,
             "dispatch_comment_id": 456,
@@ -431,7 +437,10 @@ class ExternalMistralReviewTests(unittest.TestCase):
             + " repo=NTinkicht/veritas-atlas pr=21 "
             + "head=" + "a" * 40 + " base=" + "b" * 40
             + " run=123 dispatch=456 verdict=CHANGES_REQUIRED "
-            + "result_sha256=" + "c" * 64 + " -->"
+            + "result_sha256=" + "c" * 64
+            + " authors_sha256="
+            + __import__("hashlib").sha256(b"chatgpt").hexdigest()
+            + " -->"
         )
         item = {
             "id": 789,
@@ -453,6 +462,7 @@ class ExternalMistralReviewTests(unittest.TestCase):
                 "pr": 21,
                 "head_sha": "a" * 40,
                 "base_sha": "b" * 40,
+                "material_authors": ["chatgpt"],
             },
             "run_id": 123,
             "dispatch_comment_id": 456,
@@ -616,6 +626,34 @@ class ExternalMistralReviewTests(unittest.TestCase):
                     ValueError, "EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED"
                 ):
                     m.validate_diff(["src/app.py"], line)
+
+    def test_multiline_sensitive_key_literal_is_blocked(self):
+        with self.assertRaisesRegex(
+            ValueError, "EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED"
+        ):
+            m.validate_diff(
+                ["config/settings.json"],
+                '+"api_key":\n+"VerySecretUnprefixedValue123456789"\n',
+            )
+
+    def test_trailerless_commit_provenance_fails_closed(self):
+        commits = [{
+            "sha": "a" * 40,
+            "author": {"login": "NTinkicht"},
+            "committer": {"login": "web-flow"},
+            "commit": {
+                "message": "change without material author",
+                "author": {"name": "Owner", "email": "owner@example.com"},
+                "committer": {"name": "GitHub", "email": "noreply@github.com"},
+            },
+        }]
+        with mock.patch.object(m, "public_api", return_value=commits):
+            with self.assertRaisesRegex(
+                ValueError, "EXTERNAL_REVIEW_AUTHOR_PROVENANCE_INCOMPLETE"
+            ):
+                m.verify_material_authors(
+                    "NTinkicht/veritas-atlas", 21, "a" * 40, ("chatgpt",)
+                )
 
 
 if __name__ == "__main__":

@@ -267,6 +267,8 @@ def review_capability_approved() -> bool:
     route = next((x for x in dispatch.get("actors", []) if x.get("actor_id") == "mistral-vibe"), {})
     mech = next((x for x in route.get("mechanisms", []) if x.get("id") == "vibe-exact-head-review"), {})
     ai = budget.get("ai", {})
+    allowed_cost_classes = set(budget.get("cost_classes", {}).get("allowed", []))
+    actor_cost_allowed = actor.get("cost_class") in allowed_cost_classes
     zero_spend = (
         ai.get("additional_monthly_spend_cap") == 0
         and all(
@@ -280,6 +282,7 @@ def review_capability_approved() -> bool:
     return (
         actor.get("enabled") is True
         and actor.get("configured") is True
+        and actor_cost_allowed
         and ready.get("setup_state") == "ready"
         and ready.get("unattended", {}).get("configured") is True
         and ready.get("unattended", {}).get("verified") is True

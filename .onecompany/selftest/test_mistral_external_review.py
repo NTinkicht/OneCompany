@@ -765,6 +765,41 @@ class ExternalMistralReviewTests(unittest.TestCase):
         self.assertFalse(m._plain("safe\u2066isolate", 100))
         self.assertTrue(m._plain("ordinary text", 100))
 
+    def test_encoded_structured_sensitive_key_is_blocked(self):
+        with self.assertRaisesRegex(
+            ValueError, "EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED"
+        ):
+            m.validate_diff(
+                ["config/settings.json"],
+                '+{"api\\u005fkey":"VerySecretUnprefixedValue123456789"}\n',
+            )
+
+    def test_diverged_base_blocks_review_packet(self):
+        env = {
+            "TARGET_REPO": "NTinkicht/veritas-atlas",
+            "TARGET_PR": "21",
+            "TARGET_HEAD": "a" * 40,
+            "TARGET_BASE": "b" * 40,
+            "TARGET_DIR": "/tmp/onecompany-test-target",
+            "TARGET_AUTHORS": "chatgpt",
+            "GITHUB_OUTPUT": "/tmp/onecompany-test-output",
+        }
+        with mock.patch.dict(os.environ, env, clear=False), \
+             mock.patch.object(m, "current_pr"), \
+             mock.patch.object(m, "verify_material_authors"), \
+             mock.patch.object(m.subprocess, "check_output") as check_output, \
+             mock.patch.object(m.Path, "is_dir", return_value=True), \
+             mock.patch.object(m.Path, "is_symlink", return_value=False):
+            check_output.side_effect = [
+                "a" * 40 + "\n",
+                "c" * 40 + "\n",
+            ]
+            m.build_prompt()
+        self.assertIn(
+            "EXTERNAL_REVIEW_EVIDENCE_BLOCKED",
+            __import__("pathlib").Path(env["GITHUB_OUTPUT"]).read_text(),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

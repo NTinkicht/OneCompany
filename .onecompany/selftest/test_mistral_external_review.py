@@ -553,8 +553,8 @@ class ExternalMistralReviewTests(unittest.TestCase):
         self.assertIn('"merge-base", base, head', helper)
         self.assertIn('"--name-only", merge_base, head', helper)
         self.assertIn('"merge_base_sha": merge_base', helper)
-        self.assertIn("onecompany-mistral-external-review-", workflow)
-        self.assertIn("github.event.client_payload.target_key", workflow)
+        self.assertIn("group: onecompany-mistral-external-review", workflow)
+        self.assertNotIn("github.event.client_payload.target_key", workflow)
 
     def test_bootstrap_excludes_source_only_external_review_surfaces(self):
         bootstrap = (ROOT / "scripts/bootstrap.py").read_text(encoding="utf-8")
@@ -584,13 +584,33 @@ class ExternalMistralReviewTests(unittest.TestCase):
             "GITHUB_EVENT_NAME": "repository_dispatch",
             "SOURCE_COMMENT_ID": "789",
         }
+        trusted_run = {
+            "id": 123,
+            "path": ".github/workflows/onecompany-mistral-external-dispatch.yml",
+            "event": "schedule",
+            "head_branch": "main",
+            "repository": {"full_name": m.WAKE_REPO},
+            "status": "completed",
+        }
+        def trusted_api(route):
+            if "/issues/comments/789" in route:
+                return trusted
+            if "/actions/runs/123" in route:
+                return trusted_run
+            raise AssertionError(route)
         with mock.patch.dict(os.environ, env, clear=False), \
-             mock.patch.object(m, "onecompany_api", return_value=trusted):
+             mock.patch.object(m, "onecompany_api", side_effect=trusted_api):
             m._validate_dispatch_source(body)
 
         bad = dict(trusted, body=body + "tampered")
+        def bad_api(route):
+            if "/issues/comments/789" in route:
+                return bad
+            if "/actions/runs/123" in route:
+                return trusted_run
+            raise AssertionError(route)
         with mock.patch.dict(os.environ, env, clear=False), \
-             mock.patch.object(m, "onecompany_api", return_value=bad):
+             mock.patch.object(m, "onecompany_api", side_effect=bad_api):
             with self.assertRaisesRegex(
                 ValueError, "EXTERNAL_REVIEW_SOURCE_COMMENT_UNTRUSTED"
             ):

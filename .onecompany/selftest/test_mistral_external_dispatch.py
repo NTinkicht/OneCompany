@@ -33,11 +33,21 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
             "repo: NTinkicht/veritas-atlas\npr: 22\n"
             "head_sha: " + "a" * 40 + "\nbase_sha: " + "b" * 40 + "\n"
             "material_authors: chatgpt\n"
-            "<!-- ONECOMPANY_L4_AUTO_DISPATCH_V1 run=123 handoff=ok -->\n"
+            "<!-- ONECOMPANY_L4_AUTO_DISPATCH_V1 run=123 -->\n"
         )
         comments = [{
+            "id": 789,
             "user": {"login": "github-actions[bot]"},
             "body": body,
+            "created_at": stamp,
+        }, {
+            "id": 790,
+            "user": {"login": "github-actions[bot]"},
+            "body": (
+                "<!-- ONECOMPANY_L4_REVIEW_HANDOFF_V1 source=789 "
+                "repo=NTinkicht/veritas-atlas pr=22 "
+                "head=" + "a" * 40 + " base=" + "b" * 40 + " -->"
+            ),
             "created_at": stamp,
         }]
         self.assertTrue(d.terminal_or_pending(
@@ -157,7 +167,9 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
         old = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - d.PENDING_TTL_SECONDS - 100))
         comments = []
         for run in range(d.MAX_REVIEW_ATTEMPTS_PER_TARGET):
+            source_id = 1000 + run
             comments.append({
+                "id": source_id,
                 "user": {"login": "github-actions[bot]"},
                 "created_at": old,
                 "body": (
@@ -165,7 +177,17 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
                     "repo: NTinkicht/veritas-atlas\npr: 22\n"
                     "head_sha: " + "a" * 40 + "\nbase_sha: " + "b" * 40 + "\n"
                     "material_authors: chatgpt\n"
-                    f"<!-- ONECOMPANY_L4_AUTO_DISPATCH_V1 run={run + 1} handoff=ok -->\n"
+                    f"<!-- ONECOMPANY_L4_AUTO_DISPATCH_V1 run={run + 1} -->\n"
+                ),
+            })
+            comments.append({
+                "id": 2000 + run,
+                "user": {"login": "github-actions[bot]"},
+                "created_at": old,
+                "body": (
+                    f"<!-- ONECOMPANY_L4_REVIEW_HANDOFF_V1 source={source_id} "
+                    "repo=NTinkicht/veritas-atlas pr=22 "
+                    "head=" + "a" * 40 + " base=" + "b" * 40 + " -->"
                 ),
             })
         self.assertTrue(d.terminal_or_pending(
@@ -190,6 +212,7 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
     def test_failed_handoff_comment_does_not_consume_retry(self):
         now = int(time.time())
         comments = [{
+            "id": 789,
             "user": {"login": "github-actions[bot]"},
             "created_at": time.strftime(
                 "%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - 60)
@@ -256,6 +279,48 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
             return {"encoding": "base64", "content": base64.b64encode(raw).decode()}
         with mock.patch.object(d, "request_json", side_effect=request):
             self.assertTrue(d.review_capability_approved())
+
+    def test_handoff_receipt_is_separate_from_authenticated_source(self):
+        body = (
+            "@mistral-vibe\nMISTRAL_EXTERNAL_REVIEW_V1\n"
+            "repo: NTinkicht/veritas-atlas\npr: 22\n"
+            "head_sha: " + "a" * 40 + "\nbase_sha: " + "b" * 40 + "\n"
+            "material_authors: chatgpt\n"
+            "<!-- ONECOMPANY_L4_AUTO_DISPATCH_V1 run=123 -->\n"
+        )
+        calls = []
+        responses = [
+            {"id": 789, "user": {"login": "github-actions[bot]"}, "body": body},
+            {},
+            {"id": 790, "user": {"login": "github-actions[bot]"},
+             "body": (
+                 "<!-- ONECOMPANY_L4_REVIEW_HANDOFF_V1 source=789 "
+                 "repo=NTinkicht/veritas-atlas pr=22 "
+                 "head=" + "a" * 40 + " base=" + "b" * 40 + " -->"
+             )},
+        ]
+        def request(route, **kwargs):
+            calls.append((route, kwargs))
+            return responses.pop(0)
+        pr = {
+            "number": 22, "draft": False, "state": "open",
+            "head": {"sha": "a" * 40, "repo": {"full_name": "NTinkicht/veritas-atlas"}},
+            "base": {"sha": "b" * 40, "ref": "main",
+                     "repo": {"full_name": "NTinkicht/veritas-atlas"}},
+        }
+        with mock.patch.dict(os.environ, {
+            "GITHUB_REPOSITORY": d.HOST_REPO, "GITHUB_RUN_ID": "123"
+        }, clear=False), \
+             mock.patch.object(d, "emergency_stop_active", return_value=False), \
+             mock.patch.object(d, "review_capability_approved", return_value=True), \
+             mock.patch.object(d, "recent_bus_comments", return_value=[]), \
+             mock.patch.object(d, "same_repo_open_prs", side_effect=[[pr], []]), \
+             mock.patch.object(d, "material_authors", return_value=("chatgpt",)), \
+             mock.patch.object(d, "request_json", side_effect=request):
+            self.assertEqual(d.main(), 0)
+        self.assertEqual(calls[0][1]["body"]["body"], body)
+        self.assertEqual(calls[1][1]["body"]["client_payload"]["dispatch_body"], body)
+        self.assertNotEqual(calls[2][1]["body"]["body"], body)
 
 
 if __name__ == "__main__":

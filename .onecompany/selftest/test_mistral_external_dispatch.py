@@ -33,7 +33,7 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
             "repo: NTinkicht/veritas-atlas\npr: 22\n"
             "head_sha: " + "a" * 40 + "\nbase_sha: " + "b" * 40 + "\n"
             "material_authors: chatgpt\n"
-            "<!-- ONECOMPANY_L4_AUTO_DISPATCH_V1 run=123 -->\n"
+            "<!-- ONECOMPANY_L4_AUTO_DISPATCH_V1 run=123 handoff=ok -->\n"
         )
         comments = [{
             "user": {"login": "github-actions[bot]"},
@@ -120,7 +120,10 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
             return {}
         body = "MISTRAL_EXTERNAL_REVIEW_V1\n"
         with mock.patch.object(d, "request_json", side_effect=request):
-            d.dispatch_review_workflow(body=body, source_comment_id=789)
+            d.dispatch_review_workflow(
+                body=body, source_comment_id=789,
+                target_key="veritas-atlas-22-" + "a" * 40 + "-" + "b" * 40,
+            )
         route, kwargs = calls[0]
         self.assertIn(
             "repos/NTinkicht/OneCompany/dispatches",
@@ -144,7 +147,7 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
         self.assertIn("github.event.client_payload.dispatch_body", reviewer)
         self.assertIn("github.event.client_payload.source_comment_id", reviewer)
         self.assertIn(
-            "group: onecompany-mistral-external-review",
+            "github.event.client_payload.target_key",
             reviewer,
         )
         self.assertIn("ONECOMPANY_L4_AUTO_DISPATCH_V1", reviewer)
@@ -162,7 +165,7 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
                     "repo: NTinkicht/veritas-atlas\npr: 22\n"
                     "head_sha: " + "a" * 40 + "\nbase_sha: " + "b" * 40 + "\n"
                     "material_authors: chatgpt\n"
-                    f"<!-- ONECOMPANY_L4_AUTO_DISPATCH_V1 run={run + 1} -->\n"
+                    f"<!-- ONECOMPANY_L4_AUTO_DISPATCH_V1 run={run + 1} handoff=ok -->\n"
                 ),
             })
         self.assertTrue(d.terminal_or_pending(
@@ -183,6 +186,75 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
             "contents/.onecompany/config.json?ref=main",
             request.call_args.args[0],
         )
+
+    def test_failed_handoff_comment_does_not_consume_retry(self):
+        now = int(time.time())
+        comments = [{
+            "user": {"login": "github-actions[bot]"},
+            "created_at": time.strftime(
+                "%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - 60)
+            ),
+            "body": (
+                "@mistral-vibe\nMISTRAL_EXTERNAL_REVIEW_V1\n"
+                "repo: NTinkicht/veritas-atlas\npr: 22\n"
+                "head_sha: " + "a" * 40 + "\nbase_sha: " + "b" * 40 + "\n"
+                "material_authors: chatgpt\n"
+                "<!-- ONECOMPANY_L4_AUTO_DISPATCH_V1 run=123 -->\n"
+            ),
+        }]
+        self.assertFalse(d.terminal_or_pending(
+            comments, repo="NTinkicht/veritas-atlas", number=22,
+            head="a" * 40, base="b" * 40, authors=("chatgpt",), now=now,
+        ))
+
+    def test_material_authors_paginates(self):
+        first = [{
+            "sha": ("%040x" % i),
+            "author": {"login": "NTinkicht"},
+            "committer": {"login": "web-flow"},
+            "commit": {"message": "x\n\nMaterial-Author: chatgpt"},
+        } for i in range(100)]
+        second = [{
+            "sha": "a" * 40,
+            "author": {"login": "NTinkicht"},
+            "committer": {"login": "web-flow"},
+            "commit": {"message": "x\n\nMaterial-Author: chatgpt"},
+        }]
+        def request(route, **_kwargs):
+            return first if "page=1" in route else second
+        with mock.patch.object(d, "request_json", side_effect=request):
+            self.assertEqual(
+                d.material_authors("NTinkicht/veritas-atlas", 22, "a" * 40),
+                ("chatgpt",),
+            )
+
+    def test_review_capability_reads_live_main_controls(self):
+        import base64, json
+        payloads = {
+            ".onecompany/actors.json": {"actors": [{
+                "id": "mistral-vibe", "enabled": True, "configured": True,
+                "capabilities": ["code_review"],
+            }]},
+            ".onecompany/readiness.json": {"actors": [{
+                "actor_id": "mistral-vibe", "setup_state": "ready",
+                "unattended": {"configured": True, "verified": True},
+                "temporarily_unavailable_capabilities": [],
+                "verified_capabilities": ["code_review"],
+                "repository_access": {"review": True},
+            }]},
+            ".onecompany/dispatch.json": {"actors": [{
+                "actor_id": "mistral-vibe", "mechanisms": [{
+                    "id": "vibe-exact-head-review", "configured": True,
+                    "unattended": True, "capabilities": ["code_review"],
+                }],
+            }]},
+        }
+        def request(route, **_kwargs):
+            path = route.split("/contents/", 1)[1].split("?ref=main", 1)[0]
+            raw = json.dumps(payloads[path]).encode()
+            return {"encoding": "base64", "content": base64.b64encode(raw).decode()}
+        with mock.patch.object(d, "request_json", side_effect=request):
+            self.assertTrue(d.review_capability_approved())
 
 
 if __name__ == "__main__":

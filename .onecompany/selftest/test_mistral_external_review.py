@@ -850,6 +850,15 @@ class ExternalMistralReviewTests(unittest.TestCase):
         self.assertIn("ready=false", output_text)
         self.assertIn("status=EXTERNAL_REVIEW_TARGET_BLOCKED", output_text)
 
+    def test_encoded_structured_sensitive_key_is_blocked(self):
+        with self.assertRaisesRegex(
+            ValueError, "EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED"
+        ):
+            m.validate_diff(
+                ["config/settings.json"],
+                '+{"api\\u005fkey":"VerySecretUnprefixedValue123456789"}\n',
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

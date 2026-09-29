@@ -598,9 +598,17 @@ def _safe_reference(value: str) -> bool:
     return any(pattern.fullmatch(candidate) for pattern in SAFE_REFERENCE_PATTERNS)
 
 
+def _decode_structured_key(value: str) -> str:
+    try:
+        return json.loads(f'"{value.replace(chr(34), chr(92) + chr(34))}"')
+    except Exception:
+        return value
+
+
 def _sensitive_key(value: str) -> bool:
     # Normalize camelCase and dotted/property-style keys without treating
     # ordinary words like "author" or "authentication_required" as secrets.
+    value = _decode_structured_key(value)
     normalized = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", value).lower()
     segments = [part for part in re.split(r"[._-]+", normalized) if part]
     if any(part in SENSITIVE_SEGMENTS for part in segments):
@@ -652,7 +660,7 @@ def validate_diff(paths: list[str], diff: str) -> None:
                 pending_sensitive_value = False
 
         key_only = re.fullmatch(
-            r"""["']?([A-Za-z0-9_.-]+)["']?\s*:\s*""", stripped
+            r"""["']?((?:\\u[0-9A-Fa-f]{4}|\\["'\\/bfnrt]|[A-Za-z0-9_.-])+?)["']?\s*:\s*""", stripped
         )
         if key_only and _sensitive_key(key_only.group(1)):
             pending_sensitive_value = True
@@ -698,6 +706,8 @@ def build_prompt() -> None:
         ).strip()
         if not SHA.fullmatch(merge_base):
             raise ValueError("EXTERNAL_REVIEW_MERGE_BASE_INVALID")
+        if merge_base != base:
+            raise ValueError("EXTERNAL_REVIEW_DIVERGED_BASE_BLOCKED")
         diff = subprocess.check_output(
             ["git", "-C", str(root), "diff", "--no-ext-diff", "--no-textconv",
              "--no-color", "--no-renames", merge_base, head, "--"],

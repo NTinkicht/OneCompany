@@ -36,7 +36,21 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Discover and enqueue missing exact-head external reviews
+      - name: Discover and publish bounded exact-head review sources
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python -I scripts/mistral_external_dispatch.py
+        run: python -I scripts/mistral_external_dispatch.py prepare
+
+      - name: Upload run-scoped dispatcher source proof
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: onecompany-external-dispatch-proof
+          path: /tmp/onecompany-external-dispatch-proof.json
+          if-no-files-found: error
+          retention-days: 7
+          compression-level: 9
+
+      - name: Dispatch only after source proof is durable
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -I scripts/mistral_external_dispatch.py handoff

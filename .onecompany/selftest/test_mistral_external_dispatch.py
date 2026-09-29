@@ -225,10 +225,13 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
                 "<!-- ONECOMPANY_L4_AUTO_DISPATCH_V1 run=123 -->\n"
             ),
         }]
-        self.assertFalse(d.terminal_or_pending(
-            comments, repo="NTinkicht/veritas-atlas", number=22,
-            head="a" * 40, base="b" * 40, authors=("chatgpt",), now=now,
-        ))
+        with mock.patch.object(
+            d, "repository_dispatch_run_exists", return_value=False
+        ):
+            self.assertFalse(d.terminal_or_pending(
+                comments, repo="NTinkicht/veritas-atlas", number=22,
+                head="a" * 40, base="b" * 40, authors=("chatgpt",), now=now,
+            ))
 
     def test_material_authors_paginates(self):
         first = [{
@@ -335,6 +338,40 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
         self.assertEqual(calls[0][1]["body"]["body"], body)
         self.assertEqual(calls[1][1]["body"]["client_payload"]["dispatch_body"], body)
         self.assertNotEqual(calls[2][1]["body"]["body"], body)
+
+    def test_successful_dispatch_run_reconciles_missing_receipt(self):
+        now = int(time.time())
+        comments = [{
+            "id": 789,
+            "user": {"login": "github-actions[bot]"},
+            "created_at": time.strftime(
+                "%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - 60)
+            ),
+            "body": (
+                "@mistral-vibe\nMISTRAL_EXTERNAL_REVIEW_V1\n"
+                "repo: NTinkicht/veritas-atlas\npr: 22\n"
+                "head_sha: " + "a" * 40 + "\nbase_sha: " + "b" * 40 + "\n"
+                "material_authors: chatgpt\n"
+                "<!-- ONECOMPANY_L4_AUTO_DISPATCH_V1 run=123 -->\n"
+            ),
+        }]
+        with mock.patch.object(
+            d, "repository_dispatch_run_exists", return_value=True
+        ):
+            self.assertTrue(d.terminal_or_pending(
+                comments, repo="NTinkicht/veritas-atlas", number=22,
+                head="a" * 40, base="b" * 40, authors=("chatgpt",), now=now,
+            ))
+
+    def test_repository_dispatch_run_reconciliation_is_source_bound(self):
+        payload = {"workflow_runs": [{
+            "event": "repository_dispatch",
+            "path": ".github/workflows/onecompany-mistral-external-review.yml",
+            "display_title": "External Mistral review dispatch 789",
+        }]}
+        with mock.patch.object(d, "request_json", return_value=payload):
+            self.assertTrue(d.repository_dispatch_run_exists(789))
+            self.assertFalse(d.repository_dispatch_run_exists(790))
 
 
 if __name__ == "__main__":

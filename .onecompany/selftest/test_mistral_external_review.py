@@ -763,6 +763,54 @@ class ExternalMistralReviewTests(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "AUTHORITY_REVOKED"):
                 m.safety()
 
+    def test_live_reviewer_cost_class_must_be_budget_allowed(self):
+        docs = {
+            ".onecompany/actors.json": {"actors": [{
+                "id": "mistral-vibe", "enabled": True, "configured": True,
+                "capabilities": ["code_review"], "cost_class": "UNKNOWN_COST",
+            }]},
+            ".onecompany/readiness.json": {"actors": [{
+                "actor_id": "mistral-vibe", "setup_state": "ready",
+                "unattended": {"configured": True, "verified": True},
+                "temporarily_unavailable_capabilities": [],
+                "verified_capabilities": ["code_review"],
+                "repository_access": {"review": True},
+            }]},
+            ".onecompany/dispatch.json": {"actors": [{
+                "actor_id": "mistral-vibe", "mechanisms": [{
+                    "id": "vibe-exact-head-review", "configured": True,
+                    "unattended": True, "capabilities": ["code_review"],
+                }],
+            }]},
+            ".onecompany/budget.json": {
+                "ai": {
+                    "additional_monthly_spend_cap": 0,
+                    "allow_paid_fallback": False,
+                    "allow_overage": False,
+                    "allow_auto_topup": False,
+                    "allow_new_paid_vendor": False,
+                },
+                "cost_classes": {
+                    "allowed": ["INCLUDED_SUBSCRIPTION"],
+                    "forbidden": ["UNKNOWN_COST"],
+                },
+            },
+        }
+        def api(route):
+            path = route.split("/contents/", 1)[1].split("?ref=main", 1)[0]
+            raw = json.dumps(docs[path]).encode("utf-8")
+            return {
+                "encoding": "base64",
+                "content": __import__("base64").b64encode(raw).decode("ascii"),
+            }
+        with mock.patch.object(m, "onecompany_api", side_effect=api):
+            self.assertFalse(m.live_review_authority_approved())
+
+    def test_model_text_rejects_unicode_control_and_bidi(self):
+        self.assertFalse(m._plain("safe\u202Espoof", 100))
+        self.assertFalse(m._plain("safe\u2066isolate", 100))
+        self.assertTrue(m._plain("ordinary text", 100))
+
 
 if __name__ == "__main__":
     unittest.main()

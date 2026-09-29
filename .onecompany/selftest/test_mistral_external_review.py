@@ -811,6 +811,25 @@ class ExternalMistralReviewTests(unittest.TestCase):
         self.assertFalse(m._plain("safe\u2066isolate", 100))
         self.assertTrue(m._plain("ordinary text", 100))
 
+    def test_prepare_blocks_revoked_live_authority_before_dispatch_parse(self):
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False) as output:
+            output_path = output.name
+        env = {
+            "GITHUB_REPOSITORY": m.WAKE_REPO,
+            "GITHUB_OUTPUT": output_path,
+            "DISPATCH_BODY": "untrusted body should never be parsed",
+        }
+        with mock.patch.dict(os.environ, env, clear=False), \
+             mock.patch.object(m, "live_emergency_stop_active", return_value=False), \
+             mock.patch.object(m, "live_review_authority_approved", return_value=False), \
+             mock.patch.object(m, "parse_dispatch") as parse:
+            m.prepare()
+            parse.assert_not_called()
+        output_text = open(output_path, encoding="utf-8").read()
+        self.assertIn("ready=false", output_text)
+        self.assertIn("status=EXTERNAL_REVIEW_TARGET_BLOCKED", output_text)
+
 
 if __name__ == "__main__":
     unittest.main()

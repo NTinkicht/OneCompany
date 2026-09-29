@@ -553,7 +553,8 @@ class ExternalMistralReviewTests(unittest.TestCase):
         self.assertIn('"merge-base", base, head', helper)
         self.assertIn('"--name-only", merge_base, head', helper)
         self.assertIn('"merge_base_sha": merge_base', helper)
-        self.assertIn("group: onecompany-mistral-external-review", workflow)
+        self.assertIn("onecompany-mistral-external-review-", workflow)
+        self.assertIn("github.event.client_payload.target_key", workflow)
 
     def test_bootstrap_excludes_source_only_external_review_surfaces(self):
         bootstrap = (ROOT / "scripts/bootstrap.py").read_text(encoding="utf-8")

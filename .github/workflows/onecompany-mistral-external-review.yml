@@ -137,6 +137,12 @@ jobs:
         if: steps.preflight.outputs.ready == 'true'
         run: python -I -m pip install --disable-pip-version-check 'mistral-vibe==2.25.3'
 
+      - name: Recheck live emergency stop immediately before provider invocation
+        if: steps.preflight.outputs.ready == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -I scripts/mistral_external_review.py safety
+
       - name: Run isolated no-tool external review
         if: steps.preflight.outputs.ready == 'true'
         id: actor

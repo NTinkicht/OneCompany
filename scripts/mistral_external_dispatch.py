@@ -7,7 +7,9 @@ import calendar
 import json
 import os
 import re
+import sys
 import time
+from pathlib import Path
 import urllib.error
 import urllib.request
 
@@ -19,11 +21,12 @@ TARGETS = ("NTinkicht/Tabibi", "NTinkicht/veritas-atlas")
 MAX_PR_PAGES = 5
 MAX_REVIEW_ATTEMPTS_PER_TARGET = 3
 MAX_DISPATCHES_PER_RUN = 6
-MAX_WAKE_PAGES = 100
+MAX_WAKE_PAGES = review_service.MAX_WAKE_PAGES
 PENDING_TTL_SECONDS = 45 * 60
 AUTO_MARKER = "ONECOMPANY_L4_AUTO_DISPATCH_V1"
 EVIDENCE_MARKER = "ONECOMPANY_EXTERNAL_MISTRAL_REVIEW_V1"
 HANDOFF_MARKER = "ONECOMPANY_L4_REVIEW_HANDOFF_V1"
+DISPATCH_PROOF_PATH = Path("/tmp/onecompany-external-dispatch-proof.json")
 MATERIAL_AUTHOR = re.compile(r"(?im)^Material-Author:[ \t]*([a-z0-9_-]+)[ \t]*$")
 MISTRAL = re.compile(r"(?i)(?:^|[^a-z0-9])mistral(?:[-_ ]?vibe)?(?:[^a-z0-9]|$)")
 DISPATCH = re.compile(
@@ -326,6 +329,13 @@ def review_capability_approved() -> bool:
     )
 
 
+def ensure_live_dispatch_allowed() -> None:
+    if emergency_stop_active():
+        raise ValueError("AUTO_DISPATCH_EMERGENCY_STOP_ACTIVE")
+    if not review_capability_approved():
+        raise ValueError("AUTO_DISPATCH_REVIEW_CAPABILITY_NOT_APPROVED")
+
+
 def dispatch_review_workflow(
     *, body: str, source_comment_id: int
 ) -> None:
@@ -347,20 +357,14 @@ def dispatch_review_workflow(
 def main() -> int:
     if os.environ.get("GITHUB_REPOSITORY") != HOST_REPO:
         raise SystemExit("WRONG_HOST_REPOSITORY")
-    if emergency_stop_active():
-        print("AUTO_DISPATCH_EMERGENCY_STOP_ACTIVE")
-        return 0
-    if not review_capability_approved():
-        print("AUTO_DISPATCH_REVIEW_CAPABILITY_NOT_APPROVED")
-        return 0
+    ensure_live_dispatch_allowed()
     comments = recent_bus_comments()
     now = int(time.time())
-    dispatched = 0
+    prepared: list[dict] = []
     for repo in TARGETS:
         for pr in same_repo_open_prs(repo):
-            if dispatched >= MAX_DISPATCHES_PER_RUN:
-                print("DISPATCH_BOUND_REACHED")
-                return 0
+            if len(prepared) >= MAX_DISPATCHES_PER_RUN:
+                break
             number = int(pr["number"])
             head = (pr.get("head") or {}).get("sha") or ""
             base = (pr.get("base") or {}).get("sha") or ""
@@ -368,18 +372,13 @@ def main() -> int:
                 continue
             try:
                 authors = material_authors(repo, number, head)
-            except (ValueError, urllib.error.URLError, TimeoutError) as exc:
-                print(f"AUTO_DISPATCH_BLOCKED repo={repo} pr={number} reason={type(exc).__name__}")
-                continue
-            if terminal_or_pending(
-                comments, repo=repo, number=number, head=head, base=base,
-                authors=authors, now=now
-            ):
-                continue
-            try:
+                if terminal_or_pending(
+                    comments, repo=repo, number=number, head=head, base=base,
+                    authors=authors, now=now
+                ):
+                    continue
                 body = dispatch_body(repo, number, head, base, authors)
-                if emergency_stop_active():
-                    raise ValueError("EMERGENCY_STOP_ACTIVE_BEFORE_SOURCE_WRITE")
+                ensure_live_dispatch_allowed()
                 posted = request_json(
                     f"repos/{HOST_REPO}/issues/{HOST_ISSUE}/comments",
                     method="POST",
@@ -393,38 +392,90 @@ def main() -> int:
                     or posted.get("body") != body
                 ):
                     raise ValueError("DISPATCH_PUBLICATION_NOT_VERIFIED")
-                if emergency_stop_active():
-                    raise ValueError("EMERGENCY_STOP_ACTIVE_BEFORE_HANDOFF")
-                dispatch_review_workflow(
-                    body=body,
-                    source_comment_id=int(posted["id"]),
-                )
-                receipt_body = (
-                    f"<!-- {HANDOFF_MARKER} source={int(posted['id'])} "
-                    f"repo={repo} pr={number} head={head} base={base} -->"
-                )
-                if emergency_stop_active():
-                    raise ValueError("EMERGENCY_STOP_ACTIVE_BEFORE_RECEIPT_WRITE")
-                receipt = request_json(
-                    f"repos/{HOST_REPO}/issues/{HOST_ISSUE}/comments",
-                    method="POST",
-                    body={"body": receipt_body},
-                )
-                if (
-                    not isinstance(receipt, dict)
-                    or receipt.get("body") != receipt_body
-                    or ((receipt.get("user") or {}).get("login") or "").lower()
-                    != "github-actions[bot]"
-                ):
-                    raise ValueError("DISPATCH_HANDOFF_CONFIRMATION_FAILED")
-                comments.extend([posted, receipt])
-                dispatched += 1
-                print(f"AUTO_DISPATCHED repo={repo} pr={number} head={head} base={base}")
+                prepared.append({
+                    "comment_id": int(posted["id"]),
+                    "body": body,
+                    "repo": repo,
+                    "pr": number,
+                    "head": head,
+                    "base": base,
+                })
+                comments.append(posted)
             except (ValueError, urllib.error.URLError, TimeoutError) as exc:
                 print(f"AUTO_DISPATCH_BLOCKED repo={repo} pr={number} reason={type(exc).__name__}")
+    proof = {
+        "version": 1,
+        "run_id": int(os.environ.get("GITHUB_RUN_ID", "0") or 0),
+        "sources": prepared,
+    }
+    if proof["run_id"] < 1:
+        raise ValueError("DISPATCH_RUN_ID_INVALID")
+    DISPATCH_PROOF_PATH.write_text(
+        json.dumps(proof, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    print(f"AUTO_DISPATCH_PREPARED={len(prepared)}")
+    return 0
+
+
+def handoff() -> int:
+    if os.environ.get("GITHUB_REPOSITORY") != HOST_REPO:
+        raise SystemExit("WRONG_HOST_REPOSITORY")
+    proof = json.loads(DISPATCH_PROOF_PATH.read_text(encoding="utf-8"))
+    if (
+        type(proof) is not dict
+        or proof.get("version") != 1
+        or proof.get("run_id") != int(os.environ.get("GITHUB_RUN_ID", "0") or 0)
+        or type(proof.get("sources")) is not list
+        or len(proof["sources"]) > MAX_DISPATCHES_PER_RUN
+    ):
+        raise ValueError("DISPATCH_PROOF_INVALID")
+    dispatched = 0
+    for source in proof["sources"]:
+        if type(source) is not dict:
+            raise ValueError("DISPATCH_SOURCE_INVALID")
+        source_id = int(source.get("comment_id") or 0)
+        body = str(source.get("body") or "")
+        repo = str(source.get("repo") or "")
+        number = int(source.get("pr") or 0)
+        head = str(source.get("head") or "")
+        base = str(source.get("base") or "")
+        ensure_live_dispatch_allowed()
+        current = request_json(f"repos/{HOST_REPO}/issues/comments/{source_id}")
+        if (
+            source_id < 1
+            or not isinstance(current, dict)
+            or (current.get("user") or {}).get("login") != "github-actions[bot]"
+            or current.get("body") != body
+        ):
+            raise ValueError("DISPATCH_SOURCE_CHANGED")
+        dispatch_review_workflow(body=body, source_comment_id=source_id)
+        receipt_body = (
+            f"<!-- {HANDOFF_MARKER} source={source_id} "
+            f"repo={repo} pr={number} head={head} base={base} -->"
+        )
+        ensure_live_dispatch_allowed()
+        receipt = request_json(
+            f"repos/{HOST_REPO}/issues/{HOST_ISSUE}/comments",
+            method="POST",
+            body={"body": receipt_body},
+        )
+        if (
+            not isinstance(receipt, dict)
+            or receipt.get("body") != receipt_body
+            or ((receipt.get("user") or {}).get("login") or "").lower()
+            != "github-actions[bot]"
+        ):
+            raise ValueError("DISPATCH_HANDOFF_CONFIRMATION_FAILED")
+        dispatched += 1
+        print(f"AUTO_DISPATCHED repo={repo} pr={number} head={head} base={base}")
     print(f"AUTO_DISPATCH_COUNT={dispatched}")
     return 0
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    mode = sys.argv[1] if len(sys.argv) > 1 else "prepare"
+    if mode == "prepare":
+        raise SystemExit(main())
+    if mode == "handoff":
+        raise SystemExit(handoff())
+    raise SystemExit("UNKNOWN_MODE")

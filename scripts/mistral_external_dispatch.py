@@ -10,6 +10,8 @@ import time
 import urllib.error
 import urllib.request
 
+import mistral_external_review as review_service
+
 HOST_REPO = "NTinkicht/OneCompany"
 HOST_ISSUE = 130
 TARGETS = ("NTinkicht/Tabibi", "NTinkicht/veritas-atlas")
@@ -116,13 +118,9 @@ def material_authors(repo: str, number: int, head: str) -> tuple[str, ...]:
         if any(MISTRAL.search(str(value or "")) for value in identities):
             raise ValueError("MISTRAL_SELF_REVIEW_BLOCKED")
         tags = MATERIAL_AUTHOR.findall(meta.get("message") or "")
-        if len(tags) > 1:
-            raise ValueError("MATERIAL_AUTHOR_AMBIGUOUS")
-        if tags:
-            actors.add(tags[0].lower())
-        else:
-            login = normalize_actor((item.get("author") or {}).get("login"))
-            actors.add(f"github-{login}" if login else "unknown")
+        if len(tags) != 1:
+            raise ValueError("MATERIAL_AUTHOR_PROVENANCE_INCOMPLETE")
+        actors.add(tags[0].lower())
     actors.discard("")
     if not actors or any(MISTRAL.search(actor) for actor in actors):
         raise ValueError("MATERIAL_AUTHORS_INVALID")
@@ -145,7 +143,8 @@ def recent_bus_comments() -> list[dict]:
 
 
 def terminal_or_pending(
-    comments: list[dict], *, repo: str, number: int, head: str, base: str, now: int
+    comments: list[dict], *, repo: str, number: int, head: str, base: str,
+    authors: tuple[str, ...], now: int
 ) -> bool:
     attempts = 0
     for item in reversed(comments):
@@ -159,6 +158,10 @@ def terminal_or_pending(
             and int(evidence.group("pr")) == number
             and evidence.group("head") == head
             and evidence.group("base") == base
+            and review_service._trusted_evidence_comment(
+                item, repo=repo, number=number, head=head, base=base,
+                authors=authors,
+            )
         ):
             return True
         dispatch = DISPATCH.search(body)
@@ -203,8 +206,14 @@ def dispatch_body(repo: str, number: int, head: str, base: str, authors: tuple[s
 
 
 def emergency_stop_active() -> bool:
-    with open(".onecompany/config.json", encoding="utf-8") as stream:
-        config = json.load(stream)
+    payload = request_json(
+        f"repos/{HOST_REPO}/contents/.onecompany/config.json?ref=main"
+    )
+    if not isinstance(payload, dict) or payload.get("encoding") != "base64":
+        raise ValueError("LIVE_CONFIG_UNAVAILABLE")
+    import base64
+    raw = base64.b64decode(str(payload.get("content") or ""), validate=False)
+    config = json.loads(raw.decode("utf-8"))
     safety = config.get("safety")
     if not isinstance(safety, dict) or type(safety.get("emergency_stop")) is not bool:
         raise ValueError("EMERGENCY_STOP_STATE_INVALID")
@@ -276,12 +285,17 @@ def main() -> int:
             base = (pr.get("base") or {}).get("sha") or ""
             if not re.fullmatch(r"[0-9a-f]{40}", head) or not re.fullmatch(r"[0-9a-f]{40}", base):
                 continue
+            try:
+                authors = material_authors(repo, number, head)
+            except (ValueError, urllib.error.URLError, TimeoutError) as exc:
+                print(f"AUTO_DISPATCH_BLOCKED repo={repo} pr={number} reason={type(exc).__name__}")
+                continue
             if terminal_or_pending(
-                comments, repo=repo, number=number, head=head, base=base, now=now
+                comments, repo=repo, number=number, head=head, base=base,
+                authors=authors, now=now
             ):
                 continue
             try:
-                authors = material_authors(repo, number, head)
                 body = dispatch_body(repo, number, head, base, authors)
                 posted = request_json(
                     f"repos/{HOST_REPO}/issues/{HOST_ISSUE}/comments",

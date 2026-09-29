@@ -342,7 +342,6 @@ def dispatch_review_workflow(
             "client_payload": {
                 "dispatch_body": body,
                 "source_comment_id": str(source_comment_id),
-                "target_key": target_key,
             },
         },
     )
@@ -395,13 +394,9 @@ def main() -> int:
                     or posted.get("body") != body
                 ):
                     raise ValueError("DISPATCH_PUBLICATION_NOT_VERIFIED")
-                target_key = (
-                    f"{repo.split('/', 1)[1]}-{number}-{head}-{base}"
-                )
                 dispatch_review_workflow(
                     body=body,
                     source_comment_id=int(posted["id"]),
-                    target_key=target_key,
                 )
                 receipt_body = (
                     f"<!-- {HANDOFF_MARKER} source={int(posted['id'])} "

@@ -8,7 +8,6 @@ on:
 permissions:
   contents: write
   issues: write
-  actions: write
 
 concurrency:
   group: onecompany-l4-external-review-auto-dispatch

@@ -2,6 +2,7 @@
 """Bounded autonomous dispatcher for OneCompany external Mistral review failover."""
 from __future__ import annotations
 
+import base64
 import calendar
 import json
 import os
@@ -97,10 +98,19 @@ def same_repo_open_prs(repo: str) -> list[dict]:
 
 
 def material_authors(repo: str, number: int, head: str) -> tuple[str, ...]:
-    commits = request_json(f"repos/{repo}/pulls/{number}/commits?per_page=100")
-    if not isinstance(commits, list) or not commits or len(commits) > 100:
-        raise ValueError("TARGET_COMMITS_UNAVAILABLE")
-    if commits[-1].get("sha") != head:
+    commits: list[dict] = []
+    for page in range(1, 6):
+        batch = request_json(
+            f"repos/{repo}/pulls/{number}/commits?per_page=100&page={page}"
+        )
+        if not isinstance(batch, list):
+            raise ValueError("TARGET_COMMITS_UNAVAILABLE")
+        commits.extend(item for item in batch if isinstance(item, dict))
+        if len(batch) < 100:
+            break
+    else:
+        raise ValueError("TARGET_COMMITS_OVER_LIMIT")
+    if not commits or commits[-1].get("sha") != head:
         raise ValueError("TARGET_HEAD_MOVED")
     actors: set[str] = set()
     for item in commits:
@@ -165,7 +175,7 @@ def terminal_or_pending(
         ):
             return True
         dispatch = DISPATCH.search(body)
-        if not dispatch or AUTO_MARKER not in body:
+        if not dispatch or AUTO_MARKER not in body or "handoff=ok" not in body:
             continue
         if not (
             dispatch.group("repo") == repo
@@ -206,27 +216,28 @@ def dispatch_body(repo: str, number: int, head: str, base: str, authors: tuple[s
 
 
 def emergency_stop_active() -> bool:
-    payload = request_json(
-        f"repos/{HOST_REPO}/contents/.onecompany/config.json?ref=main"
-    )
-    if not isinstance(payload, dict) or payload.get("encoding") != "base64":
-        raise ValueError("LIVE_CONFIG_UNAVAILABLE")
-    import base64
-    raw = base64.b64decode(str(payload.get("content") or ""), validate=False)
-    config = json.loads(raw.decode("utf-8"))
+    config = live_main_json(".onecompany/config.json")
     safety = config.get("safety")
     if not isinstance(safety, dict) or type(safety.get("emergency_stop")) is not bool:
         raise ValueError("EMERGENCY_STOP_STATE_INVALID")
     return safety["emergency_stop"]
 
 
+def live_main_json(path: str) -> dict:
+    payload = request_json(f"repos/{HOST_REPO}/contents/{path}?ref=main")
+    if not isinstance(payload, dict) or payload.get("encoding") != "base64":
+        raise ValueError("LIVE_CONTROL_FILE_UNAVAILABLE")
+    raw = base64.b64decode(str(payload.get("content") or ""), validate=False)
+    value = json.loads(raw.decode("utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError("LIVE_CONTROL_FILE_INVALID")
+    return value
+
+
 def review_capability_approved() -> bool:
-    with open(".onecompany/actors.json", encoding="utf-8") as stream:
-        actors = json.load(stream)
-    with open(".onecompany/readiness.json", encoding="utf-8") as stream:
-        readiness = json.load(stream)
-    with open(".onecompany/dispatch.json", encoding="utf-8") as stream:
-        dispatch = json.load(stream)
+    actors = live_main_json(".onecompany/actors.json")
+    readiness = live_main_json(".onecompany/readiness.json")
+    dispatch = live_main_json(".onecompany/dispatch.json")
     actor = next((x for x in actors.get("actors", []) if x.get("id") == "mistral-vibe"), {})
     ready = next((x for x in readiness.get("actors", []) if x.get("actor_id") == "mistral-vibe"), {})
     route = next((x for x in dispatch.get("actors", []) if x.get("actor_id") == "mistral-vibe"), {})
@@ -247,9 +258,14 @@ def review_capability_approved() -> bool:
     )
 
 
-def dispatch_review_workflow(*, body: str, source_comment_id: int) -> None:
-    if source_comment_id < 1:
-        raise ValueError("DISPATCH_COMMENT_ID_INVALID")
+def dispatch_review_workflow(
+    *, body: str, source_comment_id: int, target_key: str
+) -> None:
+    if source_comment_id < 1 or not re.fullmatch(
+        r"[A-Za-z0-9_.-]+-[1-9][0-9]{0,5}-[0-9a-f]{40}-[0-9a-f]{40}",
+        target_key,
+    ):
+        raise ValueError("DISPATCH_IDENTITY_INVALID")
     request_json(
         f"repos/{HOST_REPO}/dispatches",
         method="POST",
@@ -258,6 +274,7 @@ def dispatch_review_workflow(*, body: str, source_comment_id: int) -> None:
             "client_payload": {
                 "dispatch_body": body,
                 "source_comment_id": str(source_comment_id),
+                "target_key": target_key,
             },
         },
     )
@@ -310,11 +327,31 @@ def main() -> int:
                     or posted.get("body") != body
                 ):
                     raise ValueError("DISPATCH_PUBLICATION_NOT_VERIFIED")
+                target_key = (
+                    f"{repo.split('/', 1)[1]}-{number}-{head}-{base}"
+                )
                 dispatch_review_workflow(
                     body=body,
                     source_comment_id=int(posted["id"]),
+                    target_key=target_key,
                 )
-                comments.append(posted)
+                confirmed_body = body.replace(
+                    f"<!-- {AUTO_MARKER} run={os.environ.get('GITHUB_RUN_ID', '')} -->",
+                    f"<!-- {AUTO_MARKER} run={os.environ.get('GITHUB_RUN_ID', '')} handoff=ok -->",
+                )
+                confirmed = request_json(
+                    f"repos/{HOST_REPO}/issues/comments/{int(posted['id'])}",
+                    method="PATCH",
+                    body={"body": confirmed_body},
+                )
+                if (
+                    not isinstance(confirmed, dict)
+                    or confirmed.get("body") != confirmed_body
+                    or ((confirmed.get("user") or {}).get("login") or "").lower()
+                    != "github-actions[bot]"
+                ):
+                    raise ValueError("DISPATCH_HANDOFF_CONFIRMATION_FAILED")
+                comments.append(confirmed)
                 dispatched += 1
                 print(f"AUTO_DISPATCHED repo={repo} pr={number} head={head} base={base}")
             except (ValueError, urllib.error.URLError, TimeoutError) as exc:

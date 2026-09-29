@@ -13,7 +13,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: onecompany-mistral-external-review-${{ github.event.comment.id || github.event.client_payload.source_comment_id }}
+  group: onecompany-mistral-external-review
   cancel-in-progress: false
 
 jobs:
@@ -87,6 +87,7 @@ jobs:
           TARGET_PR: ${{ steps.target.outputs.pr }}
           TARGET_HEAD: ${{ steps.target.outputs.head }}
           TARGET_BASE: ${{ steps.target.outputs.base }}
+          TARGET_AUTHORS: ${{ steps.target.outputs.authors }}
           TARGET_DIR: /tmp/onecompany-external-target
         run: python -I scripts/mistral_external_review.py build
 

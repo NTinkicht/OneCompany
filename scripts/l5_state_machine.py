@@ -77,6 +77,14 @@ def reduce_evidence(evidence: dict) -> dict:
         result.update(next_action="CANONICAL_STREAM_MISMATCH")
         return result
 
+    merged = evidence.get("merged") is True
+    if not merged and active_prs != [canonical_pr]:
+        result.update(state="IMPLEMENTING", next_action="RECONCILE_CANONICAL_PR")
+        return result
+    if merged and active_prs:
+        result.update(state="VERIFYING", next_action="RECONCILE_POST_MERGE_STREAM_STATE")
+        return result
+
     head = evidence.get("head_sha")
     base = evidence.get("base_sha")
     if not _valid_sha(head) or not _valid_sha(base):
@@ -86,7 +94,7 @@ def reduce_evidence(evidence: dict) -> dict:
         result.update(state="IMPLEMENTING", next_action="RECONCILE_HEAD_BASE")
         return result
 
-    if evidence.get("merged") is True:
+    if merged:
         result["state"] = "COMPLETE" if evidence.get("verified") is True else "VERIFYING"
         result["next_action"] = "REPLENISH_NEXT_READY_WU" if result["state"] == "COMPLETE" else "VERIFY_MERGED_RESULT"
         return result
@@ -139,8 +147,10 @@ def selftest() -> None:
     assert reduce_evidence({**base, "ci": "SUCCESS", "review": "OUTAGE"})["next_action"] == "FAILOVER_TO_ELIGIBLE_NONAUTHOR_REVIEWER"
     assert reduce_evidence({**base, "head_current": False})["next_action"] == "RECONCILE_HEAD_BASE"
     assert reduce_evidence({**base, "active_prs": [250, 251]})["next_action"] == "DUPLICATE_STREAM_RECONCILIATION_REQUIRED"
-    assert reduce_evidence({**base, "merged": True, "verified": False})["state"] == "VERIFYING"
-    assert reduce_evidence({**base, "merged": True, "verified": True})["next_action"] == "REPLENISH_NEXT_READY_WU"
+    assert reduce_evidence({**base, "active_prs": []})["next_action"] == "RECONCILE_CANONICAL_PR"
+    assert reduce_evidence({**base, "active_prs": [], "merged": True, "verified": False})["state"] == "VERIFYING"
+    assert reduce_evidence({**base, "active_prs": [], "merged": True, "verified": True})["next_action"] == "REPLENISH_NEXT_READY_WU"
+    assert reduce_evidence({**base, "merged": True, "verified": True})["next_action"] == "RECONCILE_POST_MERGE_STREAM_STATE"
     assert reduce_evidence({**base, "emergency_stop": True})["next_action"] == "EMERGENCY_STOP_HOLD"
     print("l5_state_machine selftest PASS")
 

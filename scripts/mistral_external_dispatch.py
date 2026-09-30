@@ -234,6 +234,18 @@ def terminal_or_pending(
         ):
             continue
         source_id = int(item.get("id") or 0)
+        marker = re.search(
+            r"<!-- ONECOMPANY_L4_AUTO_DISPATCH_V1 run=([1-9][0-9]*) -->",
+            body,
+        )
+        if (
+            source_id < 1
+            or marker is None
+            or not review_service._dispatcher_source_proof(
+                int(marker.group(1)), source_id, body
+            )
+        ):
+            continue
         if (
             source_id not in confirmed_sources
             and not repository_dispatch_run_exists(source_id)

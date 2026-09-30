@@ -1,4 +1,5 @@
 {
+  "$schema": "./schemas/l5.schema.json",
   "schema_version": "1.0",
   "level": "L5_CANDIDATE",
   "phase": "L4.1_CONTINUITY",

@@ -51,7 +51,7 @@ jobs:
           test.write_text(text.replace(old, new, 1), encoding='utf-8')
           PY
       - name: Run focused retry-proof tests
-        run: python -m unittest .onecompany/selftest/test_mistral_external_dispatch.py
+        run: python .onecompany/selftest/test_mistral_external_dispatch.py
       - name: Commit hardened source and tests
         shell: bash
         run: |

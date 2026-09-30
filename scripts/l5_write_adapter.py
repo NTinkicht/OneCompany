@@ -2,7 +2,10 @@
 """Credential-isolated L5 write adapter with live CAS and replay safety."""
 from __future__ import annotations
 
+import fcntl
 import json
+import os
+from pathlib import Path
 from typing import Any
 
 from l5_activation import HARD_BOUNDARY_FIELDS, RETRYABLE_MUTATIONS, SAFE_MUTATIONS, TOKEN64, authorize_mutation, required_bool
@@ -30,7 +33,7 @@ def _blocked(reason: str, token: Any = None) -> dict[str, Any]:
     return {"status": "BLOCKED", "reason": reason, "mutation_token": token, "written": False}
 
 
-def _live_gate(auth: dict[str, Any], stream: str, client: Any, store: Any, *, retry_check: bool) -> str | None:
+def _live_gate(auth: dict[str, Any], stream: str, client: Any, store: Any, *, retry_check: bool, observed_retry: tuple[int, str | None] | None = None) -> str | None:
     boundaries = client.fetch_boundaries()
     if not isinstance(boundaries, dict):
         return "BOUNDARY_STATE_UNKNOWN"
@@ -59,7 +62,7 @@ def _live_gate(auth: dict[str, Any], stream: str, client: Any, store: Any, *, re
     if mutation == "dispatch_review" and live.get("review_eligible_nonauthor") is not True:
         return "REVIEWER_NOT_ELIGIBLE"
     if retry_check and mutation in RETRYABLE_MUTATIONS:
-        prior_count, prior_scope = store.retry_state(stream)
+        prior_count, prior_scope = observed_retry if observed_retry is not None else store.retry_state(stream)
         scope = auth.get("retry_action_after")
         expected = auth.get("retry_count_after")
         if (prior_count if prior_scope == scope else 0) + 1 != expected:
@@ -104,22 +107,31 @@ def execute_mutation(auth: dict[str, Any], snapshot: dict[str, Any], client: Any
         if prior.get("status") == "PENDING":
             return _reconcile(auth, client, store, written=False)
         return _blocked(f"PRIOR_{prior.get('status')}", token)
-    reason = _live_gate(auth, stream, client, store, retry_check=True)
+    observed_retry = store.retry_state(stream) if auth["mutation"] in RETRYABLE_MUTATIONS else None
+    reason = _live_gate(auth, stream, client, store, retry_check=True, observed_retry=observed_retry)
     if reason:
         return _blocked(reason, token)
-    record = {"status": "PENDING", "mutation": auth["mutation"], "canonical_pr": auth["canonical_pr"]}
-    if not store.begin(token, record, stream, auth.get("retry_count_after"), auth.get("retry_action_after")):
-        return {"status": "REPLAY_NOOP", "reason": "TOKEN_ALREADY_PERSISTED", "mutation_token": token, "written": False}
-    reason = _live_gate(auth, stream, client, store, retry_check=False)
+    record = {"status": "PENDING", "mutation": auth["mutation"], "canonical_pr": auth["canonical_pr"],
+              "expected_head_sha": auth["expected_head_sha"], "expected_base_sha": auth["expected_base_sha"]}
+    started = store.begin(token, record, stream, auth.get("retry_count_after"), auth.get("retry_action_after"), expected_retry=observed_retry)
+    if not started:
+        if store.get(token) is not None:
+            return {"status": "REPLAY_NOOP", "reason": "TOKEN_ALREADY_PERSISTED", "mutation_token": token, "written": False}
+        return _blocked("RETRY_STATE_STALE", token)
+    try:
+        reason = _live_gate(auth, stream, client, store, retry_check=False)
+    except Exception as exc:
+        store.fail_and_restore(token, f"{type(exc).__name__}: {exc}", stream, observed_retry)
+        return {"status": "FAILED", "reason": "UNEXPECTED_ERROR", "mutation_token": token, "written": False}
     if reason:
-        store.set_status(token, "FAILED", reason)
+        store.fail_and_restore(token, reason, stream, observed_retry)
         return _blocked(reason, token)
     try:
         client.perform(auth["mutation"], _params(auth))
-    except WriteRejected:
-        store.set_status(token, "FAILED", "WRITE_REJECTED")
+    except WriteRejected as exc:
+        store.fail_and_restore(token, str(exc), stream, observed_retry)
         return {"status": "FAILED", "reason": "WRITE_REJECTED", "mutation_token": token, "written": False}
-    except (LostResponse, AlreadyExists):
+    except Exception:
         return _reconcile(auth, client, store, written=False)
     return _reconcile(auth, client, store, written=True)
 
@@ -132,13 +144,25 @@ class MemoryStore:
     def get(self, token: str) -> dict[str, Any] | None:
         return dict(self.records[token]) if token in self.records else None
 
-    def begin(self, token: str, record: dict[str, Any], stream: str, count: int | None, action: str | None) -> bool:
+    def begin(self, token: str, record: dict[str, Any], stream: str, count: int | None, action: str | None,
+              *, expected_retry: tuple[int, str | None] | None = None) -> bool:
         if token in self.records:
+            return False
+        if expected_retry is not None and self.retry.get(stream, (0, None)) != expected_retry:
             return False
         self.records[token] = dict(record)
         if count is not None:
             self.retry[stream] = (count, action)
         return True
+
+    def fail_and_restore(self, token: str, detail: Any, stream: str, prior_retry: tuple[int, str | None] | None) -> None:
+        self.records[token]["status"] = "FAILED"
+        self.records[token]["detail"] = detail
+        if prior_retry is not None:
+            if prior_retry == (0, None):
+                self.retry.pop(stream, None)
+            else:
+                self.retry[stream] = prior_retry
 
     def set_status(self, token: str, status: str, detail: Any = None) -> None:
         self.records[token]["status"] = status
@@ -146,3 +170,46 @@ class MemoryStore:
 
     def retry_state(self, stream: str) -> tuple[int, str | None]:
         return self.retry.get(stream, (0, None))
+
+
+class JsonFileStore(MemoryStore):
+    """Crash-safe process-shared token/retry store guarded by flock."""
+    def __init__(self, path: Path) -> None:
+        super().__init__(); self.path = Path(path)
+
+    def _locked(self, fn: Any) -> Any:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        with open(str(self.path) + ".lock", "w", encoding="utf-8") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            if self.path.exists():
+                data = json.loads(self.path.read_text(encoding="utf-8"))
+                self.records = data["records"]
+                self.retry = {k: (v[0], v[1]) for k, v in data["retry"].items()}
+            else:
+                self.records, self.retry = {}, {}
+            out = fn()
+            tmp = self.path.with_suffix(".tmp")
+            payload = json.dumps({"records": self.records, "retry": {k: list(v) for k, v in self.retry.items()}}, sort_keys=True)
+            with open(tmp, "w", encoding="utf-8") as fh:
+                fh.write(payload); fh.flush(); os.fsync(fh.fileno())
+            os.replace(tmp, self.path)
+            dir_fd = os.open(self.path.parent, os.O_RDONLY)
+            try: os.fsync(dir_fd)
+            finally: os.close(dir_fd)
+            return out
+
+    def get(self, token: str) -> dict[str, Any] | None:
+        return self._locked(lambda: MemoryStore.get(self, token))
+
+    def begin(self, token: str, record: dict[str, Any], stream: str, count: int | None, action: str | None,
+              *, expected_retry: tuple[int, str | None] | None = None) -> bool:
+        return self._locked(lambda: MemoryStore.begin(self, token, record, stream, count, action, expected_retry=expected_retry))
+
+    def fail_and_restore(self, token: str, detail: Any, stream: str, prior_retry: tuple[int, str | None] | None) -> None:
+        self._locked(lambda: MemoryStore.fail_and_restore(self, token, detail, stream, prior_retry))
+
+    def set_status(self, token: str, status: str, detail: Any = None) -> None:
+        self._locked(lambda: MemoryStore.set_status(self, token, status, detail))
+
+    def retry_state(self, stream: str) -> tuple[int, str | None]:
+        return self._locked(lambda: MemoryStore.retry_state(self, stream))

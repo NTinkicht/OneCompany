@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -81,13 +82,40 @@ class ActivationTests(unittest.TestCase):
                 row = {k:False for k in act.HARD_BOUNDARY_FIELDS}
                 if self.n > 1: row["emergency_stop"] = True
                 return row
-        client=Flip(); out=wa.execute_mutation(auth,s,client,wa.MemoryStore())
+        client=Flip(); store=wa.MemoryStore(); out=wa.execute_mutation(auth,s,client,store)
         self.assertEqual(out["reason"],"HARD_BOUNDARY"); self.assertEqual(client.calls,0)
+        self.assertEqual(store.retry_state(wa.stream_key(auth,s)),(0,None))
 
     def test_lost_response_reconciles_without_duplicate_write(self):
         s=snap(ci="FAILURE",review="UNKNOWN"); auth=act.authorize_mutation(s); store=wa.MemoryStore(); client=Client(lost=True,effect=True)
         first=wa.execute_mutation(auth,s,client,store); second=wa.execute_mutation(auth,s,client,store)
         self.assertEqual(first["status"],"COMPLETE"); self.assertEqual(second["status"],"REPLAY_NOOP"); self.assertEqual(client.calls,1)
+
+    def test_unexpected_perform_exception_reconciles_without_refund(self):
+        s=snap(ci="FAILURE",review="UNKNOWN"); auth=act.authorize_mutation(s); store=wa.MemoryStore()
+        class Boom(Client):
+            def perform(self, _mutation, _params):
+                self.calls += 1
+                raise RuntimeError("transport failed after send")
+        client=Boom(effect=True); out=wa.execute_mutation(auth,s,client,store)
+        self.assertEqual(out["status"],"COMPLETE")
+        self.assertEqual(store.retry_state(wa.stream_key(auth,s)),(1,"CI"))
+        self.assertEqual(client.calls,1)
+
+    def test_retry_state_cas_blocks_stale_concurrent_authorization(self):
+        store=wa.MemoryStore(); s=snap(ci="FAILURE",review="UNKNOWN"); auth=act.authorize_mutation(s); stream=wa.stream_key(auth,s)
+        observed=store.retry_state(stream)
+        self.assertTrue(store.begin("1"*64,{"status":"PENDING"},stream,1,"CI",expected_retry=observed))
+        self.assertFalse(store.begin("2"*64,{"status":"PENDING"},stream,1,"CI",expected_retry=observed))
+        self.assertEqual(store.retry_state(stream),(1,"CI"))
+
+    def test_json_store_persists_token_and_retry_state(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/"l5-store.json"; store=wa.JsonFileStore(path)
+            self.assertTrue(store.begin("3"*64,{"status":"PENDING"},"stream",1,"CI",expected_retry=(0,None)))
+            reopened=wa.JsonFileStore(path)
+            self.assertEqual(reopened.get("3"*64)["status"],"PENDING")
+            self.assertEqual(reopened.retry_state("stream"),(1,"CI"))
 
     def test_retry_state_is_per_stream(self):
         store=wa.MemoryStore()

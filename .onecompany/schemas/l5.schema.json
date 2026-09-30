@@ -41,14 +41,7 @@
     "ready_labels": {"type": "array", "const": ["l4-ready"]},
     "blocking_labels": {
       "type": "array",
-      "minItems": 3,
-      "uniqueItems": true,
-      "items": {"type": "string", "minLength": 1},
-      "allOf": [
-        {"contains": {"const": "l4-blocked"}},
-        {"contains": {"const": "human-only"}},
-        {"contains": {"const": "release-go-no-go"}}
-      ]
+      "const": ["l5-blocked", "l4-blocked", "human-only", "release-go-no-go"]
     },
     "human_only_boundaries": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
     "state_machine": {

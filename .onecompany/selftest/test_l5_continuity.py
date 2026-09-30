@@ -87,10 +87,19 @@ class L5ContinuityTests(unittest.TestCase):
 
     def test_open_pr_issue_references_are_detected(self):
         pulls = [
-            {"title": "WU for #41", "body": "Also tracks #42."},
+            {
+                "title": "WU for #41",
+                "body": (
+                    "Also tracks #42 and "
+                    "https://github.com/NTinkicht/OneCompany/issues/43"
+                ),
+            },
             {"title": "Other", "body": None},
         ]
-        self.assertEqual(l5.represented_issue_numbers(pulls), {41, 42})
+        self.assertEqual(
+            l5.represented_issue_numbers(pulls, "NTinkicht/OneCompany"),
+            {41, 42, 43},
+        )
 
     def test_unreviewed_mutation_mode_fails_closed(self):
         with self.assertRaisesRegex(RuntimeError, "UNREVIEWED_MUTATION_MODE"):

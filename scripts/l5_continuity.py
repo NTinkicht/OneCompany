@@ -11,7 +11,9 @@ from pathlib import Path
 
 POLICY_PATH = Path(".onecompany/l5.json")
 MAX_PAGES = 10
-ISSUE_REF = re.compile(r"(?<![A-Za-z0-9])#([1-9][0-9]{0,5})")
+WORK_REF = re.compile(
+    r"(?i)\b(?:implements?|closes?|fixes?|resolves?|tracks?)\s+#([1-9][0-9]{0,5})(?![0-9])"
+)
 
 
 def gh(path: str):
@@ -74,11 +76,12 @@ def active_internal_prs(
 def represented_issue_numbers(pulls: list[dict], repo: str) -> set[int]:
     represented: set[int] = set()
     url_ref = re.compile(
+        rf"(?i)\b(?:implements?|closes?|fixes?|resolves?|tracks?)\s+"
         rf"https://github\.com/{re.escape(repo)}/issues/([1-9][0-9]{{0,5}})(?![0-9])"
     )
     for pr in pulls:
         text = f"{pr.get('title') or ''}\n{pr.get('body') or ''}"
-        represented.update(int(value) for value in ISSUE_REF.findall(text))
+        represented.update(int(value) for value in WORK_REF.findall(text))
         represented.update(int(value) for value in url_ref.findall(text))
     return represented
 
@@ -166,7 +169,7 @@ def selftest() -> None:
             "draft": False,
             "base": {"ref": "main"},
             "head": {"repo": {"full_name": repo}},
-            "body": "Implements #4",
+            "body": "Implements #4. This does not address #99.",
         },
         {
             "number": 6,

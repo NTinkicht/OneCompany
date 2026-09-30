@@ -29,13 +29,17 @@ class L5StateMachineTest(unittest.TestCase):
             "blocked": False,
             "merged": False,
             "verified": False,
+            "verified_head_sha": None,
+            "verified_base_sha": None,
             "ci_head_sha": head,
             "ci_base_sha": base,
             "review_head_sha": head,
             "review_base_sha": base,
             "reviewer_actor": "mistral-vibe",
             "material_authors": ["chatgpt"],
+            "material_authors_head_sha": head,
             "review_eligible": True,
+            "unresolved_threads": False,
         }
 
     def ready(self):
@@ -48,7 +52,7 @@ class L5StateMachineTest(unittest.TestCase):
         self.assertFalse(result["mutation_allowed"])
 
     def test_unknown_safety_controls_fail_closed(self):
-        for field in ("emergency_stop", "human_only", "blocked"):
+        for field in ("emergency_stop", "human_only", "blocked", "unresolved_threads"):
             sample = self.ready()
             sample.pop(field)
             with self.assertRaises(ValueError):
@@ -104,7 +108,14 @@ class L5StateMachineTest(unittest.TestCase):
     def test_post_merge_requires_closed_stream_then_verification(self):
         inconsistent = l5.reduce_evidence({**self.base(), "merged": True, "verified": True})
         verifying = l5.reduce_evidence({**self.base(), "active_prs": [], "merged": True, "verified": False})
-        complete = l5.reduce_evidence({**self.base(), "active_prs": [], "merged": True, "verified": True})
+        complete = l5.reduce_evidence({
+            **self.base(),
+            "active_prs": [],
+            "merged": True,
+            "verified": True,
+            "verified_head_sha": "a" * 40,
+            "verified_base_sha": "b" * 40,
+        })
         self.assertEqual(inconsistent["next_action"], "RECONCILE_POST_MERGE_STREAM_STATE")
         self.assertEqual(verifying["state"], "VERIFYING")
         self.assertEqual(complete["state"], "COMPLETE")

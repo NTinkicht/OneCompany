@@ -85,16 +85,17 @@ class L5ContinuityTests(unittest.TestCase):
         )
         self.assertEqual(selected, [])
 
-    def test_open_pr_issue_references_are_detected(self):
+    def test_only_authoritative_work_references_are_detected(self):
         pulls = [
             {
-                "title": "WU for #41",
+                "title": "Implements #41",
                 "body": (
-                    "Also tracks #42 and "
-                    "https://github.com/NTinkicht/OneCompany/issues/43"
+                    "Tracks #42. Closes "
+                    "https://github.com/NTinkicht/OneCompany/issues/43. "
+                    "This does not address #99."
                 ),
             },
-            {"title": "Other", "body": None},
+            {"title": "Other", "body": "Follow-up remains in #77."},
         ]
         self.assertEqual(
             l5.represented_issue_numbers(pulls, "NTinkicht/OneCompany"),

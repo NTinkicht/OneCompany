@@ -1,0 +1,36 @@
+name: L5 Cross-Repo Continuity Supervision
+
+on:
+  schedule:
+    - cron: "23 * * * *"
+  workflow_dispatch:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+concurrency:
+  group: onecompany-l5-continuity
+  cancel-in-progress: true
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+      - name: Verify deterministic cross-repo L5 rules
+        run: python -I scripts/l5_continuity.py --selftest
+      - name: Reconcile all L5 repository quotas
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python -I scripts/l5_continuity.py

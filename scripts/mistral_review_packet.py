@@ -50,9 +50,9 @@ be a positive integer; description must be one JSON string <=1200 chars with no
 literal newline/control characters. If evidence is insufficient, still emit the
 complete object with verdict="INSUFFICIENT_EVIDENCE" and findings=[].
 Before answering, silently verify that your final response begins with `{`, ends
-with `}`, parses as a single JSON object, contains all exact keys, and contains no
-text outside that object. If you cannot satisfy the contract, emit the complete
-INSUFFICIENT_EVIDENCE object rather than prose or malformed JSON.
+with `}`, parses as a single JSON object, contains all exact keys, and has no text outside that object.
+If you cannot satisfy the contract, emit the complete INSUFFICIENT_EVIDENCE object
+rather than prose or malformed JSON.
 """
 
 

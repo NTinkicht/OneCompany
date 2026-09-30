@@ -8,20 +8,23 @@
     {
       "repository": "NTinkicht/Tabibi",
       "target_open_prs": 3,
-      "base_branch": "main"
+      "base_branch": "main",
+      "count_drafts": true
     },
     {
       "repository": "NTinkicht/OneCompany",
       "target_open_prs": 2,
-      "base_branch": "main"
+      "base_branch": "main",
+      "count_drafts": true
     },
     {
       "repository": "NTinkicht/veritas-atlas",
       "target_open_prs": 2,
-      "base_branch": "main"
+      "base_branch": "main",
+      "count_drafts": true
     }
   ],
-  "ready_labels": ["l5-ready", "l4-ready"],
+  "ready_labels": ["l4-ready"],
   "blocking_labels": ["l5-blocked", "l4-blocked", "human-only", "release-go-no-go"],
   "human_only_boundaries": [
     "new_paid_vendor_or_spend",
@@ -47,6 +50,7 @@
     "three consecutive quota reconciliations produce deterministic plans",
     "fault injection covers stale head/base, CI failure, reviewer outage and emergency stop",
     "no eligible work is invented when backlog is not ready",
+    "parallel replenishment requires explicit conflict proof",
     "mutation activation is a separate reviewed governance change"
   ]
 }

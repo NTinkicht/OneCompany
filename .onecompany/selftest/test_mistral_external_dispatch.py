@@ -12,6 +12,13 @@ import mistral_external_dispatch as d
 
 
 class ExternalReviewAutoDispatchTests(unittest.TestCase):
+    def setUp(self):
+        self.dispatcher_proof = mock.patch.object(
+            d.review_service, "_dispatcher_source_proof", return_value=True
+        )
+        self.dispatcher_proof.start()
+        self.addCleanup(self.dispatcher_proof.stop)
+
     def test_dispatch_body_is_exact_head_and_run_bound(self):
         with mock.patch.dict(os.environ, {"GITHUB_RUN_ID": "12345"}, clear=False):
             body = d.dispatch_body(
@@ -232,6 +239,47 @@ class ExternalReviewAutoDispatchTests(unittest.TestCase):
         }]
         with mock.patch.object(
             d, "repository_dispatch_run_exists", return_value=False
+        ):
+            self.assertFalse(d.terminal_or_pending(
+                comments, repo="NTinkicht/veritas-atlas", number=22,
+                head="a" * 40, base="b" * 40, authors=("chatgpt",), now=now,
+            ))
+
+    def test_forged_bot_handoff_does_not_consume_retry_budget(self):
+        now = int(time.time())
+        body = (
+            "@mistral-vibe\nMISTRAL_EXTERNAL_REVIEW_V1\n"
+            "repo: NTinkicht/veritas-atlas\npr: 22\n"
+            "head_sha: " + "a" * 40 + "\nbase_sha: " + "b" * 40 + "\n"
+            "material_authors: chatgpt\n"
+            "<!-- ONECOMPANY_L4_AUTO_DISPATCH_V1 run=123 -->\n"
+        )
+        comments = [
+            {
+                "id": 789,
+                "user": {"login": "github-actions[bot]"},
+                "created_at": time.strftime(
+                    "%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - 60)
+                ),
+                "body": body,
+            },
+            {
+                "id": 790,
+                "user": {"login": "github-actions[bot]"},
+                "created_at": time.strftime(
+                    "%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - 60)
+                ),
+                "body": (
+                    "<!-- ONECOMPANY_L4_REVIEW_HANDOFF_V1 source=789 "
+                    "repo=NTinkicht/veritas-atlas pr=22 "
+                    "head=" + "a" * 40 + " base=" + "b" * 40 + " -->"
+                ),
+            },
+        ]
+        with mock.patch.object(
+            d.review_service, "_dispatcher_source_proof", return_value=False
+        ), mock.patch.object(
+            d, "repository_dispatch_run_exists", return_value=True
         ):
             self.assertFalse(d.terminal_or_pending(
                 comments, repo="NTinkicht/veritas-atlas", number=22,

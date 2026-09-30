@@ -44,13 +44,20 @@ class L5StateMachineTest(unittest.TestCase):
         result = l5.reduce_evidence({**self.base(), "active_prs": [250, 251]})
         self.assertEqual(result["next_action"], "DUPLICATE_STREAM_RECONCILIATION_REQUIRED")
 
+    def test_vanished_unmerged_canonical_stream_fails_closed(self):
+        result = l5.reduce_evidence({**self.base(), "active_prs": []})
+        self.assertEqual(result["state"], "IMPLEMENTING")
+        self.assertEqual(result["next_action"], "RECONCILE_CANONICAL_PR")
+
     def test_stale_refs_fail_closed(self):
         result = l5.reduce_evidence({**self.base(), "head_current": False})
         self.assertEqual(result["next_action"], "RECONCILE_HEAD_BASE")
 
-    def test_post_merge_requires_verification_before_replenishment(self):
-        verifying = l5.reduce_evidence({**self.base(), "merged": True, "verified": False})
-        complete = l5.reduce_evidence({**self.base(), "merged": True, "verified": True})
+    def test_post_merge_requires_closed_stream_then_verification(self):
+        inconsistent = l5.reduce_evidence({**self.base(), "merged": True, "verified": True})
+        verifying = l5.reduce_evidence({**self.base(), "active_prs": [], "merged": True, "verified": False})
+        complete = l5.reduce_evidence({**self.base(), "active_prs": [], "merged": True, "verified": True})
+        self.assertEqual(inconsistent["next_action"], "RECONCILE_POST_MERGE_STREAM_STATE")
         self.assertEqual(verifying["state"], "VERIFYING")
         self.assertEqual(complete["state"], "COMPLETE")
         self.assertEqual(complete["next_action"], "REPLENISH_NEXT_READY_WU")

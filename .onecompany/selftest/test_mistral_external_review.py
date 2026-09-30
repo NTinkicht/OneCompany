@@ -554,6 +554,7 @@ class ExternalMistralReviewTests(unittest.TestCase):
         self.assertIn('"--name-only", merge_base, head', helper)
         self.assertIn('"merge_base_sha": merge_base', helper)
         self.assertIn("group: onecompany-mistral-external-review", workflow)
+        self.assertNotIn("github.event.client_payload.target_key", workflow)
 
     def test_bootstrap_excludes_source_only_external_review_surfaces(self):
         bootstrap = (ROOT / "scripts/bootstrap.py").read_text(encoding="utf-8")
@@ -565,6 +566,81 @@ class ExternalMistralReviewTests(unittest.TestCase):
             '".github/workflows/onecompany-mistral-external-review.yml"', bootstrap
         )
         self.assertIn('"docs/MISTRAL-EXTERNAL-REVIEW.md"', bootstrap)
+
+
+    def test_repository_dispatch_source_must_match_trusted_bot_comment(self):
+        body = (
+            "@mistral-vibe\nMISTRAL_EXTERNAL_REVIEW_V1\n"
+            "repo: NTinkicht/veritas-atlas\npr: 21\n"
+            "head_sha: " + "a" * 40 + "\nbase_sha: " + "b" * 40 + "\n"
+            "material_authors: chatgpt\n"
+            "<!-- ONECOMPANY_L4_AUTO_DISPATCH_V1 run=123 -->\n"
+        )
+        trusted = {
+            "user": {"login": "github-actions[bot]"},
+            "body": body,
+        }
+        env = {
+            "GITHUB_EVENT_NAME": "repository_dispatch",
+            "SOURCE_COMMENT_ID": "789",
+        }
+        trusted_run = {
+            "id": 123,
+            "path": ".github/workflows/onecompany-mistral-external-dispatch.yml",
+            "event": "schedule",
+            "head_branch": "main",
+            "repository": {"full_name": m.WAKE_REPO},
+            "status": "completed",
+        }
+        def trusted_api(route):
+            if "/issues/comments/789" in route:
+                return trusted
+            if "/actions/runs/123" in route:
+                return trusted_run
+            raise AssertionError(route)
+        with mock.patch.dict(os.environ, env, clear=False), \
+             mock.patch.object(m, "onecompany_api", side_effect=trusted_api), \
+             mock.patch.object(m, "_dispatcher_source_proof", return_value=True):
+            m._validate_dispatch_source(body)
+
+        bad = dict(trusted, body=body + "tampered")
+        def bad_api(route):
+            if "/issues/comments/789" in route:
+                return bad
+            if "/actions/runs/123" in route:
+                return trusted_run
+            raise AssertionError(route)
+        with mock.patch.dict(os.environ, env, clear=False), \
+             mock.patch.object(m, "onecompany_api", side_effect=bad_api), \
+             mock.patch.object(m, "_dispatcher_source_proof", return_value=True):
+            with self.assertRaisesRegex(
+                ValueError, "EXTERNAL_REVIEW_SOURCE_COMMENT_UNTRUSTED"
+            ):
+                m._validate_dispatch_source(body)
+
+        with mock.patch.dict(os.environ, env, clear=False), \
+             mock.patch.object(m, "onecompany_api", side_effect=trusted_api), \
+             mock.patch.object(m, "_dispatcher_source_proof", return_value=False):
+            with self.assertRaisesRegex(
+                ValueError, "EXTERNAL_REVIEW_DISPATCH_RUN_UNTRUSTED"
+            ):
+                m._validate_dispatch_source(body)
+
+    def test_trusted_evidence_accepts_authenticated_repository_dispatch_run(self):
+        item, proof = self._proof()
+        run = {
+            "id": 123,
+            "path": m.EXTERNAL_WORKFLOW_PATH,
+            "event": "repository_dispatch",
+            "status": "completed",
+            "conclusion": "success",
+        }
+        with mock.patch.object(m, "onecompany_api", return_value=run), \
+             mock.patch.object(m, "_artifact_proof", return_value=proof):
+            self.assertTrue(m._trusted_evidence_comment(
+                item, repo="NTinkicht/veritas-atlas", number=21,
+                head="a" * 40, base="b" * 40,
+            ))
 
 
     def test_additional_standalone_credentials_fail_closed(self):
@@ -765,6 +841,25 @@ class ExternalMistralReviewTests(unittest.TestCase):
         self.assertFalse(m._plain("safe\u2066isolate", 100))
         self.assertTrue(m._plain("ordinary text", 100))
 
+    def test_prepare_blocks_revoked_live_authority_before_dispatch_parse(self):
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False) as output:
+            output_path = output.name
+        env = {
+            "GITHUB_REPOSITORY": m.WAKE_REPO,
+            "GITHUB_OUTPUT": output_path,
+            "DISPATCH_BODY": "untrusted body should never be parsed",
+        }
+        with mock.patch.dict(os.environ, env, clear=False), \
+             mock.patch.object(m, "live_emergency_stop_active", return_value=False), \
+             mock.patch.object(m, "live_review_authority_approved", return_value=False), \
+             mock.patch.object(m, "parse_dispatch") as parse:
+            m.prepare()
+            parse.assert_not_called()
+        output_text = open(output_path, encoding="utf-8").read()
+        self.assertIn("ready=false", output_text)
+        self.assertIn("status=EXTERNAL_REVIEW_TARGET_BLOCKED", output_text)
+
     def test_encoded_structured_sensitive_key_is_blocked(self):
         with self.assertRaisesRegex(
             ValueError, "EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED"
@@ -774,31 +869,33 @@ class ExternalMistralReviewTests(unittest.TestCase):
                 '+{"api\\u005fkey":"VerySecretUnprefixedValue123456789"}\n',
             )
 
-    def test_diverged_base_blocks_review_packet(self):
-        env = {
-            "TARGET_REPO": "NTinkicht/veritas-atlas",
-            "TARGET_PR": "21",
-            "TARGET_HEAD": "a" * 40,
-            "TARGET_BASE": "b" * 40,
-            "TARGET_DIR": "/tmp/onecompany-test-target",
-            "TARGET_AUTHORS": "chatgpt",
-            "GITHUB_OUTPUT": "/tmp/onecompany-test-output",
-        }
-        with mock.patch.dict(os.environ, env, clear=False), \
-             mock.patch.object(m, "current_pr"), \
-             mock.patch.object(m, "verify_material_authors"), \
-             mock.patch.object(m.subprocess, "check_output") as check_output, \
-             mock.patch.object(m.Path, "is_dir", return_value=True), \
-             mock.patch.object(m.Path, "is_symlink", return_value=False):
-            check_output.side_effect = [
-                "a" * 40 + "\n",
-                "c" * 40 + "\n",
-            ]
-            m.build_prompt()
-        self.assertIn(
-            "EXTERNAL_REVIEW_EVIDENCE_BLOCKED",
-            __import__("pathlib").Path(env["GITHUB_OUTPUT"]).read_text(),
+    def test_yaml_escaped_sensitive_keys_are_blocked(self):
+        for key in (r"api\x5fkey", r"api\u005fkey", r"api\U0000005fkey"):
+            with self.subTest(key=key):
+                with self.assertRaisesRegex(
+                    ValueError, "EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED"
+                ):
+                    m.validate_diff(
+                        ["config/settings.yml"],
+                        f'+{{"{key}": "VerySecretUnprefixedValue123456789"}}\n',
+                    )
+
+    def test_collection_wrapped_sensitive_multiline_value_is_blocked(self):
+        with self.assertRaisesRegex(
+            ValueError, "EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED"
+        ):
+            m.validate_diff(
+                ["config/settings.json"],
+                '+"api_key":\n+[\n+"VerySecretUnprefixedValue123456789"\n+]\n',
+            )
+
+    def test_prompt_uses_diff_bound_untrusted_boundary(self):
+        source = (ROOT / "scripts/mistral_external_review.py").read_text(
+            encoding="utf-8"
         )
+        self.assertIn('boundary = f"ONECOMPANY_UNTRUSTED_DIFF_{diff_digest}"', source)
+        self.assertIn('if boundary in diff:', source)
+        self.assertNotIn("BEGIN UNTRUSTED COMPLETE BOUNDED PR DIFF", source)
 
 
 if __name__ == "__main__":

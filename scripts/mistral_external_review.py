@@ -43,6 +43,7 @@ MAX_RESULT_BYTES = 15_000
 MAX_CHANGED_FILES = 24
 MAX_WAKE_PAGES = 50
 EXTERNAL_MARKER = "ONECOMPANY_EXTERNAL_MISTRAL_REVIEW_V1"
+AUTO_DISPATCH_MARKER = "ONECOMPANY_L4_AUTO_DISPATCH_V1"
 EXTERNAL_WORKFLOW_PATH = ".github/workflows/onecompany-mistral-external-review.yml"
 EVIDENCE_MARKER = re.compile(
     r"ONECOMPANY_EXTERNAL_MISTRAL_REVIEW_V1 "
@@ -247,8 +248,6 @@ def _mistral_identity(value: object) -> bool:
     if separator and (domain == "mistral.ai" or domain.endswith(".mistral.ai")):
         return True
     compact = re.sub(r"[^a-z0-9]+", "", text)
-    # Fail closed for the whole Mistral identity namespace, including display
-    # names such as "Vibe by Mistral", not only account-name prefixes.
     return "mistral" in compact
 
 
@@ -376,7 +375,7 @@ def _trusted_evidence_comment(
     expected_conclusion = "success" if verdict == "PASS" else "failure"
     if not (
         run.get("path") == EXTERNAL_WORKFLOW_PATH
-        and run.get("event") == "issue_comment"
+        and run.get("event") in {"issue_comment", "repository_dispatch"}
         and run.get("status") == "completed"
         and run.get("conclusion") == expected_conclusion
         and str(run.get("id")) == run_id
@@ -440,6 +439,103 @@ def existing_result(
         if len(comments) < 100:
             return False
     raise ValueError("EXTERNAL_REVIEW_HISTORY_OVER_LIMIT")
+
+
+def _dispatcher_source_proof(run_id: int, source_id: int, body: str) -> bool:
+    try:
+        payload = onecompany_api(
+            f"repos/{WAKE_REPO}/actions/runs/{run_id}/artifacts?per_page=100"
+        )
+        artifacts = [
+            item for item in payload.get("artifacts", [])
+            if isinstance(item, dict)
+            and item.get("name") == "onecompany-external-dispatch-proof"
+            and item.get("expired") is not True
+        ]
+        if len(artifacts) != 1:
+            return False
+        artifact_id = artifacts[0].get("id")
+        if type(artifact_id) is not int or artifact_id < 1:
+            return False
+        raw = subprocess.check_output(
+            ["gh", "api", f"repos/{WAKE_REPO}/actions/artifacts/{artifact_id}/zip"],
+            stderr=subprocess.DEVNULL,
+            timeout=30,
+        )
+        if not 1 <= len(raw) <= 1_000_000:
+            return False
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            names = [
+                name for name in archive.namelist()
+                if Path(name).name == "onecompany-external-dispatch-proof.json"
+            ]
+            if len(names) != 1:
+                return False
+            value = json.loads(archive.read(names[0]).decode("utf-8"))
+        if (
+            type(value) is not dict
+            or value.get("version") != 1
+            or value.get("run_id") != run_id
+            or type(value.get("sources")) is not list
+        ):
+            return False
+        matches = [
+            source for source in value["sources"]
+            if isinstance(source, dict)
+            and source.get("comment_id") == source_id
+            and source.get("body") == body
+        ]
+        return len(matches) == 1
+    except (
+        OSError, ValueError, KeyError, json.JSONDecodeError,
+        subprocess.CalledProcessError, subprocess.TimeoutExpired, zipfile.BadZipFile,
+    ):
+        return False
+
+
+def _validate_dispatch_source(body: str) -> None:
+    event = os.environ.get("GITHUB_EVENT_NAME", "")
+    if event == "issue_comment":
+        return
+    if event != "repository_dispatch":
+        raise ValueError("EXTERNAL_REVIEW_EVENT_NOT_ALLOWED")
+    source_id = os.environ.get("SOURCE_COMMENT_ID", "")
+    if not source_id.isdigit() or int(source_id) < 1:
+        raise ValueError("EXTERNAL_REVIEW_SOURCE_COMMENT_INVALID")
+    item = onecompany_api(
+        f"repos/{WAKE_REPO}/issues/comments/{int(source_id)}"
+    )
+    marker = re.search(
+        r"<!-- ONECOMPANY_L4_AUTO_DISPATCH_V1 run=([1-9][0-9]*) -->",
+        body,
+    )
+    if (
+        not isinstance(item, dict)
+        or (item.get("user") or {}).get("login") != "github-actions[bot]"
+        or item.get("body") != body
+        or marker is None
+    ):
+        raise ValueError("EXTERNAL_REVIEW_SOURCE_COMMENT_UNTRUSTED")
+
+    dispatch_run_id = int(marker.group(1))
+    run = onecompany_api(
+        f"repos/{WAKE_REPO}/actions/runs/{dispatch_run_id}"
+    )
+    if not (
+        isinstance(run, dict)
+        and int(run.get("id") or 0) == dispatch_run_id
+        and run.get("path") == ".github/workflows/onecompany-mistral-external-dispatch.yml"
+        and run.get("event") in {"schedule", "workflow_dispatch"}
+        and run.get("head_branch") == "main"
+        and (run.get("repository") or {}).get("full_name") == WAKE_REPO
+        and run.get("status") in {"in_progress", "completed"}
+        and _dispatcher_source_proof(
+            dispatch_run_id, int(source_id), body
+        )
+    ):
+        raise ValueError("EXTERNAL_REVIEW_DISPATCH_RUN_UNTRUSTED")
+
+    parse_dispatch(body)
 
 
 def live_main_json(path: str) -> dict:
@@ -529,7 +625,9 @@ def prepare() -> None:
             raise ValueError("EXTERNAL_REVIEW_EMERGENCY_STOP_ACTIVE")
         if not live_review_authority_approved():
             raise ValueError("EXTERNAL_REVIEW_AUTHORITY_REVOKED")
-        repo, number, head, base, authors = parse_dispatch(os.environ["DISPATCH_BODY"])
+        body = os.environ["DISPATCH_BODY"]
+        _validate_dispatch_source(body)
+        repo, number, head, base, authors = parse_dispatch(body)
         current_pr(repo, number, head, base)
         verify_material_authors(repo, number, head, authors)
         if existing_result(repo, number, head, base, authors):
@@ -556,10 +654,15 @@ def _safe_reference(value: str) -> bool:
 
 
 def _decode_structured_key(value: str) -> str:
-    try:
-        return json.loads(f'"{value.replace(chr(34), chr(92) + chr(34))}"')
-    except Exception:
-        return value
+    def replace_hex(match: re.Match[str]) -> str:
+        return chr(int(match.group(1), 16))
+    decoded = re.sub(r"\\U([0-9A-Fa-f]{8})", replace_hex, value)
+    decoded = re.sub(r"\\u([0-9A-Fa-f]{4})", replace_hex, decoded)
+    decoded = re.sub(r"\\x([0-9A-Fa-f]{2})", replace_hex, decoded)
+    decoded = decoded.replace(r"\\", "\\")
+    if "\\" in decoded:
+        raise ValueError("EXTERNAL_REVIEW_STRUCTURED_KEY_ESCAPE_UNSUPPORTED")
+    return decoded
 
 
 def _sensitive_key(value: str) -> bool:
@@ -605,7 +708,9 @@ def validate_diff(paths: list[str], diff: str) -> None:
 
         stripped = line.strip()
         if pending_sensitive_value:
-            if stripped in {"{", "[", "(", "-", ","}:
+            if stripped in {"{", "[", "("}:
+                raise ValueError("EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED")
+            if stripped in {"-", ","}:
                 continue
             if stripped in {"}", "]", ")", "},", "],", "),"}:
                 pending_sensitive_value = False
@@ -617,14 +722,14 @@ def validate_diff(paths: list[str], diff: str) -> None:
                 pending_sensitive_value = False
 
         key_only = re.fullmatch(
-            r"""["']?((?:\\u[0-9A-Fa-f]{4}|\\["'\\/bfnrt]|[A-Za-z0-9_.-])+?)["']?\s*:\s*""", stripped
+            r"""["']?((?:\\U[0-9A-Fa-f]{8}|\\u[0-9A-Fa-f]{4}|\\x[0-9A-Fa-f]{2}|\\["'\\/bfnrt]|[A-Za-z0-9_.-])+?)["']?\s*:\s*""", stripped
         )
         if key_only and _sensitive_key(key_only.group(1)):
             pending_sensitive_value = True
             continue
 
         for match in re.finditer(
-            r'''["']((?:\\u[0-9A-Fa-f]{4}|\\["'\\/bfnrt]|[^"'\\])+?)["']\s*:\s*(.+?)(?:[,}]|$)''',
+            r'''["']((?:\\U[0-9A-Fa-f]{8}|\\u[0-9A-Fa-f]{4}|\\x[0-9A-Fa-f]{2}|\\["'\\/bfnrt]|[^"'\\])+?)["']\s*:\s*(.+?)(?:[,}]|$)''',
             line,
         ):
             if _sensitive_key(match.group(1)) and not _safe_reference(match.group(2)):
@@ -685,13 +790,17 @@ def build_prompt() -> None:
             text=True, timeout=20,
         ).splitlines()
         validate_diff(names, diff)
+        diff_digest = hashlib.sha256(encoded).hexdigest()
+        boundary = f"ONECOMPANY_UNTRUSTED_DIFF_{diff_digest}"
+        if boundary in diff:
+            raise ValueError("EXTERNAL_REVIEW_DIFF_BOUNDARY_COLLISION")
         prompt = (
             REVIEW_INSTRUCTIONS
             + f"\nTRUSTED TARGET: repo={repo}; pr={number}; head={head}; "
-              f"base={base}; merge_base={merge_base}.\n"
-            + "BEGIN UNTRUSTED COMPLETE BOUNDED PR DIFF\n"
+              f"base={base}; merge_base={merge_base}; diff_sha256={diff_digest}.\n"
+            + f"BEGIN {boundary}\n"
             + diff
-            + "\nEND UNTRUSTED COMPLETE BOUNDED DIFF\n"
+            + f"\nEND {boundary}\n"
         )
         if len(prompt.encode("utf-8")) > MAX_PROMPT_BYTES:
             raise ValueError("EXTERNAL_REVIEW_PROMPT_BOUND_BLOCKED")

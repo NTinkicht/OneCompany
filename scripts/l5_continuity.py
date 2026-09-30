@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Deterministic L5 continuity planning for the reviewed PLAN_ONLY phase."""
 from __future__ import annotations
 
 import argparse

@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://onecompany.local/schemas/l5-recovery.schema.json",
+  "title": "OneCompany L5 self-healing recovery decision",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "event_key",
+    "repository",
+    "issue",
+    "canonical_pr",
+    "head_sha",
+    "base_sha",
+    "status",
+    "next_action",
+    "retry_count",
+    "retry_action",
+    "mutation_allowed"
+  ],
+  "properties": {
+    "event_key": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "repository": {"type": "string", "minLength": 3},
+    "issue": {"type": "integer", "minimum": 1},
+    "canonical_pr": {"type": ["integer", "null"], "minimum": 1},
+    "head_sha": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+    "base_sha": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+    "status": {"enum": ["PLANNED", "READY", "BLOCKED", "IDLE", "REPLAY_NOOP"]},
+    "next_action": {"type": "string", "minLength": 1},
+    "retry_count": {"type": "integer", "minimum": 0},
+    "retry_action": {"enum": [null, "STREAM", "CI", "REVIEW", "MERGE_READY", "VERIFY"]},
+    "retry_count_after": {"type": ["integer", "null"], "minimum": 0},
+    "retry_action_after": {"enum": [null, "STREAM", "CI", "REVIEW", "MERGE_READY", "VERIFY"]},
+    "selected_issue": {"type": ["integer", "null"], "minimum": 1},
+    "mutation_allowed": {"const": false}
+  }
+}

@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "l5.schema.json",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "level",
+    "phase",
+    "mutation_mode",
+    "repositories",
+    "ready_labels",
+    "blocking_labels",
+    "human_only_boundaries",
+    "state_machine",
+    "promotion_requirements"
+  ],
+  "properties": {
+    "$schema": {"type": "string", "const": "./schemas/l5.schema.json"},
+    "schema_version": {"type": "string", "const": "1.0"},
+    "level": {"type": "string", "const": "L5_CANDIDATE"},
+    "phase": {"type": "string", "const": "L4.1_CONTINUITY"},
+    "mutation_mode": {"type": "string", "enum": ["PLAN_ONLY"]},
+    "repositories": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["repository", "target_open_prs", "base_branch"],
+        "properties": {
+          "repository": {"type": "string", "minLength": 3},
+          "target_open_prs": {"type": "integer", "minimum": 1, "maximum": 8},
+          "base_branch": {"type": "string", "const": "main"}
+        }
+      }
+    },
+    "ready_labels": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "blocking_labels": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "human_only_boundaries": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "state_machine": {
+      "type": "array",
+      "const": ["SELECTED", "IMPLEMENTING", "TESTING", "REVIEWING", "REMEDIATING", "MERGE_READY", "MERGED", "VERIFYING", "COMPLETE"]
+    },
+    "promotion_requirements": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}}
+  }
+}

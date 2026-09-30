@@ -43,20 +43,21 @@ def label_names(item: dict) -> set[str]:
     return result
 
 
-def active_internal_pr_rows(
-    repo: str, base: str, pulls: list[dict], *, count_drafts: bool
-) -> list[dict]:
+def internal_pr_rows(repo: str, base: str, pulls: list[dict]) -> list[dict]:
     result = []
     for pr in pulls:
         head_repo = ((pr.get("head") or {}).get("repo") or {}).get("full_name")
         if (
             (pr.get("base") or {}).get("ref") == base
             and head_repo == repo
-            and (count_drafts or pr.get("draft") is not True)
             and isinstance(pr.get("number"), int)
         ):
             result.append(pr)
     return sorted(result, key=lambda row: row["number"])
+
+
+def quota_pr_rows(pulls: list[dict], *, count_drafts: bool) -> list[dict]:
+    return [row for row in pulls if count_drafts or row.get("draft") is not True]
 
 
 def active_internal_prs(
@@ -64,17 +65,21 @@ def active_internal_prs(
 ) -> list[int]:
     return [
         row["number"]
-        for row in active_internal_pr_rows(
-            repo, base, pulls, count_drafts=count_drafts
+        for row in quota_pr_rows(
+            internal_pr_rows(repo, base, pulls), count_drafts=count_drafts
         )
     ]
 
 
-def represented_issue_numbers(pulls: list[dict]) -> set[int]:
+def represented_issue_numbers(pulls: list[dict], repo: str) -> set[int]:
     represented: set[int] = set()
+    url_ref = re.compile(
+        rf"https://github\.com/{re.escape(repo)}/issues/([1-9][0-9]{{0,5}})(?![0-9])"
+    )
     for pr in pulls:
         text = f"{pr.get('title') or ''}\n{pr.get('body') or ''}"
         represented.update(int(value) for value in ISSUE_REF.findall(text))
+        represented.update(int(value) for value in url_ref.findall(text))
     return represented
 
 
@@ -103,22 +108,16 @@ def repo_plan(repo_cfg: dict, policy: dict) -> dict:
     base = str(repo_cfg.get("base_branch") or "main")
     target = int(repo_cfg["target_open_prs"])
     count_drafts = repo_cfg.get("count_drafts") is True
-    pull_rows = active_internal_pr_rows(
-        repo,
-        base,
-        paged(repo, "pulls?state=open"),
-        count_drafts=count_drafts,
-    )
-    pulls = [row["number"] for row in pull_rows]
+    all_rows = internal_pr_rows(repo, base, paged(repo, "pulls?state=open"))
+    quota_rows = quota_pr_rows(all_rows, count_drafts=count_drafts)
+    pulls = [row["number"] for row in quota_rows]
     deficit = max(0, target - len(pulls))
     issues = eligible_issues(
         paged(repo, "issues?state=open"),
         {x.lower() for x in policy.get("ready_labels", [])},
         {x.lower() for x in policy.get("blocking_labels", [])},
-        represented_issue_numbers(pull_rows),
+        represented_issue_numbers(all_rows, repo),
     )
-    # L4.1 never claims pairwise conflict-safety. It may nominate one next WU;
-    # additional capacity remains visibly unfilled until L4.5 proves conflicts.
     selected = issues[:1] if deficit else []
     unfilled = max(0, deficit - len(selected))
     if deficit == 0:
@@ -160,31 +159,30 @@ def plan(policy: dict) -> dict:
 
 
 def selftest() -> None:
+    repo = "NTinkicht/OneCompany"
     pulls = [
         {
             "number": 5,
             "draft": False,
             "base": {"ref": "main"},
-            "head": {"repo": {"full_name": "NTinkicht/OneCompany"}},
+            "head": {"repo": {"full_name": repo}},
             "body": "Implements #4",
         },
         {
             "number": 6,
             "draft": True,
             "base": {"ref": "main"},
-            "head": {"repo": {"full_name": "NTinkicht/OneCompany"}},
+            "head": {"repo": {"full_name": repo}},
+            "body": "Closes https://github.com/NTinkicht/OneCompany/issues/8",
         },
     ]
-    assert active_internal_prs(
-        "NTinkicht/OneCompany", "main", pulls, count_drafts=True
-    ) == [5, 6]
-    assert active_internal_prs(
-        "NTinkicht/OneCompany", "main", pulls, count_drafts=False
-    ) == [5]
-    assert represented_issue_numbers(pulls) == {4}
+    assert active_internal_prs(repo, "main", pulls, count_drafts=True) == [5, 6]
+    assert active_internal_prs(repo, "main", pulls, count_drafts=False) == [5]
+    assert represented_issue_numbers(internal_pr_rows(repo, "main", pulls), repo) == {4, 8}
     issues = [
         {"number": 4, "state": "open", "labels": [{"name": "l4-ready"}]},
         {"number": 7, "state": "open", "labels": [{"name": "l4-ready"}]},
+        {"number": 8, "state": "open", "labels": [{"name": "l4-ready"}]},
         {
             "number": 2,
             "state": "open",
@@ -193,7 +191,7 @@ def selftest() -> None:
     ]
     assert [
         row["number"]
-        for row in eligible_issues(issues, {"l4-ready"}, {"human-only"}, {4})
+        for row in eligible_issues(issues, {"l4-ready"}, {"human-only"}, {4, 8})
     ] == [7]
     print("l5_continuity selftest PASS")
 

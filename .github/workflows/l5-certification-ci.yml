@@ -1,0 +1,42 @@
+name: L5 Certification Candidate CI
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/l5_state_machine.py'
+      - 'scripts/l5_recovery.py'
+      - 'scripts/l5_certification.py'
+      - '.onecompany/selftest/test_l5_state_machine.py'
+      - '.onecompany/selftest/test_l5_recovery.py'
+      - '.onecompany/selftest/test_l5_certification.py'
+      - '.github/workflows/l5-certification-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: onecompany-l5-certification-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  certification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Compile L5 certification surface
+        run: python -m py_compile scripts/l5_state_machine.py scripts/l5_recovery.py scripts/l5_certification.py .onecompany/selftest/test_l5_certification.py
+      - name: Run state and recovery regressions
+        run: |
+          python .onecompany/selftest/test_l5_state_machine.py
+          python .onecompany/selftest/test_l5_recovery.py
+      - name: Run deterministic L5 certification tests
+        run: python .onecompany/selftest/test_l5_certification.py
+      - name: Emit certification report
+        run: python scripts/l5_certification.py

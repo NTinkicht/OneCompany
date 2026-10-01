@@ -1,99 +1,133 @@
 #!/usr/bin/env python3
-import copy
+"""Regression tests for the durable Claude L5 ledger."""
 import sys
 import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from l5_kernel import Intent, Lease, Observation, RepoMode
+from l5_kernel import RepoMode
 from l5_ledger import *
 
 
 def base_doc():
+    """Return a valid empty ledger."""
     return {
-        "schema_version": 2,
-        "repository": "repo",
+        "schema_version": SCHEMA_VERSION,
+        "repository": "NTinkicht/repo",
         "revision": 0,
         "mode": "GOVERNANCE_DRIFT",
         "mode_version": 1,
         "human_clear_required": True,
-        "platform_enforcement": {"branch_protected": False, "active_rulesets": 0},
         "leases": {},
         "budgets": {},
         "observations": {},
+        "platform_enforcement": {"branch_protected": False, "active_rulesets": 0},
     }
 
 
-def lease(version=1, epoch=1, active=True, intent=None, holder="run-a"):
-    return Lease(
-        key="k",
-        holder=holder,
-        epoch=epoch,
-        observed=Observation("a" * 40, "b" * 40),
-        acquired_at=1,
-        expires_at=10,
-        version=version,
-        intent=intent,
-        active=active,
-    )
+def lease_row(*, version=1, epoch=1, holder="r1", state="ACTIVE", intent=None):
+    """Return a valid persisted lease row."""
+    return {
+        "version": version,
+        "epoch": epoch,
+        "holder": holder,
+        "state": state,
+        "acquired_at": 1.0,
+        "expires_at": 300.0 if state == "ACTIVE" else 2.0,
+        "observed": {
+            "head": "a" * 40,
+            "base": "b" * 40,
+            "wu_body_hash": "wu",
+            "pr_updated_at": "t",
+        },
+        "intent": intent,
+    }
 
 
-class Backend:
-    def __init__(self, doc):
-        self.doc = copy.deepcopy(doc)
-        self.sha = "sha-1"
-
-    def read(self):
-        return copy.deepcopy(self.doc), self.sha
-
-    def write(self, document, expected_blob_sha):
-        if expected_blob_sha != self.sha:
-            raise LedgerConflict("BLOB_STALE")
-        self.doc = copy.deepcopy(document)
-        self.sha = "sha-" + str(int(self.sha.split("-")[1]) + 1)
-        return self.sha
+def pending_intent(epoch=1, op_id="op1"):
+    """Return a valid PENDING persisted intent."""
+    return {
+        "op_id": op_id,
+        "idem_key": "f" * 64,
+        "operation": "merge",
+        "expected_head": "a" * 40,
+        "expected_base": "b" * 40,
+        "epoch": epoch,
+        "state": "PENDING",
+    }
 
 
 class LedgerTests(unittest.TestCase):
-    def test_validate_v2(self):
-        validate_ledger(base_doc(), expected_repo="repo")
+    """Durable monotonicity and recovery tests."""
 
-    def test_human_clear_required(self):
+    def test_valid_empty_ledger(self):
+        validate_ledger(base_doc())
+
+    def test_human_clear_required_for_protected_mode_exit(self):
         doc = base_doc()
         with self.assertRaises(LedgerConflict):
-            cas_mode(doc, expected_revision=0, expected_mode_version=1, new_mode=RepoMode.NORMAL)
+            cas_mode(doc, expected_revision=0, expected_mode_version=1, new_mode=RepoMode.NORMAL, human_clear=False)
+        out = cas_mode(doc, expected_revision=0, expected_mode_version=1, new_mode=RepoMode.NORMAL, human_clear=True)
+        self.assertEqual(out["mode"], "NORMAL")
 
-    def test_pending_intent_cannot_disappear(self):
+    def test_lease_delete_forbidden(self):
         doc = base_doc()
-        pending = Intent("op", "i", "merge", "a" * 40, "b" * 40, 1)
-        row1 = lease(intent=pending)
-        doc1 = cas_lease(doc, "k", expected_revision=0, expected_lease_version=None, new_record=lease_to_record(row1))
-        row2 = lease(version=2, epoch=1, intent=None)
+        doc["leases"]["k"] = lease_row()
         with self.assertRaises(LedgerInvalid):
-            cas_lease(doc1, "k", expected_revision=1, expected_lease_version=1, new_record=lease_to_record(row2))
+            cas_lease(doc, "k", expected_revision=0, expected_lease_version=1, new_record=None)
 
-    def test_tombstone_preserves_epoch_floor(self):
+    def test_release_tombstone_preserves_epoch_version(self):
         doc = base_doc()
-        row1 = lease()
-        doc1 = cas_lease(doc, "k", expected_revision=0, expected_lease_version=None, new_record=lease_to_record(row1))
-        retired = lease(version=2, active=False)
-        doc2 = cas_lease(doc1, "k", expected_revision=1, expected_lease_version=1, new_record=lease_to_record(retired))
-        stale_reactivate = lease(version=3, epoch=1, active=True, holder="run-b")
-        with self.assertRaises(LedgerInvalid):
-            cas_lease(doc2, "k", expected_revision=2, expected_lease_version=2, new_record=lease_to_record(stale_reactivate))
-        fresh = lease(version=3, epoch=2, active=True, holder="run-b")
-        doc3 = cas_lease(doc2, "k", expected_revision=2, expected_lease_version=2, new_record=lease_to_record(fresh))
-        self.assertEqual(doc3["leases"]["k"]["epoch"], 2)
+        doc["leases"]["k"] = lease_row(version=3, epoch=7)
+        released = lease_row(version=4, epoch=7, holder="r1", state="RELEASED")
+        out = cas_lease(doc, "k", expected_revision=0, expected_lease_version=3, new_record=released)
+        self.assertEqual(out["leases"]["k"]["epoch"], 7)
+        self.assertEqual(out["leases"]["k"]["version"], 4)
+        self.assertEqual(out["leases"]["k"]["state"], "RELEASED")
 
-    def test_ledger_store_uses_blob_and_record_cas(self):
-        backend = Backend(base_doc())
-        store = LedgerCASStore(backend, "repo")
-        first = lease()
-        self.assertTrue(store.cas("k", None, first))
-        self.assertEqual(store.read("k"), first)
-        stale = lease(version=2, epoch=1, holder="run-b")
+    def test_new_holder_requires_higher_epoch(self):
+        doc = base_doc()
+        doc["leases"]["k"] = lease_row(version=3, epoch=7, holder="r1", state="RELEASED")
+        bad = lease_row(version=4, epoch=7, holder="r2")
         with self.assertRaises(LedgerInvalid):
-            store.cas("k", 1, stale)
+            cas_lease(doc, "k", expected_revision=0, expected_lease_version=3, new_record=bad)
+        good = lease_row(version=4, epoch=8, holder="r2")
+        out = cas_lease(doc, "k", expected_revision=0, expected_lease_version=3, new_record=good)
+        self.assertEqual(out["leases"]["k"]["epoch"], 8)
+
+    def test_pending_intent_cannot_be_lost_replaced_or_reassigned(self):
+        doc = base_doc()
+        doc["leases"]["k"] = lease_row(intent=pending_intent())
+        with self.assertRaises(LedgerConflict):
+            cas_lease(doc, "k", expected_revision=0, expected_lease_version=1, new_record=lease_row(version=2))
+        replaced = lease_row(version=2, intent=pending_intent(op_id="different"))
+        with self.assertRaises(LedgerConflict):
+            cas_lease(doc, "k", expected_revision=0, expected_lease_version=1, new_record=replaced)
+        reassigned = lease_row(version=2, epoch=2, holder="r2", intent={**pending_intent(epoch=2), "op_id": "op1"})
+        with self.assertRaises(LedgerConflict):
+            cas_lease(doc, "k", expected_revision=0, expected_lease_version=1, new_record=reassigned)
+
+    def test_pending_intent_may_resolve_then_release(self):
+        doc = base_doc()
+        doc["leases"]["k"] = lease_row(intent=pending_intent())
+        done = pending_intent(); done["state"] = "DONE"
+        resolved = lease_row(version=2, intent=done)
+        out = cas_lease(doc, "k", expected_revision=0, expected_lease_version=1, new_record=resolved)
+        released = {**resolved, "version": 3, "state": "RELEASED", "expires_at": 2.0}
+        out2 = cas_lease(out, "k", expected_revision=1, expected_lease_version=2, new_record=released)
+        self.assertEqual(out2["leases"]["k"]["state"], "RELEASED")
+
+    def test_blob_cas_and_revision_cas(self):
+        self.assertTrue(blob_cas_ok("abc", "abc"))
+        self.assertFalse(blob_cas_ok("abc", "def"))
+        with self.assertRaises(LedgerConflict):
+            cas_budget(
+                base_doc(),
+                "item",
+                expected_revision=1,
+                expected_budget_version=None,
+                new_record={"version": 1, "ci_reruns": 0, "fix_iterations": 0, "review_rounds": 0, "lease_acquisitions": 0},
+            )
 
 
 if __name__ == "__main__":

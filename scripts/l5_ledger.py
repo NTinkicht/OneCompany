@@ -192,7 +192,7 @@ def cas_mode(
 
 
 def _validate_lease_transition(cur: Mapping[str, Any] | None, row: Mapping[str, Any]) -> None:
-    """Enforce monotonic lease epoch/version and intent preservation."""
+    """Enforce monotonic lease epoch/version, expiry fencing, and intent preservation."""
     validate_lease_record(row)
     if cur is None:
         if row["version"] != 1:
@@ -207,6 +207,12 @@ def _validate_lease_transition(cur: Mapping[str, Any] | None, row: Mapping[str, 
     same_holder_new_epoch = row["holder"] == cur["holder"] and row["epoch"] > cur["epoch"]
     if not (same_owner_epoch or new_owner_epoch or same_holder_new_epoch):
         raise LedgerInvalid("LEASE_EPOCH_NOT_MONOTONIC")
+    if (
+        cur.get("state") == "ACTIVE"
+        and (new_owner_epoch or same_holder_new_epoch)
+        and row["acquired_at"] < cur["expires_at"]
+    ):
+        raise LedgerConflict("ACTIVE_LEASE_TAKEOVER")
 
     cur_intent = cur.get("intent")
     next_intent = row.get("intent")

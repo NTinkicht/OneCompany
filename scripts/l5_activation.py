@@ -8,6 +8,7 @@ import re
 from typing import Any
 
 from l5_recovery import MAX_RETRIES, plan_recovery
+from l5_trust_boundary import trust_boundary_from_activation
 
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
 TOKEN64 = re.compile(r"^[0-9a-f]{64}$")
@@ -95,6 +96,18 @@ def authorize_mutation(snapshot: dict[str, Any], *, prior_mutation_tokens: set[s
             raise ValueError("L5_ACTIVATION_MERGE_EVIDENCE_NOT_READY")
         if required_bool(snapshot, "unresolved_threads") or required_bool(snapshot, "mergeable") is not True:
             raise ValueError("L5_ACTIVATION_MERGE_BLOCKED")
+        trust_ok, trust_failures = trust_boundary_from_activation(snapshot)
+        if not trust_ok:
+            return {
+                "authorized": False,
+                "mutation_allowed": False,
+                "reason": "TRUST_BOUNDARY_FAILED",
+                "trust_failures": list(trust_failures),
+                "expected_head_sha": head,
+                "expected_base_sha": base,
+                "canonical_pr": pr,
+                "issue": issue,
+            }
     if mutation in RETRYABLE_MUTATIONS:
         count = result["retry_count_after"]
         if type(count) is not int or not 1 <= count <= MAX_RETRIES or not isinstance(result["retry_action_after"], str):

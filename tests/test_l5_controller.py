@@ -33,6 +33,38 @@ def repo_snapshot(**overrides):
     return row
 
 
+def intent_restraint_evidence(head: str, base: str, wu_hash: str) -> dict:
+    """Return a valid exact-state Engineering Intent & Restraint attestation."""
+    return {
+        "state": "PASS",
+        "head_sha": head,
+        "base_sha": base,
+        "wu_body_hash": wu_hash,
+        "complete": True,
+        "designated_independent": True,
+        "reviewer_eligible": True,
+        "identity_source_verified": True,
+        "wu_contract_frozen": True,
+        "intent_preserved": True,
+        "scope_discipline_verified": True,
+        "minimal_change_verified": True,
+        "no_overengineering": True,
+        "existing_mechanism_reused_or_justified": True,
+        "conventions_preserved": True,
+        "architecture_consistent": True,
+        "performance_preserved": True,
+        "api_semantics_preserved": True,
+        "diff_proportionate": True,
+        "adversarial_deletion_review_complete": True,
+        "deletion_candidates_resolved": True,
+        "failure_reasons": [],
+        "author": "coderabbitai",
+        "material_authors": ["chatgpt"],
+        "controller_identities": ["controller-1", "controller-2"],
+        "material_authors_head_sha": head,
+    }
+
+
 def merge_item():
     """Return a fully valid merge-eligible item."""
     head = "a" * 40
@@ -81,6 +113,9 @@ def merge_item():
         "review": review,
         "ci": "GREEN",
         "independent_review_pass": True,
+        "wu_body_hash": "wu-7",
+        "l5_intent_restraint_required": True,
+        "intent_restraint": intent_restraint_evidence(head, base, "wu-7"),
     }
     for key in TRUE_FIELDS:
         item[key] = True
@@ -311,7 +346,7 @@ class ControllerTests(unittest.TestCase):
         class SlowIO(FakeIO):
             def __init__(self, items):
                 super().__init__(items=items)
-                self.times = iter([1.0, 2.0, 299.0])
+                self.times = iter([1.0, 2.0, 3.0, 299.0])
 
             def trusted_now(self):
                 return next(self.times)

@@ -18,6 +18,7 @@ SAFE_MUTATIONS = {
     "REMEDIATE_SAME_PR_REVIEW": "remediate_review",
     "AWAIT_AUTHORIZED_EXPECTED_HEAD_MERGE": "merge_expected_head",
     "PLAN_REPLENISH_READY_WU": "reserve_next_wu",
+    "RECONCILE_HEAD_BASE": "update_branch",
 }
 HARD_BOUNDARY_FIELDS = (
     "emergency_stop", "human_only", "blocked", "release_go_no_go",

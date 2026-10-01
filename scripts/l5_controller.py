@@ -29,8 +29,11 @@ from l5_kernel import (
     fence_ok,
     governance_mode,
     intent_recovery,
+    intent_restraint_status,
     lease_key,
     merge_ok,
+    merge_ok_v11,
+    merge_precheck_v11,
     new_run_id,
     release,
     repo_merge_lock_key,
@@ -117,9 +120,11 @@ def _state_priority(state: ItemState) -> int:
         ItemState.CI_RED_INFRA: 4,
         ItemState.BEHIND_BASE: 5,
         ItemState.CI_GREEN_UNREVIEWED: 6,
-        ItemState.MERGE_ELIGIBLE: 7,
-        ItemState.IMPLEMENT: 8,
-        ItemState.IDLE: 9,
+        ItemState.INTENT_RESTRAINT_FAILED: 7,
+        ItemState.INTENT_RESTRAINT_PENDING: 8,
+        ItemState.MERGE_ELIGIBLE: 9,
+        ItemState.IMPLEMENT: 10,
+        ItemState.IDLE: 11,
     }
     return order.get(state, 100)
 
@@ -138,8 +143,8 @@ def _operation_for(state: ItemState, item: Mapping[str, Any]) -> str | None:
         return "update_branch"
     if state == ItemState.MERGE_ELIGIBLE:
         return "merge_expected_head"
-    if state == ItemState.MAIN_BROKEN:
-        return "revert"
+    # MAIN_BROKEN requires its own independently authorized recovery path.
+    # Do not repeatedly select an operation the guarded bridge cannot authorize.
     if state == ItemState.IDLE and item.get("replenish_candidate") is True:
         return "reserve_next_wu"
     return None
@@ -212,14 +217,24 @@ def _recover_pending(io: ControllerIO, store: CASStore) -> tuple[bool, str]:
 
 
 def _select(
+    repo_id: str,
     io: ControllerIO,
+    store: CASStore,
     items: Sequence[Mapping[str, Any]],
 ) -> tuple[Mapping[str, Any], ItemState] | None:
-    """Classify then deterministically select one actionable item."""
+    """Classify and select one actionable item, skipping active cooldown leases."""
     candidates: list[tuple[int, str, Mapping[str, Any], ItemState]] = []
-    for item in items:
+    now = _trusted_now(io)
+    for raw in items:
+        item = dict(raw)
+        item["l5_intent_restraint_required"] = True
         state = classify_item(item, io.budget_for(item))
-        if _operation_for(state, item) is None:
+        operation = _operation_for(state, item)
+        if operation is None:
+            continue
+        key = _lease_key_for(repo_id, _item_id(item), operation, item)
+        current = store.read(key)
+        if current is not None and current.expires_at > now:
             continue
         candidates.append((_state_priority(state), _item_id(item), item, state))
     if not candidates:
@@ -385,12 +400,13 @@ def _revalidate_before_write(
     if derived != allowed_mode or current_mode != allowed_mode:
         return None, f"REPO_MODE_{derived.value}"
 
-    fresh = io.refresh_item(original)
+    fresh = dict(io.refresh_item(original))
+    fresh["l5_intent_restraint_required"] = True
     if _item_id(fresh) != _item_id(original):
         return None, "ITEM_ID_CHANGED"
     if io.observe_item(fresh) != expected_observation:
         return None, "OBSERVATION_CHANGED"
-    if operation == "merge_expected_head" and not merge_ok(fresh)[0]:
+    if operation == "merge_expected_head" and not merge_precheck_v11(fresh)[0]:
         return None, "MERGE_OK_FALSE_FINAL"
     return fresh, None
 
@@ -491,7 +507,7 @@ def run_once(
             reason=derived.value,
         )
 
-    selected = _select(io, items)
+    selected = _select(repo_id, io, store, items)
     if selected is None:
         return RunResult(
             rid,
@@ -505,7 +521,7 @@ def run_once(
     operation = _operation_for(state, item)
     assert operation is not None
 
-    if operation == "merge_expected_head" and not merge_ok(item)[0]:
+    if operation == "merge_expected_head" and not merge_precheck_v11(item)[0]:
         return RunResult(
             rid,
             RunPhase.RECONCILE_ITEM,
@@ -579,6 +595,8 @@ def run_once(
         observed,
     )
     if final_item is None:
+        if resolve_intent(store, with_intent, "ABORTED") is None:
+            return RunResult(rid, RunPhase.FENCE_CHECK, "WAIT", action=operation, item_id=item_id, reason="INTENT_ABORT_CAS_FAILED")
         return RunResult(
             rid,
             RunPhase.FENCE_CHECK,
@@ -598,6 +616,8 @@ def run_once(
         now_srv=fence_now,
     )
     if not ok:
+        if fence_reason not in {"LEASE_LOST", "LEASE_MISSING"}:
+            resolve_intent(store, with_intent, "ABORTED")
         return RunResult(
             rid,
             RunPhase.FENCE_CHECK,
@@ -606,6 +626,23 @@ def run_once(
             item_id=item_id,
             reason=fence_reason,
         )
+
+    if operation == "merge_expected_head":
+        final_merge = dict(io.refresh_item(final_item))
+        final_merge["l5_intent_restraint_required"] = True
+        if _item_id(final_merge) != item_id or io.observe_item(final_merge) != observed:
+            resolve_intent(store, with_intent, "ABORTED")
+            return RunResult(rid, RunPhase.FENCE_CHECK, "BLOCKED", action=operation, item_id=item_id, reason="OBSERVATION_CHANGED")
+        final_repo = io.repo_snapshot()
+        final_mode, _ = store.read_repo_mode(repo_id)
+        final_merge["merge_lock_owned"] = True
+        final_merge["fence_ok"] = True
+        final_merge["unresolved_other_intent"] = False
+        final_merge["repo_mode"] = final_mode.value
+        if governance_mode(final_repo) != RepoMode.NORMAL or not merge_ok_v11(final_merge)[0]:
+            resolve_intent(store, with_intent, "ABORTED")
+            return RunResult(rid, RunPhase.FENCE_CHECK, "BLOCKED", action=operation, item_id=item_id, reason="MERGE_OK_FALSE_FINAL")
+        final_item = final_merge
 
     mutation = io.execute_guarded(operation, final_item, with_intent)
     status = mutation.get("status") if isinstance(mutation, Mapping) else None
@@ -682,31 +719,21 @@ def run_once(
             mutation_result=mutation,
         )
 
-    if status in {"FAILED", "BLOCKED"}:
+    if status == "BLOCKED":
+        # Abort the no-write intent but deliberately retain the live lease as
+        # a bounded cooldown. _select skips active leases, so one bad item
+        # cannot starve lower-priority work on subsequent invocations.
+        if resolve_intent(store, with_intent, "ABORTED") is None:
+            return RunResult(rid, RunPhase.ACTION, "WAIT", action=operation, item_id=item_id, reason="INTENT_ABORT_CAS_FAILED", mutation_result=mutation)
+        return RunResult(rid, RunPhase.EXIT, "BLOCKED", action=operation, item_id=item_id, reason=result_reason or "ACTION_BLOCKED_COOLDOWN", mutation_result=mutation)
+
+    if status == "FAILED":
         terminal, terminal_reason = _terminalize_non_main_write(
-            io,
-            store,
-            with_intent,
-            state="ABORTED",
+            io, store, with_intent, state="ABORTED"
         )
         if not terminal:
-            return RunResult(
-                rid,
-                RunPhase.ACTION,
-                "WAIT",
-                action=operation,
-                item_id=item_id,
-                reason=terminal_reason,
-                mutation_result=mutation,
-            )
-        return RunResult(
-            rid,
-            RunPhase.EXIT,
-            status,
-            action=operation,
-            item_id=item_id,
-            mutation_result=mutation,
-        )
+            return RunResult(rid, RunPhase.ACTION, "WAIT", action=operation, item_id=item_id, reason=terminal_reason, mutation_result=mutation)
+        return RunResult(rid, RunPhase.EXIT, status, action=operation, item_id=item_id, mutation_result=mutation)
 
     return RunResult(
         rid,
@@ -727,7 +754,7 @@ class GuardedWriteBridge:
         self.client = client
         self.token_store = token_store
 
-    def execute(
+    def execute_guarded(
         self,
         operation: str,
         item: Mapping[str, Any],
@@ -746,6 +773,7 @@ class GuardedWriteBridge:
             "retry_ci": "retry_ci",
             "dispatch_review": "dispatch_review",
             "remediate_review": "remediate_review",
+            "update_branch": "update_branch",
             "merge_expected_head": "merge_expected_head",
             "reserve_next_wu": "reserve_next_wu",
         }.get(operation)

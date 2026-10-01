@@ -215,6 +215,9 @@ def _validate_lease_transition(cur: Mapping[str, Any] | None, row: Mapping[str, 
             raise LedgerConflict("PENDING_INTENT_LOST")
         if next_intent.get("op_id") != cur_intent.get("op_id"):
             raise LedgerConflict("PENDING_INTENT_REPLACED")
+        for field in ("idem_key", "operation", "expected_head", "expected_base", "epoch"):
+            if next_intent.get(field) != cur_intent.get(field):
+                raise LedgerConflict("PENDING_INTENT_MUTATED")
         if next_intent.get("state") not in {"PENDING", "DONE", "ABORTED"}:
             raise LedgerInvalid("PENDING_INTENT_TRANSITION")
         if row["epoch"] != cur["epoch"] or row["holder"] != cur["holder"]:

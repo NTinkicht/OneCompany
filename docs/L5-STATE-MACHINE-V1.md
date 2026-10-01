@@ -120,3 +120,8 @@ Passing simulation is necessary but not sufficient: full repository CI and a fre
 Changes to this controller, ledger contract, durable store, candidate workflow, or other governed enforcement paths are human-merge-only. They cannot be autonomously merged by the controller they modify.
 
 Unattended activation additionally requires verified platform enforcement on `main`, human clearance of `GOVERNANCE_DRIFT`, successful shadow-mode execution, and four identical scheduled controllers executing this exact contract. Staggering is load distribution only and is never mutual exclusion.
+
+
+## L5.1 Engineering Intent & Restraint
+
+The merge contract is extended by `docs/L5-INTENT-RESTRAINT-V1.1.md`. Autonomous merge requires both the base `MERGE_OK` predicate and an exact-state independent intent/restraint PASS. Certification now includes S1-S40 for a minimum of 40,000 hostile traces.

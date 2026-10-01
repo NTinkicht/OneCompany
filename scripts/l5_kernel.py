@@ -60,6 +60,8 @@ class ItemState(str, Enum):
     CI_RED_DETERMINISTIC = "CI_RED_DETERMINISTIC"
     BEHIND_BASE = "BEHIND_BASE"
     CI_GREEN_UNREVIEWED = "CI_GREEN_UNREVIEWED"
+    INTENT_RESTRAINT_PENDING = "INTENT_RESTRAINT_PENDING"
+    INTENT_RESTRAINT_FAILED = "INTENT_RESTRAINT_FAILED"
     FINDINGS_OPEN = "FINDINGS_OPEN"
     DISPUTED_FINDING = "DISPUTED_FINDING"
     BLOCK_HUMAN = "BLOCK_HUMAN"
@@ -488,6 +490,129 @@ def _review_ok(review: Any, head: str, base: str) -> bool:
     return norm not in {str(x).strip().lower() for x in authors + controllers}
 
 
+
+INTENT_RESTRAINT_REASON_CODES = frozenset(
+    {
+        "INTENT_DRIFT",
+        "OVERENGINEERED",
+        "DUPLICATED_MECHANISM",
+        "PERFORMANCE_REGRESSION",
+        "SEMANTIC_CHANGE",
+        "DIFF_DISPROPORTIONATE",
+        "CONVENTION_DRIFT",
+        "ARCHITECTURE_DRIFT",
+        "UNRESOLVED_DELETION_CANDIDATES",
+        "SELF_REVIEW",
+        "ATTESTATION_INCOMPLETE",
+    }
+)
+
+
+def intent_restraint_status(snapshot: Mapping[str, Any]) -> tuple[str, tuple[str, ...]]:
+    """Validate a structured, independent engineering-intent attestation.
+
+    The attestation is bound to the exact head, base, and frozen work-unit body
+    hash. Model prose is never accepted as gate evidence.
+    """
+    evidence = snapshot.get("intent_restraint")
+    if evidence is None:
+        return "PENDING", ("INTENT_RESTRAINT_MISSING",)
+    if not isinstance(evidence, Mapping):
+        return "FAILED", ("ATTESTATION_INCOMPLETE",)
+    state = evidence.get("state")
+    if state == "PENDING":
+        return "PENDING", ("INTENT_RESTRAINT_PENDING",)
+    if state != "PASS":
+        reasons = evidence.get("failure_reasons")
+        if not isinstance(reasons, list) or not reasons:
+            return "FAILED", ("ATTESTATION_INCOMPLETE",)
+        normalized = tuple(str(reason) for reason in reasons)
+        if any(reason not in INTENT_RESTRAINT_REASON_CODES for reason in normalized):
+            return "FAILED", ("ATTESTATION_INCOMPLETE",)
+        return "FAILED", normalized
+
+    head = snapshot.get("head_sha")
+    base = snapshot.get("base_sha")
+    wu_hash = snapshot.get("wu_body_hash")
+    failures: list[str] = []
+    if not _sha(head) or evidence.get("head_sha") != head:
+        failures.append("INTENT_DRIFT")
+    if not _sha(base) or evidence.get("base_sha") != base:
+        failures.append("INTENT_DRIFT")
+    if not isinstance(wu_hash, str) or not wu_hash or evidence.get("wu_body_hash") != wu_hash:
+        failures.append("INTENT_DRIFT")
+    if evidence.get("material_authors_head_sha") != head:
+        failures.append("INTENT_DRIFT")
+
+    required_true = {
+        "complete": "ATTESTATION_INCOMPLETE",
+        "designated_independent": "SELF_REVIEW",
+        "reviewer_eligible": "SELF_REVIEW",
+        "identity_source_verified": "ATTESTATION_INCOMPLETE",
+        "wu_contract_frozen": "INTENT_DRIFT",
+        "intent_preserved": "INTENT_DRIFT",
+        "scope_discipline_verified": "INTENT_DRIFT",
+        "minimal_change_verified": "OVERENGINEERED",
+        "no_overengineering": "OVERENGINEERED",
+        "existing_mechanism_reused_or_justified": "DUPLICATED_MECHANISM",
+        "conventions_preserved": "CONVENTION_DRIFT",
+        "architecture_consistent": "ARCHITECTURE_DRIFT",
+        "performance_preserved": "PERFORMANCE_REGRESSION",
+        "api_semantics_preserved": "SEMANTIC_CHANGE",
+        "diff_proportionate": "DIFF_DISPROPORTIONATE",
+        "adversarial_deletion_review_complete": "ATTESTATION_INCOMPLETE",
+        "deletion_candidates_resolved": "UNRESOLVED_DELETION_CANDIDATES",
+    }
+    for key, reason in required_true.items():
+        if evidence.get(key) is not True:
+            failures.append(reason)
+
+    reasons = evidence.get("failure_reasons")
+    if reasons != []:
+        failures.append("ATTESTATION_INCOMPLETE")
+
+    reviewer = evidence.get("author")
+    authors = evidence.get("material_authors")
+    controllers = evidence.get("controller_identities")
+    if not isinstance(reviewer, str) or not reviewer.strip():
+        failures.append("ATTESTATION_INCOMPLETE")
+    elif not isinstance(authors, list) or not isinstance(controllers, list):
+        failures.append("ATTESTATION_INCOMPLETE")
+    else:
+        norm = reviewer.strip().lower()
+        excluded = {str(actor).strip().lower() for actor in authors + controllers}
+        if norm in excluded:
+            failures.append("SELF_REVIEW")
+
+    unique = tuple(dict.fromkeys(failures))
+    return ("PASS", ()) if not unique else ("FAILED", unique)
+
+
+def intent_restraint_ok(snapshot: Mapping[str, Any]) -> tuple[bool, tuple[str, ...]]:
+    """Return a fail-closed boolean view of the intent/restraint gate."""
+    state, reasons = intent_restraint_status(snapshot)
+    return state == "PASS", reasons
+
+
+def merge_ok_v11(snapshot: Mapping[str, Any]) -> tuple[bool, tuple[str, ...]]:
+    """Evaluate base MERGE_OK plus the L5.1 Engineering Intent & Restraint gate."""
+    base_ok, base_failures = merge_ok(snapshot)
+    if snapshot.get("l5_intent_restraint_required") is not True:
+        return base_ok, base_failures
+    restraint_ok, restraint_failures = intent_restraint_ok(snapshot)
+    failures = tuple(base_failures) + tuple(restraint_failures)
+    return base_ok and restraint_ok, failures
+
+
+def merge_precheck_v11(snapshot: Mapping[str, Any]) -> tuple[bool, tuple[str, ...]]:
+    """Evaluate merge readiness before runtime-only lock/fence acquisition."""
+    staged = dict(snapshot)
+    staged["merge_lock_owned"] = True
+    staged["fence_ok"] = True
+    staged["unresolved_other_intent"] = False
+    return merge_ok_v11(staged)
+
+
 TRUE_FIELDS = (
     "merge_lock_owned",
     "fence_ok",
@@ -629,7 +754,29 @@ def classify_item(snapshot: Mapping[str, Any], budget: Budget) -> ItemState:
         return ItemState.WAIT_PROVIDER
     if snapshot.get("independent_review_pass") is not True:
         return ItemState.CI_GREEN_UNREVIEWED
-    return ItemState.MERGE_ELIGIBLE if merge_ok(snapshot)[0] else ItemState.FINDINGS_OPEN
+    if snapshot.get("l5_intent_restraint_required") is True:
+        restraint_state, _ = intent_restraint_status(snapshot)
+        if restraint_state == "PENDING":
+            return ItemState.INTENT_RESTRAINT_PENDING
+        if restraint_state != "PASS":
+            return ItemState.INTENT_RESTRAINT_FAILED
+        ok, failures = merge_precheck_v11(snapshot)
+    else:
+        staged = dict(snapshot)
+        staged["merge_lock_owned"] = True
+        staged["fence_ok"] = True
+        staged["unresolved_other_intent"] = False
+        ok, failures = merge_ok(staged)
+    if ok:
+        return ItemState.MERGE_ELIGIBLE
+    finding_codes = {
+        "FINDINGS_CONFIRMED_CLOSED_NOT_TRUE",
+        "UNRESOLVED_REQUIRED_THREADS_NOT_FALSE",
+        "THREAD_RESOLUTION_POLICY_OK_NOT_TRUE",
+    }
+    if failures and set(failures).issubset(finding_codes):
+        return ItemState.FINDINGS_OPEN
+    return ItemState.BLOCK_HUMAN
 
 
 def selftest() -> None:

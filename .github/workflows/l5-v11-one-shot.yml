@@ -50,27 +50,19 @@ jobs:
           )
           p.write_text(text, encoding="utf-8")
           PY
-      - name: Format candidate workflow when Prettier is available
-        shell: bash
-        run: |
-          if [ -f package-lock.json ]; then
-            npm ci --ignore-scripts
-            if [ -x node_modules/.bin/prettier ]; then
-              node_modules/.bin/prettier --write .github/workflows/l5-hostile-controller-ci.yml
-            fi
-          fi
       - name: Validate Python L5 suite
         run: python -m unittest discover -s tests -p 'test_l5_*.py'
       - name: Run S1-S30 hostile certification
         run: python scripts/l5_hostile_sim.py
       - name: Run S31-S40 intent/restraint certification
         run: python scripts/l5_intent_hostile_sim.py
-      - name: Commit hardened controller and remove one-shot machinery
+      - name: Commit hardened controller without workflow mutations
         shell: bash
         run: |
           git config user.name 'l5-human-authorized-hardening'
           git config user.email 'actions@users.noreply.github.com'
-          git rm scripts/_apply_l5_v11_once.py .github/workflows/l5-v11-one-shot.yml
+          git checkout HEAD -- .github/workflows/l5-hostile-controller-ci.yml .github/workflows/l5-v11-one-shot.yml
+          git rm scripts/_apply_l5_v11_once.py
           git add -A
           git commit -m 'feat(l5): add Engineering Intent and Restraint gate'
           git push origin HEAD:l5/claude-hostile-controller

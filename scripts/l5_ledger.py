@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
-"""Durable GitHub-ledger contract for Claude L5 controllers.
+"""Durable GitHub-backed ledger contract for Claude-exact L5 controllers.
 
-The ledger document is stored on ``l5/controller-ledger``. The network adapter
-must update the file through GitHub's contents API using the exact observed blob
-SHA. This module validates persisted state and enforces monotonic lease/epoch
-history; it contains no credentials.
+The authoritative ledger lives on ``l5/controller-ledger`` at
+``.l5/controller-ledger.json``. A network adapter MUST use the current GitHub
+blob SHA as the storage CAS precondition. This module validates the document and
+enforces record-level monotonicity; it performs no network I/O.
 """
 from __future__ import annotations
 
 import copy
 import json
-from dataclasses import asdict
-from typing import Any, Callable, Mapping, Protocol
+from typing import Any, Mapping
 
-from l5_kernel import HUMAN_CLEAR_ONLY, Intent, Lease, Observation, RepoMode
+from l5_kernel import HUMAN_CLEAR_ONLY, RepoMode, SHA40
 
 SCHEMA_VERSION = 2
 LEDGER_PATH = ".l5/controller-ledger.json"
@@ -21,97 +20,121 @@ LEDGER_BRANCH = "l5/controller-ledger"
 
 
 class LedgerConflict(RuntimeError):
-    """Raised on stale compare-and-swap state."""
+    """Raised when a CAS precondition or state transition is stale."""
 
 
 class LedgerInvalid(ValueError):
-    """Raised when ledger data violates the durable schema."""
+    """Raised when durable state is malformed or unsafe."""
 
 
-class LedgerBackend(Protocol):
-    """Transport boundary for GitHub contents read/update operations."""
-
-    def read(self) -> tuple[Mapping[str, Any], str]: ...
-    def write(self, document: Mapping[str, Any], expected_blob_sha: str) -> str: ...
+def _sha(value: Any) -> bool:
+    """Return True for a 40-character hex SHA."""
+    return isinstance(value, str) and bool(SHA40.fullmatch(value))
 
 
-def _validate_observation(value: Any) -> None:
-    """Validate a persisted resource observation."""
-    if not isinstance(value, Mapping):
+def _validate_observation(row: Any) -> None:
+    """Validate a persisted lease observation."""
+    if not isinstance(row, Mapping):
         raise LedgerInvalid("LEASE_OBSERVATION")
-    for key in ("head", "base", "wu_body_hash", "pr_updated_at"):
-        if not isinstance(value.get(key), str):
-            raise LedgerInvalid("LEASE_OBSERVATION")
+    if not _sha(row.get("head")) or not _sha(row.get("base")):
+        raise LedgerInvalid("LEASE_OBSERVATION_REFS")
+    if not isinstance(row.get("wu_body_hash", ""), str):
+        raise LedgerInvalid("LEASE_OBSERVATION_WU_HASH")
+    if not isinstance(row.get("pr_updated_at", ""), str):
+        raise LedgerInvalid("LEASE_OBSERVATION_UPDATED_AT")
 
 
-def _validate_intent(value: Any, epoch: int) -> None:
-    """Validate a persisted intent."""
-    if value is None:
+def _validate_intent(row: Any, epoch: int) -> None:
+    """Validate a persisted write-ahead intent."""
+    if row is None:
         return
-    if not isinstance(value, Mapping):
+    if not isinstance(row, Mapping):
         raise LedgerInvalid("LEASE_INTENT")
-    for key in ("op_id", "idem_key", "operation", "expected_head", "expected_base", "state"):
-        if not isinstance(value.get(key), str) or not value[key]:
-            raise LedgerInvalid("LEASE_INTENT")
-    if value.get("state") not in {"PENDING", "DONE", "ABORTED"}:
-        raise LedgerInvalid("LEASE_INTENT_STATE")
-    if value.get("epoch") != epoch:
+    for key in ("op_id", "idem_key", "operation"):
+        if not isinstance(row.get(key), str) or not row[key]:
+            raise LedgerInvalid(f"LEASE_INTENT_{key.upper()}")
+    if not _sha(row.get("expected_head")) or not _sha(row.get("expected_base")):
+        raise LedgerInvalid("LEASE_INTENT_REFS")
+    if row.get("epoch") != epoch:
         raise LedgerInvalid("LEASE_INTENT_EPOCH")
+    if row.get("state") not in {"PENDING", "DONE", "ABORTED"}:
+        raise LedgerInvalid("LEASE_INTENT_STATE")
 
 
-def _validate_lease_record(value: Any) -> None:
-    """Validate a persisted lease or tombstone."""
-    if not isinstance(value, Mapping):
+def validate_lease_record(row: Any) -> None:
+    """Validate a durable active/released lease record."""
+    if not isinstance(row, Mapping):
         raise LedgerInvalid("LEASE_RECORD")
-    if type(value.get("version")) is not int or value["version"] < 1:
+    if type(row.get("version")) is not int or row["version"] < 1:
         raise LedgerInvalid("LEASE_RECORD_VERSION")
-    if type(value.get("epoch")) is not int or value["epoch"] < 1:
+    if type(row.get("epoch")) is not int or row["epoch"] < 1:
         raise LedgerInvalid("LEASE_RECORD_EPOCH")
-    if not isinstance(value.get("holder"), str) or not value["holder"]:
+    if not isinstance(row.get("holder"), str) or not row["holder"]:
         raise LedgerInvalid("LEASE_RECORD_HOLDER")
-    if type(value.get("active")) is not bool:
-        raise LedgerInvalid("LEASE_RECORD_ACTIVE")
-    if not isinstance(value.get("acquired_at"), (int, float)):
-        raise LedgerInvalid("LEASE_ACQUIRED_AT")
-    if not isinstance(value.get("expires_at"), (int, float)):
-        raise LedgerInvalid("LEASE_EXPIRES_AT")
-    _validate_observation(value.get("observed"))
-    _validate_intent(value.get("intent"), value["epoch"])
-    if not value["active"]:
-        intent = value.get("intent")
-        if intent is not None and intent.get("state") == "PENDING":
-            raise LedgerInvalid("INACTIVE_PENDING_INTENT")
+    if row.get("state") not in {"ACTIVE", "RELEASED"}:
+        raise LedgerInvalid("LEASE_RECORD_STATE")
+    if not isinstance(row.get("acquired_at"), (int, float)):
+        raise LedgerInvalid("LEASE_RECORD_ACQUIRED_AT")
+    if not isinstance(row.get("expires_at"), (int, float)):
+        raise LedgerInvalid("LEASE_RECORD_EXPIRES_AT")
+    _validate_observation(row.get("observed"))
+    _validate_intent(row.get("intent"), row["epoch"])
+    if row["state"] == "RELEASED":
+        intent = row.get("intent")
+        if isinstance(intent, Mapping) and intent.get("state") == "PENDING":
+            raise LedgerInvalid("LEASE_RELEASED_WITH_PENDING_INTENT")
 
 
-def validate_ledger(document: Mapping[str, Any], *, expected_repo: str | None = None) -> None:
+def validate_budget_record(row: Any) -> None:
+    """Validate a durable bounded-work budget record."""
+    if not isinstance(row, Mapping):
+        raise LedgerInvalid("BUDGET_RECORD")
+    if type(row.get("version")) is not int or row["version"] < 1:
+        raise LedgerInvalid("BUDGET_RECORD_VERSION")
+    for key in ("ci_reruns", "fix_iterations", "review_rounds", "lease_acquisitions"):
+        if type(row.get(key)) is not int or row[key] < 0:
+            raise LedgerInvalid(f"BUDGET_{key.upper()}")
+
+
+def validate_ledger(doc: Mapping[str, Any], *, expected_repo: str | None = None) -> None:
     """Validate the complete durable ledger document."""
-    if not isinstance(document, Mapping):
+    if not isinstance(doc, Mapping):
         raise LedgerInvalid("LEDGER_NOT_OBJECT")
-    if document.get("schema_version") != SCHEMA_VERSION:
+    if doc.get("schema_version") != SCHEMA_VERSION:
         raise LedgerInvalid("LEDGER_SCHEMA")
-    repo = document.get("repository")
+    repo = doc.get("repository")
     if not isinstance(repo, str) or not repo:
         raise LedgerInvalid("LEDGER_REPOSITORY")
     if expected_repo is not None and repo != expected_repo:
         raise LedgerInvalid("LEDGER_REPOSITORY_MISMATCH")
-    if type(document.get("revision")) is not int or document["revision"] < 0:
+    if type(doc.get("revision")) is not int or doc["revision"] < 0:
         raise LedgerInvalid("LEDGER_REVISION")
     try:
-        mode = RepoMode(document.get("mode"))
+        mode = RepoMode(doc.get("mode"))
     except Exception as exc:
         raise LedgerInvalid("LEDGER_MODE") from exc
-    if type(document.get("mode_version")) is not int or document["mode_version"] < 1:
+    if type(doc.get("mode_version")) is not int or doc["mode_version"] < 1:
         raise LedgerInvalid("LEDGER_MODE_VERSION")
-    if type(document.get("human_clear_required")) is not bool:
+    if type(doc.get("human_clear_required")) is not bool:
         raise LedgerInvalid("LEDGER_HUMAN_CLEAR")
-    if mode in HUMAN_CLEAR_ONLY and document["human_clear_required"] is not True:
+    if mode in HUMAN_CLEAR_ONLY and doc["human_clear_required"] is not True:
         raise LedgerInvalid("LEDGER_HUMAN_CLEAR_REQUIRED")
-    for key in ("leases", "budgets", "observations"):
-        if not isinstance(document.get(key), Mapping):
-            raise LedgerInvalid(f"LEDGER_{key.upper()}")
-    for record in document["leases"].values():
-        _validate_lease_record(record)
-    enforcement = document.get("platform_enforcement")
+
+    leases = doc.get("leases")
+    budgets = doc.get("budgets")
+    observations = doc.get("observations")
+    if not isinstance(leases, Mapping):
+        raise LedgerInvalid("LEDGER_LEASES")
+    if not isinstance(budgets, Mapping):
+        raise LedgerInvalid("LEDGER_BUDGETS")
+    if not isinstance(observations, Mapping):
+        raise LedgerInvalid("LEDGER_OBSERVATIONS")
+    for row in leases.values():
+        validate_lease_record(row)
+    for row in budgets.values():
+        validate_budget_record(row)
+
+    enforcement = doc.get("platform_enforcement")
     if (
         not isinstance(enforcement, Mapping)
         or type(enforcement.get("branch_protected")) is not bool
@@ -121,37 +144,41 @@ def validate_ledger(document: Mapping[str, Any], *, expected_repo: str | None = 
         raise LedgerInvalid("LEDGER_PLATFORM_ENFORCEMENT")
 
 
-def canonical_json(document: Mapping[str, Any]) -> str:
+def canonical_json(doc: Mapping[str, Any]) -> str:
     """Serialize a validated ledger deterministically."""
-    validate_ledger(document)
-    return json.dumps(document, sort_keys=True, indent=2, separators=(",", ": ")) + "\n"
+    validate_ledger(doc)
+    return json.dumps(doc, sort_keys=True, indent=2, separators=(",", ": ")) + "\n"
 
 
 def blob_cas_ok(observed_blob_sha: str, expected_blob_sha: str) -> bool:
-    """Validate the outer GitHub file CAS precondition."""
-    return isinstance(observed_blob_sha, str) and bool(observed_blob_sha) and observed_blob_sha == expected_blob_sha
+    """Check GitHub blob-SHA CAS evidence."""
+    return (
+        isinstance(observed_blob_sha, str)
+        and bool(observed_blob_sha)
+        and observed_blob_sha == expected_blob_sha
+    )
 
 
-def _begin(document: Mapping[str, Any], expected_revision: int) -> dict[str, Any]:
-    """Clone a ledger and advance its document revision."""
-    validate_ledger(document)
-    if document["revision"] != expected_revision:
+def _begin(doc: Mapping[str, Any], expected_revision: int) -> dict[str, Any]:
+    """Clone a ledger after checking document revision."""
+    validate_ledger(doc)
+    if doc["revision"] != expected_revision:
         raise LedgerConflict("LEDGER_REVISION_STALE")
-    out = copy.deepcopy(dict(document))
+    out = copy.deepcopy(dict(doc))
     out["revision"] += 1
     return out
 
 
 def cas_mode(
-    document: Mapping[str, Any],
+    doc: Mapping[str, Any],
     *,
     expected_revision: int,
     expected_mode_version: int,
     new_mode: RepoMode,
     human_clear: bool = False,
 ) -> dict[str, Any]:
-    """CAS repository mode, preserving human-only exits."""
-    out = _begin(document, expected_revision)
+    """CAS repository mode while enforcing human-only exits."""
+    out = _begin(doc, expected_revision)
     if out["mode_version"] != expected_mode_version:
         raise LedgerConflict("MODE_VERSION_STALE")
     old = RepoMode(out["mode"])
@@ -164,184 +191,87 @@ def cas_mode(
     return out
 
 
-def lease_to_record(lease: Lease) -> dict[str, Any]:
-    """Convert an in-memory lease to its durable representation."""
-    return asdict(lease)
+def _validate_lease_transition(cur: Mapping[str, Any] | None, row: Mapping[str, Any]) -> None:
+    """Enforce monotonic lease epoch/version and intent preservation."""
+    validate_lease_record(row)
+    if cur is None:
+        if row["version"] != 1:
+            raise LedgerInvalid("LEASE_INITIAL_VERSION")
+        return
 
+    validate_lease_record(cur)
+    if row["version"] <= cur["version"]:
+        raise LedgerInvalid("LEASE_VERSION_NOT_MONOTONIC")
+    same_owner_epoch = row["holder"] == cur["holder"] and row["epoch"] == cur["epoch"]
+    new_owner_epoch = row["holder"] != cur["holder"] and row["epoch"] > cur["epoch"]
+    same_holder_new_epoch = row["holder"] == cur["holder"] and row["epoch"] > cur["epoch"]
+    if not (same_owner_epoch or new_owner_epoch or same_holder_new_epoch):
+        raise LedgerInvalid("LEASE_EPOCH_NOT_MONOTONIC")
 
-def record_to_lease(key: str, record: Mapping[str, Any]) -> Lease:
-    """Convert a validated durable record to a lease object."""
-    _validate_lease_record(record)
-    observation = Observation(**dict(record["observed"]))
-    intent_data = record.get("intent")
-    intent = Intent(**dict(intent_data)) if intent_data is not None else None
-    return Lease(
-        key=key,
-        holder=record["holder"],
-        epoch=record["epoch"],
-        observed=observation,
-        acquired_at=record["acquired_at"],
-        expires_at=record["expires_at"],
-        version=record["version"],
-        intent=intent,
-        active=record["active"],
-    )
+    cur_intent = cur.get("intent")
+    next_intent = row.get("intent")
+    if isinstance(cur_intent, Mapping) and cur_intent.get("state") == "PENDING":
+        if not isinstance(next_intent, Mapping):
+            raise LedgerConflict("PENDING_INTENT_LOST")
+        if next_intent.get("op_id") != cur_intent.get("op_id"):
+            raise LedgerConflict("PENDING_INTENT_REPLACED")
+        if next_intent.get("state") not in {"PENDING", "DONE", "ABORTED"}:
+            raise LedgerInvalid("PENDING_INTENT_TRANSITION")
+        if row["epoch"] != cur["epoch"] or row["holder"] != cur["holder"]:
+            raise LedgerConflict("PENDING_INTENT_REASSIGNED")
+
+    if cur.get("state") == "ACTIVE" and row.get("state") == "RELEASED":
+        intent = row.get("intent")
+        if isinstance(intent, Mapping) and intent.get("state") == "PENDING":
+            raise LedgerConflict("PENDING_INTENT_RELEASE")
 
 
 def cas_lease(
-    document: Mapping[str, Any],
+    doc: Mapping[str, Any],
     key: str,
     *,
     expected_revision: int,
     expected_lease_version: int | None,
-    new_record: Mapping[str, Any],
+    new_record: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
-    """CAS a lease/tombstone while preserving version and epoch floors."""
+    """CAS a lease record; deletion is forbidden, release uses tombstones."""
     if not isinstance(key, str) or not key:
         raise LedgerInvalid("LEASE_KEY")
-    _validate_lease_record(new_record)
-    out = _begin(document, expected_revision)
-    current = out["leases"].get(key)
-    actual = None if current is None else current.get("version")
+    if new_record is None:
+        raise LedgerInvalid("LEASE_DELETE_FORBIDDEN")
+    out = _begin(doc, expected_revision)
+    cur = out["leases"].get(key)
+    actual = None if cur is None else cur.get("version")
     if actual != expected_lease_version:
         raise LedgerConflict("LEASE_VERSION_STALE")
     row = copy.deepcopy(dict(new_record))
-    if current is None:
-        if row["version"] != 1 or row["epoch"] != 1:
-            raise LedgerInvalid("LEASE_INITIAL_VERSION_EPOCH")
-    else:
-        _validate_lease_record(current)
-        if row["version"] <= current["version"]:
-            raise LedgerInvalid("LEASE_VERSION_NOT_MONOTONIC")
-        if row["epoch"] < current["epoch"]:
-            raise LedgerInvalid("LEASE_EPOCH_REGRESSION")
-        if row["epoch"] == current["epoch"] and row["holder"] != current["holder"]:
-            raise LedgerInvalid("LEASE_HOLDER_CHANGED_WITHOUT_NEW_EPOCH")
-        old_intent = current.get("intent")
-        if old_intent is not None and old_intent.get("state") == "PENDING":
-            new_intent = row.get("intent")
-            if new_intent is None or new_intent.get("op_id") != old_intent.get("op_id"):
-                raise LedgerInvalid("PENDING_INTENT_REPLACED")
-        if not current["active"] and row["active"] and row["epoch"] <= current["epoch"]:
-            raise LedgerInvalid("LEASE_REACTIVATION_EPOCH")
+    _validate_lease_transition(cur, row)
     out["leases"][key] = row
     validate_ledger(out)
     return out
 
 
 def cas_budget(
-    document: Mapping[str, Any],
+    doc: Mapping[str, Any],
     key: str,
     *,
     expected_revision: int,
     expected_budget_version: int | None,
     new_record: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """CAS one bounded-budget record."""
-    out = _begin(document, expected_revision)
-    current = out["budgets"].get(key)
-    actual = None if current is None else current.get("version")
+    """CAS a bounded-work budget record."""
+    out = _begin(doc, expected_revision)
+    cur = out["budgets"].get(key)
+    actual = None if cur is None else cur.get("version")
     if actual != expected_budget_version:
         raise LedgerConflict("BUDGET_VERSION_STALE")
     row = copy.deepcopy(dict(new_record))
-    if type(row.get("version")) is not int or row["version"] < 1:
-        raise LedgerInvalid("BUDGET_RECORD_VERSION")
-    if expected_budget_version is not None and row["version"] <= expected_budget_version:
+    validate_budget_record(row)
+    if expected_budget_version is None:
+        if row["version"] != 1:
+            raise LedgerInvalid("BUDGET_INITIAL_VERSION")
+    elif row["version"] <= expected_budget_version:
         raise LedgerInvalid("BUDGET_VERSION_NOT_MONOTONIC")
     out["budgets"][key] = row
     validate_ledger(out)
     return out
-
-
-class LedgerCASStore:
-    """CASStore backed by an outer GitHub-file CAS backend."""
-
-    def __init__(self, backend: LedgerBackend, repository: str):
-        self.backend = backend
-        self.repository = repository
-
-    def _read_document(self) -> tuple[dict[str, Any], str]:
-        """Read and validate the authoritative document and blob SHA."""
-        document, blob_sha = self.backend.read()
-        validate_ledger(document, expected_repo=self.repository)
-        if not isinstance(blob_sha, str) or not blob_sha:
-            raise LedgerInvalid("LEDGER_BLOB_SHA")
-        return copy.deepcopy(dict(document)), blob_sha
-
-    def read(self, key: str) -> Lease | None:
-        """Read a lease/tombstone from the durable ledger."""
-        document, _ = self._read_document()
-        record = document["leases"].get(key)
-        return None if record is None else record_to_lease(key, record)
-
-    def list_leases(self) -> list[Lease]:
-        """Read all durable lease/tombstone records."""
-        document, _ = self._read_document()
-        return [record_to_lease(key, row) for key, row in document["leases"].items()]
-
-    def cas(self, key: str, expected_version: int | None, value: Lease) -> bool:
-        """Atomically update a lease using record CAS plus blob-SHA CAS."""
-        document, blob_sha = self._read_document()
-        try:
-            updated = cas_lease(
-                document,
-                key,
-                expected_revision=document["revision"],
-                expected_lease_version=expected_version,
-                new_record=lease_to_record(value),
-            )
-            self.backend.write(updated, blob_sha)
-        except LedgerConflict:
-            return False
-        return True
-
-    def read_repo_mode(self, repo_id: str) -> tuple[RepoMode, int | None]:
-        """Read durable repository mode; missing state never defaults NORMAL."""
-        if repo_id != self.repository:
-            raise LedgerInvalid("LEDGER_REPOSITORY_MISMATCH")
-        document, _ = self._read_document()
-        return RepoMode(document["mode"]), document["mode_version"]
-
-    def cas_repo_mode(self, repo_id: str, expected_version: int | None, mode: RepoMode) -> bool:
-        """CAS durable mode without allowing implicit human-clear exits."""
-        if repo_id != self.repository or expected_version is None:
-            return False
-        document, blob_sha = self._read_document()
-        try:
-            updated = cas_mode(
-                document,
-                expected_revision=document["revision"],
-                expected_mode_version=expected_version,
-                new_mode=mode,
-                human_clear=False,
-            )
-            self.backend.write(updated, blob_sha)
-        except LedgerConflict:
-            return False
-        return True
-
-
-class CallbackGitHubLedgerBackend:
-    """GitHub contents adapter using injected read/update callbacks.
-
-    ``reader`` returns ``(document, blob_sha)`` for the canonical ledger file.
-    ``writer`` performs a GitHub contents update with ``expected_blob_sha`` as
-    the file-SHA precondition and returns the resulting blob SHA.
-    """
-
-    def __init__(
-        self,
-        reader: Callable[[], tuple[Mapping[str, Any], str]],
-        writer: Callable[[str, str], str],
-    ):
-        self._reader = reader
-        self._writer = writer
-
-    def read(self) -> tuple[Mapping[str, Any], str]:
-        """Read the canonical GitHub ledger file."""
-        return self._reader()
-
-    def write(self, document: Mapping[str, Any], expected_blob_sha: str) -> str:
-        """Write the ledger through exact GitHub file-SHA CAS."""
-        validate_ledger(document)
-        return self._writer(canonical_json(document), expected_blob_sha)

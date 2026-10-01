@@ -61,9 +61,11 @@ class LedgerTests(unittest.TestCase):
     """Durable monotonicity and recovery tests."""
 
     def test_valid_empty_ledger(self):
+        """Accept the minimal valid schema-v2 repository ledger."""
         validate_ledger(base_doc())
 
     def test_human_clear_required_for_protected_mode_exit(self):
+        """Require explicit human clearance before leaving protected freeze modes."""
         doc = base_doc()
         with self.assertRaises(LedgerConflict):
             cas_mode(doc, expected_revision=0, expected_mode_version=1, new_mode=RepoMode.NORMAL, human_clear=False)
@@ -71,12 +73,14 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(out["mode"], "NORMAL")
 
     def test_lease_delete_forbidden(self):
+        """Forbid lease deletion so epoch and version history remain durable."""
         doc = base_doc()
         doc["leases"]["k"] = lease_row()
         with self.assertRaises(LedgerInvalid):
             cas_lease(doc, "k", expected_revision=0, expected_lease_version=1, new_record=None)
 
     def test_release_tombstone_preserves_epoch_version(self):
+        """Preserve fencing epoch and advance version when a lease is released."""
         doc = base_doc()
         doc["leases"]["k"] = lease_row(version=3, epoch=7)
         released = lease_row(version=4, epoch=7, holder="r1", state="RELEASED")
@@ -86,6 +90,7 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(out["leases"]["k"]["state"], "RELEASED")
 
     def test_new_holder_requires_higher_epoch(self):
+        """Require a strictly higher fencing epoch when ownership changes."""
         doc = base_doc()
         doc["leases"]["k"] = lease_row(version=3, epoch=7, holder="r1", state="RELEASED")
         bad = lease_row(version=4, epoch=7, holder="r2")
@@ -96,6 +101,7 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(out["leases"]["k"]["epoch"], 8)
 
     def test_active_lease_cannot_be_taken_over_before_expiry(self):
+        """Reject durable ownership takeover until the current active lease expires."""
         doc = base_doc()
         doc["leases"]["k"] = lease_row(version=3, epoch=7, holder="r1")
         early = lease_row(version=4, epoch=8, holder="r2")
@@ -111,6 +117,7 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(out["leases"]["k"]["epoch"], 8)
 
     def test_pending_intent_cannot_be_lost_replaced_or_reassigned(self):
+        """Keep every unresolved PENDING intent immutable and owner-bound."""
         doc = base_doc()
         doc["leases"]["k"] = lease_row(intent=pending_intent())
         with self.assertRaises(LedgerConflict):
@@ -123,6 +130,7 @@ class LedgerTests(unittest.TestCase):
             cas_lease(doc, "k", expected_revision=0, expected_lease_version=1, new_record=reassigned)
 
     def test_pending_intent_may_resolve_then_release(self):
+        """Allow release only after a pending write-ahead intent becomes terminal."""
         doc = base_doc()
         doc["leases"]["k"] = lease_row(intent=pending_intent())
         done = pending_intent(); done["state"] = "DONE"
@@ -133,6 +141,7 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(out2["leases"]["k"]["state"], "RELEASED")
 
     def test_blob_cas_and_revision_cas(self):
+        """Reject stale document revisions while validating outer blob CAS evidence."""
         self.assertTrue(blob_cas_ok("abc", "abc"))
         self.assertFalse(blob_cas_ok("abc", "def"))
         with self.assertRaises(LedgerConflict):

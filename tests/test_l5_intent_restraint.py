@@ -9,6 +9,7 @@ from l5_kernel import Budget, ItemState, intent_restraint_status, merge_ok_v11, 
 
 
 def attestation(head="a" * 40, base="b" * 40, wu="wu-1"):
+    """Return a complete independent exact-state intent/restraint attestation."""
     return {
         "state": "PASS", "head_sha": head, "base_sha": base, "wu_body_hash": wu,
         "complete": True, "designated_independent": True, "reviewer_eligible": True,
@@ -26,6 +27,7 @@ def attestation(head="a" * 40, base="b" * 40, wu="wu-1"):
 
 
 def merge_snapshot():
+    """Return a fully valid merge snapshot including L5.1 restraint evidence."""
     head, base = "a" * 40, "b" * 40
     src = {"app_id": 1, "workflow_path": "ci.yml"}
     secsrc = {"app_id": 2, "workflow_path": "security.yml"}
@@ -57,26 +59,33 @@ def merge_snapshot():
 
 
 class IntentRestraintTests(unittest.TestCase):
+    """Exercise exact-state binding and fail-closed restraint classification."""
+
     def test_pass_is_exact_state_bound(self):
+        """Accept a complete attestation bound to the exact head, base, and WU."""
         snap = merge_snapshot()
         self.assertEqual(intent_restraint_status(snap), ("PASS", ()))
         self.assertEqual(merge_ok_v11(snap), (True, ()))
 
     def test_missing_attestation_is_pending(self):
+        """Treat absent independent restraint evidence as pending, never PASS."""
         snap = merge_snapshot(); snap.pop("intent_restraint")
         self.assertEqual(intent_restraint_status(snap)[0], "PENDING")
         self.assertFalse(merge_ok_v11(snap)[0])
 
     def test_head_base_and_wu_drift_fail(self):
+        """Reject an attestation if any exact-state binding component drifts."""
         for field, value in (("head_sha", "c" * 40), ("base_sha", "d" * 40), ("wu_body_hash", "other")):
             snap = merge_snapshot(); snap["intent_restraint"] = dict(snap["intent_restraint"]); snap["intent_restraint"][field] = value
             self.assertEqual(intent_restraint_status(snap)[0], "FAILED")
 
     def test_self_review_fails(self):
+        """Reject a restraint attestation authored by a material author."""
         snap = merge_snapshot(); snap["intent_restraint"] = dict(snap["intent_restraint"]); snap["intent_restraint"]["author"] = "chatgpt"
         self.assertIn("SELF_REVIEW", intent_restraint_status(snap)[1])
 
     def test_engineering_regressions_fail(self):
+        """Map restraint regressions to stable explicit engineering reason codes."""
         cases = {
             "no_overengineering": "OVERENGINEERED",
             "existing_mechanism_reused_or_justified": "DUPLICATED_MECHANISM",
@@ -89,6 +98,7 @@ class IntentRestraintTests(unittest.TestCase):
             self.assertIn(reason, intent_restraint_status(snap)[1])
 
     def test_classifier_exposes_pending_and_failed_states(self):
+        """Expose pending and failed restraint as distinct controller item states."""
         pending = {"ci": "GREEN", "independent_review_pass": True, "l5_intent_restraint_required": True}
         self.assertEqual(classify(pending), ItemState.INTENT_RESTRAINT_PENDING)
         failed = dict(pending); failed["head_sha"] = "a" * 40; failed["base_sha"] = "b" * 40; failed["wu_body_hash"] = "wu"; failed["intent_restraint"] = {"state": "FAIL", "failure_reasons": ["OVERENGINEERED"]}
@@ -96,6 +106,7 @@ class IntentRestraintTests(unittest.TestCase):
 
 
 def classify(snapshot):
+    """Classify a synthetic snapshot through the production L5 kernel."""
     from l5_kernel import classify_item
     return classify_item(snapshot, Budget())
 

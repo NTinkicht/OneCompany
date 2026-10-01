@@ -1,0 +1,42 @@
+{
+  "version": "1.0",
+  "fail_closed": true,
+  "lease_ttl_seconds": 300,
+  "lease_renew_seconds": 60,
+  "minimum_write_lease_remaining_seconds": 90,
+  "max_run_seconds": 720,
+  "merge_evidence_freshness_seconds": 60,
+  "review_request_cooldown_seconds": 1800,
+  "ci_rerun_budget_per_head_check": 2,
+  "max_fix_iterations": 5,
+  "max_review_rounds": 3,
+  "independent_reviewers": ["CodeRabbit", "human"],
+  "controller_instances_are_independent_reviewers": false,
+  "unknown_gate_is_false": true,
+  "mandatory_check_conclusion": "success",
+  "require_exact_head": true,
+  "require_exact_tested_base": true,
+  "require_expected_head_merge": true,
+  "require_repo_merge_lock": true,
+  "governance_change_requires_human": true,
+  "governed_paths": [
+    ".github/workflows/**",
+    ".github/actions/**",
+    "CODEOWNERS",
+    ".coderabbit.yaml",
+    "scripts/l5_*.py",
+    "config/l5-*.json",
+    "package.json",
+    "Makefile",
+    "tox.ini",
+    "noxfile.py",
+    "pyproject.toml",
+    "scripts/ci/**"
+  ],
+  "human_clear_only_modes": [
+    "HALTED",
+    "CONTROLLER_INTEGRITY",
+    "SECURITY_INTEGRITY_FAILURE",
+    "GOVERNANCE_DRIFT"
+  ]
+}

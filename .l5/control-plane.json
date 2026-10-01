@@ -10,6 +10,16 @@
     "NTinkicht/Tabibi",
     "NTinkicht/veritas-atlas"
   ],
+  "required_contract_files": [
+    "docs/L5-STATE-MACHINE-V1.md",
+    "docs/L5-POST-CLAUDE-CUTOVER.md",
+    ".l5/trust-policy.json",
+    "scripts/l5_trust_boundary.py",
+    "scripts/l5_shadow.py",
+    "scripts/l5_api_hostile_sim.py",
+    "scripts/l5_liveness.py",
+    "scripts/l5_activation.py"
+  ],
   "activation_requirements": [
     "trust_boundary_verified",
     "api_hostile_simulation_green",

@@ -1,63 +1,186 @@
 from __future__ import annotations
-import sys,tempfile,unittest
+
+import sys
+import tempfile
+import unittest
 from pathlib import Path
-ROOT=Path(__file__).resolve().parents[2]
-sys.path.insert(0,str(ROOT/"scripts"))
+
+ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT / "scripts"))
 import l5_activation as act
 import l5_write_adapter as wa
-H,B="a"*40,"b"*40
+
 
 def snap(**patch):
-    row={"repository":"NTinkicht/OneCompany","issue":262,"canonical_pr":263,"active_prs":[263],"head_sha":H,"base_sha":B,"head_current":True,"base_current":True,"implementation_complete":True,"emergency_stop":False,"human_only":False,"blocked":False,"release_go_no_go":False,"destructive_production":False,"spend_required":False,"secret_scope_change":False,"security_control_weakening":False,"merged":False,"verified":False,"verified_head_sha":None,"verified_base_sha":None,"ci":"SUCCESS","ci_head_sha":H,"ci_base_sha":B,"review":"PASS","review_head_sha":H,"review_base_sha":B,"reviewer_actor":"mistral-vibe","material_authors":["chatgpt"],"material_authors_head_sha":H,"review_eligible":True,"unresolved_threads":False,"mergeable":True,"retry_count":0,"retry_action":None,"event_id":"activation-1","ready_candidates":[]};row.update(patch);return row
+    h, b = "a" * 40, "b" * 40
+    row = {
+        "repository":"NTinkicht/OneCompany","issue":262,"canonical_pr":263,"active_prs":[263],
+        "head_sha":h,"base_sha":b,"head_current":True,"base_current":True,"implementation_complete":True,
+        "emergency_stop":False,"human_only":False,"blocked":False,"release_go_no_go":False,
+        "destructive_production":False,"spend_required":False,"secret_scope_change":False,"security_control_weakening":False,
+        "merged":False,"verified":False,"verified_head_sha":None,"verified_base_sha":None,
+        "ci":"SUCCESS","ci_head_sha":h,"ci_base_sha":b,"review":"PASS","review_head_sha":h,"review_base_sha":b,
+        "reviewer_actor":"mistral-vibe","material_authors":["chatgpt"],"material_authors_head_sha":h,
+        "review_eligible":True,"unresolved_threads":False,"mergeable":True,"retry_count":0,"retry_action":None,
+        "event_id":"activation-1","ready_candidates":[],
+    }
+    row.update(patch); return row
+
 
 class Client:
-    def __init__(self,*,effect=True):
-        self.boundaries={k:False for k in act.HARD_BOUNDARY_FIELDS};self.live={"head_sha":H,"base_sha":B,"pr_state":"open","open_streams":{262:[263]},"review_eligible_nonauthor":True};self.effect=effect;self.calls=0;self.reject=False;self.raise_unknown=False
-    def fetch_boundaries(self):return dict(self.boundaries)
-    def fetch_live(self,_pr):return dict(self.live)
-    def perform_cas(self,_mutation,_params):
-        self.calls+=1
-        if self.reject:raise wa.WriteRejected("definitive no-write")
-        if self.raise_unknown:raise RuntimeError("unknown after send")
+    def __init__(self, *, boundaries=None, live=None, lost=False, effect=True):
+        self.boundaries = boundaries or {k:False for k in act.HARD_BOUNDARY_FIELDS}
+        self.live = live or {"head_sha":"a"*40,"base_sha":"b"*40,"pr_state":"open","open_streams":{262:[263]},"review_eligible_nonauthor":True}
+        self.lost, self.effect, self.calls = lost, effect, 0
+        self.reject = False
+    def fetch_boundaries(self): return dict(self.boundaries)
+    def fetch_live(self, _pr): return dict(self.live)
+    def perform_cas(self, _mutation, _params):
+        self.calls += 1
+        if self.reject:
+            raise wa.WriteRejected("definitive no-write")
+        if self.lost:
+            raise wa.LostResponse()
         return True
-    def verify_effect(self,_mutation,_params):return self.effect
+    def verify_effect(self, _mutation, _params): return self.effect
+
 
 class ActivationTests(unittest.TestCase):
     def test_merge_authorization_exact_refs(self):
-        a=act.authorize_mutation(snap());self.assertEqual(a["mutation"],"merge_expected_head");self.assertTrue(a["mutation_allowed"]);self.assertEqual(a["expected_head_sha"],H)
-    def test_every_hard_boundary_blocks(self):
-        for field in act.HARD_BOUNDARY_FIELDS:self.assertFalse(act.authorize_mutation(snap(**{field:True}))["mutation_allowed"],field)
-    def test_event_replay_identity_stable(self):
-        a=act.authorize_mutation(snap());b=act.authorize_mutation(snap(event_id="poll-2"));self.assertEqual(a["mutation_token"],b["mutation_token"])
-    def test_retry_attempts_have_distinct_tokens(self):
-        a=act.authorize_mutation(snap(ci="FAILURE",review="UNKNOWN"));b=act.authorize_mutation(snap(ci="FAILURE",review="UNKNOWN",retry_count=1,retry_action="CI",event_id="r2"));self.assertNotEqual(a["mutation_token"],b["mutation_token"])
-    def test_atomic_cas_required_and_stale_ref_blocks(self):
-        s=snap(ci="FAILURE",review="UNKNOWN");a=act.authorize_mutation(s);c=Client();c.perform_cas=None;self.assertEqual(wa.execute_mutation(a,s,c,wa.MemoryStore())["reason"],"ATOMIC_CAS_UNAVAILABLE");c=Client();c.live["head_sha"]="c"*40;self.assertEqual(wa.execute_mutation(a,s,c,wa.MemoryStore())["reason"],"STALE_HEAD_OR_BASE")
-    def test_merge_rechecks_reviewer_eligibility(self):
-        s=snap();a=act.authorize_mutation(s);c=Client();c.live["review_eligible_nonauthor"]=False;self.assertEqual(wa.execute_mutation(a,s,c,wa.MemoryStore())["reason"],"REVIEWER_NOT_ELIGIBLE")
-    def test_uncertain_write_pending_then_reconcile(self):
-        s=snap(ci="FAILURE",review="UNKNOWN");a=act.authorize_mutation(s);store=wa.MemoryStore();c=Client(effect=False);c.raise_unknown=True;o=wa.execute_mutation(a,s,c,store);self.assertEqual(o["status"],"IN_PROGRESS");self.assertEqual(store.get(a["mutation_token"])["status"],"PENDING");c.raise_unknown=False;c.effect=True;self.assertEqual(wa.execute_mutation(a,s,c,store)["status"],"COMPLETE");self.assertEqual(c.calls,1)
-    def test_definitive_rejection_retryable_for_merge(self):
-        s=snap();a=act.authorize_mutation(s);store=wa.MemoryStore();c=Client();c.reject=True;o=wa.execute_mutation(a,s,c,store);self.assertEqual(o["reason"],"WRITE_REJECTED");self.assertEqual(store.get(a["mutation_token"])["status"],"RETRYABLE");c.reject=False;self.assertEqual(wa.execute_mutation(a,s,c,store)["status"],"COMPLETE")
-    def test_token_owner_prevents_aba_restore(self):
-        store=wa.MemoryStore();stream="s";t1="1"*64;t2="2"*64
-        self.assertTrue(store.begin(t1,{"status":"PENDING"},stream,1,"CI",expected_retry=(0,None),expected_owner=None))
-        self.assertTrue(store.begin(t2,{"status":"PENDING"},stream,1,"REVIEW",expected_retry=(1,"CI"),expected_owner=t1))
-        store.fail_and_restore(t2,"newer failed",stream,(1,"CI"));self.assertEqual(store.retry_state(stream),(1,"CI"));self.assertEqual(store.retry_owner(stream),t2)
-        store.fail_and_restore(t1,"old late",stream,(0,None));self.assertEqual(store.retry_state(stream),(1,"CI"));self.assertEqual(store.retry_owner(stream),t2)
-    def test_stale_concurrent_owner_rejected(self):
-        store=wa.MemoryStore();self.assertTrue(store.begin("3"*64,{"status":"PENDING"},"s",1,"CI",expected_retry=(0,None),expected_owner=None));self.assertFalse(store.begin("4"*64,{"status":"PENDING"},"s",1,"CI",expected_retry=(0,None),expected_owner=None))
-    def test_boundary_rechecked_before_write(self):
-        s=snap(ci="FAILURE",review="UNKNOWN");a=act.authorize_mutation(s)
-        class Flip(Client):
-            def __init__(self):super().__init__();self.n=0
-            def fetch_boundaries(self):
-                self.n+=1;row={k:False for k in act.HARD_BOUNDARY_FIELDS}
-                if self.n>1:row["emergency_stop"]=True
-                return row
-        c=Flip();store=wa.MemoryStore();o=wa.execute_mutation(a,s,c,store);self.assertEqual(o["reason"],"HARD_BOUNDARY");self.assertEqual(store.get(a["mutation_token"])["status"],"RETRYABLE")
-    def test_json_store_persists_owner(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            p=Path(tmp)/"l5.json";s=wa.JsonFileStore(p);token="5"*64;self.assertTrue(s.begin(token,{"status":"PENDING"},"stream",1,"CI",expected_retry=(0,None),expected_owner=None));fresh=wa.JsonFileStore(p);self.assertEqual(fresh.retry_state("stream"),(1,"CI"));self.assertEqual(fresh.retry_owner("stream"),token)
+        auth = act.authorize_mutation(snap())
+        self.assertEqual(auth["mutation"], "merge_expected_head")
+        self.assertTrue(auth["mutation_allowed"])
+        self.assertEqual(auth["expected_head_sha"], "a"*40)
 
-if __name__=="__main__":unittest.main()
+    def test_every_hard_boundary_blocks(self):
+        for field in act.HARD_BOUNDARY_FIELDS:
+            self.assertFalse(act.authorize_mutation(snap(**{field:True}))["mutation_allowed"], field)
+
+    def test_event_replay_identity_is_stable(self):
+        first = act.authorize_mutation(snap())
+        second = act.authorize_mutation(snap(event_id="poll-2"))
+        self.assertEqual(first["mutation_token"], second["mutation_token"])
+        replay = act.authorize_mutation(snap(event_id="poll-3"), prior_mutation_tokens={first["mutation_token"]})
+        self.assertEqual(replay["reason"], "REPLAY_NOOP")
+
+    def test_retry_attempts_have_distinct_tokens(self):
+        first = act.authorize_mutation(snap(ci="FAILURE",review="UNKNOWN",event_id="r1"))
+        second = act.authorize_mutation(snap(ci="FAILURE",review="UNKNOWN",retry_count=1,retry_action="CI",event_id="r2"))
+        self.assertEqual(first["mutation"], "retry_ci")
+        self.assertNotEqual(first["mutation_token"], second["mutation_token"])
+
+    def test_live_cas_blocks_stale_head(self):
+        s = snap(ci="FAILURE",review="UNKNOWN")
+        auth = act.authorize_mutation(s)
+        client = Client(live={"head_sha":"c"*40,"base_sha":"b"*40,"pr_state":"open","open_streams":{262:[263]},"review_eligible_nonauthor":True})
+        out = wa.execute_mutation(auth,s,client,wa.MemoryStore())
+        self.assertEqual(out["reason"], "STALE_HEAD_OR_BASE")
+        self.assertEqual(client.calls,0)
+
+    def test_atomic_remote_cas_is_mandatory(self):
+        s = snap(ci="FAILURE",review="UNKNOWN")
+        auth = act.authorize_mutation(s)
+        client = Client(); client.perform_cas = None
+        out = wa.execute_mutation(auth,s,client,wa.MemoryStore())
+        self.assertEqual(out["reason"], "ATOMIC_CAS_UNAVAILABLE")
+        self.assertEqual(client.calls,0)
+
+    def test_merge_rechecks_nonauthor_reviewer(self):
+        s = snap(); auth = act.authorize_mutation(s); client = Client()
+        client.live["review_eligible_nonauthor"] = False
+        out = wa.execute_mutation(auth,s,client,wa.MemoryStore())
+        self.assertEqual(out["reason"], "REVIEWER_NOT_ELIGIBLE")
+        self.assertEqual(client.calls,0)
+
+    def test_boundary_rechecked_before_write(self):
+        s = snap(ci="FAILURE",review="UNKNOWN")
+        auth = act.authorize_mutation(s)
+        class Flip(Client):
+            def __init__(self): super().__init__(); self.n=0
+            def fetch_boundaries(self):
+                self.n += 1
+                row = {k:False for k in act.HARD_BOUNDARY_FIELDS}
+                if self.n > 1: row["emergency_stop"] = True
+                return row
+        client=Flip(); store=wa.MemoryStore(); out=wa.execute_mutation(auth,s,client,store)
+        self.assertEqual(out["reason"],"HARD_BOUNDARY"); self.assertEqual(client.calls,0)
+        self.assertEqual(store.retry_state(wa.stream_key(auth,s)),(0,None))
+        self.assertEqual(store.get(auth["mutation_token"])["status"],"RETRYABLE")
+
+    def test_lost_response_reconciles_without_duplicate_write(self):
+        s=snap(ci="FAILURE",review="UNKNOWN"); auth=act.authorize_mutation(s); store=wa.MemoryStore(); client=Client(lost=True,effect=True)
+        first=wa.execute_mutation(auth,s,client,store); second=wa.execute_mutation(auth,s,client,store)
+        self.assertEqual(first["status"],"COMPLETE"); self.assertEqual(second["status"],"REPLAY_NOOP"); self.assertEqual(client.calls,1)
+
+    def test_uncertain_write_stays_pending_until_effect_is_visible(self):
+        s=snap(ci="FAILURE",review="UNKNOWN"); auth=act.authorize_mutation(s); store=wa.MemoryStore(); client=Client(lost=True,effect=False)
+        first=wa.execute_mutation(auth,s,client,store)
+        self.assertEqual(first["status"],"IN_PROGRESS")
+        self.assertEqual(store.get(auth["mutation_token"])["status"],"PENDING")
+        client.effect=True
+        second=wa.execute_mutation(auth,s,client,store)
+        self.assertEqual(second["status"],"COMPLETE")
+        self.assertEqual(client.calls,1)
+
+    def test_unexpected_perform_exception_reconciles_without_refund(self):
+        s=snap(ci="FAILURE",review="UNKNOWN"); auth=act.authorize_mutation(s); store=wa.MemoryStore()
+        class Boom(Client):
+            def perform_cas(self, _mutation, _params):
+                self.calls += 1
+                raise RuntimeError("transport failed after send")
+        client=Boom(effect=True); out=wa.execute_mutation(auth,s,client,store)
+        self.assertEqual(out["status"],"COMPLETE")
+        self.assertEqual(store.retry_state(wa.stream_key(auth,s)),(1,"CI"))
+        self.assertEqual(client.calls,1)
+
+    def test_definitive_no_write_rejection_can_retry_same_merge_token(self):
+        s=snap(); auth=act.authorize_mutation(s); store=wa.MemoryStore(); client=Client(); client.reject=True
+        first=wa.execute_mutation(auth,s,client,store)
+        self.assertEqual(first["reason"],"WRITE_REJECTED")
+        self.assertEqual(store.get(auth["mutation_token"])["status"],"RETRYABLE")
+        client.reject=False
+        second=wa.execute_mutation(auth,s,client,store)
+        self.assertEqual(second["status"],"COMPLETE")
+
+    def test_retry_state_cas_blocks_stale_concurrent_authorization(self):
+        store=wa.MemoryStore(); s=snap(ci="FAILURE",review="UNKNOWN"); auth=act.authorize_mutation(s); stream=wa.stream_key(auth,s)
+        observed=store.retry_state(stream)
+        self.assertTrue(store.begin("1"*64,{"status":"PENDING"},stream,1,"CI",expected_retry=observed))
+        self.assertFalse(store.begin("2"*64,{"status":"PENDING"},stream,1,"CI",expected_retry=observed))
+        self.assertEqual(store.retry_state(stream),(1,"CI"))
+
+    def test_token_owner_prevents_retry_aba_restore(self):
+        store=wa.MemoryStore(); stream="s"; old="1"*64; newer="2"*64
+        self.assertTrue(store.begin(old,{"status":"PENDING"},stream,1,"CI",expected_retry=(0,None),expected_owner=None))
+        self.assertTrue(store.begin(newer,{"status":"PENDING"},stream,1,"REVIEW",expected_retry=(1,"CI"),expected_owner=old))
+        store.fail_and_restore(newer,"newer failed",stream,(1,"CI"))
+        self.assertEqual(store.retry_state(stream),(1,"CI")); self.assertEqual(store.retry_owner(stream),newer)
+        store.fail_and_restore(old,"old late",stream,(0,None))
+        self.assertEqual(store.retry_state(stream),(1,"CI")); self.assertEqual(store.retry_owner(stream),newer)
+
+    def test_json_store_persists_token_retry_state_and_owner(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/"l5-store.json"; store=wa.JsonFileStore(path); token="3"*64
+            self.assertTrue(store.begin(token,{"status":"PENDING"},"stream",1,"CI",expected_retry=(0,None),expected_owner=None))
+            reopened=wa.JsonFileStore(path)
+            self.assertEqual(reopened.get(token)["status"],"PENDING")
+            self.assertEqual(reopened.retry_state("stream"),(1,"CI"))
+            self.assertEqual(reopened.retry_owner("stream"),token)
+
+    def test_retry_state_is_per_stream(self):
+        store=wa.MemoryStore()
+        a=snap(ci="FAILURE",review="UNKNOWN"); aa=act.authorize_mutation(a); sa=wa.stream_key(aa,a)
+        b=snap(issue=300,canonical_pr=301,active_prs=[301],ci="FAILURE",review="UNKNOWN",event_id="b"); ba=act.authorize_mutation(b); sb=wa.stream_key(ba,b)
+        store.begin(aa["mutation_token"],{"status":"PENDING"},sa,1,"CI")
+        store.begin(ba["mutation_token"],{"status":"PENDING"},sb,1,"CI")
+        self.assertNotEqual(sa,sb); self.assertEqual(store.retry_state(sa),(1,"CI")); self.assertEqual(store.retry_state(sb),(1,"CI"))
+
+    def test_provider_availability_never_grants_reviewer_eligibility(self):
+        s=snap(review="UNKNOWN",reviewer_actor=None,review_eligible=False)
+        auth=act.authorize_mutation(s)
+        self.assertEqual(auth["mutation"],"dispatch_review")
+        client=Client(live={"head_sha":"a"*40,"base_sha":"b"*40,"pr_state":"open","open_streams":{262:[263]},"review_eligible_nonauthor":False})
+        self.assertEqual(wa.execute_mutation(auth,s,client,wa.MemoryStore())["reason"],"REVIEWER_NOT_ELIGIBLE")
+
+
+if __name__ == "__main__": unittest.main()

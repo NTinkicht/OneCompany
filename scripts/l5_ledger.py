@@ -57,7 +57,7 @@ def _validate_intent(row: Any, epoch: int) -> None:
         raise LedgerInvalid("LEASE_INTENT_REFS")
     if row.get("epoch") != epoch:
         raise LedgerInvalid("LEASE_INTENT_EPOCH")
-    if row.get("state") not in {"PENDING", "DONE", "ABORTED"}:
+    if row.get("state") not in {"PENDING", "DONE", "ABORTED", "VERIFIED"}:
         raise LedgerInvalid("LEASE_INTENT_STATE")
 
 
@@ -176,14 +176,17 @@ def cas_mode(
     expected_mode_version: int,
     new_mode: RepoMode,
     human_clear: bool = False,
+    post_merge_verified: bool = False,
 ) -> dict[str, Any]:
-    """CAS repository mode while enforcing human-only exits."""
+    """CAS repository mode while enforcing protected exits."""
     out = _begin(doc, expected_revision)
     if out["mode_version"] != expected_mode_version:
         raise LedgerConflict("MODE_VERSION_STALE")
     old = RepoMode(out["mode"])
     if old in HUMAN_CLEAR_ONLY and old != new_mode and not human_clear:
         raise LedgerConflict("HUMAN_CLEAR_REQUIRED")
+    if old == RepoMode.MERGE_LOCKED and old != new_mode and not post_merge_verified:
+        raise LedgerConflict("POST_MERGE_VERIFICATION_REQUIRED")
     out["mode"] = new_mode.value
     out["mode_version"] += 1
     out["human_clear_required"] = new_mode in HUMAN_CLEAR_ONLY
@@ -228,6 +231,18 @@ def _validate_lease_transition(cur: Mapping[str, Any] | None, row: Mapping[str, 
             raise LedgerInvalid("PENDING_INTENT_TRANSITION")
         if row["epoch"] != cur["epoch"] or row["holder"] != cur["holder"]:
             raise LedgerConflict("PENDING_INTENT_REASSIGNED")
+
+    if isinstance(cur_intent, Mapping) and cur_intent.get("state") == "DONE" and same_owner_epoch:
+        if not isinstance(next_intent, Mapping):
+            raise LedgerConflict("DONE_INTENT_LOST")
+        for field in ("op_id", "idem_key", "operation", "expected_head", "expected_base", "epoch"):
+            if next_intent.get(field) != cur_intent.get(field):
+                raise LedgerConflict("DONE_INTENT_MUTATED")
+        if next_intent.get("state") not in {"DONE", "VERIFIED"}:
+            raise LedgerInvalid("DONE_INTENT_TRANSITION")
+
+    if cur.get("state") == "RELEASED" and same_owner_epoch and row.get("state") != "RELEASED":
+        raise LedgerConflict("RELEASED_LEASE_REACTIVATION")
 
     if cur.get("state") == "ACTIVE" and row.get("state") == "RELEASED":
         intent = row.get("intent")

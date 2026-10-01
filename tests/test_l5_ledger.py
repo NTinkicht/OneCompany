@@ -72,6 +72,21 @@ class LedgerTests(unittest.TestCase):
         out = cas_mode(doc, expected_revision=0, expected_mode_version=1, new_mode=RepoMode.NORMAL, human_clear=True)
         self.assertEqual(out["mode"], "NORMAL")
 
+    def test_merge_locked_exit_requires_post_merge_verification(self):
+        doc = base_doc()
+        doc["mode"] = "MERGE_LOCKED"
+        doc["human_clear_required"] = False
+        with self.assertRaises(LedgerConflict):
+            cas_mode(doc, expected_revision=0, expected_mode_version=1, new_mode=RepoMode.NORMAL)
+        out = cas_mode(
+            doc,
+            expected_revision=0,
+            expected_mode_version=1,
+            new_mode=RepoMode.NORMAL,
+            post_merge_verified=True,
+        )
+        self.assertEqual(out["mode"], "NORMAL")
+
     def test_lease_delete_forbidden(self):
         """Forbid lease deletion so epoch and version history remain durable."""
         doc = base_doc()

@@ -83,6 +83,7 @@ class DurableLedgerCASStore:
             expires_at=float(row["expires_at"]),
             version=row["version"],
             intent=cls._intent_from_record(row.get("intent")),
+            state=row["state"],
         )
 
     @staticmethod
@@ -106,29 +107,14 @@ class DurableLedgerCASStore:
         lease: Lease,
         current: Mapping[str, Any] | None,
     ) -> dict[str, Any]:
-        """Serialize a lease, preserving released tombstones monotonically."""
-        state = "ACTIVE"
-        if current is not None:
-            same_epoch = (
-                lease.epoch == current.get("epoch")
-                and lease.holder == current.get("holder")
-            )
-            terminal = lease.intent is None or lease.intent.state != "PENDING"
-            if (
-                same_epoch
-                and current.get("state") == "ACTIVE"
-                and terminal
-                and lease.expires_at < float(current.get("expires_at", lease.expires_at))
-            ):
-                state = "RELEASED"
-            elif current.get("state") == "RELEASED" and lease.epoch == current.get("epoch"):
-                state = "RELEASED"
-
+        """Serialize a lease with an explicit ACTIVE/RELEASED state."""
+        if lease.state not in {"ACTIVE", "RELEASED"}:
+            raise ValueError("L5_LEASE_STATE_INVALID")
         return {
             "version": lease.version,
             "epoch": lease.epoch,
             "holder": lease.holder,
-            "state": state,
+            "state": lease.state,
             "acquired_at": lease.acquired_at,
             "expires_at": lease.expires_at,
             "observed": {
@@ -184,6 +170,7 @@ class DurableLedgerCASStore:
         mode: RepoMode,
         *,
         human_clear: bool = False,
+        post_merge_verified: bool = False,
     ) -> bool:
         """CAS repository mode through mode version plus GitHub blob identity."""
         if repo_id != self.repo_id or expected_version is None:
@@ -198,6 +185,7 @@ class DurableLedgerCASStore:
                 expected_mode_version=expected_version,
                 new_mode=mode,
                 human_clear=human_clear,
+                post_merge_verified=post_merge_verified,
             )
         except LedgerConflict:
             return False

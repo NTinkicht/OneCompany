@@ -115,6 +115,7 @@ class Lease:
     expires_at: float
     version: int
     intent: Intent | None = None
+    state: str = "ACTIVE"
 
 
 @dataclass(frozen=True)
@@ -149,6 +150,7 @@ class CASStore(Protocol):
         mode: RepoMode,
         *,
         human_clear: bool = False,
+        post_merge_verified: bool = False,
     ) -> bool: ...
 
 
@@ -183,14 +185,17 @@ class MemoryCASStore:
         mode: RepoMode,
         *,
         human_clear: bool = False,
+        post_merge_verified: bool = False,
     ) -> bool:
-        """CAS repo mode while enforcing human-only exits."""
+        """CAS repo mode while enforcing protected exits."""
         cur = self.modes.get(repo_id)
         actual = None if cur is None else cur[1]
         if actual != expected_version:
             return False
         old_mode = RepoMode.AUTOMATION_DEGRADED if cur is None else cur[0]
         if old_mode in HUMAN_CLEAR_ONLY and old_mode != mode and not human_clear:
+            return False
+        if old_mode == RepoMode.MERGE_LOCKED and old_mode != mode and not post_merge_verified:
             return False
         self.modes[repo_id] = (mode, 1 if cur is None else cur[1] + 1)
         return True
@@ -256,12 +261,15 @@ def renew(
     ttl: float = 300,
 ) -> Lease | None:
     """Renew only the exact current, still-live lease."""
-    if ttl <= 0 or now_srv >= lease.expires_at:
+    if ttl <= 0 or now_srv >= lease.expires_at or lease.state != "ACTIVE":
+        return None
+    new_expires_at = now_srv + ttl
+    if new_expires_at <= lease.expires_at:
         return None
     cur = store.read(lease.key)
-    if cur != lease or cur.holder != lease.holder or cur.epoch != lease.epoch:
+    if cur != lease or cur.holder != lease.holder or cur.epoch != lease.epoch or cur.state != "ACTIVE":
         return None
-    nxt = replace(lease, expires_at=now_srv + ttl, version=lease.version + 1)
+    nxt = replace(lease, expires_at=new_expires_at, version=lease.version + 1)
     return nxt if store.cas(lease.key, lease.version, nxt) else None
 
 
@@ -275,7 +283,7 @@ def attach_intent(
     now_srv: float,
 ) -> Lease | None:
     """Attach one PENDING intent to the exact current live lease."""
-    if operation not in DANGEROUS | HARMLESS or now_srv >= lease.expires_at:
+    if operation not in DANGEROUS | HARMLESS or now_srv >= lease.expires_at or lease.state != "ACTIVE":
         return None
     cur = store.read(lease.key)
     if cur != lease or cur.holder != lease.holder or cur.epoch != lease.epoch:
@@ -305,14 +313,23 @@ def resolve_intent(store: CASStore, lease: Lease, state: str) -> Lease | None:
     return nxt if store.cas(cur.key, cur.version, nxt) else None
 
 
-def release(store: CASStore, lease: Lease, *, now_srv: float) -> Lease | None:
-    """Expire only the exact current lease after any intent is terminal."""
+def verify_intent(store: CASStore, lease: Lease) -> Lease | None:
+    """Durably mark a completed main-changing intent as post-merge verified."""
     cur = store.read(lease.key)
-    if cur != lease:
+    if cur != lease or cur.intent is None or cur.intent.state != "DONE":
+        return None
+    nxt = replace(cur, intent=replace(cur.intent, state="VERIFIED"), version=cur.version + 1)
+    return nxt if store.cas(cur.key, cur.version, nxt) else None
+
+
+def release(store: CASStore, lease: Lease, *, now_srv: float) -> Lease | None:
+    """Release only the exact current lease after any intent is terminal."""
+    cur = store.read(lease.key)
+    if cur != lease or cur.state != "ACTIVE":
         return None
     if cur.intent is not None and cur.intent.state == "PENDING":
         return None
-    nxt = replace(cur, expires_at=now_srv, version=cur.version + 1)
+    nxt = replace(cur, expires_at=now_srv, version=cur.version + 1, state="RELEASED")
     return nxt if store.cas(cur.key, cur.version, nxt) else None
 
 
@@ -345,6 +362,8 @@ def fence_ok(
         return False, "LEASE_MISSING"
     if cur != lease:
         return False, "LEASE_LOST"
+    if cur.state != "ACTIVE":
+        return False, "LEASE_RELEASED"
     if now_srv + max_write_latency + skew_margin >= cur.expires_at:
         return False, "LEASE_TOO_CLOSE_TO_EXPIRY"
     if cur.observed != observed_now:

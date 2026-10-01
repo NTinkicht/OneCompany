@@ -426,6 +426,54 @@ class ControllerTests(unittest.TestCase):
         self.assertEqual(result.reason, "MAIN_BROKEN")
         self.assertEqual(store.read_repo_mode("repo")[0], RepoMode.MAIN_BROKEN)
 
+    def test_merge_locked_survives_governance_drift(self):
+        """A live governance freeze cannot erase pending post-merge verification."""
+        store = MemoryCASStore()
+        store.modes["repo"] = (RepoMode.MERGE_LOCKED, 3)
+        io = FakeIO(repo_snapshot(rulesets_or_protection_active=False))
+        result = run_once("repo", io, store)
+        self.assertEqual(result.status, "BLOCKED")
+        self.assertEqual(result.reason, "GOVERNANCE_DRIFT")
+        self.assertEqual(store.read_repo_mode("repo")[0], RepoMode.MERGE_LOCKED)
+
+    def test_bridge_invalid_authorization_is_blocked(self):
+        """Pre-write authorization errors abort through the normal BLOCKED path."""
+        obs = Observation("a" * 40, "b" * 40)
+        intent = Intent("op", "f" * 64, "ci_rerun", obs.head, obs.base, 1)
+        lease = Lease("k", "run", 1, obs, 0.0, 300.0, 1, intent)
+        bridge = GuardedWriteBridge(object(), object())
+        result = bridge.execute_guarded("retry_ci", {"activation_snapshot": {}}, lease)
+        self.assertEqual(result["status"], "BLOCKED")
+        self.assertTrue(result["reason"].startswith("AUTHORIZATION_INVALID:"))
+
+    def test_expired_pending_lease_does_not_starve_other_work(self):
+        """An expired PENDING lease is skipped instead of being reselected forever."""
+        blocked = {
+            "item_id": "9",
+            "head_sha": "a" * 40,
+            "base_sha": "b" * 40,
+            "ci": "DETERMINISTIC_FAILED",
+        }
+        other = {
+            "item_id": "1",
+            "head_sha": "a" * 40,
+            "base_sha": "b" * 40,
+            "ci": "GREEN",
+            "independent_review_pass": False,
+        }
+        store = MemoryCASStore()
+        obs = Observation("a" * 40, "b" * 40)
+        key = lease_key("repo", "item", "9", "REMEDIATE_REVIEW")
+        lease = acquire(store, key, "old", obs, now_srv=0.0, ttl=1.0)
+        self.assertIsNotNone(lease)
+        pending = attach_intent(store, lease, "repo", "9", "push", now_srv=0.5)
+        self.assertIsNotNone(pending)
+        io = FakeIO(items=[blocked, other])
+        io.clock = 2.0
+        result = run_once("repo", io, store)
+        self.assertEqual(result.item_id, "1")
+        self.assertEqual(result.action, "dispatch_review")
+
     def test_deterministic_selection_prefers_repair_over_review(self):
         """Deterministic remediation has higher priority than review dispatch."""
         repair = {

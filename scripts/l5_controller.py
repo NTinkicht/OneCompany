@@ -28,6 +28,7 @@ from l5_kernel import (
     classify_item,
     fence_ok,
     governance_mode,
+    idem_key,
     intent_recovery,
     intent_restraint_status,
     lease_key,
@@ -38,6 +39,7 @@ from l5_kernel import (
     release,
     repo_merge_lock_key,
     resolve_intent,
+    verify_intent,
 )
 
 
@@ -234,7 +236,10 @@ def _select(
             continue
         key = _lease_key_for(repo_id, _item_id(item), operation, item)
         current = store.read(key)
-        if current is not None and current.expires_at > now:
+        if current is not None and (
+            current.expires_at > now
+            or (current.intent is not None and current.intent.state == "PENDING")
+        ):
             continue
         candidates.append((_state_priority(state), _item_id(item), item, state))
     if not candidates:
@@ -245,18 +250,29 @@ def _select(
 
 
 def _find_merged_unverified(
+    repo_id: str,
+    lock: Lease,
     io: ControllerIO,
     items: Sequence[Mapping[str, Any]],
 ) -> Mapping[str, Any] | None:
-    """Return exactly one merged-unverified item while the repo is locked."""
-    found = [
-        item
-        for item in items
-        if classify_item(item, io.budget_for(item)) == ItemState.MERGED_UNVERIFIED
-    ]
-    if len(found) != 1:
+    """Return the merged-unverified item bound to the durable merge intent."""
+    if lock.intent is None or lock.intent.operation not in {"merge", "revert"}:
         return None
-    return found[0]
+    found = []
+    for item in items:
+        if classify_item(item, io.budget_for(item)) != ItemState.MERGED_UNVERIFIED:
+            continue
+        item_id = _item_id(item)
+        bound = idem_key(
+            repo_id,
+            item_id,
+            lock.intent.expected_head,
+            lock.intent.expected_base,
+            lock.intent.operation,
+        )
+        if bound == lock.intent.idem_key:
+            found.append(item)
+    return found[0] if len(found) == 1 else None
 
 
 def _post_merge_verify(
@@ -267,7 +283,22 @@ def _post_merge_verify(
     rid: str,
 ) -> RunResult:
     """Keep MERGE_LOCKED until trusted post-merge health is terminal."""
-    item = _find_merged_unverified(io, items)
+    lock_key = repo_merge_lock_key(repo_id)
+    lock = store.read(lock_key)
+    if (
+        lock is None
+        or lock.intent is None
+        or lock.intent.state not in {"DONE", "VERIFIED"}
+        or lock.intent.operation not in {"merge", "revert"}
+    ):
+        return RunResult(
+            rid,
+            RunPhase.POST_MERGE_VERIFY,
+            "WAIT",
+            reason="MERGE_LOCK_EVIDENCE_INVALID",
+        )
+
+    item = _find_merged_unverified(repo_id, lock, io, items)
     if item is None:
         return RunResult(
             rid,
@@ -277,13 +308,15 @@ def _post_merge_verify(
         )
 
     item_id = _item_id(item)
-    lock_key = repo_merge_lock_key(repo_id)
-    lock = store.read(lock_key)
     if (
-        lock is None
-        or lock.intent is None
-        or lock.intent.state != "DONE"
-        or lock.intent.operation not in {"merge", "revert"}
+        lock.intent.idem_key
+        != idem_key(
+            repo_id,
+            item_id,
+            lock.intent.expected_head,
+            lock.intent.expected_base,
+            lock.intent.operation,
+        )
     ):
         return RunResult(
             rid,
@@ -321,6 +354,18 @@ def _post_merge_verify(
             reason="POST_MERGE_HEALTH_INVALID",
         )
 
+    if lock.intent.state == "DONE":
+        verified = verify_intent(store, lock)
+        if verified is None:
+            return RunResult(
+                rid,
+                RunPhase.POST_MERGE_VERIFY,
+                "WAIT",
+                item_id=item_id,
+                reason="POST_MERGE_VERIFY_CAS_FAILED",
+            )
+        lock = verified
+
     release_now = _trusted_now(io)
     released = release(store, lock, now_srv=release_now)
     if released is None:
@@ -347,7 +392,12 @@ def _post_merge_verify(
         "BROKEN": RepoMode.MAIN_BROKEN,
         "ENV_BROKEN": RepoMode.MAIN_BROKEN_ENV,
     }[health]
-    if not store.cas_repo_mode(repo_id, mode_version, target_mode):
+    if not store.cas_repo_mode(
+        repo_id,
+        mode_version,
+        target_mode,
+        post_merge_verified=True,
+    ):
         return RunResult(
             rid,
             RunPhase.POST_MERGE_VERIFY,
@@ -467,7 +517,7 @@ def run_once(
     if derived in HUMAN_CLEAR_ONLY:
         if current_mode != derived:
             _, version = store.read_repo_mode(repo_id)
-            if current_mode not in HUMAN_CLEAR_ONLY:
+            if current_mode not in HUMAN_CLEAR_ONLY and current_mode != RepoMode.MERGE_LOCKED:
                 store.cas_repo_mode(repo_id, version, derived)
         return RunResult(
             rid,
@@ -768,7 +818,13 @@ class GuardedWriteBridge:
         if not isinstance(snapshot, dict):
             return {"status": "BLOCKED", "reason": "ACTIVATION_SNAPSHOT_MISSING"}
 
-        auth = authorize_mutation(snapshot)
+        try:
+            auth = authorize_mutation(snapshot)
+        except ValueError as exc:
+            return {
+                "status": "BLOCKED",
+                "reason": f"AUTHORIZATION_INVALID:{exc}",
+            }
         expected = {
             "retry_ci": "retry_ci",
             "dispatch_review": "dispatch_review",

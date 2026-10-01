@@ -91,6 +91,34 @@ class DurableStoreTests(unittest.TestCase):
         self.assertEqual(row["state"], "RELEASED")
         self.assertEqual(row["intent"]["state"], "DONE")
 
+    def test_release_after_ttl_is_still_a_released_tombstone(self):
+        """Late terminal release is explicitly persisted as RELEASED."""
+        backend = FakeBackend(empty_ledger())
+        store = DurableLedgerCASStore("repo", backend)
+        obs = Observation("a" * 40, "b" * 40)
+        lease = acquire(store, "k", "run-1", obs, now_srv=1, ttl=5)
+        intended = attach_intent(store, lease, "repo", "1", "push", now_srv=2)
+        done = resolve_intent(store, intended, "DONE")
+        released = release(store, done, now_srv=10)
+        self.assertIsNotNone(released)
+        self.assertEqual(backend.doc["leases"]["k"]["state"], "RELEASED")
+
+    def test_merge_locked_mode_exit_needs_verified_transition(self):
+        """The durable ledger refuses an unverified MERGE_LOCKED exit."""
+        doc = empty_ledger()
+        doc["mode"] = "MERGE_LOCKED"
+        backend = FakeBackend(doc)
+        store = DurableLedgerCASStore("repo", backend)
+        self.assertFalse(store.cas_repo_mode("repo", 1, RepoMode.NORMAL))
+        self.assertTrue(
+            store.cas_repo_mode(
+                "repo",
+                1,
+                RepoMode.NORMAL,
+                post_merge_verified=True,
+            )
+        )
+
     def test_blob_race_rejects_stale_write(self):
         """GitHub blob CAS conflict rejects a stale lease mutation."""
         backend = FakeBackend(empty_ledger())

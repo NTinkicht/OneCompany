@@ -92,6 +92,12 @@ def reduce_evidence(evidence: dict) -> dict:
     if _required_bool(evidence, "head_current") is not True or _required_bool(evidence, "base_current") is not True:
         result.update(state="IMPLEMENTING", next_action="RECONCILE_HEAD_BASE"); return result
 
+    behind_base = evidence.get("behind_base", False)
+    if type(behind_base) is not bool:
+        raise ValueError("L5_STATE_BEHIND_BASE_UNKNOWN")
+    if not merged and behind_base:
+        result.update(state="IMPLEMENTING", next_action="RECONCILE_HEAD_BASE"); return result
+
     if merged:
         if not verified:
             result.update(state="VERIFYING", next_action="VERIFY_MERGED_RESULT"); return result

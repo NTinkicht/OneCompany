@@ -31,7 +31,9 @@ def valid(rng: random.Random):
 
 
 def scenario(sid: int, rng: random.Random):
-    snap = valid(rng); ev = dict(snap["intent_restraint"]); snap["intent_restraint"] = ev
+    snap = valid(rng)
+    assert intent_restraint_status(snap) == ("PASS", ()), sid
+    ev = dict(snap["intent_restraint"]); snap["intent_restraint"] = ev
     if sid == 31: ev["head_sha"] = HEX[(HEX.index(snap["head_sha"][0]) + 1) % len(HEX)] * 40
     elif sid == 32: ev["base_sha"] = HEX[(HEX.index(snap["base_sha"][0]) + 1) % len(HEX)] * 40
     elif sid == 33: ev["wu_body_hash"] = "mutated-" + snap["wu_body_hash"]
@@ -43,8 +45,21 @@ def scenario(sid: int, rng: random.Random):
     elif sid == 39: ev["deletion_candidates_resolved"] = False
     elif sid == 40: ev["failure_reasons"] = [rng.choice(["OVERENGINEERED", "INTENT_DRIFT", "PERFORMANCE_REGRESSION"])]
     else: raise AssertionError(sid)
+    expected = {
+        31: "INTENT_DRIFT",
+        32: "INTENT_DRIFT",
+        33: "INTENT_DRIFT",
+        34: "SELF_REVIEW",
+        35: "OVERENGINEERED",
+        36: "PERFORMANCE_REGRESSION",
+        37: "SEMANTIC_CHANGE",
+        38: "DIFF_DISPROPORTIONATE",
+        39: "UNRESOLVED_DELETION_CANDIDATES",
+        40: "ATTESTATION_INCOMPLETE",
+    }[sid]
     state, reasons = intent_restraint_status(snap)
-    assert state == "FAILED" and reasons, (sid, state, reasons)
+    assert state == "FAILED", (sid, state, reasons)
+    assert expected in reasons, (sid, reasons)
 
 
 def run(rounds=1000, seed=0x51A11):

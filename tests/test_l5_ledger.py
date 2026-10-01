@@ -95,6 +95,21 @@ class LedgerTests(unittest.TestCase):
         out = cas_lease(doc, "k", expected_revision=0, expected_lease_version=3, new_record=good)
         self.assertEqual(out["leases"]["k"]["epoch"], 8)
 
+    def test_active_lease_cannot_be_taken_over_before_expiry(self):
+        doc = base_doc()
+        doc["leases"]["k"] = lease_row(version=3, epoch=7, holder="r1")
+        early = lease_row(version=4, epoch=8, holder="r2")
+        early["acquired_at"] = 299.0
+        early["expires_at"] = 599.0
+        with self.assertRaises(LedgerConflict):
+            cas_lease(doc, "k", expected_revision=0, expected_lease_version=3, new_record=early)
+        after_expiry = lease_row(version=4, epoch=8, holder="r2")
+        after_expiry["acquired_at"] = 300.0
+        after_expiry["expires_at"] = 600.0
+        out = cas_lease(doc, "k", expected_revision=0, expected_lease_version=3, new_record=after_expiry)
+        self.assertEqual(out["leases"]["k"]["holder"], "r2")
+        self.assertEqual(out["leases"]["k"]["epoch"], 8)
+
     def test_pending_intent_cannot_be_lost_replaced_or_reassigned(self):
         doc = base_doc()
         doc["leases"]["k"] = lease_row(intent=pending_intent())

@@ -34,6 +34,6 @@ jobs:
         run: |
           git config user.name 'l5-finalize[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add .github/workflows/l5-hostile-controller-ci.yml scripts/l5_state_machine.py scripts/l5_kernel.py scripts/l5_ledger.py scripts/l5_ledger_store.py scripts/l5_controller.py scripts/l5_intent_hostile_sim.py tests/test_l5_controller.py tests/test_l5_ledger.py tests/test_l5_ledger_store.py
+          git add scripts/l5_state_machine.py scripts/l5_kernel.py scripts/l5_ledger.py scripts/l5_ledger_store.py scripts/l5_controller.py scripts/l5_intent_hostile_sim.py tests/test_l5_controller.py tests/test_l5_ledger.py tests/test_l5_ledger_store.py
           git commit -m 'fix(l5): close final coordination safety gaps'
           git push origin HEAD:l5/claude-hostile-controller

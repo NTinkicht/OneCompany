@@ -1,7 +1,7 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "repository": "NTinkicht/OneCompany",
-  "revision": 0,
+  "revision": 1,
   "mode": "GOVERNANCE_DRIFT",
   "mode_version": 1,
   "human_clear_required": true,
@@ -12,5 +12,5 @@
     "branch_protected": false,
     "active_rulesets": 0
   },
-  "note": "Initialized fail-closed. Do not clear GOVERNANCE_DRIFT until platform enforcement is verified from live GitHub evidence."
+  "note": "Fail-closed Claude L5 ledger v2. Do not clear GOVERNANCE_DRIFT until live platform enforcement is verified and human-cleared."
 }

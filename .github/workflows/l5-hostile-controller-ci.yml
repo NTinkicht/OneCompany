@@ -1,0 +1,27 @@
+name: L5 Hostile Controller Candidate CI
+on:
+  pull_request:
+    paths:
+      - "scripts/l5_kernel.py"
+      - "scripts/l5_hostile_sim.py"
+      - "tests/test_l5_kernel.py"
+      - "docs/L5-STATE-MACHINE-V1.md"
+      - ".github/workflows/l5-hostile-controller-ci.yml"
+permissions:
+  contents: read
+jobs:
+  hostile-controller:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Kernel selftest
+        run: python scripts/l5_kernel.py
+      - name: Unit tests
+        run: python -m unittest discover -s tests -p "test_l5_kernel.py"
+      - name: Core hostile interleavings
+        run: python scripts/l5_hostile_sim.py

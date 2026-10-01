@@ -7,23 +7,31 @@ from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from l5_kernel import *
 
+
 def good():
     h="a"*40;b="b"*40;src={"app_id":1,"workflow_path":"ci"};sec={"app_id":2,"workflow_path":"security"}
-    row={**src,"head_sha":h,"tested_base_sha":b,"latest_attempt":True,"conclusion":"success","assertion_failure_any_attempt":False};srow={**sec,"head_sha":h,"tested_base_sha":b,"latest_attempt":True,"conclusion":"success","assertion_failure_any_attempt":False}
+    row={**src,"head_sha":h,"tested_base_sha":b,"latest_attempt":True,"conclusion":"success","assertion_history_complete":True,"assertion_failure_any_attempt":False}
+    srow={**sec,"head_sha":h,"tested_base_sha":b,"latest_attempt":True,"conclusion":"success","assertion_history_complete":True,"assertion_failure_any_attempt":False}
     review={"state":"APPROVED","commit_id":h,"base_sha":b,"complete":True,"skipped":False,"covers_full_diff":True,"author":"coderabbitai","material_authors":["chatgpt"],"controller_identities":["controller"],"designated_independent":True}
     s={"head_sha":h,"base_sha":b,"expected_head_sha":h,"expected_base_sha":b,"repo_mode":"NORMAL","required_checks":[row],"security_checks":[srow],"required_check_sources":[src],"security_check_sources":[sec],"review":review}
     for k in TRUE_FIELDS:s[k]=True
     for k in FALSE_FIELDS:s[k]=False
     return s
 
+
+def gov(**extra):
+    base={"ledger_reachable":True,"platform_enforcement_ok":True,"live_rules_at_least_pinned":True,"rulesets_or_protection_active":True,"required_check_sources_pinned":True,"controller_admin":False,"controller_bypass":False}
+    base.update(extra);return base
+
+
 def one(sid,r):
     o=Observation("a"*40,"b"*40,"wu","t")
     if sid=="S1":
         st=MemoryCASStore();l=acquire(st,repo_merge_lock_key("r"),"A",o,now_srv=0,ttl=5);li=attach_intent(st,l,"r","p","merge");assert not fence_ok(st,"r",li,replace(o,pr_updated_at="hold"),now_srv=10)[0]
     elif sid=="S2":
-        st=MemoryCASStore();k=lease_key("r","pr","1","REPAIR");assert acquire(st,k,"A",o,now_srv=0);assert acquire(st,k,"B",o,now_srv=r.uniform(1,299)) is None
+        st=MemoryCASStore();k=lease_key("r","pr","1","REPAIR");a=acquire(st,k,"A",o,now_srv=0);assert a;assert acquire(st,k,"B",o,now_srv=r.uniform(1,299)) is None;li=attach_intent(st,a,"r","p","push");assert li;assert release(st,a,now_srv=400) is None;assert st.read(k).intent.state=="PENDING"
     elif sid in {"S3","S4"}:
-        st=MemoryCASStore();op="merge" if sid=="S3" else "push";k=repo_merge_lock_key("r") if sid=="S3" else lease_key("r","pr","1","REPAIR");l=acquire(st,k,"A",o,now_srv=0);li=attach_intent(st,l,"r","p",op);assert intent_recovery(li,"UNKNOWN")=="READBACK_REQUIRED"
+        st=MemoryCASStore();op="merge" if sid=="S3" else "push";k=repo_merge_lock_key("r") if sid=="S3" else lease_key("r","pr","1","REPAIR");l=acquire(st,k,"A",o,now_srv=0);li=attach_intent(st,l,"r","p",op);assert intent_recovery(li,"UNKNOWN")=="READBACK_REQUIRED";assert attach_intent(st,li,"r","p",op) is None
     elif sid=="S5":s=good();s["review"]["commit_id"]="c"*40;assert not merge_ok(s)[0]
     elif sid=="S6":s=good();s["base_currency_ok"]=False;assert not merge_ok(s)[0]
     elif sid in {"S7","S8"}:s={"ci":"GREEN","governed_path_touched":sid=="S7","test_weakening":sid=="S8"};assert classify_item(s,Budget())==ItemState.GOVERNANCE_CHANGE
@@ -34,11 +42,11 @@ def one(sid,r):
     elif sid=="S13":assert classify_item({"ci":"GREEN","provider_unavailable":True},Budget())==ItemState.WAIT_PROVIDER
     elif sid=="S14":s=good();s["review"]["skipped"]=True;assert not merge_ok(s)[0]
     elif sid=="S15":assert classify_item({"disputed_finding":True},Budget())==ItemState.DISPUTED_FINDING
-    elif sid=="S16":assert governance_mode({"platform_enforcement_ok":True,"live_rules_at_least_pinned":False,"rulesets_or_protection_active":True,"required_check_sources_pinned":True})==RepoMode.GOVERNANCE_DRIFT
-    elif sid=="S17":assert governance_mode({"platform_enforcement_ok":True,"live_rules_at_least_pinned":True,"rulesets_or_protection_active":True,"required_check_sources_pinned":True,"controller_bypass":True})==RepoMode.GOVERNANCE_DRIFT
+    elif sid=="S16":assert governance_mode(gov(live_rules_at_least_pinned=False))==RepoMode.GOVERNANCE_DRIFT
+    elif sid=="S17":assert governance_mode(gov(controller_bypass=True))==RepoMode.GOVERNANCE_DRIFT
     elif sid=="S18":assert classify_item({"merged":True,"main_broken":True},Budget())==ItemState.MAIN_BROKEN
-    elif sid=="S19":assert governance_mode({"platform_enforcement_ok":True,"live_rules_at_least_pinned":True,"rulesets_or_protection_active":True,"required_check_sources_pinned":True,"main_broken_env":True})==RepoMode.MAIN_BROKEN_ENV
-    elif sid=="S20":assert governance_mode({"platform_enforcement_ok":True,"live_rules_at_least_pinned":True,"rulesets_or_protection_active":True,"required_check_sources_pinned":True,"main_broken":True})==RepoMode.MAIN_BROKEN
+    elif sid=="S19":assert governance_mode(gov(main_broken_env=True))==RepoMode.MAIN_BROKEN_ENV
+    elif sid=="S20":assert governance_mode(gov(main_broken=True))==RepoMode.MAIN_BROKEN
     elif sid=="S21":
         st=MemoryCASStore();k=lease_key("r","wu","42","IMPLEMENT");hs=list("ABCD");r.shuffle(hs);assert sum(acquire(st,k,h,o,now_srv=0) is not None for h in hs)==1
     elif sid=="S22":
@@ -54,10 +62,13 @@ def one(sid,r):
     elif sid=="S30":assert governance_mode({"controller_integrity_failure":True})==RepoMode.CONTROLLER_INTEGRITY
     else:raise AssertionError(sid)
 
+
 def run(rounds=1000,seed=0x5A17):
     r=random.Random(seed);ids=[f"S{i}" for i in range(1,31)];counts={x:0 for x in ids}
     for sid in ids:
         for _ in range(rounds):one(sid,r);counts[sid]+=1
     return counts
+
+
 if __name__=="__main__":
     c=run();assert all(v==1000 for v in c.values());print("l5_hostile_sim S1-S30 PASS",sum(c.values()),"traces")

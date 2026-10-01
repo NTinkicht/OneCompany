@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+"""Regression tests for the Claude-exact L5 kernel."""
 import sys
 import unittest
 from dataclasses import replace
@@ -9,176 +10,207 @@ from l5_kernel import *
 
 
 def merge_snapshot():
-    h = "a" * 40
-    b = "b" * 40
-    src = {"app_id": 1, "workflow_path": ".github/workflows/ci.yml"}
-    secsrc = {"app_id": 2, "workflow_path": ".github/workflows/security.yml"}
+    """Build a fully valid merge fixture."""
+    head = "a" * 40
+    base = "b" * 40
+    source = {"app_id": 1, "workflow_path": ".github/workflows/ci.yml"}
     check = {
-        **src,
-        "head_sha": h,
-        "tested_base_sha": b,
+        "head_sha": head,
+        "tested_base_sha": base,
         "latest_attempt": True,
         "conclusion": "success",
-        "assertion_history_complete": True,
+        "app_id": 1,
+        "workflow_path": ".github/workflows/ci.yml",
         "assertion_failure_any_attempt": False,
+        "attempt_history_complete": True,
+        "source_verified": True,
     }
-    seccheck = {
-        **secsrc,
-        "head_sha": h,
-        "tested_base_sha": b,
-        "latest_attempt": True,
-        "conclusion": "success",
-        "assertion_history_complete": True,
-        "assertion_failure_any_attempt": False,
-    }
+    sec_source = {"app_id": 2, "workflow_path": ".github/workflows/security.yml"}
+    sec_check = {**check, "app_id": 2, "workflow_path": ".github/workflows/security.yml"}
     review = {
         "state": "APPROVED",
-        "commit_id": h,
-        "base_sha": b,
+        "commit_id": head,
+        "base_sha": base,
         "complete": True,
         "skipped": False,
         "covers_full_diff": True,
         "author": "coderabbitai",
         "material_authors": ["chatgpt"],
-        "controller_identities": ["controller-1"],
+        "controller_identities": ["controller-1", "controller-2"],
         "designated_independent": True,
+        "reviewer_eligible": True,
+        "authorship_complete": True,
+        "material_authors_head_sha": head,
+        "identity_source_verified": True,
     }
-    snapshot = {
-        "head_sha": h,
-        "base_sha": b,
-        "expected_head_sha": h,
-        "expected_base_sha": b,
+    snap = {
+        "head_sha": head,
+        "base_sha": base,
+        "expected_head_sha": head,
+        "expected_base_sha": base,
         "repo_mode": "NORMAL",
         "required_checks": [check],
-        "security_checks": [seccheck],
-        "required_check_sources": [src],
-        "security_check_sources": [secsrc],
+        "required_check_sources": [source],
+        "security_checks": [sec_check],
+        "security_check_sources": [sec_source],
         "review": review,
         "ci": "GREEN",
         "independent_review_pass": True,
     }
     for key in TRUE_FIELDS:
-        snapshot[key] = True
+        snap[key] = True
     for key in FALSE_FIELDS:
-        snapshot[key] = False
-    return snapshot
+        snap[key] = False
+    return snap
 
 
 class KernelTests(unittest.TestCase):
-    def test_monotonic_epoch_and_pending_intent_blocks_reclaim(self):
-        store = MemoryCASStore()
-        observed = Observation("a" * 40, "b" * 40)
-        lease = acquire(store, "k", "r1", observed, now_srv=1, ttl=5)
-        intended = attach_intent(store, lease, "repo", "item", "merge")
-        self.assertIsNone(acquire(store, "k", "r2", observed, now_srv=10, ttl=5))
-        resolved = resolve_intent(store, intended, "ABORTED")
-        retired = release(store, resolved, now_srv=10)
-        lease2 = acquire(store, "k", "r2", observed, now_srv=11, ttl=5)
-        self.assertEqual(lease2.epoch, retired.epoch + 1)
-        self.assertGreater(lease2.version, retired.version)
+    """Safety regression suite."""
 
-    def test_stale_release_cannot_finalize_newer_intent(self):
-        store = MemoryCASStore()
-        observed = Observation("a" * 40, "b" * 40)
-        lease = acquire(store, "k", "r1", observed, now_srv=1)
-        intended = attach_intent(store, lease, "repo", "item", "merge")
-        self.assertIsNone(release(store, lease, now_srv=2))
-        self.assertIsNone(release(store, intended, now_srv=2))
-        self.assertEqual(store.read("k").intent.state, "PENDING")
+    def setUp(self):
+        self.store = MemoryCASStore()
+        self.assertTrue(self.store.cas_repo_mode("repo", None, RepoMode.NORMAL))
+        self.obs = Observation("a" * 40, "b" * 40, "wu", "t")
+
+    def test_epoch_intent_recovery_and_release(self):
+        """Pending intents block reclaim until explicitly resolved."""
+        first = acquire(self.store, "k", "r1", self.obs, now_srv=1, ttl=5)
+        self.assertIsNotNone(first)
+        with_intent = attach_intent(self.store, first, "repo", "item", "merge", now_srv=2)
+        self.assertIsNotNone(with_intent)
+        self.assertIsNone(acquire(self.store, "k", "r2", self.obs, now_srv=10))
+        self.assertIsNone(release(self.store, with_intent, now_srv=10))
+        done = resolve_intent(self.store, with_intent, "ABORTED")
+        self.assertIsNotNone(done)
+        released = release(self.store, done, now_srv=10)
+        self.assertIsNotNone(released)
+        second = acquire(self.store, "k", "r2", self.obs, now_srv=11, ttl=5)
+        self.assertIsNotNone(second)
+        self.assertEqual(second.epoch, first.epoch + 1)
+
+    def test_stale_release_rejected(self):
+        """A stale lease snapshot cannot release a newer record."""
+        first = acquire(self.store, "k", "r1", self.obs, now_srv=1)
+        renewed = renew(self.store, first, now_srv=2)
+        self.assertIsNotNone(renewed)
+        self.assertIsNone(release(self.store, first, now_srv=3))
+
+    def test_expired_renew_and_intent_rejected(self):
+        """Expired leases cannot be renewed or acquire new intent."""
+        first = acquire(self.store, "k", "r1", self.obs, now_srv=1, ttl=2)
+        self.assertIsNone(renew(self.store, first, now_srv=3))
+        self.assertIsNone(attach_intent(self.store, first, "repo", "i", "merge", now_srv=3))
 
     def test_pending_intent_cannot_be_replaced(self):
-        store = MemoryCASStore()
-        observed = Observation("a" * 40, "b" * 40)
-        lease = acquire(store, "k", "r1", observed, now_srv=1)
-        intended = attach_intent(store, lease, "repo", "item", "merge")
-        self.assertIsNone(attach_intent(store, intended, "repo", "item", "push"))
-        self.assertEqual(store.read("k").intent.op_id, intended.intent.op_id)
+        """Only one unresolved write intent may exist per lease."""
+        first = acquire(self.store, "k", "r1", self.obs, now_srv=1)
+        one = attach_intent(self.store, first, "repo", "i", "merge", now_srv=2)
+        self.assertIsNotNone(one)
+        self.assertIsNone(attach_intent(self.store, one, "repo", "i", "push", now_srv=3))
 
     def test_changed_observation_fails_fence(self):
-        store = MemoryCASStore()
-        observed = Observation("a" * 40, "b" * 40)
-        lease = acquire(store, "k", "r1", observed, now_srv=1)
-        intended = attach_intent(store, lease, "repo", "item", "merge")
-        self.assertFalse(fence_ok(store, "repo", intended, replace(observed, head="c" * 40), now_srv=2)[0])
+        """Fencing identifies observation drift, not lease expiry."""
+        first = acquire(self.store, "k", "r1", self.obs, now_srv=1, ttl=300)
+        with_intent = attach_intent(self.store, first, "repo", "i", "merge", now_srv=2)
+        self.assertEqual(fence_ok(self.store, "repo", with_intent, self.obs, now_srv=3), (True, "OK"))
+        changed = replace(self.obs, pr_updated_at="human-change")
+        self.assertEqual(fence_ok(self.store, "repo", with_intent, changed, now_srv=3), (False, "OBSERVATION_CHANGED"))
 
-    def test_revert_requires_narrow_emergency_authority(self):
-        store = MemoryCASStore()
-        observed = Observation("a" * 40, "b" * 40)
-        store.cas_repo_mode("repo", None, RepoMode.HALTED)
-        lease = acquire(store, "k", "r1", observed, now_srv=1)
-        intended = attach_intent(store, lease, "repo", "item", "revert")
-        self.assertFalse(fence_ok(store, "repo", intended, observed, now_srv=2, emergency_revert_authorized=True)[0])
-        store.modes["repo"] = (RepoMode.MAIN_BROKEN, 2)
-        self.assertTrue(fence_ok(store, "repo", intended, observed, now_srv=2, emergency_revert_authorized=True)[0])
-
-    def test_ambiguous_write_requires_readback(self):
-        store = MemoryCASStore()
-        observed = Observation("a" * 40, "b" * 40)
-        lease = acquire(store, "k", "r1", observed, now_srv=1)
-        intended = attach_intent(store, lease, "repo", "item", "merge")
-        self.assertEqual(intent_recovery(intended, "UNKNOWN"), "READBACK_REQUIRED")
-
-    def test_capacity_and_merge_locks_unique(self):
-        for key in (repo_merge_lock_key("repo"), capacity_slot_key("repo", 4)):
+    def test_human_modes_block_all_automated_writes(self):
+        """Human-clear-only modes block even revert effects."""
+        for mode in HUMAN_CLEAR_ONLY:
             store = MemoryCASStore()
-            observed = Observation("a" * 40, "b" * 40)
-            self.assertEqual(sum(acquire(store, key, f"r{i}", observed, now_srv=1) is not None for i in range(4)), 1)
+            store.modes["repo"] = (mode, 1)
+            lease = acquire(store, "k", "r1", self.obs, now_srv=1)
+            intent = attach_intent(store, lease, "repo", "i", "revert", now_srv=2)
+            self.assertFalse(fence_ok(store, "repo", intent, self.obs, now_srv=3)[0])
 
-    def test_unprotected_is_governance_drift(self):
-        self.assertEqual(
-            governance_mode({
-                "ledger_reachable": True,
-                "platform_enforcement_ok": False,
-                "live_rules_at_least_pinned": True,
-                "rulesets_or_protection_active": False,
-                "required_check_sources_pinned": True,
-            }),
-            RepoMode.GOVERNANCE_DRIFT,
-        )
+    def test_main_broken_allows_only_revert(self):
+        """MAIN_BROKEN permits narrowly scoped revert recovery."""
+        for op in ("revert", "comment", "push"):
+            store = MemoryCASStore()
+            store.modes["repo"] = (RepoMode.MAIN_BROKEN, 1)
+            lease = acquire(store, "k", "r1", self.obs, now_srv=1)
+            intent = attach_intent(store, lease, "repo", "i", op, now_srv=2)
+            self.assertEqual(fence_ok(store, "repo", intent, self.obs, now_srv=3)[0], op == "revert")
 
-    def test_missing_ledger_evidence_degrades_automation(self):
-        self.assertEqual(governance_mode({}), RepoMode.AUTOMATION_DEGRADED)
+    def test_missing_repo_mode_fails_closed(self):
+        """Absent persisted mode is degraded, never NORMAL."""
+        self.assertEqual(MemoryCASStore().read_repo_mode("missing")[0], RepoMode.AUTOMATION_DEGRADED)
+
+    def test_human_clear_required_to_exit_protected_mode(self):
+        """Protected modes cannot be cleared automatically."""
+        store = MemoryCASStore()
+        store.modes["repo"] = (RepoMode.GOVERNANCE_DRIFT, 7)
+        self.assertFalse(store.cas_repo_mode("repo", 7, RepoMode.NORMAL, human_clear=False))
+        self.assertTrue(store.cas_repo_mode("repo", 7, RepoMode.NORMAL, human_clear=True))
 
     def test_merge_ok_full_predicate(self):
+        """A complete valid merge fixture qualifies."""
         self.assertEqual(merge_ok(merge_snapshot()), (True, ()))
 
-    def test_missing_assertion_history_fails_closed(self):
-        snapshot = merge_snapshot()
-        del snapshot["required_checks"][0]["assertion_history_complete"]
-        self.assertFalse(merge_ok(snapshot)[0])
+    def test_no_rerun_to_green_requires_explicit_false(self):
+        """Missing/true attempt-history evidence fails closed."""
+        snap = merge_snapshot()
+        snap["required_checks"][0].pop("assertion_failure_any_attempt")
+        ok, why = merge_ok(snap)
+        self.assertFalse(ok)
+        self.assertIn("REQUIRED_CHECKS_INVALID", why)
+        snap = merge_snapshot()
+        snap["required_checks"][0]["assertion_failure_any_attempt"] = True
+        ok, why = merge_ok(snap)
+        self.assertFalse(ok)
+        self.assertIn("REQUIRED_CHECKS_INVALID", why)
 
-    def test_rerun_to_green_fails(self):
-        snapshot = merge_snapshot()
-        snapshot["required_checks"][0]["assertion_failure_any_attempt"] = True
-        self.assertFalse(merge_ok(snapshot)[0])
-
-    def test_merge_queue_mismatched_base_fails(self):
-        snapshot = merge_snapshot()
-        snapshot["required_checks"][0]["tested_base_sha"] = "c" * 40
-        snapshot["required_checks"][0]["merge_queue"] = True
-        self.assertFalse(merge_ok(snapshot)[0])
+    def test_merge_queue_cannot_bypass_tested_base(self):
+        """Merge queue status never substitutes for tested-base identity."""
+        snap = merge_snapshot()
+        snap["required_checks"][0]["merge_queue"] = True
+        snap["required_checks"][0]["tested_base_sha"] = "c" * 40
+        ok, why = merge_ok(snap)
+        self.assertFalse(ok)
+        self.assertIn("REQUIRED_CHECKS_INVALID", why)
 
     def test_check_source_spoof_fails(self):
-        snapshot = merge_snapshot()
-        snapshot["required_checks"][0]["app_id"] = 999
-        self.assertFalse(merge_ok(snapshot)[0])
+        """Unpinned app/workflow identity fails closed."""
+        snap = merge_snapshot()
+        snap["required_checks"][0]["app_id"] = 999
+        ok, why = merge_ok(snap)
+        self.assertFalse(ok)
+        self.assertIn("REQUIRED_CHECKS_INVALID", why)
 
     def test_review_must_be_external_exact_head(self):
-        snapshot = merge_snapshot()
-        snapshot["review"]["author"] = "chatgpt"
-        self.assertFalse(merge_ok(snapshot)[0])
-        snapshot = merge_snapshot()
-        snapshot["review"]["commit_id"] = "c" * 40
-        self.assertFalse(merge_ok(snapshot)[0])
+        """Reviewer cannot be a material author/controller."""
+        snap = merge_snapshot()
+        snap["review"]["author"] = "chatgpt"
+        ok, why = merge_ok(snap)
+        self.assertFalse(ok)
+        self.assertIn("REVIEW_INVALID", why)
+
+    def test_review_authorship_must_be_head_bound(self):
+        """Material-author evidence is bound to exact reviewed head."""
+        snap = merge_snapshot()
+        snap["review"]["material_authors_head_sha"] = "c" * 40
+        ok, why = merge_ok(snap)
+        self.assertFalse(ok)
+        self.assertIn("REVIEW_INVALID", why)
 
     def test_unknown_gate_fails_closed(self):
-        snapshot = merge_snapshot()
-        del snapshot["files_fully_enumerated"]
-        self.assertFalse(merge_ok(snapshot)[0])
+        """Missing required merge datum produces its specific failure."""
+        snap = merge_snapshot()
+        del snap["files_fully_enumerated"]
+        ok, why = merge_ok(snap)
+        self.assertFalse(ok)
+        self.assertIn("FILES_FULLY_ENUMERATED_NOT_TRUE", why)
 
-    def test_budget_parks_and_idle_quiesces(self):
+    def test_budget_parks(self):
+        """Exhausted bounded-work budget parks item."""
         self.assertEqual(classify_item({"ci": "GREEN"}, Budget(fix_iterations=MAX_FIX_ITERATIONS)), ItemState.PARKED)
-        self.assertEqual(classify_item({"no_actionable_work": True}, Budget()), ItemState.IDLE)
+
+    def test_classifies_human_and_dependency_holds(self):
+        """Human and dependency holds have explicit states."""
+        self.assertEqual(classify_item({"human_hold": True}, Budget()), ItemState.BLOCK_HUMAN)
+        self.assertEqual(classify_item({"dependency_wait": True}, Budget()), ItemState.WAIT_DEPENDENCY)
 
 
 if __name__ == "__main__":

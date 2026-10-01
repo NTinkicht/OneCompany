@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "repository": "NTinkicht/OneCompany",
+  "revision": 0,
+  "mode": "GOVERNANCE_DRIFT",
+  "mode_version": 1,
+  "human_clear_required": true,
+  "leases": {},
+  "budgets": {},
+  "observations": {},
+  "platform_enforcement": {
+    "branch_protected": false,
+    "active_rulesets": 0
+  },
+  "note": "Initialized fail-closed. Do not clear GOVERNANCE_DRIFT until platform enforcement is verified from live GitHub evidence."
+}

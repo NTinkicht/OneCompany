@@ -3,8 +3,10 @@ on:
   pull_request:
     paths:
       - "scripts/l5_kernel.py"
+      - "scripts/l5_ledger.py"
       - "scripts/l5_hostile_sim.py"
       - "tests/test_l5_kernel.py"
+      - "tests/test_l5_ledger.py"
       - "docs/L5-STATE-MACHINE-V1.md"
       - ".github/workflows/l5-hostile-controller-ci.yml"
 permissions:
@@ -22,6 +24,6 @@ jobs:
       - name: Kernel selftest
         run: python scripts/l5_kernel.py
       - name: Unit tests
-        run: python -m unittest discover -s tests -p "test_l5_kernel.py"
+        run: python -m unittest discover -s tests -p "test_l5_*.py"
       - name: Core hostile interleavings
         run: python scripts/l5_hostile_sim.py

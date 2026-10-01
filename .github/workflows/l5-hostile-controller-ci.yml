@@ -1,23 +1,21 @@
 name: L5 Hostile Controller Candidate CI
+
 on:
   pull_request:
     paths:
-      - scripts/l5_kernel.py
-      - scripts/l5_ledger.py
-      - scripts/l5_ledger_store.py
-      - scripts/l5_controller.py
-      - scripts/l5_hostile_sim.py
-      - scripts/l5_intent_hostile_sim.py
-      - tests/test_l5_kernel.py
-      - tests/test_l5_ledger.py
-      - tests/test_l5_ledger_store.py
-      - tests/test_l5_controller.py
-      - tests/test_l5_intent_restraint.py
-      - docs/L5-STATE-MACHINE-V1.md
-      - docs/L5-INTENT-RESTRAINT-V1.1.md
-      - .github/workflows/l5-hostile-controller-ci.yml
+      - 'scripts/l5_*.py'
+      - 'tests/test_l5_*.py'
+      - 'docs/L5-STATE-MACHINE-V1.md'
+      - 'docs/L5-INTENT-RESTRAINT-V1.1.md'
+      - '.github/workflows/l5-hostile-controller-ci.yml'
+
 permissions:
   contents: read
+
+concurrency:
+  group: l5-hostile-controller-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   hostile-controller:
     runs-on: ubuntu-latest
@@ -27,7 +25,7 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
-          python-version: "3.12"
+          python-version: '3.12'
       - name: Kernel selftest
         run: python scripts/l5_kernel.py
       - name: Claude L5 unit, ledger, runner, and intent tests

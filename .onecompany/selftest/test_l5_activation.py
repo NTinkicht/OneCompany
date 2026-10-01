@@ -32,11 +32,16 @@ class Client:
         self.boundaries = boundaries or {k:False for k in act.HARD_BOUNDARY_FIELDS}
         self.live = live or {"head_sha":"a"*40,"base_sha":"b"*40,"pr_state":"open","open_streams":{262:[263]},"review_eligible_nonauthor":True}
         self.lost, self.effect, self.calls = lost, effect, 0
+        self.reject = False
     def fetch_boundaries(self): return dict(self.boundaries)
     def fetch_live(self, _pr): return dict(self.live)
-    def perform(self, _mutation, _params):
+    def perform_cas(self, _mutation, _params):
         self.calls += 1
-        if self.lost: raise wa.LostResponse()
+        if self.reject:
+            raise wa.WriteRejected("definitive no-write")
+        if self.lost:
+            raise wa.LostResponse()
+        return True
     def verify_effect(self, _mutation, _params): return self.effect
 
 
@@ -72,6 +77,21 @@ class ActivationTests(unittest.TestCase):
         self.assertEqual(out["reason"], "STALE_HEAD_OR_BASE")
         self.assertEqual(client.calls,0)
 
+    def test_atomic_remote_cas_is_mandatory(self):
+        s = snap(ci="FAILURE",review="UNKNOWN")
+        auth = act.authorize_mutation(s)
+        client = Client(); client.perform_cas = None
+        out = wa.execute_mutation(auth,s,client,wa.MemoryStore())
+        self.assertEqual(out["reason"], "ATOMIC_CAS_UNAVAILABLE")
+        self.assertEqual(client.calls,0)
+
+    def test_merge_rechecks_nonauthor_reviewer(self):
+        s = snap(); auth = act.authorize_mutation(s); client = Client()
+        client.live["review_eligible_nonauthor"] = False
+        out = wa.execute_mutation(auth,s,client,wa.MemoryStore())
+        self.assertEqual(out["reason"], "REVIEWER_NOT_ELIGIBLE")
+        self.assertEqual(client.calls,0)
+
     def test_boundary_rechecked_before_write(self):
         s = snap(ci="FAILURE",review="UNKNOWN")
         auth = act.authorize_mutation(s)
@@ -85,22 +105,42 @@ class ActivationTests(unittest.TestCase):
         client=Flip(); store=wa.MemoryStore(); out=wa.execute_mutation(auth,s,client,store)
         self.assertEqual(out["reason"],"HARD_BOUNDARY"); self.assertEqual(client.calls,0)
         self.assertEqual(store.retry_state(wa.stream_key(auth,s)),(0,None))
+        self.assertEqual(store.get(auth["mutation_token"])["status"],"RETRYABLE")
 
     def test_lost_response_reconciles_without_duplicate_write(self):
         s=snap(ci="FAILURE",review="UNKNOWN"); auth=act.authorize_mutation(s); store=wa.MemoryStore(); client=Client(lost=True,effect=True)
         first=wa.execute_mutation(auth,s,client,store); second=wa.execute_mutation(auth,s,client,store)
         self.assertEqual(first["status"],"COMPLETE"); self.assertEqual(second["status"],"REPLAY_NOOP"); self.assertEqual(client.calls,1)
 
+    def test_uncertain_write_stays_pending_until_effect_is_visible(self):
+        s=snap(ci="FAILURE",review="UNKNOWN"); auth=act.authorize_mutation(s); store=wa.MemoryStore(); client=Client(lost=True,effect=False)
+        first=wa.execute_mutation(auth,s,client,store)
+        self.assertEqual(first["status"],"IN_PROGRESS")
+        self.assertEqual(store.get(auth["mutation_token"])["status"],"PENDING")
+        client.effect=True
+        second=wa.execute_mutation(auth,s,client,store)
+        self.assertEqual(second["status"],"COMPLETE")
+        self.assertEqual(client.calls,1)
+
     def test_unexpected_perform_exception_reconciles_without_refund(self):
         s=snap(ci="FAILURE",review="UNKNOWN"); auth=act.authorize_mutation(s); store=wa.MemoryStore()
         class Boom(Client):
-            def perform(self, _mutation, _params):
+            def perform_cas(self, _mutation, _params):
                 self.calls += 1
                 raise RuntimeError("transport failed after send")
         client=Boom(effect=True); out=wa.execute_mutation(auth,s,client,store)
         self.assertEqual(out["status"],"COMPLETE")
         self.assertEqual(store.retry_state(wa.stream_key(auth,s)),(1,"CI"))
         self.assertEqual(client.calls,1)
+
+    def test_definitive_no_write_rejection_can_retry_same_merge_token(self):
+        s=snap(); auth=act.authorize_mutation(s); store=wa.MemoryStore(); client=Client(); client.reject=True
+        first=wa.execute_mutation(auth,s,client,store)
+        self.assertEqual(first["reason"],"WRITE_REJECTED")
+        self.assertEqual(store.get(auth["mutation_token"])["status"],"RETRYABLE")
+        client.reject=False
+        second=wa.execute_mutation(auth,s,client,store)
+        self.assertEqual(second["status"],"COMPLETE")
 
     def test_retry_state_cas_blocks_stale_concurrent_authorization(self):
         store=wa.MemoryStore(); s=snap(ci="FAILURE",review="UNKNOWN"); auth=act.authorize_mutation(s); stream=wa.stream_key(auth,s)
@@ -109,13 +149,23 @@ class ActivationTests(unittest.TestCase):
         self.assertFalse(store.begin("2"*64,{"status":"PENDING"},stream,1,"CI",expected_retry=observed))
         self.assertEqual(store.retry_state(stream),(1,"CI"))
 
-    def test_json_store_persists_token_and_retry_state(self):
+    def test_token_owner_prevents_retry_aba_restore(self):
+        store=wa.MemoryStore(); stream="s"; old="1"*64; newer="2"*64
+        self.assertTrue(store.begin(old,{"status":"PENDING"},stream,1,"CI",expected_retry=(0,None),expected_owner=None))
+        self.assertTrue(store.begin(newer,{"status":"PENDING"},stream,1,"REVIEW",expected_retry=(1,"CI"),expected_owner=old))
+        store.fail_and_restore(newer,"newer failed",stream,(1,"CI"))
+        self.assertEqual(store.retry_state(stream),(1,"CI")); self.assertEqual(store.retry_owner(stream),newer)
+        store.fail_and_restore(old,"old late",stream,(0,None))
+        self.assertEqual(store.retry_state(stream),(1,"CI")); self.assertEqual(store.retry_owner(stream),newer)
+
+    def test_json_store_persists_token_retry_state_and_owner(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path=Path(tmp)/"l5-store.json"; store=wa.JsonFileStore(path)
-            self.assertTrue(store.begin("3"*64,{"status":"PENDING"},"stream",1,"CI",expected_retry=(0,None)))
+            path=Path(tmp)/"l5-store.json"; store=wa.JsonFileStore(path); token="3"*64
+            self.assertTrue(store.begin(token,{"status":"PENDING"},"stream",1,"CI",expected_retry=(0,None),expected_owner=None))
             reopened=wa.JsonFileStore(path)
-            self.assertEqual(reopened.get("3"*64)["status"],"PENDING")
+            self.assertEqual(reopened.get(token)["status"],"PENDING")
             self.assertEqual(reopened.retry_state("stream"),(1,"CI"))
+            self.assertEqual(reopened.retry_owner("stream"),token)
 
     def test_retry_state_is_per_stream(self):
         store=wa.MemoryStore()

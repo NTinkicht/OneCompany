@@ -3,8 +3,10 @@
 
 The runner reconstructs repository truth every invocation, recovers orphaned
 intents before selecting work, acquires one lease, re-observes the resource,
-writes one intent, fences again, and delegates the effect to the existing
-guarded write adapter. It never waits for CI/review inside one invocation.
+writes one intent, revalidates the complete authorization predicate at the
+final write boundary, and delegates the effect to the existing guarded write
+adapter. Main-changing operations retain a durable repository merge lock until
+post-merge health verification completes.
 """
 from __future__ import annotations
 
@@ -14,10 +16,10 @@ from typing import Any, Mapping, Protocol, Sequence
 
 from l5_kernel import (
     Budget,
+    CASStore,
     HUMAN_CLEAR_ONLY,
     ItemState,
     Lease,
-    MemoryCASStore,
     Observation,
     RepoMode,
     acquire,
@@ -30,6 +32,7 @@ from l5_kernel import (
     lease_key,
     merge_ok,
     new_run_id,
+    release,
     repo_merge_lock_key,
     resolve_intent,
 )
@@ -51,6 +54,7 @@ class RunPhase(str, Enum):
     WRITE_INTENT = "WRITE_INTENT"
     FENCE_CHECK = "FENCE_CHECK"
     ACTION = "ACTION"
+    POST_MERGE_VERIFY = "POST_MERGE_VERIFY"
     EXIT = "EXIT"
 
 
@@ -68,14 +72,17 @@ class RunResult:
 
 
 class ControllerIO(Protocol):
-    """Structured evidence/action boundary required by the runner."""
+    """Trusted structured evidence/action boundary required by the runner."""
 
     def repo_snapshot(self) -> Mapping[str, Any]: ...
     def pending_intent_leases(self) -> Sequence[Lease]: ...
     def detect_intent_effect(self, lease: Lease) -> str: ...
     def inventory(self) -> Sequence[Mapping[str, Any]]: ...
+    def refresh_item(self, item: Mapping[str, Any]) -> Mapping[str, Any]: ...
     def budget_for(self, item: Mapping[str, Any]) -> Budget: ...
     def observe_item(self, item: Mapping[str, Any]) -> Observation: ...
+    def trusted_now(self) -> float: ...
+    def post_merge_health(self, item: Mapping[str, Any]) -> str: ...
     def execute_guarded(
         self,
         operation: str,
@@ -90,6 +97,14 @@ def _item_id(item: Mapping[str, Any]) -> str:
     if not isinstance(value, (str, int)) or str(value) == "":
         raise ValueError("L5_ITEM_ID_INVALID")
     return str(value)
+
+
+def _trusted_now(io: ControllerIO) -> float:
+    """Read fresh trusted/server time and fail closed on malformed values."""
+    value = io.trusted_now()
+    if not isinstance(value, (int, float)):
+        raise ValueError("L5_TRUSTED_TIME_INVALID")
+    return float(value)
 
 
 def _state_priority(state: ItemState) -> int:
@@ -130,7 +145,12 @@ def _operation_for(state: ItemState, item: Mapping[str, Any]) -> str | None:
     return None
 
 
-def _lease_key_for(repo_id: str, item_id: str, operation: str, item: Mapping[str, Any]) -> str:
+def _lease_key_for(
+    repo_id: str,
+    item_id: str,
+    operation: str,
+    item: Mapping[str, Any],
+) -> str:
     """Choose repo merge lock, capacity slot, or item lease."""
     if operation in {"merge_expected_head", "revert"}:
         return repo_merge_lock_key(repo_id)
@@ -159,19 +179,21 @@ def _intent_operation(operation: str) -> str:
         raise ValueError("L5_OPERATION_NOT_ALLOWLISTED") from exc
 
 
-def _sync_mode(store: MemoryCASStore, repo_id: str, derived: RepoMode) -> tuple[bool, str]:
-    """Persist derived mode without auto-clearing human-only modes."""
+def _sync_mode(store: CASStore, repo_id: str, derived: RepoMode) -> tuple[bool, str]:
+    """Persist derived mode without auto-clearing protected modes."""
     current, version = store.read_repo_mode(repo_id)
     if current == derived:
         return True, "UNCHANGED"
     if current in HUMAN_CLEAR_ONLY:
         return False, "HUMAN_CLEAR_REQUIRED"
+    if current == RepoMode.MERGE_LOCKED:
+        return False, "POST_MERGE_VERIFICATION_REQUIRED"
     if not store.cas_repo_mode(repo_id, version, derived):
         return False, "MODE_CAS_CONFLICT"
     return True, "UPDATED"
 
 
-def _recover_pending(io: ControllerIO, store: MemoryCASStore) -> tuple[bool, str]:
+def _recover_pending(io: ControllerIO, store: CASStore) -> tuple[bool, str]:
     """Recover all known orphaned intents before selecting new work."""
     for lease in io.pending_intent_leases():
         current = store.read(lease.key)
@@ -189,7 +211,10 @@ def _recover_pending(io: ControllerIO, store: MemoryCASStore) -> tuple[bool, str
     return True, "RECOVERED"
 
 
-def _select(io: ControllerIO, items: Sequence[Mapping[str, Any]]) -> tuple[Mapping[str, Any], ItemState] | None:
+def _select(
+    io: ControllerIO,
+    items: Sequence[Mapping[str, Any]],
+) -> tuple[Mapping[str, Any], ItemState] | None:
     """Classify then deterministically select one actionable item."""
     candidates: list[tuple[int, str, Mapping[str, Any], ItemState]] = []
     for item in items:
@@ -204,15 +229,216 @@ def _select(io: ControllerIO, items: Sequence[Mapping[str, Any]]) -> tuple[Mappi
     return item, state
 
 
+def _find_merged_unverified(
+    io: ControllerIO,
+    items: Sequence[Mapping[str, Any]],
+) -> Mapping[str, Any] | None:
+    """Return exactly one merged-unverified item while the repo is locked."""
+    found = [
+        item
+        for item in items
+        if classify_item(item, io.budget_for(item)) == ItemState.MERGED_UNVERIFIED
+    ]
+    if len(found) != 1:
+        return None
+    return found[0]
+
+
+def _post_merge_verify(
+    repo_id: str,
+    io: ControllerIO,
+    store: CASStore,
+    items: Sequence[Mapping[str, Any]],
+    rid: str,
+) -> RunResult:
+    """Keep MERGE_LOCKED until trusted post-merge health is terminal."""
+    item = _find_merged_unverified(io, items)
+    if item is None:
+        return RunResult(
+            rid,
+            RunPhase.POST_MERGE_VERIFY,
+            "WAIT",
+            reason="MERGE_LOCK_RECONCILIATION_REQUIRED",
+        )
+
+    item_id = _item_id(item)
+    lock_key = repo_merge_lock_key(repo_id)
+    lock = store.read(lock_key)
+    if (
+        lock is None
+        or lock.intent is None
+        or lock.intent.state != "DONE"
+        or lock.intent.operation not in {"merge", "revert"}
+    ):
+        return RunResult(
+            rid,
+            RunPhase.POST_MERGE_VERIFY,
+            "WAIT",
+            item_id=item_id,
+            reason="MERGE_LOCK_EVIDENCE_INVALID",
+        )
+
+    refreshed = io.refresh_item(item)
+    if _item_id(refreshed) != item_id:
+        return RunResult(
+            rid,
+            RunPhase.POST_MERGE_VERIFY,
+            "BLOCKED",
+            item_id=item_id,
+            reason="ITEM_ID_CHANGED",
+        )
+
+    health = io.post_merge_health(refreshed)
+    if health == "UNKNOWN":
+        return RunResult(
+            rid,
+            RunPhase.POST_MERGE_VERIFY,
+            "WAIT",
+            item_id=item_id,
+            reason="POST_MERGE_HEALTH_UNKNOWN",
+        )
+    if health not in {"HEALTHY", "BROKEN", "ENV_BROKEN"}:
+        return RunResult(
+            rid,
+            RunPhase.POST_MERGE_VERIFY,
+            "BLOCKED",
+            item_id=item_id,
+            reason="POST_MERGE_HEALTH_INVALID",
+        )
+
+    release_now = _trusted_now(io)
+    released = release(store, lock, now_srv=release_now)
+    if released is None:
+        return RunResult(
+            rid,
+            RunPhase.POST_MERGE_VERIFY,
+            "WAIT",
+            item_id=item_id,
+            reason="MERGE_LOCK_RELEASE_CAS_FAILED",
+        )
+
+    current_mode, mode_version = store.read_repo_mode(repo_id)
+    if current_mode != RepoMode.MERGE_LOCKED:
+        return RunResult(
+            rid,
+            RunPhase.POST_MERGE_VERIFY,
+            "BLOCKED",
+            item_id=item_id,
+            reason="MERGE_LOCK_MODE_LOST",
+        )
+
+    target_mode = {
+        "HEALTHY": RepoMode.NORMAL,
+        "BROKEN": RepoMode.MAIN_BROKEN,
+        "ENV_BROKEN": RepoMode.MAIN_BROKEN_ENV,
+    }[health]
+    if not store.cas_repo_mode(repo_id, mode_version, target_mode):
+        return RunResult(
+            rid,
+            RunPhase.POST_MERGE_VERIFY,
+            "WAIT",
+            item_id=item_id,
+            reason="POST_MERGE_MODE_CAS_FAILED",
+        )
+
+    if health == "HEALTHY":
+        return RunResult(
+            rid,
+            RunPhase.EXIT,
+            "COMPLETE",
+            action="verify_post_merge",
+            item_id=item_id,
+            reason="POST_MERGE_VERIFIED",
+        )
+    if health == "BROKEN":
+        return RunResult(
+            rid,
+            RunPhase.EXIT,
+            "WAIT",
+            action="verify_post_merge",
+            item_id=item_id,
+            reason="MAIN_BROKEN",
+        )
+    return RunResult(
+        rid,
+        RunPhase.EXIT,
+        "WAIT",
+        action="verify_post_merge",
+        item_id=item_id,
+        reason="MAIN_BROKEN_ENV",
+    )
+
+
+def _revalidate_before_write(
+    repo_id: str,
+    io: ControllerIO,
+    store: CASStore,
+    operation: str,
+    original: Mapping[str, Any],
+    expected_observation: Observation,
+) -> tuple[Mapping[str, Any] | None, str | None]:
+    """Refresh complete evidence immediately before a material write."""
+    fresh_repo = io.repo_snapshot()
+    derived = governance_mode(fresh_repo)
+    current_mode, _ = store.read_repo_mode(repo_id)
+    allowed_mode = RepoMode.MAIN_BROKEN if operation == "revert" else RepoMode.NORMAL
+    if derived != allowed_mode or current_mode != allowed_mode:
+        return None, f"REPO_MODE_{derived.value}"
+
+    fresh = io.refresh_item(original)
+    if _item_id(fresh) != _item_id(original):
+        return None, "ITEM_ID_CHANGED"
+    if io.observe_item(fresh) != expected_observation:
+        return None, "OBSERVATION_CHANGED"
+    if operation == "merge_expected_head" and not merge_ok(fresh)[0]:
+        return None, "MERGE_OK_FALSE_FINAL"
+    return fresh, None
+
+
+def _terminalize_non_main_write(
+    io: ControllerIO,
+    store: CASStore,
+    lease: Lease,
+    *,
+    state: str,
+) -> tuple[bool, str]:
+    """Resolve and release a non-main-changing operation."""
+    resolved = resolve_intent(store, lease, state)
+    if resolved is None:
+        return False, "RESULT_COMMIT_CAS_FAILED"
+    if release(store, resolved, now_srv=_trusted_now(io)) is None:
+        return False, "LEASE_RELEASE_CAS_FAILED"
+    return True, "TERMINAL"
+
+
+def _enter_merge_locked(
+    repo_id: str,
+    store: CASStore,
+    lease: Lease,
+) -> tuple[bool, str]:
+    """Resolve a successful main write and durably freeze further merges."""
+    resolved = resolve_intent(store, lease, "DONE")
+    if resolved is None:
+        return False, "RESULT_COMMIT_CAS_FAILED"
+    current_mode, mode_version = store.read_repo_mode(repo_id)
+    expected = RepoMode.MAIN_BROKEN if lease.intent and lease.intent.operation == "revert" else RepoMode.NORMAL
+    if current_mode != expected:
+        return False, "REPO_MODE_CHANGED_AFTER_WRITE"
+    if not store.cas_repo_mode(repo_id, mode_version, RepoMode.MERGE_LOCKED):
+        return False, "MERGE_LOCK_MODE_CAS_FAILED"
+    return True, "MERGED_UNVERIFIED"
+
+
 def run_once(
     repo_id: str,
     io: ControllerIO,
-    store: MemoryCASStore,
+    store: CASStore,
     *,
-    now_srv: float,
+    now_srv: float | None = None,
     run_id: str | None = None,
 ) -> RunResult:
     """Execute one deterministic BOOT-to-ACTION controller invocation."""
+    del now_srv  # Compatibility only. All write timing uses fresh trusted time.
     rid = run_id or new_run_id()
     repo = io.repo_snapshot()
 
@@ -220,21 +446,59 @@ def run_once(
         return RunResult(rid, RunPhase.HALT_CHECK, "BLOCKED", reason="HALTED")
 
     derived = governance_mode(repo)
-    synced, sync_reason = _sync_mode(store, repo_id, derived)
-    if not synced:
-        return RunResult(rid, RunPhase.REPOSITORY_MODE, "BLOCKED", reason=sync_reason)
+    current_mode, _ = store.read_repo_mode(repo_id)
+
     if derived in HUMAN_CLEAR_ONLY:
-        return RunResult(rid, RunPhase.REPOSITORY_MODE, "BLOCKED", reason=derived.value)
-    if derived not in {RepoMode.NORMAL, RepoMode.MAIN_BROKEN}:
-        return RunResult(rid, RunPhase.REPOSITORY_MODE, "WAIT", reason=derived.value)
+        if current_mode != derived:
+            _, version = store.read_repo_mode(repo_id)
+            if current_mode not in HUMAN_CLEAR_ONLY:
+                store.cas_repo_mode(repo_id, version, derived)
+        return RunResult(
+            rid,
+            RunPhase.REPOSITORY_MODE,
+            "BLOCKED",
+            reason=derived.value,
+        )
 
     recovered, recovery_reason = _recover_pending(io, store)
     if not recovered:
-        return RunResult(rid, RunPhase.INTENT_RECOVERY, "WAIT", reason=recovery_reason)
+        return RunResult(
+            rid,
+            RunPhase.INTENT_RECOVERY,
+            "WAIT",
+            reason=recovery_reason,
+        )
 
-    selected = _select(io, io.inventory())
+    items = list(io.inventory())
+
+    current_mode, _ = store.read_repo_mode(repo_id)
+    if current_mode == RepoMode.MERGE_LOCKED:
+        return _post_merge_verify(repo_id, io, store, items, rid)
+
+    synced, sync_reason = _sync_mode(store, repo_id, derived)
+    if not synced:
+        return RunResult(
+            rid,
+            RunPhase.REPOSITORY_MODE,
+            "BLOCKED",
+            reason=sync_reason,
+        )
+    if derived not in {RepoMode.NORMAL, RepoMode.MAIN_BROKEN}:
+        return RunResult(
+            rid,
+            RunPhase.REPOSITORY_MODE,
+            "WAIT",
+            reason=derived.value,
+        )
+
+    selected = _select(io, items)
     if selected is None:
-        return RunResult(rid, RunPhase.SELECT, "IDLE", reason="NO_ACTIONABLE_ITEM")
+        return RunResult(
+            rid,
+            RunPhase.SELECT,
+            "IDLE",
+            reason="NO_ACTIONABLE_ITEM",
+        )
 
     item, state = selected
     item_id = _item_id(item)
@@ -242,51 +506,233 @@ def run_once(
     assert operation is not None
 
     if operation == "merge_expected_head" and not merge_ok(item)[0]:
-        return RunResult(rid, RunPhase.RECONCILE_ITEM, "BLOCKED", action=operation, item_id=item_id, reason="MERGE_OK_FALSE")
+        return RunResult(
+            rid,
+            RunPhase.RECONCILE_ITEM,
+            "BLOCKED",
+            action=operation,
+            item_id=item_id,
+            reason="MERGE_OK_FALSE",
+        )
 
     observed = io.observe_item(item)
     key = _lease_key_for(repo_id, item_id, operation, item)
-    lease = acquire(store, key, rid, observed, now_srv=now_srv)
+    lease = acquire(
+        store,
+        key,
+        rid,
+        observed,
+        now_srv=_trusted_now(io),
+    )
     if lease is None:
-        return RunResult(rid, RunPhase.ACQUIRE_CAS_LEASE, "WAIT", action=operation, item_id=item_id, reason="LEASE_BUSY")
+        return RunResult(
+            rid,
+            RunPhase.ACQUIRE_CAS_LEASE,
+            "WAIT",
+            action=operation,
+            item_id=item_id,
+            reason="LEASE_BUSY",
+        )
 
-    observed_now = io.observe_item(item)
-    if observed_now != observed:
-        return RunResult(rid, RunPhase.RECONCILE_ITEM, "WAIT", action=operation, item_id=item_id, reason="OBSERVATION_CHANGED")
+    fresh, reason = _revalidate_before_write(
+        repo_id,
+        io,
+        store,
+        operation,
+        item,
+        observed,
+    )
+    if fresh is None:
+        return RunResult(
+            rid,
+            RunPhase.RECONCILE_ITEM,
+            "WAIT",
+            action=operation,
+            item_id=item_id,
+            reason=reason,
+        )
 
-    with_intent = attach_intent(store, lease, repo_id, item_id, _intent_operation(operation), now_srv=now_srv)
+    with_intent = attach_intent(
+        store,
+        lease,
+        repo_id,
+        item_id,
+        _intent_operation(operation),
+        now_srv=_trusted_now(io),
+    )
     if with_intent is None:
-        return RunResult(rid, RunPhase.WRITE_INTENT, "WAIT", action=operation, item_id=item_id, reason="INTENT_CAS_FAILED")
+        return RunResult(
+            rid,
+            RunPhase.WRITE_INTENT,
+            "WAIT",
+            action=operation,
+            item_id=item_id,
+            reason="INTENT_CAS_FAILED",
+        )
 
-    observed_final = io.observe_item(item)
-    ok, fence_reason = fence_ok(store, repo_id, with_intent, observed_final, now_srv=now_srv)
+    final_item, reason = _revalidate_before_write(
+        repo_id,
+        io,
+        store,
+        operation,
+        fresh,
+        observed,
+    )
+    if final_item is None:
+        return RunResult(
+            rid,
+            RunPhase.FENCE_CHECK,
+            "BLOCKED",
+            action=operation,
+            item_id=item_id,
+            reason=reason,
+        )
+
+    observed_final = io.observe_item(final_item)
+    fence_now = _trusted_now(io)
+    ok, fence_reason = fence_ok(
+        store,
+        repo_id,
+        with_intent,
+        observed_final,
+        now_srv=fence_now,
+    )
     if not ok:
-        return RunResult(rid, RunPhase.FENCE_CHECK, "BLOCKED", action=operation, item_id=item_id, reason=fence_reason)
+        return RunResult(
+            rid,
+            RunPhase.FENCE_CHECK,
+            "BLOCKED",
+            action=operation,
+            item_id=item_id,
+            reason=fence_reason,
+        )
 
-    mutation = io.execute_guarded(operation, item, with_intent)
+    mutation = io.execute_guarded(operation, final_item, with_intent)
     status = mutation.get("status") if isinstance(mutation, Mapping) else None
-    if status in {"COMPLETE", "REPLAY_NOOP"}:
-        resolved = resolve_intent(store, with_intent, "DONE")
-        if resolved is None:
-            return RunResult(rid, RunPhase.ACTION, "WAIT", action=operation, item_id=item_id, reason="RESULT_COMMIT_CAS_FAILED", mutation_result=mutation)
-        return RunResult(rid, RunPhase.EXIT, "COMPLETE", action=operation, item_id=item_id, mutation_result=mutation)
-    if status in {"FAILED", "BLOCKED"}:
-        resolved = resolve_intent(store, with_intent, "ABORTED")
-        if resolved is None:
-            return RunResult(rid, RunPhase.ACTION, "WAIT", action=operation, item_id=item_id, reason="ABORT_COMMIT_CAS_FAILED", mutation_result=mutation)
-        return RunResult(rid, RunPhase.EXIT, status, action=operation, item_id=item_id, mutation_result=mutation)
+    result_reason = mutation.get("reason") if isinstance(mutation, Mapping) else None
 
-    return RunResult(rid, RunPhase.ACTION, "WAIT", action=operation, item_id=item_id, reason="OUTCOME_UNKNOWN", mutation_result=mutation)
+    effect_complete = status == "COMPLETE" or (
+        status == "REPLAY_NOOP" and result_reason == "ALREADY_COMPLETE"
+    )
+    replay_pending = status == "REPLAY_NOOP" and result_reason in {
+        "TOKEN_ALREADY_PERSISTED",
+        "EFFECT_NOT_YET_VERIFIED",
+    }
+
+    if replay_pending:
+        return RunResult(
+            rid,
+            RunPhase.ACTION,
+            "WAIT",
+            action=operation,
+            item_id=item_id,
+            reason="OUTCOME_UNKNOWN",
+            mutation_result=mutation,
+        )
+
+    if effect_complete:
+        if operation in {"merge_expected_head", "revert"}:
+            transitioned, transition_reason = _enter_merge_locked(
+                repo_id,
+                store,
+                with_intent,
+            )
+            if not transitioned:
+                return RunResult(
+                    rid,
+                    RunPhase.ACTION,
+                    "WAIT",
+                    action=operation,
+                    item_id=item_id,
+                    reason=transition_reason,
+                    mutation_result=mutation,
+                )
+            return RunResult(
+                rid,
+                RunPhase.EXIT,
+                "WAIT",
+                action=operation,
+                item_id=item_id,
+                reason="MERGED_UNVERIFIED",
+                mutation_result=mutation,
+            )
+
+        terminal, terminal_reason = _terminalize_non_main_write(
+            io,
+            store,
+            with_intent,
+            state="DONE",
+        )
+        if not terminal:
+            return RunResult(
+                rid,
+                RunPhase.ACTION,
+                "WAIT",
+                action=operation,
+                item_id=item_id,
+                reason=terminal_reason,
+                mutation_result=mutation,
+            )
+        return RunResult(
+            rid,
+            RunPhase.EXIT,
+            "COMPLETE",
+            action=operation,
+            item_id=item_id,
+            mutation_result=mutation,
+        )
+
+    if status in {"FAILED", "BLOCKED"}:
+        terminal, terminal_reason = _terminalize_non_main_write(
+            io,
+            store,
+            with_intent,
+            state="ABORTED",
+        )
+        if not terminal:
+            return RunResult(
+                rid,
+                RunPhase.ACTION,
+                "WAIT",
+                action=operation,
+                item_id=item_id,
+                reason=terminal_reason,
+                mutation_result=mutation,
+            )
+        return RunResult(
+            rid,
+            RunPhase.EXIT,
+            status,
+            action=operation,
+            item_id=item_id,
+            mutation_result=mutation,
+        )
+
+    return RunResult(
+        rid,
+        RunPhase.ACTION,
+        "WAIT",
+        action=operation,
+        item_id=item_id,
+        reason="OUTCOME_UNKNOWN",
+        mutation_result=mutation,
+    )
 
 
 class GuardedWriteBridge:
     """Bridge controller actions into the existing certified write adapter."""
 
     def __init__(self, client: Any, token_store: Any):
+        """Store credential-bearing client and durable token store references."""
         self.client = client
         self.token_store = token_store
 
-    def execute(self, operation: str, item: Mapping[str, Any], lease: Lease) -> Mapping[str, Any]:
+    def execute(
+        self,
+        operation: str,
+        item: Mapping[str, Any],
+        lease: Lease,
+    ) -> Mapping[str, Any]:
         """Reproduce authorization and delegate to ``execute_mutation``."""
         from l5_activation import authorize_mutation
         from l5_write_adapter import execute_mutation
@@ -294,6 +740,7 @@ class GuardedWriteBridge:
         snapshot = item.get("activation_snapshot")
         if not isinstance(snapshot, dict):
             return {"status": "BLOCKED", "reason": "ACTIVATION_SNAPSHOT_MISSING"}
+
         auth = authorize_mutation(snapshot)
         expected = {
             "retry_ci": "retry_ci",

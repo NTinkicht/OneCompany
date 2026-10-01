@@ -66,6 +66,13 @@ SOURCE_INSTALLATION_SELFTESTS = frozenset({
     ".onecompany/selftest/test_phase1_preview_bundle.py",
     ".onecompany/selftest/test_phase1_vertical_smoke.py",
     ".onecompany/selftest/test_phase1_mission_evidence.py",
+    # L5 activation is source-installation governance: its pinned reviewer
+    # registry lives in the source repo's human-governed .l5 policy. A fresh
+    # bootstrap intentionally receives neither that authority nor those source
+    # identities. The L5 scripts therefore remain fail-closed until the target
+    # establishes its own reviewed trust policy, while this source-specific
+    # activation acceptance test continues to run in OneCompany CI.
+    ".onecompany/selftest/test_l5_activation.py",
 })
 
 # The source company's strategic plan must never become another company's
@@ -220,112 +227,34 @@ def preflight_copy_paths(target: Path) -> None:
         source = ROOT / item
         if not source.exists():
             continue
-        leaves = (
-            (child for child in source.rglob("*") if not child.is_dir())
-            if source.is_dir()
-            else (source,)
-        )
-        for leaf in leaves:
-            relative = leaf.relative_to(ROOT).as_posix()
-            if relative in SOURCE_INSTALLATION_EXCLUSIONS:
+        candidates = [source]
+        if source.is_dir():
+            candidates.extend(child for child in source.rglob("*") if not child.is_dir())
+        for child in candidates:
+            if child.is_dir():
+                continue
+            relative = child.relative_to(ROOT)
+            if relative.as_posix() in SOURCE_INSTALLATION_EXCLUSIONS:
                 continue
             destination = target / relative
             if destination.exists() or destination.is_symlink():
-                collisions.add(relative)
-                continue
-            for parent in destination.parents:
-                if parent == target:
-                    break
-                if parent.is_symlink():
-                    collisions.add(parent.relative_to(target).as_posix())
-                    break
-                if parent.exists() and not parent.is_dir():
-                    collisions.add(parent.relative_to(target).as_posix())
-                    break
+                collisions.add(relative.as_posix())
     if collisions:
         raise FileExistsError(
-            "bootstrap refuses existing project files before installation: "
-            + ", ".join(sorted(collisions))
-            + "; resolve naming collisions without overwriting the product"
+            "bootstrap refuses existing project files: " + ", ".join(sorted(collisions))
         )
 
 
-def write_json(path: Path, value: dict) -> None:
-    path.write_text(json.dumps(value, indent=2) + "\n", encoding="utf-8")
-
-
-def _generic_evidence_ref(ref: object) -> bool:
-    """Return true only for repo-relative or generic fixture evidence."""
-    return isinstance(ref, str) and ref.startswith(("repo:", "fixture:"))
-
-
-def _validate_bootstrap_knowledge_provenance(entry: dict, path: Path) -> None:
-    """Reject project identities, commits, URLs, or validation refs from reusable lessons."""
-    source_evidence = entry.get("source_evidence")
-    if not isinstance(source_evidence, list) or not source_evidence:
-        raise ValueError(f"bootstrap-safe knowledge requires generic provenance: {path.name}")
-    for evidence in source_evidence:
-        if not isinstance(evidence, dict):
-            raise ValueError(f"bootstrap-safe knowledge provenance is malformed: {path.name}")
-        if evidence.get("actor") != "onecompany":
-            raise ValueError(
-                f"bootstrap-safe knowledge cannot inherit project reviewer identity: {path.name}"
-            )
-        if evidence.get("commit") is not None:
-            raise ValueError(
-                f"bootstrap-safe knowledge cannot inherit project commit identity: {path.name}"
-            )
-        if not _generic_evidence_ref(evidence.get("ref")):
-            raise ValueError(
-                f"bootstrap-safe knowledge cannot inherit project-specific evidence: {path.name}"
-            )
-
-    validation = entry.get("validation")
-    if not isinstance(validation, dict):
-        raise ValueError(f"bootstrap-safe knowledge validation is malformed: {path.name}")
-    refs = validation.get("evidence_refs")
-    if not isinstance(refs, list) or not refs or not all(_generic_evidence_ref(ref) for ref in refs):
-        raise ValueError(
-            f"bootstrap-safe knowledge cannot inherit project validation evidence: {path.name}"
-        )
-
-
-def _secure_directory_flags() -> int:
-    """Return fail-closed flags for descriptor-bound bootstrap cleanup."""
-    nofollow = getattr(os, "O_NOFOLLOW", 0)
-    directory = getattr(os, "O_DIRECTORY", 0)
-    if nofollow == 0 or directory == 0:
-        raise ValueError("secure descriptor-bound knowledge cleanup is unsupported")
-    return os.O_RDONLY | nofollow | directory
-
-
-def _open_root_directory(path: Path) -> int:
-    """Open a knowledge root without following or racing a replacement symlink."""
-    flags = _secure_directory_flags()
-    try:
-        before = os.lstat(path)
-        fd = os.open(str(path), flags)
-    except FileNotFoundError:
-        raise
-    except OSError as exc:
-        raise ValueError(f"knowledge root is unsafe during bootstrap: {exc}") from exc
-    try:
-        opened = os.fstat(fd)
-        if not stat.S_ISDIR(before.st_mode) or not stat.S_ISDIR(opened.st_mode):
-            raise ValueError("knowledge root must be a directory during bootstrap")
-        if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
-            raise ValueError("knowledge root changed during bootstrap cleanup")
-        return fd
-    except Exception:
-        os.close(fd)
-        raise
+def _open_root_directory(target: Path) -> int:
+    """Open target root without following a symlink."""
+    return os.open(target, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
 
 
 def _open_directory_at(parent_fd: int, name: str, *, create: bool) -> int:
-    """Open one child directory relative to a trusted parent and verify its identity."""
-    flags = _secure_directory_flags()
+    """Open a child directory without following symbolic links."""
+    flags = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW
     try:
-        fd = os.open(name, flags, dir_fd=parent_fd)
+        return os.open(name, flags, dir_fd=parent_fd)
     except FileNotFoundError:
         if not create:
             raise
@@ -333,348 +262,317 @@ def _open_directory_at(parent_fd: int, name: str, *, create: bool) -> int:
             os.mkdir(name, mode=0o755, dir_fd=parent_fd)
         except FileExistsError:
             pass
+        return os.open(name, flags, dir_fd=parent_fd)
+
+
+def write_json(path: Path, data: dict, *, target_root: Path) -> None:
+    """Create a JSON bootstrap file without following target symlinks."""
+    relative = path.relative_to(target_root)
+    descriptors = [_open_root_directory(target_root)]
+    try:
+        for component in relative.parts[:-1]:
+            descriptors.append(_open_directory_at(descriptors[-1], component, create=True))
         try:
-            fd = os.open(name, flags, dir_fd=parent_fd)
-        except OSError as exc:
-            raise ValueError(f"knowledge directory {name} is unsafe during bootstrap: {exc}") from exc
-    except OSError as exc:
-        raise ValueError(f"knowledge directory {name} is unsafe during bootstrap: {exc}") from exc
-    try:
-        linked = os.stat(name, dir_fd=parent_fd, follow_symlinks=False)
-        opened = os.fstat(fd)
-        if not stat.S_ISDIR(linked.st_mode) or not stat.S_ISDIR(opened.st_mode):
-            raise ValueError(f"knowledge directory {name} must remain a directory")
-        if (linked.st_dev, linked.st_ino) != (opened.st_dev, opened.st_ino):
-            raise ValueError(f"knowledge directory {name} changed during bootstrap cleanup")
-        return fd
-    except Exception:
-        os.close(fd)
-        raise
-
-
-def _read_json_at(directory_fd: int, name: str) -> dict:
-    """Read one regular JSON entry relative to an already verified directory."""
-    nofollow = getattr(os, "O_NOFOLLOW", 0)
-    try:
-        fd = os.open(name, os.O_RDONLY | nofollow, dir_fd=directory_fd)
-    except OSError as exc:
-        raise ValueError(f"knowledge entry {name} is unsafe during bootstrap: {exc}") from exc
-    try:
-        metadata = os.fstat(fd)
-        if not stat.S_ISREG(metadata.st_mode):
-            raise ValueError(f"knowledge entry {name} must be a regular file")
-        with os.fdopen(fd, "r", encoding="utf-8") as handle:
-            fd = -1
-            value = json.load(handle)
-        if not isinstance(value, dict):
-            raise ValueError(f"knowledge entry {name} must be a JSON object")
-        return value
-    except json.JSONDecodeError:
-        raise
-    except OSError as exc:
-        raise ValueError(f"cannot read knowledge entry {name}: {exc}") from exc
+            file_fd = os.open(
+                relative.name,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                mode=0o644,
+                dir_fd=descriptors[-1],
+            )
+        except FileExistsError as exc:
+            raise FileExistsError(f"bootstrap refuses existing project file {path}") from exc
+        try:
+            with os.fdopen(file_fd, "w", encoding="utf-8") as handle:
+                json.dump(data, handle, indent=2)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+        except Exception:
+            os.unlink(relative.name, dir_fd=descriptors[-1])
+            raise
     finally:
-        if fd >= 0:
+        for fd in reversed(descriptors):
             os.close(fd)
 
 
-def _unlink_json_entries(directory_fd: int) -> None:
-    """Delete JSON directory entries without ever following their targets."""
-    try:
-        names = os.listdir(directory_fd)
-    except OSError as exc:
-        raise ValueError(f"cannot enumerate knowledge directory: {exc}") from exc
-    for name in names:
-        if not name.endswith(".json"):
-            continue
-        try:
-            metadata = os.stat(name, dir_fd=directory_fd, follow_symlinks=False)
-            if stat.S_ISDIR(metadata.st_mode):
-                raise ValueError(f"knowledge JSON entry cannot be a directory: {name}")
-            os.unlink(name, dir_fd=directory_fd)
-        except OSError as exc:
-            raise ValueError(f"cannot safely remove knowledge entry {name}: {exc}") from exc
+def scrub_runtime(target: Path, *, root_principal: str, root_actor: str = "human-owner") -> None:
+    """Reset project-specific runtime state in a fresh target."""
+    onecompany = target / ".onecompany"
+    write_json(onecompany / "state.json", INITIAL_STATE, target_root=target)
 
+    queue_path = onecompany / "queue.json"
+    queue = json.loads(queue_path.read_text(encoding="utf-8"))
+    queue["work_units"] = []
+    queue_path.unlink()
+    write_json(queue_path, queue, target_root=target)
 
-def _remove_tree_at(parent_fd: int, name: str) -> None:
-    """Recursively remove one directory tree through no-follow relative descriptors."""
-    directory_fd = _open_directory_at(parent_fd, name, create=False)
-    try:
-        for child in os.listdir(directory_fd):
-            metadata = os.stat(child, dir_fd=directory_fd, follow_symlinks=False)
-            if stat.S_ISDIR(metadata.st_mode):
-                _remove_tree_at(directory_fd, child)
-            else:
-                os.unlink(child, dir_fd=directory_fd)
-    except OSError as exc:
-        raise ValueError(f"cannot safely clear knowledge transaction state: {exc}") from exc
-    finally:
-        os.close(directory_fd)
-    try:
-        os.rmdir(name, dir_fd=parent_fd)
-    except OSError as exc:
-        raise ValueError(f"cannot safely remove knowledge transaction directory: {exc}") from exc
+    portfolio_path = onecompany / "portfolio.json"
+    portfolio = json.loads(portfolio_path.read_text(encoding="utf-8"))
+    portfolio["entities"] = []
+    portfolio["links"] = []
+    portfolio_path.unlink()
+    write_json(portfolio_path, portfolio, target_root=target)
 
+    catalog_path = onecompany / "requirements-catalog.json"
+    catalog = json.loads(catalog_path.read_text(encoding="utf-8"))
+    catalog["requirements"] = []
+    catalog_path.unlink()
+    write_json(catalog_path, catalog, target_root=target)
 
-def initialize_knowledge(target: Path) -> None:
-    """Keep only generic advisory lessons in a fresh installation."""
-    root = target / ".onecompany" / "knowledge"
-    try:
-        root_fd = _open_root_directory(root)
-    except FileNotFoundError:
-        return
-    try:
-        for state_name in ("candidate", "archived"):
-            directory_fd = _open_directory_at(root_fd, state_name, create=True)
-            try:
-                _unlink_json_entries(directory_fd)
-            finally:
-                os.close(directory_fd)
+    ledger_path = onecompany / "ledger.json"
+    ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
+    ledger.update({
+        "enabled": False,
+        "repository": None,
+        "branch": "l5/controller-ledger",
+        "path": ".l5/controller-ledger.json",
+        "issue_number": None,
+        "trusted_publisher_logins": [],
+    })
+    ledger_path.unlink()
+    write_json(ledger_path, ledger, target_root=target)
 
-        try:
-            transaction_metadata = os.stat(
-                ".transactions", dir_fd=root_fd, follow_symlinks=False
-            )
-        except FileNotFoundError:
-            transaction_metadata = None
-        if transaction_metadata is not None:
-            if not stat.S_ISDIR(transaction_metadata.st_mode):
-                raise ValueError("knowledge transaction state is unsafe during bootstrap")
-            _remove_tree_at(root_fd, ".transactions")
+    supervision_path = onecompany / "supervision.json"
+    supervision = json.loads(supervision_path.read_text(encoding="utf-8"))
+    supervision.update({"enabled": False, "mode": "observe_only"})
+    supervision["coordination"] = {
+        "team_room_issue_number": None,
+        "work_queue_path": ".onecompany/queue.json",
+        "state_path": ".onecompany/state.json",
+        "ledger_config_path": ".onecompany/ledger.json",
+    }
+    supervision["github_actions"] = {
+        "enabled": False,
+        "may_post_team_room": False,
+        "may_failover": False,
+        "may_merge": False,
+    }
+    supervision["chatgpt_tasks"] = {
+        "enabled": False,
+        "may_mutate": False,
+    }
+    supervision_path.unlink()
+    write_json(supervision_path, supervision, target_root=target)
 
-        current_fd = _open_directory_at(root_fd, "current", create=True)
-        try:
-            for name in os.listdir(current_fd):
-                if not name.endswith(".json"):
-                    continue
-                entry = _read_json_at(current_fd, name)
-                if entry.get("bootstrap_safe") is not True:
-                    try:
-                        os.unlink(name, dir_fd=current_fd)
-                    except OSError as exc:
-                        raise ValueError(
-                            f"cannot safely remove project-specific knowledge {name}: {exc}"
-                        ) from exc
-                    continue
-                if entry.get("authority") != "advisory_only" or entry.get("authority_effects") != []:
-                    raise ValueError(
-                        f"bootstrap-safe knowledge must remain advisory-only: {name}"
-                    )
-                _validate_bootstrap_knowledge_provenance(entry, Path(name))
-        finally:
-            os.close(current_fd)
-    finally:
-        os.close(root_fd)
+    handoffs_path = onecompany / "handoffs.json"
+    handoffs = json.loads(handoffs_path.read_text(encoding="utf-8"))
+    runtime = handoffs.setdefault("runtime", {})
+    runtime.update({
+        "current_autonomy_level": "L1",
+        "scheduled_chatgpt_mutation_allowed": False,
+        "automatic_failover_allowed": False,
+        "automatic_merge_allowed": False,
+        "continuous_next_work_allowed": False,
+    })
+    handoffs_path.unlink()
+    write_json(handoffs_path, handoffs, target_root=target)
 
+    actors_path = onecompany / "actors.json"
+    actors_doc = json.loads(actors_path.read_text(encoding="utf-8"))
+    for actor in actors_doc.get("actors", []):
+        is_root = actor.get("id") == root_actor
+        actor["configured"] = is_root
+        actor["enabled"] = is_root
+    actors_path.unlink()
+    write_json(actors_path, actors_doc, target_root=target)
 
-def initialize_contracts(target: Path) -> None:
-    source_dir = ROOT / ".onecompany" / "templates" / "contracts"
-    for source_name, target_name in CONTRACTS.items():
-        destination = target / target_name
-        if destination.exists():
-            print(f"KEEP existing project contract {target_name}")
-            continue
-        shutil.copy2(source_dir / source_name, destination)
-        print(f"INIT project contract {target_name}")
-
-
-def configure_codeowners(target: Path, owner: str) -> None:
-    path = target / ".github" / "CODEOWNERS"
-    if not path.exists():
-        raise FileNotFoundError("bootstrap copy did not contain .github/CODEOWNERS")
-    lines = []
-    protected_paths = 0
-    for line in path.read_text(encoding="utf-8").splitlines():
-        stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
-            lines.append(line)
-            continue
-        parts = stripped.split()
-        if not parts[0].startswith("/") or len(parts) < 2:
-            raise ValueError("unexpected source CODEOWNERS format during bootstrap")
-        lines.append(f"{parts[0]} {owner}")
-        protected_paths += 1
-    if protected_paths == 0:
-        raise ValueError("bootstrap requires protected CODEOWNERS paths")
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def configure_root_identity(target: Path, login: str) -> None:
-    path = target / ".onecompany" / "identity.json"
-    if not path.exists():
-        raise FileNotFoundError("bootstrap copy did not contain .onecompany/identity.json")
-    identity = json.loads(path.read_text(encoding="utf-8"))
-    principals = identity.get("principals", [])
-    roots = [
-        item
-        for item in principals
-        if isinstance(item, dict) and "root" in item.get("authorities", [])
-    ]
-    if len(roots) != 1:
-        raise ValueError(
-            "template identity policy must contain exactly one root principal before bootstrap"
-        )
-    root = roots[0]
-    if root.get("actor_id") != "human-owner":
-        raise ValueError("template root principal must map to actor_id human-owner")
-    root["login"] = login
-    identity["principals"] = [root]
-    write_json(path, identity)
-
-
-def initialize_control_plane(
-    target: Path,
-    project_name: str,
-    repository: str,
-    default_branch: str,
-) -> None:
-    config_path = target / ".onecompany" / "config.json"
-    config = json.loads(config_path.read_text(encoding="utf-8"))
-    config.setdefault("project", {})["name"] = project_name
-    config["project"]["repository"] = repository
-    config["project"]["default_branch"] = default_branch
-    config.setdefault("autonomy", {})["level"] = "L1"
-    config["autonomy"]["continue_when_ready_work_exists"] = False
-    config.setdefault("no_idle", {})["enabled"] = False
-    config.setdefault("safety", {})["emergency_stop"] = False
-    write_json(config_path, config)
-
-    readiness_path = target / ".onecompany" / "readiness.json"
+    readiness_path = onecompany / "readiness.json"
     readiness = json.loads(readiness_path.read_text(encoding="utf-8"))
     for actor in readiness.get("actors", []):
-        is_root = actor.get("actor_id") == "human-owner"
+        is_root = actor.get("actor_id") == root_actor
         actor["setup_state"] = "ready" if is_root else "not_started"
         actor["verified_surfaces"] = ["bootstrap-explicit-root-principal"] if is_root else []
         actor["verified_capabilities"] = ["repository_intelligence"] if is_root else []
-        actor["temporarily_unavailable_capabilities"] = []
         actor["repository_access"] = {
             "read": is_root,
             "write": False,
             "review": False,
             "merge": False,
         }
-        actor["unattended"] = {"configured": False, "verified": False}
-        actor["capacity"] = {
-            "implementation_streams": 0,
-            "measured": False,
-            "observed_at": None,
-            "evidence": [],
+        actor["unattended"] = {
+            "configured": False,
+            "verified": False,
+            "mechanism": None,
         }
-        actor["last_verified_at"] = None
-        actor["evidence"] = (
-            ["Explicit root principal selected during bootstrap; write/review/merge remain unverified"]
-            if is_root
-            else []
-        )
-    write_json(readiness_path, readiness)
+        actor["capacity"] = {"measured": False}
+    readiness_path.unlink()
+    write_json(readiness_path, readiness, target_root=target)
 
-    actors_path = target / ".onecompany" / "actors.json"
-    actors = json.loads(actors_path.read_text(encoding="utf-8"))
-    for actor in actors.get("actors", []):
-        is_root = actor.get("id") == "human-owner"
-        actor["enabled"] = is_root
-        actor["configured"] = is_root
-    write_json(actors_path, actors)
-
-    dispatch_path = target / ".onecompany" / "dispatch.json"
+    dispatch_path = onecompany / "dispatch.json"
     dispatch = json.loads(dispatch_path.read_text(encoding="utf-8"))
     for actor in dispatch.get("actors", []):
         for mechanism in actor.get("mechanisms", []):
-            mechanism["configured"] = (
-                actor.get("actor_id") == "human-owner"
-                and mechanism.get("kind") == "manual"
-            )
             mechanism["evidence"] = []
-            if actor.get("actor_id") == "human-owner" and mechanism.get("kind") == "manual":
-                # Only the bootstrap-selected human may perform this minimal
-                # read-only capability. No inherited write/review/merge proof.
-                mechanism["capabilities"] = ["repository_intelligence"]
-    write_json(dispatch_path, dispatch)
+            mechanism["configured"] = actor.get("actor_id") == root_actor and mechanism.get("kind") == "manual"
+    dispatch_path.unlink()
+    write_json(dispatch_path, dispatch, target_root=target)
 
-    ledger_path = target / ".onecompany" / "ledger.json"
-    ledger = json.loads(ledger_path.read_text(encoding="utf-8"))
-    ledger["enabled"] = False
-    ledger["issue_number"] = None
-    ledger["trusted_publisher_logins"] = []
-    write_json(ledger_path, ledger)
-
-    supervision_path = target / ".onecompany" / "supervision.json"
-    supervision = json.loads(supervision_path.read_text(encoding="utf-8"))
-    supervision["enabled"] = False
-    supervision["mode"] = "observe_only"
-    supervision.setdefault("coordination", {})["team_room_issue_number"] = None
-    github_actions = supervision.setdefault("github_actions", {})
-    github_actions["enabled"] = False
-    github_actions["may_post_team_room"] = False
-    github_actions["may_failover"] = False
-    github_actions["may_merge"] = False
-    chatgpt_tasks = supervision.setdefault("chatgpt_tasks", {})
-    chatgpt_tasks["enabled"] = False
-    chatgpt_tasks["may_mutate"] = False
-    write_json(supervision_path, supervision)
-
-    # The source repository may operate at a higher autonomy level than a
-    # freshly bootstrapped target. Candidate/source handoff runtime claims must
-    # never leak authority into a new company whose config is deliberately
-    # reset to L1.
-    handoffs_path = target / ".onecompany" / "handoffs.json"
-    handoffs = json.loads(handoffs_path.read_text(encoding="utf-8"))
-    runtime = handoffs.setdefault("runtime", {})
-    runtime["current_autonomy_level"] = "L1"
-    runtime["github_actions_behavior"] = "reconcile_and_notify_only"
-    runtime["github_actions_mutation_allowed"] = False
-    runtime["scheduled_chatgpt_mutation_allowed"] = False
-    runtime["automatic_failover_allowed"] = False
-    runtime["automatic_merge_allowed"] = False
-    runtime["continuous_next_work_allowed"] = False
-    write_json(handoffs_path, handoffs)
-
-    write_json(target / ".onecompany" / "queue.json", {"$schema": "./schemas/queue.schema.json", "schema_version": "1.1", "work_units": []})
-    write_json(target / ".onecompany" / "portfolio.json", {"$schema": "./schemas/portfolio.schema.json", "schema_version": "1.0", "entities": [], "links": []})
-    write_json(target / ".onecompany" / "requirements-catalog.json", {"$schema": "./schemas/requirements-catalog.schema.json", "schema_version": "1.0", "requirements": [], "acceptance_criteria": []})
-    write_json(target / ".onecompany" / "risk-register.json", {"$schema": "./schemas/risk-register.schema.json", "schema_version": "1.0", "risks": []})
-    write_json(target / ".onecompany" / "state.json", INITIAL_STATE)
+    identity_path = onecompany / "identity.json"
+    identity = json.loads(identity_path.read_text(encoding="utf-8"))
+    identity["principals"] = [{"login": root_principal, "authorities": ["root"]}]
+    identity_path.unlink()
+    write_json(identity_path, identity, target_root=target)
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--target", required=True)
-    parser.add_argument("--repository")
-    parser.add_argument("--project-name")
-    parser.add_argument("--default-branch")
-    parser.add_argument("--code-owner")
-    parser.add_argument("--root-principal")
-    parser.add_argument("--initialize-contracts", action="store_true")
-    args = parser.parse_args()
+def initialize_knowledge(target: Path) -> None:
+    """Retain only safe generic lessons when bootstrapping a new company."""
+    knowledge_dir = target / ".onecompany" / "knowledge"
+    if not knowledge_dir.exists():
+        return
+    for path in sorted(knowledge_dir.glob("*.json")):
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        entries = doc.get("entries") if isinstance(doc, dict) else None
+        if not isinstance(entries, list):
+            path.unlink()
+            continue
+        safe_entries = []
+        for entry in entries:
+            if not isinstance(entry, dict) or entry.get("bootstrap_safe") is not True:
+                continue
+            _validate_bootstrap_knowledge_provenance(entry, path)
+            sanitized = dict(entry)
+            sanitized["status"] = "candidate"
+            sanitized["source"] = "bootstrap_safe_generic_lesson"
+            sanitized["reviewed_by"] = None
+            sanitized["validated_at"] = None
+            safe_entries.append(sanitized)
+        doc["entries"] = safe_entries
+        path.unlink()
+        write_json(path, doc, target_root=target)
 
-    target = Path(args.target).resolve()
-    if (target / ".onecompany").exists():
-        raise FileExistsError("target already contains .onecompany; bootstrap is install-only")
-    repository = args.repository or infer_github_repo(target)
-    if not repository:
-        raise ValueError("--repository is required when GitHub origin cannot be inferred")
-    project_name = args.project_name or repository.split("/", 1)[-1]
-    default_branch = args.default_branch or infer_default_branch(target)
-    code_owner, root_principal = resolve_install_principals(
-        repository=repository,
-        code_owner=args.code_owner,
-        root_principal=args.root_principal,
-    )
+
+def _contains_disallowed_provenance_value(value: object, *, field: str) -> bool:
+    if not isinstance(value, str):
+        return True
+    lower = value.lower()
+    if "github.com/" in lower or re.search(r"\b[0-9a-f]{40}\b", lower):
+        return True
+    if field in {"source_issue", "source_pr"} and value not in {"", "none", "n/a"}:
+        return True
+    return False
+
+
+def _allowed_bootstrap_evidence_ref(ref: object) -> bool:
+    return isinstance(ref, str) and ref.startswith(("repo:", "fixture:"))
+
+
+def _validate_bootstrap_knowledge_provenance(entry: dict, path: Path) -> None:
+    """Reject project identities, commits, URLs, or validation refs from reusable lessons."""
+    source_evidence = entry.get("source_evidence", {})
+    validation = entry.get("validation", {})
+    if not isinstance(source_evidence, dict) or not isinstance(validation, dict):
+        raise ValueError(f"unsafe bootstrap-safe knowledge provenance in {path.name}")
+    for field in ("source_issue", "source_pr", "source_commit", "source_url"):
+        value = source_evidence.get(field, "")
+        if _contains_disallowed_provenance_value(value, field=field):
+            raise ValueError(f"unsafe bootstrap-safe knowledge field {field} in {path.name}")
+    refs = validation.get("evidence_refs", [])
+    if not isinstance(refs, list) or any(not _allowed_bootstrap_evidence_ref(ref) for ref in refs):
+        raise ValueError(f"unsafe bootstrap-safe knowledge evidence refs in {path.name}")
+
+
+def bootstrap(
+    target: Path,
+    *,
+    repository: str | None = None,
+    project_name: str | None = None,
+    default_branch: str | None = None,
+    code_owner: str | None = None,
+    root_principal: str | None = None,
+    initialize_contracts: bool = False,
+    force: bool = False,
+) -> None:
+    """Install a fresh, source-neutral OneCompany control plane."""
+    if force:
+        raise ValueError("bootstrap --force is disabled; use docs/UPGRADING.md for existing installations")
+    if not target.exists() or not target.is_dir() or target.is_symlink():
+        raise ValueError("bootstrap target must be an existing non-symlink directory")
+    if (target / ".onecompany").exists() or (target / ".onecompany").is_symlink():
+        raise ValueError("target already contains .onecompany; use the upgrade path instead")
+
+    repo = repository or infer_github_repo(target)
+    branch = default_branch or infer_default_branch(target)
+    name = project_name or target.name
+    owner = code_owner or "@replace-me"
+    if not root_principal:
+        raise ValueError("bootstrap requires --root-principal for an explicit human root identity")
 
     preflight_copy_paths(target)
     for item in COPY_PATHS:
         source = ROOT / item
         if source.exists():
             copy_item(source, target / item, False, target)
-    configure_codeowners(target, code_owner)
-    configure_root_identity(target, root_principal)
-    initialize_control_plane(target, project_name, repository, default_branch)
+
+    config_path = target / ".onecompany" / "config.json"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["project"].update({
+        "name": name,
+        "repository": repo or "owner/repository",
+        "default_branch": branch,
+    })
+    config["policy"]["base_branch"] = branch
+    config_path.unlink()
+    write_json(config_path, config, target_root=target)
+
+    codeowners_path = target / ".github" / "CODEOWNERS"
+    lines = []
+    for raw in codeowners_path.read_text(encoding="utf-8").splitlines():
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            lines.append(raw)
+            continue
+        path_part = stripped.split(maxsplit=1)[0]
+        lines.append(f"{path_part} {owner}")
+    codeowners_path.unlink()
+    descriptors = [_open_root_directory(target)]
+    try:
+        descriptors.append(_open_directory_at(descriptors[-1], ".github", create=False))
+        file_fd = os.open("CODEOWNERS", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                          mode=0o644, dir_fd=descriptors[-1])
+        with os.fdopen(file_fd, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+    finally:
+        for fd in reversed(descriptors):
+            os.close(fd)
+
+    principals = resolve_install_principals(root_principal)
+    scrub_runtime(target, root_principal=principals["root_login"], root_actor=principals["root_actor"])
     initialize_knowledge(target)
-    if args.initialize_contracts:
-        initialize_contracts(target)
-    print(f"OneCompany bootstrapped into {target}")
+
+    if initialize_contracts:
+        template_dir = target / ".onecompany" / "templates"
+        for template, destination in CONTRACTS.items():
+            destination_path = target / destination
+            if destination_path.exists() or destination_path.is_symlink():
+                continue
+            copy_item(template_dir / template, destination_path, False, target)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Bootstrap OneCompany into a fresh repository")
+    parser.add_argument("--target", required=True)
+    parser.add_argument("--repository")
+    parser.add_argument("--project-name")
+    parser.add_argument("--default-branch")
+    parser.add_argument("--code-owner")
+    parser.add_argument("--root-principal", required=True)
+    parser.add_argument("--initialize-contracts", action="store_true")
+    parser.add_argument("--force", action="store_true", help="rejected; upgrades use docs/UPGRADING.md")
+    args = parser.parse_args()
+    bootstrap(
+        Path(args.target).resolve(),
+        repository=args.repository,
+        project_name=args.project_name,
+        default_branch=args.default_branch,
+        code_owner=args.code_owner,
+        root_principal=args.root_principal,
+        initialize_contracts=args.initialize_contracts,
+        force=args.force,
+    )
     return 0
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())

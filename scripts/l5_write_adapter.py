@@ -127,9 +127,8 @@ class MemoryStore:
         if count is not None: self.retry[stream] = (count, action)
         return True
     def fail_and_restore(self, token: str, detail: Any, stream: str, prior_retry: tuple[int, str | None] | None) -> None:
-        row = self.records[token]; row["detail"] = detail
-        if prior_retry is None: row["status"] = "FAILED"; return
-        row["status"] = "RETRYABLE"
+        row = self.records[token]; row["detail"] = detail; row["status"] = "RETRYABLE"
+        if prior_retry is None: return
         written = row.get("retry_written")
         if not isinstance(written, list) or len(written) != 2: return
         if self.retry.get(stream, (0, None)) != (written[0], written[1]): return

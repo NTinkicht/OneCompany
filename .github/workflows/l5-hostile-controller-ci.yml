@@ -2,17 +2,17 @@ name: L5 Hostile Controller Candidate CI
 on:
   pull_request:
     paths:
-      - "scripts/l5_kernel.py"
-      - "scripts/l5_ledger.py"
-      - "scripts/l5_ledger_store.py"
-      - "scripts/l5_controller.py"
-      - "scripts/l5_hostile_sim.py"
-      - "tests/test_l5_kernel.py"
-      - "tests/test_l5_ledger.py"
-      - "tests/test_l5_ledger_store.py"
-      - "tests/test_l5_controller.py"
-      - "docs/L5-STATE-MACHINE-V1.md"
-      - ".github/workflows/l5-hostile-controller-ci.yml"
+      - scripts/l5_kernel.py
+      - scripts/l5_ledger.py
+      - scripts/l5_ledger_store.py
+      - scripts/l5_controller.py
+      - scripts/l5_hostile_sim.py
+      - tests/test_l5_kernel.py
+      - tests/test_l5_ledger.py
+      - tests/test_l5_ledger_store.py
+      - tests/test_l5_controller.py
+      - docs/L5-STATE-MACHINE-V1.md
+      - .github/workflows/l5-hostile-controller-ci.yml
 permissions:
   contents: read
 jobs:

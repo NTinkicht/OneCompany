@@ -11,6 +11,13 @@ import l5_activation as act
 import l5_trust_boundary as tb
 import l5_write_adapter as wa
 
+# This acceptance test validates the OneCompany source repository's pinned L5
+# reviewer/credential trust policy. Fresh bootstrap targets intentionally do
+# not inherit that source authority; in those targets the production gate
+# remains fail-closed until a target-specific policy is established.
+if not (ROOT / ".l5" / "trust-policy.json").exists():
+    raise unittest.SkipTest("source L5 trust policy is not installed in this fresh target")
+
 
 def _credential_boundary():
     return {

@@ -219,4 +219,12 @@ def run(*, rounds: int = 1000, seed: int = 20261001) -> dict[str, int]:
 
 
 if __name__ == "__main__":
-    print(run())
+    import argparse
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--rounds", type=int, default=1000)
+    parser.add_argument("--seed", type=int, default=20261001)
+    args = parser.parse_args()
+    if args.rounds < 1:
+        parser.error("--rounds must be >= 1")
+    print(run(rounds=args.rounds, seed=args.seed))

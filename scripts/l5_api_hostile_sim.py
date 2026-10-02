@@ -1,8 +1,8 @@
 """API-level hostile scheduler for L5 post-Claude certification.
 
 This module intentionally models only the concurrency/fault boundary needed by
-A1-A12.  It is deterministic for a seed, but each trace varies object values,
-actor order and selected fault placement.  Safety is asserted after every
+A1-A12. It is deterministic for a seed, but each trace varies object values,
+actor order and selected fault placement. Safety is asserted after every
 trace; no GitHub or network writes occur here.
 """
 from __future__ import annotations
@@ -115,88 +115,83 @@ def scenario(sid: int, rng: random.Random) -> None:
     head = _sha(rng, "a")
     base = _sha(rng, "b")
     state = SimState(head=head, base=base)
-
-    # Reads happen at calls 1 (initial observation) and 2 (final reconcile).
-    # Slot 3 deliberately represents a no-op placement so traces cover both
-    # faulted and clean schedules without pretending call 1 can be stale.
     stale_slot = rng.choice([2, 2, 3])
     partial_slot = rng.choice([1, 2])
     actor_order = ["A", "B"]
     rng.shuffle(actor_order)
 
-    if sid == 1:  # zombie merger: pause, reclaim, hold/freeze, resume
+    if sid == 1:
         api = SimAPI(state, FaultPlan(stale_reads=frozenset({stale_slot})))
         observed = api.read()
         api.external_change(hold=True, epoch=state.epoch + rng.randint(1, 3))
         result = final_merge(api, observed, int(observed.get("epoch", 1)))
         assert result["status"] == "BLOCKED" and not state.merged
-    elif sid == 2:  # dropped merge response after apply: read back, never merge twice
+    elif sid == 2:
         api = SimAPI(state, FaultPlan(drop_after_apply=frozenset({"merge"})))
         observed = api.read()
         result = final_merge(api, observed, state.epoch)
         assert result["status"] == "UNKNOWN" and state.merged
         readback = api.read()
         assert readback.get("merged") is True and state.merge_calls == 1
-    elif sid == 3:  # dropped push response after apply: read same remote object
+    elif sid == 3:
         api = SimAPI(state, FaultPlan(drop_after_apply=frozenset({"push"})))
         observed = api.read()
         new_head = _sha(rng, "c")
         result = api.push(str(observed["head"]), new_head, state.epoch)
         assert result["status"] == "UNKNOWN"
         assert api.read().get("head") == new_head and state.mutation_count == 1
-    elif sid == 4:  # stale read after base advance cannot authorize merge
+    elif sid == 4:
         api = SimAPI(state, FaultPlan(stale_reads=frozenset({2})))
         observed = api.read()
         state.external_marker = rng.random()
         api.external_change(base=_sha(rng, "d"))
         result = final_merge(api, observed, state.epoch)
         assert result["status"] == "BLOCKED" and not state.merged
-    elif sid == 5:  # review revoked between initial and final read
+    elif sid == 5:
         api = SimAPI(state, FaultPlan(stale_reads=frozenset({stale_slot})))
         observed = api.read()
         api.external_change(review_ok=False)
         result = final_merge(api, observed, state.epoch)
         assert result["status"] == "BLOCKED" and not state.merged
-    elif sid == 6:  # governance weakens before merge
+    elif sid == 6:
         api = SimAPI(state, FaultPlan())
         observed = api.read()
         api.external_change(rules_ok=False)
         result = final_merge(api, observed, state.epoch)
         assert result["status"] == "BLOCKED" and not state.merged
-    elif sid == 7:  # duplicate pushes: one CAS winner despite actor order
+    elif sid == 7:
         api = SimAPI(state, FaultPlan())
         observed = api.read()
         results = []
         for actor in actor_order:
             results.append(api.push(str(observed["head"]), _sha(rng, actor.lower()), state.epoch))
         assert sum(result["status"] == "COMPLETE" for result in results) == 1
-    elif sid == 8:  # duplicate mergers: one repository-lock winner
+    elif sid == 8:
         api = SimAPI(state, FaultPlan())
         observed = api.read()
         results = [final_merge(api, observed, state.epoch) for _actor in actor_order]
         assert sum(result["status"] == "COMPLETE" for result in results) == 1
         assert state.mutation_count == 1
-    elif sid == 9:  # partial evidence fails closed at randomized read position
-        faults = FaultPlan(partial_reads=frozenset({partial_slot}))
-        api = SimAPI(state, faults)
+    elif sid == 9:
+        api = SimAPI(state, FaultPlan(partial_reads=frozenset({partial_slot})))
         observed = api.read()
         result = final_merge(api, observed, state.epoch)
         assert result["status"] == "BLOCKED" and not state.merged
-    elif sid == 10:  # stale holder after lease epoch reclaim cannot push
+    elif sid == 10:
         api = SimAPI(state, FaultPlan())
         observed = api.read()
         old_epoch = state.epoch
         api.external_change(epoch=old_epoch + rng.randint(1, 4))
         result = api.push(str(observed["head"]), _sha(rng, "e"), old_epoch)
         assert result["status"] == "BLOCKED" and state.mutation_count == 0
-    elif sid == 11:  # exact-head ABA with review invalidation must fail on review evidence
+    elif sid == 11:
         api = SimAPI(state, FaultPlan())
         observed = api.read()
         api.external_change(head=_sha(rng, "f"), review_ok=False)
         api.external_change(head=head)
         result = final_merge(api, observed, state.epoch)
         assert result["status"] == "BLOCKED" and not state.merged
-    elif sid == 12:  # main/base moves while worker is paused
+    elif sid == 12:
         api = SimAPI(state, FaultPlan())
         observed = api.read()
         api.external_change(base=_sha(rng, "9"), epoch=state.epoch + 1)
@@ -216,6 +211,11 @@ def run(*, rounds: int = 1000, seed: int = 20261001) -> dict[str, int]:
             scenario(sid, rng)
             traces += 1
     return {"rounds": rounds, "scenarios": 12, "traces": traces, "seed": seed}
+
+
+# Compatibility name used by the certification unit suite. Keep the canonical
+# implementation in run() so CLI and tests exercise the same simulator.
+run_simulation = run
 
 
 if __name__ == "__main__":

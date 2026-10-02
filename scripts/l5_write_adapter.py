@@ -93,21 +93,39 @@ def _reconcile(auth: dict[str, Any], client: Any, store: Any, *, written: bool) 
     return {"status": "IN_PROGRESS", "reason": "EFFECT_NOT_YET_VERIFIED", "mutation_token": token, "written": written}
 
 
-def _reproduce(auth: dict[str, Any], snapshot: dict[str, Any], *, recovery: bool) -> bool:
-    """Reproduce authorization, bypassing only admission policy for read-only recovery."""
+def _reproduce(auth: dict[str, Any], snapshot: dict[str, Any]) -> bool:
+    """Reproduce current authorization before admitting any new write."""
     try:
-        reproduced = authorize_mutation(snapshot, enforce_control_plane=not recovery)
+        reproduced = authorize_mutation(snapshot, enforce_control_plane=True)
     except ValueError:
         return False
     return reproduced == auth
+
+
+def _persisted_record_matches(auth: dict[str, Any], record: dict[str, Any]) -> bool:
+    """Validate immutable authorization details stored before a write attempt.
+
+    This deliberately does not consult current trust policy. A PENDING token may
+    represent an already-applied remote effect whose response was lost; recovery
+    must be able to observe that effect after policy changes without authorizing
+    any new mutation.
+    """
+    return (
+        isinstance(record, dict)
+        and record.get("mutation") == auth.get("mutation")
+        and record.get("canonical_pr") == auth.get("canonical_pr")
+        and record.get("expected_head_sha") == auth.get("expected_head_sha")
+        and record.get("expected_base_sha") == auth.get("expected_base_sha")
+    )
 
 
 def execute_mutation(auth: dict[str, Any], snapshot: dict[str, Any], client: Any, store: Any) -> dict[str, Any]:
     """Execute or reconcile exactly one guarded mutation.
 
     PENDING/COMPLETE records are reconciled before current admission policy is
-    consulted so a later shutdown cannot strand an ambiguous remote outcome.
-    No new write is possible on that recovery-only path.
+    consulted so a later shutdown or trust-policy change cannot strand an
+    ambiguous remote outcome. No new write is possible on that recovery-only
+    path; current authorization remains mandatory for every new mutation.
     """
     token = auth.get("mutation_token") if isinstance(auth, dict) else None
     if not isinstance(auth, dict) or auth.get("authorized") is not True or auth.get("mutation_allowed") is not True:
@@ -120,7 +138,7 @@ def execute_mutation(auth: dict[str, Any], snapshot: dict[str, Any], client: Any
     if prior:
         status = prior.get("status")
         if status in {"COMPLETE", "PENDING"}:
-            if not _reproduce(auth, snapshot, recovery=True):
+            if not _persisted_record_matches(auth, prior):
                 return _blocked("AUTHORIZATION_MISMATCH", token)
             if status == "COMPLETE":
                 return {"status": "REPLAY_NOOP", "reason": "ALREADY_COMPLETE", "mutation_token": token, "written": False}
@@ -128,7 +146,7 @@ def execute_mutation(auth: dict[str, Any], snapshot: dict[str, Any], client: Any
         if status != "RETRYABLE":
             return _blocked(f"PRIOR_{status}", token)
 
-    if not _reproduce(auth, snapshot, recovery=False):
+    if not _reproduce(auth, snapshot):
         return _blocked("AUTHORIZATION_MISMATCH", token)
 
     observed_retry = store.retry_state(stream) if auth["mutation"] in RETRYABLE_MUTATIONS else None
@@ -188,41 +206,21 @@ class MemoryStore:
         existing = self.records.get(token)
         if existing is not None and existing.get("status") != "RETRYABLE":
             return False
-        if expected_retry is not None and self.retry.get(stream, (0, None)) != expected_retry:
-            return False
-        if expected_owner is not _UNSET and self.retry_owners.get(stream) != expected_owner:
-            return False
-        row = dict(record)
-        if expected_retry is not None:
-            row["retry_before"] = list(expected_retry)
         if count is not None:
-            row["retry_written"] = [count, action]
-        self.records[token] = row
-        if count is not None:
+            current = self.retry.get(stream, (0, None))
+            if expected_retry is not None and current != expected_retry:
+                return False
+            current_owner = self.retry_owners.get(stream)
+            if expected_owner is not _UNSET and current_owner != expected_owner:
+                return False
             self.retry[stream] = (count, action)
             self.retry_owners[stream] = token
+        self.records[token] = dict(record)
         return True
 
-    def fail_and_restore(self, token: str, detail: Any, stream: str, prior_retry: tuple[int, str | None] | None) -> None:
-        row = self.records[token]
-        row["status"] = "RETRYABLE"
-        row["detail"] = detail
-        if prior_retry is None:
-            return
-        written = row.get("retry_written")
-        if not isinstance(written, list) or len(written) != 2:
-            return
-        if self.retry.get(stream, (0, None)) != (written[0], written[1]) or self.retry_owners.get(stream) != token:
-            return
-        if prior_retry == (0, None):
-            self.retry.pop(stream, None)
-        else:
-            self.retry[stream] = prior_retry
-        # Keep this token as the monotonic owner/version tag; an older attempt can no longer win an ABA race.
-
-    def set_status(self, token: str, status: str, detail: Any = None) -> None:
-        self.records[token]["status"] = status
-        self.records[token]["detail"] = detail
+    def set_status(self, token: str, status: str) -> None:
+        if token in self.records:
+            self.records[token]["status"] = status
 
     def retry_state(self, stream: str) -> tuple[int, str | None]:
         return self.retry.get(stream, (0, None))
@@ -230,57 +228,82 @@ class MemoryStore:
     def retry_owner(self, stream: str) -> str | None:
         return self.retry_owners.get(stream)
 
+    def fail_and_restore(self, token: str, reason: str, stream: str, prior_retry: tuple[int, str | None] | None) -> None:
+        record = self.records.get(token)
+        if record is not None:
+            record["status"] = "RETRYABLE"
+            record["reason"] = reason
+        if prior_retry is not None and self.retry_owners.get(stream) == token:
+            self.retry[stream] = prior_retry
+            self.retry_owners.pop(stream, None)
 
-class JsonFileStore(MemoryStore):
-    """Crash-safe process-shared token/retry store guarded by flock."""
 
-    def __init__(self, path: Path) -> None:
-        super().__init__(); self.path = Path(path)
+class FileStore(MemoryStore):
+    """Small durable JSON store. Writes are fsync+replace under an exclusive lock."""
 
-    def _locked(self, fn: Any) -> Any:
+    def __init__(self, path: str | Path):
+        super().__init__()
+        self.path = Path(path)
+        self.lock_path = self.path.with_suffix(self.path.suffix + ".lock")
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        with open(str(self.path) + ".lock", "w", encoding="utf-8") as lock:
-            fcntl.flock(lock, fcntl.LOCK_EX)
-            if self.path.exists():
-                data = json.loads(self.path.read_text(encoding="utf-8"))
-                self.records = data["records"]
-                self.retry = {k: (v[0], v[1]) for k, v in data["retry"].items()}
-                self.retry_owners = dict(data.get("retry_owners", {}))
-            else:
-                self.records, self.retry, self.retry_owners = {}, {}, {}
-            out = fn()
-            tmp = self.path.with_suffix(".tmp")
-            payload = json.dumps({
-                "records": self.records,
-                "retry": {k: list(v) for k, v in self.retry.items()},
-                "retry_owners": self.retry_owners,
-            }, sort_keys=True)
-            with open(tmp, "w", encoding="utf-8") as fh:
-                fh.write(payload); fh.flush(); os.fsync(fh.fileno())
-            os.replace(tmp, self.path)
-            dir_fd = os.open(self.path.parent, os.O_RDONLY)
-            try: os.fsync(dir_fd)
-            finally: os.close(dir_fd)
-            return out
+        if self.path.exists():
+            data = json.loads(self.path.read_text())
+            self.records = data.get("records", {})
+            self.retry = {k: tuple(v) for k, v in data.get("retry", {}).items()}
+            self.retry_owners = data.get("retry_owners", {})
+
+    def _flush(self) -> None:
+        tmp = self.path.with_suffix(self.path.suffix + f".{os.getpid()}.tmp")
+        with tmp.open("w") as fh:
+            json.dump({"records": self.records, "retry": self.retry, "retry_owners": self.retry_owners}, fh, sort_keys=True)
+            fh.flush(); os.fsync(fh.fileno())
+        os.replace(tmp, self.path)
+        dir_fd = os.open(str(self.path.parent), os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+
+    def begin(self, *args, **kwargs) -> bool:
+        with self._lock():
+            self._reload()
+            ok = super().begin(*args, **kwargs)
+            if ok: self._flush()
+            return ok
+
+    def set_status(self, token: str, status: str) -> None:
+        with self._lock():
+            self._reload(); super().set_status(token, status); self._flush()
+
+    def fail_and_restore(self, token: str, reason: str, stream: str, prior_retry: tuple[int, str | None] | None) -> None:
+        with self._lock():
+            self._reload(); super().fail_and_restore(token, reason, stream, prior_retry); self._flush()
 
     def get(self, token: str) -> dict[str, Any] | None:
-        return self._locked(lambda: MemoryStore.get(self, token))
-
-    def begin(self, token: str, record: dict[str, Any], stream: str, count: int | None, action: str | None,
-              *, expected_retry: tuple[int, str | None] | None = None, expected_owner: Any = _UNSET) -> bool:
-        return self._locked(lambda: MemoryStore.begin(
-            self, token, record, stream, count, action,
-            expected_retry=expected_retry, expected_owner=expected_owner,
-        ))
-
-    def fail_and_restore(self, token: str, detail: Any, stream: str, prior_retry: tuple[int, str | None] | None) -> None:
-        self._locked(lambda: MemoryStore.fail_and_restore(self, token, detail, stream, prior_retry))
-
-    def set_status(self, token: str, status: str, detail: Any = None) -> None:
-        self._locked(lambda: MemoryStore.set_status(self, token, status, detail))
+        with self._lock():
+            self._reload(); return super().get(token)
 
     def retry_state(self, stream: str) -> tuple[int, str | None]:
-        return self._locked(lambda: MemoryStore.retry_state(self, stream))
+        with self._lock():
+            self._reload(); return super().retry_state(stream)
 
     def retry_owner(self, stream: str) -> str | None:
-        return self._locked(lambda: MemoryStore.retry_owner(self, stream))
+        with self._lock():
+            self._reload(); return super().retry_owner(stream)
+
+    def _reload(self) -> None:
+        if self.path.exists():
+            data = json.loads(self.path.read_text())
+            self.records = data.get("records", {})
+            self.retry = {k: tuple(v) for k, v in data.get("retry", {}).items()}
+            self.retry_owners = data.get("retry_owners", {})
+
+    def _lock(self):
+        self.lock_path.touch(exist_ok=True)
+        fh = self.lock_path.open("r+")
+        class _Lock:
+            def __enter__(self_nonlocal):
+                fcntl.flock(fh.fileno(), fcntl.LOCK_EX); return fh
+            def __exit__(self_nonlocal, *_):
+                fcntl.flock(fh.fileno(), fcntl.LOCK_UN); fh.close()
+        return _Lock()

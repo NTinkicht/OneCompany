@@ -42,7 +42,8 @@ def check_liveness(
         item = str(event.get("item_id") or "repo")
         key = (repo, item)
         status = event.get("status")
-        if status not in TERMINAL_RUN_STATUSES:
+        status_valid = isinstance(status, str) and status in TERMINAL_RUN_STATUSES
+        if not status_valid:
             failures.append("RUN_NOT_TERMINAL")
 
         budget = event.get("budget")
@@ -63,16 +64,19 @@ def check_liveness(
         if event.get("stable_cycle") is True and writes != 0 and event.get("external_changes") is not True:
             failures.append("IDLE_NOT_QUIESCENT")
 
+        # Reason text is diagnostic, not progress evidence. A controller that
+        # repeatedly changes prose while state/head/base remain fixed is still
+        # stagnant and must eventually trip the bounded-liveness guard.
         fingerprint = json.dumps(
-            [event.get("state"), event.get("reason"), event.get("head"), event.get("base")],
+            [event.get("state"), event.get("head"), event.get("base")],
             sort_keys=True,
         )
         reason = str(event.get("reason") or "")
-        named_wait = status == "WAIT" and (
+        named_wait = status_valid and status == "WAIT" and (
             any(reason.startswith(prefix) for prefix in NAMED_WAIT_PREFIXES)
             or reason in {"LEASE_BUSY", "MERGED_UNVERIFIED"}
         )
-        if status in {"COMPLETE", "FAILED", "IDLE"} or event.get("state") == "PARKED" or named_wait:
+        if status_valid and (status in {"COMPLETE", "FAILED", "IDLE"} or event.get("state") == "PARKED" or named_wait):
             stagnant[key] = 0
         elif last_fingerprint.get(key) == fingerprint:
             stagnant[key] = stagnant.get(key, 0) + 1

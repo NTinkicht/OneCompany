@@ -51,7 +51,10 @@ def check_liveness(
             failures.append("BUDGET_EVIDENCE_INVALID")
         else:
             for name, limit in LIMITS.items():
-                value = budget.get(name, 0)
+                if name not in budget:
+                    failures.append(f"BUDGET_MISSING_{name.upper()}")
+                    continue
+                value = budget[name]
                 if type(value) is not int or value < 0 or value > limit:
                     failures.append(f"BUDGET_INVALID_{name.upper()}")
 

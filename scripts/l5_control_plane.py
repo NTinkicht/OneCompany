@@ -40,7 +40,11 @@ def load_manifest(path: Path | None = None) -> Mapping[str, Any]:
     if value.get("control_repository") != "NTinkicht/OneCompany":
         raise ValueError("CONTROL_PLANE_REPOSITORY_INVALID")
     requirements = value.get("activation_requirements")
-    if not isinstance(requirements, list) or set(requirements) != REQUIRED_ACTIVATION:
+    if (
+        not isinstance(requirements, list)
+        or not all(isinstance(requirement, str) for requirement in requirements)
+        or set(requirements) != REQUIRED_ACTIVATION
+    ):
         raise ValueError("CONTROL_PLANE_REQUIREMENTS_INVALID")
     return value
 

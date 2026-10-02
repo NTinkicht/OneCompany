@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0",
+  "control_repository": "NTinkicht/OneCompany",
+  "control_ref": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "execution_mode": "ACTIVE",
+  "platform_enforcement": "VERIFIED",
+  "mutation_allowed": true,
+  "managed_repositories": [
+    "NTinkicht/OneCompany",
+    "NTinkicht/Tabibi",
+    "NTinkicht/veritas-atlas"
+  ],
+  "activation_requirements": [
+    "trust_boundary_verified",
+    "api_hostile_simulation_green",
+    "shadow_liveness_validated",
+    "platform_enforcement_verified_on_all_repositories",
+    "governance_drift_human_cleared"
+  ],
+  "activation_evidence": {
+    "trust_boundary_verified": true,
+    "api_hostile_simulation_green": true,
+    "shadow_liveness_validated": true,
+    "platform_enforcement_verified_on_all_repositories": true,
+    "governance_drift_human_cleared": true
+  }
+}

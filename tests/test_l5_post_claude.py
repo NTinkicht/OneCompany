@@ -2,6 +2,7 @@
 import json
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -9,6 +10,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from l5_kernel import Budget
 from l5_api_hostile_sim import run as run_api_hostile_sim
+from l5_control_plane import mutation_policy
 from l5_liveness import check_liveness
 from l5_shadow import shadow_evaluate
 from l5_trust_boundary import (
@@ -122,6 +124,24 @@ class TrustBoundaryTests(unittest.TestCase):
         self.assertFalse(trust_boundary_ok(evidence, policy=policy, head_sha=H, base_sha=B, material_authors=["chatgpt"])[0])
 
 
+class ControlPlaneTests(unittest.TestCase):
+    def test_malformed_requirement_item_fails_closed(self):
+        manifest = json.loads((ROOT / ".l5" / "control-plane.json").read_text())
+        manifest["activation_requirements"] = [
+            "trust_boundary_verified",
+            "api_hostile_simulation_green",
+            "shadow_liveness_validated",
+            "platform_enforcement_verified_on_all_repositories",
+            {"malformed": True},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "control-plane.json"
+            path.write_text(json.dumps(manifest), encoding="utf-8")
+            allowed, reason = mutation_policy("retry_ci", path)
+        self.assertFalse(allowed)
+        self.assertEqual(reason, "CONTROL_PLANE_REQUIREMENTS_INVALID")
+
+
 class ShadowModeTests(unittest.TestCase):
     def test_shadow_is_read_only_and_platform_gate_is_deferred(self):
         result = shadow_evaluate(shadow_repo(), {"no_actionable_work": True}, budget=Budget())
@@ -166,6 +186,13 @@ class LivenessTests(unittest.TestCase):
         ok, failures = check_liveness(events)
         self.assertFalse(ok)
         self.assertIn("BUDGET_INVALID_CI_RERUNS", failures)
+        self.assertIn("IDLE_NOT_QUIESCENT", failures)
+
+    def test_stable_write_requires_positive_external_change_evidence(self):
+        ok, failures = check_liveness([
+            {"repo":"r","item_id":"1","status":"IDLE","state":"IDLE","reason":"NO_ACTIONABLE_ITEM","writes":1,"stable_cycle":True,"budget":{}}
+        ])
+        self.assertFalse(ok)
         self.assertIn("IDLE_NOT_QUIESCENT", failures)
 
     def test_malformed_or_negative_budget_fails_closed(self):

@@ -5,6 +5,7 @@ on:
     paths:
       - 'scripts/l5_*.py'
       - 'tests/test_l5_*.py'
+      - 'tests/fixtures/l5-control-plane-active.json'
       - '.onecompany/selftest/test_l5_activation.py'
       - '.l5/trust-policy.json'
       - '.l5/control-plane.json'

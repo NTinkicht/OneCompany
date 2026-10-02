@@ -7,6 +7,7 @@ import json
 import re
 from typing import Any
 
+from l5_control_plane import mutation_policy
 from l5_recovery import MAX_RETRIES, plan_recovery
 from l5_trust_boundary import trust_boundary_from_activation
 
@@ -30,6 +31,7 @@ RETRYABLE_MUTATIONS = frozenset({"retry_ci", "dispatch_review", "remediate_revie
 
 
 def required_bool(row: dict[str, Any], key: str) -> bool:
+    """Read one required boolean or fail closed on unknown evidence."""
     value = row.get(key)
     if type(value) is not bool:
         raise ValueError(f"L5_ACTIVATION_{key.upper()}_UNKNOWN")
@@ -37,6 +39,7 @@ def required_bool(row: dict[str, Any], key: str) -> bool:
 
 
 def _token_set(values: Any) -> set[str]:
+    """Validate the prior mutation-token history."""
     if values is None:
         return set()
     if not isinstance(values, set) or not all(isinstance(v, str) and TOKEN64.fullmatch(v) for v in values):
@@ -45,6 +48,7 @@ def _token_set(values: Any) -> set[str]:
 
 
 def _mutation_token(plan: dict[str, Any], snapshot: dict[str, Any]) -> str:
+    """Bind one idempotency token to the exact planned mutation and refs."""
     material = {
         "mutation": SAFE_MUTATIONS.get(plan.get("next_action")),
         "next_action": plan.get("next_action"),
@@ -61,6 +65,7 @@ def _mutation_token(plan: dict[str, Any], snapshot: dict[str, Any]) -> str:
 
 
 def authorize_mutation(snapshot: dict[str, Any], *, prior_mutation_tokens: set[str] | None = None) -> dict[str, Any]:
+    """Authorize one exact mutation under L5 evidence and control-plane mode."""
     if not isinstance(snapshot, dict):
         raise ValueError("L5_ACTIVATION_SNAPSHOT_INVALID")
     history = _token_set(prior_mutation_tokens)
@@ -77,6 +82,16 @@ def authorize_mutation(snapshot: dict[str, Any], *, prior_mutation_tokens: set[s
     if action not in SAFE_MUTATIONS:
         return {"authorized": False, "mutation_allowed": False, "reason": "ACTION_NOT_MUTATION_WHITELISTED", "planned_action": action}
     mutation = SAFE_MUTATIONS[action]
+    mode_ok, mode_reason = mutation_policy(mutation)
+    if not mode_ok:
+        return {
+            "authorized": False,
+            "mutation_allowed": False,
+            "reason": mode_reason,
+            "mutation": mutation,
+            "expected_head_sha": head,
+            "expected_base_sha": base,
+        }
     token = _mutation_token(plan, snapshot)
     if token in history:
         return {"authorized": False, "mutation_allowed": False, "reason": "REPLAY_NOOP", "mutation_token": token}

@@ -203,6 +203,22 @@ class LivenessTests(unittest.TestCase):
             self.assertFalse(ok, budget)
             self.assertTrue(any(code.startswith("BUDGET_") for code in failures), (budget, failures))
 
+    def test_unhashable_status_fails_closed(self):
+        ok, failures = check_liveness([
+            {"repo":"r","item_id":"1","status":[],"state":"X","reason":"X","writes":0,"budget":{}}
+        ])
+        self.assertFalse(ok)
+        self.assertIn("RUN_NOT_TERMINAL", failures)
+
+    def test_reason_only_changes_do_not_reset_stagnation(self):
+        events = [
+            {"repo":"r","item_id":"1","status":"BLOCKED","state":"FINDINGS_OPEN","reason":f"finding-{i}","head":H,"base":B,"writes":0,"budget":{}}
+            for i in range(6)
+        ]
+        ok, failures = check_liveness(events, max_stagnant_runs=5)
+        self.assertFalse(ok)
+        self.assertIn("UNBOUNDED_STAGNATION", failures)
+
 
 if __name__ == "__main__":
     unittest.main()

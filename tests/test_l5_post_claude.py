@@ -11,14 +11,14 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from l5_api_hostile_sim import run_simulation as run_api_hostile_sim
 from l5_liveness import check_liveness
 from l5_shadow import evaluate_shadow
-from l5_trust_boundary import load_trust_policy, verify_binding_review
+from l5_trust_boundary import load_trust_policy, review_is_independent
 
 
 class TrustBoundaryTests(unittest.TestCase):
     def test_policy_loads_and_has_binding_reviewer(self):
         policy = load_trust_policy(ROOT / ".l5" / "trust-policy.json")
-        self.assertTrue(policy.binding_reviewers)
-        self.assertIn("coderabbitai", policy.binding_reviewers)
+        self.assertTrue(policy.binding_reviewer_logins)
+        self.assertIn("coderabbitai", policy.binding_reviewer_logins)
         self.assertEqual(len(policy.policy_hash), 64)
 
     def test_exact_head_independent_review_passes(self):
@@ -29,9 +29,9 @@ class TrustBoundaryTests(unittest.TestCase):
             "complete": True, "skipped": False, "covers_full_diff": True,
             "identity_source_verified": True, "author": "coderabbitai",
         }
-        ok, reasons = verify_binding_review(
-            policy=policy, review=review, expected_head=h, expected_base=b,
-            material_authors=["chatgpt"], material_authors_head_sha=h,
+        ok, reasons = review_is_independent(
+            review, policy=policy, head_sha=h, base_sha=b,
+            material_authors=["chatgpt"],
         )
         self.assertTrue(ok, reasons)
 
@@ -43,14 +43,14 @@ class TrustBoundaryTests(unittest.TestCase):
             "skipped":False,"covers_full_diff":True,"identity_source_verified":True,
             "author":"coderabbitai",
         }
-        self.assertFalse(verify_binding_review(
-            policy=policy, review=stale, expected_head=h, expected_base=b,
-            material_authors=["chatgpt"], material_authors_head_sha=h,
+        self.assertFalse(review_is_independent(
+            stale, policy=policy, head_sha=h, base_sha=b,
+            material_authors=["chatgpt"],
         )[0])
         self_author = dict(stale, commit_id=h, author="chatgpt")
-        self.assertFalse(verify_binding_review(
-            policy=policy, review=self_author, expected_head=h, expected_base=b,
-            material_authors=["chatgpt"], material_authors_head_sha=h,
+        self.assertFalse(review_is_independent(
+            self_author, policy=policy, head_sha=h, base_sha=b,
+            material_authors=["chatgpt"],
         )[0])
 
 

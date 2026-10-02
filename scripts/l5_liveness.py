@@ -58,7 +58,9 @@ def check_liveness(
         if type(writes) is not int or writes < 0:
             failures.append("WRITE_COUNT_INVALID")
             writes = 0
-        if event.get("external_changes") is False and event.get("stable_cycle") is True and writes != 0:
+        # A stabilized cycle may write only when a fresh external change is
+        # positively evidenced. Missing/unknown evidence is never permission.
+        if event.get("stable_cycle") is True and writes != 0 and event.get("external_changes") is not True:
             failures.append("IDLE_NOT_QUIESCENT")
 
         fingerprint = json.dumps(

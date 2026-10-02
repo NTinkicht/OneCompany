@@ -4,9 +4,9 @@ This document records the remaining production-readiness work after the hostile 
 
 ## Deferred platform enforcement
 
-Repository rulesets / branch protection are intentionally deferred until every other cutover component is complete. Until then, unattended write activation is forbidden. Shadow mode is allowed because it exposes no mutation capability.
+Repository rulesets / branch protection are intentionally deferred during the current validation phase. The controller therefore operates in **LIVE_SAFE** mode: reversible feature-branch, PR, CI, review, issue and work-unit mutations are allowed, while main-changing actions remain blocked until final activation.
 
-`PLATFORM_ENFORCEMENT_DEFERRED` is therefore an expected activation blocker, not an error to bypass.
+`PLATFORM_ENFORCEMENT_DEFERRED` remains visible telemetry and a blocker for merge/enqueue/direct-main mutations, but it no longer blocks reversible non-main engineering work.
 
 ## 1. Independent reviewer trust boundary
 
@@ -48,23 +48,21 @@ The L5 candidate workflow is intentionally `contents: read` with checkout creden
 - governance or review changes between an earlier observation and final reconcile;
 - duplicate writers and merge serialization;
 - resource-level exact-state checks even when an API read is stale;
-- read-only shadow execution.
+- read-only shadow diagnostics.
 
 A1-A12 run for 1,000 randomized API-level traces each. They supplement the existing S1-S40 certification corpus. The minimum hostile corpus is therefore **52,000 traces total: 40,000 S1-S40 seeded traces plus 12,000 randomized API-level A1-A12 traces**.
 
-## 4. Real-repository shadow mode
+A11 specifically verifies exact-head ABA behavior after review revocation: the head returns to the originally observed SHA, but the final gate must still reject the merge because review evidence is no longer valid.
 
-`scripts/l5_shadow.py` is structurally read-only: it imports no write adapter and returns `mutation_allowed: false` and `writes: 0`. Before activation, four identical scheduled controllers run this contract at the production cadence. Shadow mode:
+## 4. LIVE_SAFE real-repository validation
 
-- performs fresh reconciliation against all three repositories;
-- computes the state-machine decision and exact hypothetical candidate action;
-- records why a gate would pass or fail;
-- computes a clearly-labelled hypothetical result by staging only the intentionally deferred platform-enforcement fields on a copy of repository evidence;
-- never stages away unrelated integrity/governance failures;
-- performs zero GitHub mutations;
-- never invokes the write adapter.
+The four identical scheduled controllers run at :00, :15, :30 and :45. In LIVE_SAFE mode they may perform reversible engineering writes such as canonical feature-branch commits, PR creation and updates, CI reruns, eligible independent review requests, comments/labels, verified thread resolution and dependency-ready work-unit replenishment.
 
-Shadow output is evidence for cutover readiness but never authorization to mutate.
+They must still reconcile fresh repository truth, exact head/base, source-pinned CI, reviewer identity and material-author separation, L5.1 intent/restraint evidence, budgets, lease/intent state, credential isolation and all human-only boundaries before acting.
+
+Main-changing actions remain blocked while platform enforcement is deferred: no PR merge/enqueue, no direct push to `main`, no default-branch history rewrite and no weakening of CI/review/security controls.
+
+`scripts/l5_shadow.py` remains available as a strictly read-only diagnostic oracle that returns `mutation_allowed: false` and `writes: 0` for comparison and fault simulation.
 
 ## 5. Liveness and invariant validation
 
@@ -79,7 +77,7 @@ Shadow output is evidence for cutover readiness but never authorization to mutat
 
 ## 6. Shared control plane
 
-`.l5/control-plane.json` declares `NTinkicht/OneCompany@main` as the shared L5 post-Claude contract for OneCompany, Tabibi, and Veritas Atlas while the controllers are in SHADOW mode. The governed modules are:
+`.l5/control-plane.json` declares `NTinkicht/OneCompany@main` as the shared L5 post-Claude contract for OneCompany, Tabibi, and Veritas Atlas while the controllers are in LIVE_SAFE mode. The governed modules are:
 
 - `scripts/l5_trust_boundary.py`
 - `scripts/l5_shadow.py`
@@ -92,14 +90,14 @@ Tabibi and Veritas Atlas carry small local manifests that bind them to this revi
 
 ## 7. Final activation sequence
 
-The sequence is fixed:
+The current sequence is:
 
 1. trust boundary and credential isolation merged;
 2. A1-A12 API-level hostile simulation green together with S1-S40;
-3. four identical production-cadence controllers run read-only shadow mode;
-4. shadow/liveness evidence is reviewed and accepted;
-5. GitHub platform rulesets / branch protection are installed and independently verified;
-6. `GOVERNANCE_DRIFT` / `PLATFORM_ENFORCEMENT_DEFERRED` is human-cleared only after that verification;
-7. the same four controllers are switched from SHADOW to ACTIVE without changing the state-machine contract.
+3. four identical production-cadence controllers run LIVE_SAFE and exercise reversible writes;
+4. live-safe/liveness evidence is reviewed and accepted;
+5. GitHub platform rulesets / branch protection may be installed and independently verified later;
+6. the main-changing governance freeze is human-cleared only after the chosen final enforcement policy is accepted;
+7. the same four controllers are promoted from LIVE_SAFE to ACTIVE without changing the core state-machine contract.
 
-Any failure after step 5 returns the affected repository to fail-closed observation-only behavior.
+Until step 7, all non-main validation should continue rather than idling when platform enforcement is the only remaining blocker.

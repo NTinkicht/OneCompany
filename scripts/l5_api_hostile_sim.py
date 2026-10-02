@@ -231,13 +231,15 @@ def scenario(sid: int, rng: random.Random) -> None:
         api.external_change(epoch=old_epoch + rng.randint(1, 4))
         result = api.push(str(observed["head"]), _sha(rng, "e"), old_epoch)
         assert result["status"] == "BLOCKED" and state.mutation_count == 0
-    elif sid == 11:  # head ABA with review invalidation; stale read cannot beat resource gate
-        api = SimAPI(state, FaultPlan(stale_reads=frozenset({2})))
+    elif sid == 11:  # exact-head ABA with review invalidation must fail on review evidence
+        api = SimAPI(state, FaultPlan())
         observed = api.read()
         api.external_change(head=_sha(rng, "f"), review_ok=False)
         api.external_change(head=head)
+        final = api.read()
+        assert final.get("head") == observed.get("head") and final.get("review_ok") is False
         result = final_merge(api, observed, state.epoch)
-        assert result["status"] == "BLOCKED" and not state.merged
+        assert result["status"] == "BLOCKED" and result["reason"] == "FINAL_GATE_FALSE" and not state.merged
     elif sid == 12:  # shadow path has no mutation capability by construction
         before = state.clone()
         decision = shadow_evaluate(

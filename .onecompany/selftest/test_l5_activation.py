@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import unittest
@@ -17,6 +18,8 @@ import l5_write_adapter as wa
 # remains fail-closed until a target-specific policy is established.
 if not (ROOT / ".l5" / "trust-policy.json").exists():
     raise unittest.SkipTest("source L5 trust policy is not installed in this fresh target")
+
+ACTIVE_CONTROL_PLANE = ROOT / "tests" / "fixtures" / "l5-control-plane-active.json"
 
 
 def _credential_boundary():
@@ -73,6 +76,16 @@ class Client:
 
 
 class ActivationTests(unittest.TestCase):
+    def setUp(self):
+        self._old_control_plane = os.environ.get("L5_CONTROL_PLANE_MANIFEST")
+        os.environ["L5_CONTROL_PLANE_MANIFEST"] = str(ACTIVE_CONTROL_PLANE)
+
+    def tearDown(self):
+        if self._old_control_plane is None:
+            os.environ.pop("L5_CONTROL_PLANE_MANIFEST", None)
+        else:
+            os.environ["L5_CONTROL_PLANE_MANIFEST"] = self._old_control_plane
+
     def test_merge_authorization_exact_refs(self):
         auth = act.authorize_mutation(snap())
         self.assertEqual(auth["mutation"], "merge_expected_head")

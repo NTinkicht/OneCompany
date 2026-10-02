@@ -79,7 +79,11 @@ def check_liveness(
             any(reason.startswith(prefix) for prefix in NAMED_WAIT_PREFIXES)
             or reason in {"LEASE_BUSY", "MERGED_UNVERIFIED"}
         )
-        if status_valid and (status in {"COMPLETE", "FAILED", "IDLE"} or event.get("state") == "PARKED" or named_wait):
+        # Terminal success/idle, explicit parking, and named external waits are
+        # bounded outcomes rather than controller stagnation. FAILED is not:
+        # repeated failure on unchanged state/head/base must consume the
+        # stagnation budget and eventually fail closed.
+        if status_valid and (status in {"COMPLETE", "IDLE"} or event.get("state") == "PARKED" or named_wait):
             stagnant[key] = 0
         elif last_fingerprint.get(key) == fingerprint:
             stagnant[key] = stagnant.get(key, 0) + 1

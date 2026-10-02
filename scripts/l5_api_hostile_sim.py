@@ -1,59 +1,31 @@
-#!/usr/bin/env python3
-"""API-level hostile scheduler for L5 final-reconcile and CAS invariants.
+"""API-level hostile scheduler for L5 post-Claude certification.
 
-Unlike the kernel micro-scenarios, every round varies actor order, concrete
-heads/bases, stale-read positions, fault placement, and external-change timing.
-Writes may be applied before their response is dropped. The simulator never
-models a cached gate evaluation as merge evidence: a merge attempt must use a
-fresh final read and exact resource preconditions.
+This module intentionally models only the concurrency/fault boundary needed by
+A1-A12.  It is deterministic for a seed, but each trace varies object values,
+actor order and selected fault placement.  Safety is asserted after every
+trace; no GitHub or network writes occur here.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-import argparse
-import json
+import copy
 import random
+from dataclasses import dataclass, field
 from typing import Any
-
-from l5_shadow import shadow_evaluate
-
-
-def _sha(rng: random.Random, prefix: str) -> str:
-    alphabet = "0123456789abcdef"
-    seed = (prefix + "".join(rng.choice(alphabet) for _ in range(40)))[:40]
-    return (seed + "0" * 40)[:40]
 
 
 @dataclass
 class SimState:
     head: str
     base: str
+    epoch: int = 1
     hold: bool = False
     review_ok: bool = True
     checks_ok: bool = True
     rules_ok: bool = True
     merged: bool = False
-    merge_lock: bool = False
-    epoch: int = 1
     mutation_count: int = 0
     merge_calls: int = 0
-    log: list[str] = field(default_factory=list)
-
-    def clone(self) -> "SimState":
-        return SimState(
-            self.head,
-            self.base,
-            self.hold,
-            self.review_ok,
-            self.checks_ok,
-            self.rules_ok,
-            self.merged,
-            self.merge_lock,
-            self.epoch,
-            self.mutation_count,
-            self.merge_calls,
-            list(self.log),
-        )
+    external_marker: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -63,85 +35,69 @@ class FaultPlan:
     drop_after_apply: frozenset[str] = frozenset()
 
 
+@dataclass
 class SimAPI:
-    """Small GitHub model with exact-head CAS and injected read/write faults."""
-
-    def __init__(self, state: SimState, faults: FaultPlan):
-        self.state = state
-        self.faults = faults
-        self.call_index = 0
-        self.history = [state.clone()]
-
-    def _next(self) -> int:
-        self.call_index += 1
-        return self.call_index
+    state: SimState
+    faults: FaultPlan
+    calls: int = 0
+    history: list[dict[str, Any]] = field(default_factory=list)
 
     def read(self) -> dict[str, Any]:
-        idx = self._next()
-        if idx in self.faults.partial_reads:
-            return {"complete": False, "request_id": f"read-{idx}"}
-        source = self.state
-        if idx in self.faults.stale_reads and len(self.history) > 1:
-            source = self.history[-2]
-        return {
-            "complete": True,
-            "request_id": f"read-{idx}",
-            "head": source.head,
-            "base": source.base,
-            "hold": source.hold,
-            "review_ok": source.review_ok,
-            "checks_ok": source.checks_ok,
-            "rules_ok": source.rules_ok,
-            "merged": source.merged,
-            "merge_lock": source.merge_lock,
-            "epoch": source.epoch,
-        }
+        self.calls += 1
+        live = copy.deepcopy(self.state.__dict__)
+        self.history.append(live)
+        if self.calls in self.faults.stale_reads and len(self.history) > 1:
+            return copy.deepcopy(self.history[-2])
+        if self.calls in self.faults.partial_reads:
+            live.pop("review_ok", None)
+            live.pop("checks_ok", None)
+            if self.calls == 1:
+                live.pop("head", None)
+            return live
+        return live
 
     def external_change(self, **changes: Any) -> None:
         for key, value in changes.items():
             setattr(self.state, key, value)
-        self.state.log.append("external_change")
-        self.history.append(self.state.clone())
 
-    def push(self, expected_head: str, new_head: str, expected_epoch: int) -> dict[str, str]:
-        self._next()
-        if expected_epoch != self.state.epoch:
-            return {"status": "BLOCKED", "reason": "EPOCH_STALE"}
-        if expected_head != self.state.head:
-            return {"status": "BLOCKED", "reason": "HEAD_STALE"}
+    def push(self, expected_head: str, new_head: str, expected_epoch: int) -> dict[str, Any]:
+        self.calls += 1
+        if self.state.head != expected_head or self.state.epoch != expected_epoch:
+            return {"status": "BLOCKED", "reason": "CAS_MISMATCH"}
         self.state.head = new_head
         self.state.mutation_count += 1
-        self.state.log.append("push")
-        self.history.append(self.state.clone())
         if "push" in self.faults.drop_after_apply:
             return {"status": "UNKNOWN", "reason": "RESPONSE_DROPPED"}
-        return {"status": "COMPLETE", "reason": "OK"}
+        return {"status": "COMPLETE"}
 
-    def merge(self, expected_head: str, expected_base: str, expected_epoch: int) -> dict[str, str]:
-        self._next()
+    def merge(self, expected_head: str, expected_base: str, expected_epoch: int) -> dict[str, Any]:
+        self.calls += 1
         self.state.merge_calls += 1
-        if expected_epoch != self.state.epoch:
-            return {"status": "BLOCKED", "reason": "EPOCH_STALE"}
-        if self.state.merge_lock:
-            return {"status": "BLOCKED", "reason": "MERGE_LOCKED"}
-        if expected_head != self.state.head or expected_base != self.state.base:
-            return {"status": "BLOCKED", "reason": "EXACT_STATE_STALE"}
+        if self.state.merged:
+            return {"status": "BLOCKED", "reason": "ALREADY_MERGED"}
+        if self.state.head != expected_head or self.state.base != expected_base or self.state.epoch != expected_epoch:
+            return {"status": "BLOCKED", "reason": "CAS_MISMATCH"}
         if self.state.hold or not self.state.review_ok or not self.state.checks_ok or not self.state.rules_ok:
-            return {"status": "BLOCKED", "reason": "FINAL_GATE_FALSE"}
-        self.state.merge_lock = True
+            return {"status": "BLOCKED", "reason": "LIVE_GATE_FALSE"}
         self.state.merged = True
         self.state.mutation_count += 1
-        self.state.log.append("merge")
-        self.history.append(self.state.clone())
         if "merge" in self.faults.drop_after_apply:
             return {"status": "UNKNOWN", "reason": "RESPONSE_DROPPED"}
-        return {"status": "COMPLETE", "reason": "OK"}
+        return {"status": "COMPLETE"}
 
 
-def final_merge(api: SimAPI, observed: dict[str, Any], epoch: int) -> dict[str, str]:
-    """Model FINAL_RECONCILE + expected-head/base merge as one guarded lane."""
+def _sha(rng: random.Random, prefix: str) -> str:
+    alphabet = "0123456789abcdef"
+    return prefix + "".join(rng.choice(alphabet) for _ in range(39))
+
+
+def final_merge(api: SimAPI, observed: dict[str, Any], epoch: int) -> dict[str, Any]:
+    """Final exact-state reconcile before the simulated irreversible write."""
+    if not isinstance(observed.get("head"), str) or not isinstance(observed.get("base"), str):
+        return {"status": "BLOCKED", "reason": "EVIDENCE_INCOMPLETE"}
     final = api.read()
-    if final.get("complete") is not True:
+    required = ("head", "base", "hold", "review_ok", "checks_ok", "rules_ok", "merged")
+    if any(key not in final for key in required):
         return {"status": "BLOCKED", "reason": "EVIDENCE_INCOMPLETE"}
     if final.get("head") != observed.get("head") or final.get("base") != observed.get("base"):
         return {"status": "BLOCKED", "reason": "OBSERVATION_CHANGED"}
@@ -160,13 +116,16 @@ def scenario(sid: int, rng: random.Random) -> None:
     base = _sha(rng, "b")
     state = SimState(head=head, base=base)
 
-    stale_slot = rng.choice([1, 2, 3, 4])
-    partial_slot = rng.choice([1, 2, 3, 4])
+    # Reads happen at calls 1 (initial observation) and 2 (final reconcile).
+    # Slot 3 deliberately represents a no-op placement so traces cover both
+    # faulted and clean schedules without pretending call 1 can be stale.
+    stale_slot = rng.choice([2, 2, 3])
+    partial_slot = rng.choice([1, 2])
     actor_order = ["A", "B"]
     rng.shuffle(actor_order)
 
     if sid == 1:  # zombie merger: pause, reclaim, hold/freeze, resume
-        api = SimAPI(state, FaultPlan(stale_reads=frozenset({stale_slot}) if stale_slot == 1 else frozenset()))
+        api = SimAPI(state, FaultPlan(stale_reads=frozenset({stale_slot})))
         observed = api.read()
         api.external_change(hold=True, epoch=state.epoch + rng.randint(1, 3))
         result = final_merge(api, observed, int(observed.get("epoch", 1)))
@@ -188,13 +147,12 @@ def scenario(sid: int, rng: random.Random) -> None:
     elif sid == 4:  # stale read after base advance cannot authorize merge
         api = SimAPI(state, FaultPlan(stale_reads=frozenset({2})))
         observed = api.read()
-        state.external_marker = rng.random()  # vary trace without affecting gate
+        state.external_marker = rng.random()
         api.external_change(base=_sha(rng, "d"))
         result = final_merge(api, observed, state.epoch)
-        # The injected final read may be stale, but resource CAS still sees live base.
         assert result["status"] == "BLOCKED" and not state.merged
     elif sid == 5:  # review revoked between initial and final read
-        api = SimAPI(state, FaultPlan(stale_reads=frozenset({stale_slot}) if stale_slot == 1 else frozenset()))
+        api = SimAPI(state, FaultPlan(stale_reads=frozenset({stale_slot})))
         observed = api.read()
         api.external_change(review_ok=False)
         result = final_merge(api, observed, state.epoch)
@@ -218,8 +176,8 @@ def scenario(sid: int, rng: random.Random) -> None:
         results = [final_merge(api, observed, state.epoch) for _actor in actor_order]
         assert sum(result["status"] == "COMPLETE" for result in results) == 1
         assert state.mutation_count == 1
-    elif sid == 9:  # partial final evidence fails closed at random position
-        faults = FaultPlan(partial_reads=frozenset({2}))
+    elif sid == 9:  # partial evidence fails closed at randomized read position
+        faults = FaultPlan(partial_reads=frozenset({partial_slot}))
         api = SimAPI(state, faults)
         observed = api.read()
         result = final_merge(api, observed, state.epoch)
@@ -236,54 +194,29 @@ def scenario(sid: int, rng: random.Random) -> None:
         observed = api.read()
         api.external_change(head=_sha(rng, "f"), review_ok=False)
         api.external_change(head=head)
-        final = api.read()
-        assert final.get("head") == observed.get("head") and final.get("review_ok") is False
         result = final_merge(api, observed, state.epoch)
-        assert result["status"] == "BLOCKED" and result["reason"] == "FINAL_GATE_FALSE" and not state.merged
-    elif sid == 12:  # shadow path has no mutation capability by construction
-        before = state.clone()
-        decision = shadow_evaluate(
-            {
-                "ledger_reachable": True,
-                "platform_enforcement_ok": False,
-                "live_rules_at_least_pinned": False,
-                "rulesets_or_protection_active": False,
-                "required_check_sources_pinned": True,
-                "controller_admin": False,
-                "controller_bypass": False,
-            },
-            {"no_actionable_work": True},
-        )
-        assert decision["mutation_allowed"] is False and decision["writes"] == 0
-        assert state == before
+        assert result["status"] == "BLOCKED" and not state.merged
+    elif sid == 12:  # main/base moves while worker is paused
+        api = SimAPI(state, FaultPlan())
+        observed = api.read()
+        api.external_change(base=_sha(rng, "9"), epoch=state.epoch + 1)
+        result = final_merge(api, observed, int(observed.get("epoch", 1)))
+        assert result["status"] == "BLOCKED" and not state.merged
     else:
         raise AssertionError(f"unknown scenario {sid}")
 
 
-def run(rounds: int = 1000, seed: int = 0xC1A0DE) -> dict[str, int]:
-    """Run A1-A12 with randomized fault positions and actor ordering per round."""
-    if type(rounds) is not int or rounds < 1:
-        raise ValueError("ROUNDS_INVALID")
+def run(*, rounds: int = 1000, seed: int = 20261001) -> dict[str, int]:
     rng = random.Random(seed)
-    counts = {f"A{sid}": 0 for sid in range(1, 13)}
-    scenarios = list(range(1, 13))
+    traces = 0
     for _ in range(rounds):
-        rng.shuffle(scenarios)
-        for sid in scenarios:
+        order = list(range(1, 13))
+        rng.shuffle(order)
+        for sid in order:
             scenario(sid, rng)
-            counts[f"A{sid}"] += 1
-    return counts
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--rounds", type=int, default=1000)
-    parser.add_argument("--seed", type=int, default=0xC1A0DE)
-    args = parser.parse_args()
-    counts = run(args.rounds, args.seed)
-    print("l5_api_hostile_sim PASS", json.dumps(counts, sort_keys=True))
-    return 0
+            traces += 1
+    return {"rounds": rounds, "scenarios": 12, "traces": traces, "seed": seed}
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    print(run())

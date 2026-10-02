@@ -16,26 +16,29 @@ _UNSET = object()
 
 
 class LostResponse(Exception):
-    pass
+    """Raised when a write may have been applied but its response was lost."""
 
 
 class AlreadyExists(Exception):
-    pass
+    """Raised by clients when an idempotent create already exists."""
 
 
 class WriteRejected(Exception):
-    pass
+    """Raised only when the client proves the remote write was not applied."""
 
 
 def stream_key(auth: dict[str, Any], snapshot: dict[str, Any]) -> str:
+    """Return the durable retry-stream identity for one canonical PR."""
     return json.dumps([snapshot.get("repository"), auth.get("issue"), auth.get("canonical_pr")], separators=(",", ":"))
 
 
 def _blocked(reason: str, token: Any = None) -> dict[str, Any]:
+    """Return a uniform non-writing blocked result."""
     return {"status": "BLOCKED", "reason": reason, "mutation_token": token, "written": False}
 
 
 def _live_gate(auth: dict[str, Any], stream: str, client: Any, store: Any, *, retry_check: bool, observed_retry: tuple[int, str | None] | None = None) -> str | None:
+    """Revalidate boundaries, exact refs, stream uniqueness, review and retry CAS."""
     boundaries = client.fetch_boundaries()
     if not isinstance(boundaries, dict):
         return "BOUNDARY_STATE_UNKNOWN"
@@ -73,6 +76,7 @@ def _live_gate(auth: dict[str, Any], stream: str, client: Any, store: Any, *, re
 
 
 def _params(auth: dict[str, Any]) -> dict[str, Any]:
+    """Build the exact structured actuator request."""
     return {
         "canonical_pr": auth["canonical_pr"], "issue": auth["issue"],
         "expected_head_sha": auth["expected_head_sha"], "expected_base_sha": auth["expected_base_sha"],
@@ -81,6 +85,7 @@ def _params(auth: dict[str, Any]) -> dict[str, Any]:
 
 
 def _reconcile(auth: dict[str, Any], client: Any, store: Any, *, written: bool) -> dict[str, Any]:
+    """Read back one already-admitted effect without issuing another mutation."""
     token = auth["mutation_token"]
     if client.verify_effect(auth["mutation"], _params(auth)) is True:
         store.set_status(token, "COMPLETE")
@@ -88,28 +93,43 @@ def _reconcile(auth: dict[str, Any], client: Any, store: Any, *, written: bool) 
     return {"status": "IN_PROGRESS", "reason": "EFFECT_NOT_YET_VERIFIED", "mutation_token": token, "written": written}
 
 
+def _reproduce(auth: dict[str, Any], snapshot: dict[str, Any], *, recovery: bool) -> bool:
+    """Reproduce authorization, bypassing only admission policy for read-only recovery."""
+    try:
+        reproduced = authorize_mutation(snapshot, enforce_control_plane=not recovery)
+    except ValueError:
+        return False
+    return reproduced == auth
+
+
 def execute_mutation(auth: dict[str, Any], snapshot: dict[str, Any], client: Any, store: Any) -> dict[str, Any]:
+    """Execute or reconcile exactly one guarded mutation.
+
+    PENDING/COMPLETE records are reconciled before current admission policy is
+    consulted so a later shutdown cannot strand an ambiguous remote outcome.
+    No new write is possible on that recovery-only path.
+    """
     token = auth.get("mutation_token") if isinstance(auth, dict) else None
     if not isinstance(auth, dict) or auth.get("authorized") is not True or auth.get("mutation_allowed") is not True:
         return _blocked("NOT_AUTHORIZED", token)
     if auth.get("mutation") not in MUTATIONS or not isinstance(token, str) or not TOKEN64.fullmatch(token):
         return _blocked("AUTHORIZATION_INVALID", token)
-    try:
-        reproduced = authorize_mutation(snapshot)
-    except ValueError:
-        return _blocked("AUTHORIZATION_NOT_REPRODUCIBLE", token)
-    if reproduced != auth:
-        return _blocked("AUTHORIZATION_MISMATCH", token)
+
     stream = stream_key(auth, snapshot)
     prior = store.get(token)
     if prior:
         status = prior.get("status")
-        if status == "COMPLETE":
-            return {"status": "REPLAY_NOOP", "reason": "ALREADY_COMPLETE", "mutation_token": token, "written": False}
-        if status == "PENDING":
+        if status in {"COMPLETE", "PENDING"}:
+            if not _reproduce(auth, snapshot, recovery=True):
+                return _blocked("AUTHORIZATION_MISMATCH", token)
+            if status == "COMPLETE":
+                return {"status": "REPLAY_NOOP", "reason": "ALREADY_COMPLETE", "mutation_token": token, "written": False}
             return _reconcile(auth, client, store, written=False)
         if status != "RETRYABLE":
             return _blocked(f"PRIOR_{status}", token)
+
+    if not _reproduce(auth, snapshot, recovery=False):
+        return _blocked("AUTHORIZATION_MISMATCH", token)
 
     observed_retry = store.retry_state(stream) if auth["mutation"] in RETRYABLE_MUTATIONS else None
     observed_owner = store.retry_owner(stream) if auth["mutation"] in RETRYABLE_MUTATIONS else _UNSET
@@ -153,6 +173,8 @@ def execute_mutation(auth: dict[str, Any], snapshot: dict[str, Any], client: Any
 
 
 class MemoryStore:
+    """In-memory reference implementation for token and retry-state CAS tests."""
+
     def __init__(self) -> None:
         self.records: dict[str, dict[str, Any]] = {}
         self.retry: dict[str, tuple[int, str | None]] = {}
@@ -211,6 +233,7 @@ class MemoryStore:
 
 class JsonFileStore(MemoryStore):
     """Crash-safe process-shared token/retry store guarded by flock."""
+
     def __init__(self, path: Path) -> None:
         super().__init__(); self.path = Path(path)
 

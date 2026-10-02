@@ -52,3 +52,13 @@ def shadow_evaluate(
         "candidate_merge_ok_if_platform_enforced": hypothetical_ok,
         "candidate_merge_failures_if_platform_enforced": list(hypothetical_failures),
     }
+
+
+def evaluate_shadow(
+    repo_snapshot: Mapping[str, Any],
+    item_snapshot: Mapping[str, Any],
+    *,
+    budget: Budget | None = None,
+) -> Mapping[str, Any]:
+    """Backward-compatible public entrypoint for the read-only shadow evaluator."""
+    return shadow_evaluate(repo_snapshot, item_snapshot, budget=budget)

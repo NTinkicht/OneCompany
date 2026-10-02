@@ -148,9 +148,19 @@ class FileStore(MemoryStore):
         if self.path.exists():self._reload()
     def _flush(self):
         tmp=self.path.with_suffix(self.path.suffix+f".{os.getpid()}.tmp")
-        with tmp.open("w") as fh:
-            json.dump({"records":self.records,"retry":self.retry,"retry_owners":self.retry_owners},fh,sort_keys=True);fh.flush();os.fsync(fh.fileno())
-        os.replace(tmp,self.path);dir_fd=os.open(str(self.path.parent),os.O_RDONLY)
+        try:
+            with tmp.open("w") as fh:
+                json.dump({"records":self.records,"retry":self.retry,"retry_owners":self.retry_owners},fh,sort_keys=True)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp,self.path)
+        except Exception:
+            try:
+                tmp.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
+        dir_fd=os.open(str(self.path.parent),os.O_RDONLY)
         try:os.fsync(dir_fd)
         finally:os.close(dir_fd)
     def begin(self,*args,**kwargs):

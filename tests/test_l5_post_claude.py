@@ -10,7 +10,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from l5_api_hostile_sim import run_simulation as run_api_hostile_sim
 from l5_liveness import check_liveness
-from l5_shadow import evaluate_shadow
+from l5_shadow import shadow_evaluate
 from l5_trust_boundary import load_trust_policy, review_is_independent
 
 
@@ -56,10 +56,17 @@ class TrustBoundaryTests(unittest.TestCase):
 
 class ShadowTests(unittest.TestCase):
     def test_shadow_never_writes(self):
-        result = evaluate_shadow({
+        repo_snapshot = {
+            "platform_enforcement_ok": False,
+            "live_rules_at_least_pinned": False,
+            "rulesets_or_protection_active": False,
+            "required_check_sources_pinned": False,
+        }
+        item_snapshot = {
             "repo":"NTinkicht/OneCompany","head_sha":"a"*40,"base_sha":"b"*40,
             "ci":"SUCCESS","review":"PASS","mergeable":True,
-        })
+        }
+        result = shadow_evaluate(repo_snapshot, item_snapshot)
         self.assertEqual(result["writes"], 0)
         self.assertFalse(result["mutation_allowed"])
 

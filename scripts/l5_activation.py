@@ -64,8 +64,17 @@ def _mutation_token(plan: dict[str, Any], snapshot: dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(material, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
-def authorize_mutation(snapshot: dict[str, Any], *, prior_mutation_tokens: set[str] | None = None) -> dict[str, Any]:
-    """Authorize one exact mutation under L5 evidence and control-plane mode."""
+def authorize_mutation(
+    snapshot: dict[str, Any],
+    *,
+    prior_mutation_tokens: set[str] | None = None,
+    enforce_control_plane: bool = True,
+) -> dict[str, Any]:
+    """Authorize one exact mutation.
+
+    ``enforce_control_plane=False`` exists only for non-mutating recovery of an
+    already persisted token. Callers must never use it to admit a new write.
+    """
     if not isinstance(snapshot, dict):
         raise ValueError("L5_ACTIVATION_SNAPSHOT_INVALID")
     history = _token_set(prior_mutation_tokens)
@@ -82,16 +91,17 @@ def authorize_mutation(snapshot: dict[str, Any], *, prior_mutation_tokens: set[s
     if action not in SAFE_MUTATIONS:
         return {"authorized": False, "mutation_allowed": False, "reason": "ACTION_NOT_MUTATION_WHITELISTED", "planned_action": action}
     mutation = SAFE_MUTATIONS[action]
-    mode_ok, mode_reason = mutation_policy(mutation)
-    if not mode_ok:
-        return {
-            "authorized": False,
-            "mutation_allowed": False,
-            "reason": mode_reason,
-            "mutation": mutation,
-            "expected_head_sha": head,
-            "expected_base_sha": base,
-        }
+    if enforce_control_plane:
+        mode_ok, mode_reason = mutation_policy(mutation)
+        if not mode_ok:
+            return {
+                "authorized": False,
+                "mutation_allowed": False,
+                "reason": mode_reason,
+                "mutation": mutation,
+                "expected_head_sha": head,
+                "expected_base_sha": base,
+            }
     token = _mutation_token(plan, snapshot)
     if token in history:
         return {"authorized": False, "mutation_allowed": False, "reason": "REPLAY_NOOP", "mutation_token": token}

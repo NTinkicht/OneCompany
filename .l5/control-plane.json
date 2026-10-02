@@ -2,9 +2,9 @@
   "schema_version": "1.0",
   "control_repository": "NTinkicht/OneCompany",
   "control_ref": "main",
-  "execution_mode": "SHADOW",
-  "platform_enforcement": "DEFERRED_UNTIL_FINAL_CUTOVER",
-  "mutation_allowed": false,
+  "execution_mode": "LIVE_SAFE",
+  "platform_enforcement": "DEFERRED_FOR_VALIDATION",
+  "mutation_allowed": true,
   "managed_repositories": [
     "NTinkicht/OneCompany",
     "NTinkicht/Tabibi",

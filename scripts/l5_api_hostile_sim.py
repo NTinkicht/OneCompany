@@ -169,17 +169,11 @@ def scenario(sid: int, rng: random.Random) -> None:
     elif sid == 8:
         api = SimAPI(state, FaultPlan())
         observed = api.read()
-        # Both actors complete their final observation before either submits a
-        # merge request. This makes the two requests compete using the same
-        # pre-merge evidence and exercises the duplicate-merge guard itself.
         final_observations = [api.read() for _actor in actor_order]
         required = ("head", "base", "hold", "review_ok", "checks_ok", "rules_ok", "merged")
         assert all(all(key in final for key in required) for final in final_observations)
         assert all(final["head"] == observed["head"] and final["base"] == observed["base"] for final in final_observations)
-        results = [
-            api.merge(str(final["head"]), str(final["base"]), state.epoch)
-            for final in final_observations
-        ]
+        results = [api.merge(str(final["head"]), str(final["base"]), state.epoch) for final in final_observations]
         assert state.merge_calls == 2
         assert sum(result["status"] == "COMPLETE" for result in results) == 1
         assert state.mutation_count == 1
@@ -213,6 +207,8 @@ def scenario(sid: int, rng: random.Random) -> None:
 
 
 def run(*, rounds: int = 1000, seed: int = 20261001) -> dict[str, int]:
+    if not isinstance(rounds, int) or isinstance(rounds, bool) or rounds < 1:
+        raise ValueError("rounds must be >= 1")
     rng = random.Random(seed)
     traces = 0
     for _ in range(rounds):
@@ -224,8 +220,6 @@ def run(*, rounds: int = 1000, seed: int = 20261001) -> dict[str, int]:
     return {"rounds": rounds, "scenarios": 12, "traces": traces, "seed": seed}
 
 
-# Compatibility name used by the certification unit suite. Keep the canonical
-# implementation in run() so CLI and tests exercise the same simulator.
 run_simulation = run
 
 

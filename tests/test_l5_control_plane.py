@@ -16,7 +16,7 @@ import l5_control_plane as cp  # noqa: E402
 
 
 class ControlPlaneTests(unittest.TestCase):
-    """Prove reversible LIVE_SAFE writes and main-change denial."""
+    """Prove reversible LIVE_SAFE writes and fail-closed ACTIVE binding."""
 
     def manifest(self, **overrides):
         value = {
@@ -79,38 +79,108 @@ class ControlPlaneTests(unittest.TestCase):
         )
         self.assertEqual(cp.mutation_policy("merge_expected_head", unpinned)[1], "CONTROL_PLANE_REF_NOT_PINNED")
 
-        no_blobs = self.manifest(
-            **base,
-            activation_evidence={name: True for name in cp.REQUIRED_ACTIVATION},
-        )
-        self.assertEqual(
-            cp.mutation_policy("merge_expected_head", no_blobs)[1],
-            "CONTROL_PLANE_RUNTIME_BLOBS_MISSING",
-        )
-
         complete = self.manifest(
             **base,
             activation_evidence={name: True for name in cp.REQUIRED_ACTIVATION},
-            runtime_file_git_blob_sha={name: "b" * 40 for name in cp.PINNED_RUNTIME_FILES},
         )
-        with mock.patch.object(cp, "_runtime_source_verified", return_value=(False, "CONTROL_PLANE_RUNTIME_SOURCE_MISMATCH")):
+        with mock.patch.object(
+            cp,
+            "_runtime_source_verified",
+            return_value=(False, "CONTROL_PLANE_RUNTIME_SOURCE_MISMATCH"),
+        ):
             self.assertEqual(
                 cp.mutation_policy("merge_expected_head", complete),
                 (False, "CONTROL_PLANE_RUNTIME_SOURCE_MISMATCH"),
             )
-        with mock.patch.object(cp, "_runtime_source_verified", return_value=(True, "CONTROL_PLANE_RUNTIME_SOURCE_VERIFIED")):
-            self.assertEqual(cp.mutation_policy("merge_expected_head", complete), (True, "CONTROL_PLANE_ACTIVE"))
+        with mock.patch.object(
+            cp,
+            "_runtime_source_verified",
+            return_value=(True, "CONTROL_PLANE_RUNTIME_SOURCE_VERIFIED"),
+        ):
+            self.assertEqual(
+                cp.mutation_policy("merge_expected_head", complete),
+                (True, "CONTROL_PLANE_ACTIVE"),
+            )
 
-    def test_runtime_blob_map_shape_fails_closed(self):
-        self.assertEqual(
-            cp._runtime_source_verified({"runtime_file_git_blob_sha": {}}),
-            (False, "CONTROL_PLANE_RUNTIME_BLOBS_MISSING"),
-        )
-        malformed = {name: "z" * 40 for name in cp.PINNED_RUNTIME_FILES}
-        self.assertEqual(
-            cp._runtime_source_verified({"runtime_file_git_blob_sha": malformed}),
-            (False, "CONTROL_PLANE_RUNTIME_BLOBS_INVALID"),
-        )
+    def test_runtime_binding_ignores_candidate_local_blob_map(self):
+        certified = {
+            ".l5/trust-policy.json": "1" * 40,
+            "scripts/l5_control_plane.py": "2" * 40,
+            "scripts/l5_trust_boundary.py": "3" * 40,
+            "scripts/l5_activation.py": "4" * 40,
+            "scripts/l5_recovery.py": "5" * 40,
+            "scripts/l5_state_machine.py": "6" * 40,
+            "scripts/l5_write_adapter.py": "7" * 40,
+        }
+        value = {
+            "control_ref": "a" * 40,
+            # Deliberately bogus candidate-local data: it must not be authority.
+            "runtime_file_git_blob_sha": {name: "f" * 40 for name in certified},
+        }
+        with mock.patch.object(
+            cp,
+            "_certified_runtime_blob_map",
+            return_value=(certified, "CONTROL_PLANE_CERTIFIED_RUNTIME_RESOLVED"),
+        ) as certified_lookup, mock.patch.object(
+            cp,
+            "_local_runtime_blob_map",
+            return_value=(dict(certified), "CONTROL_PLANE_RUNTIME_SOURCE_RESOLVED"),
+        ):
+            self.assertEqual(
+                cp._runtime_source_verified(value),
+                (True, "CONTROL_PLANE_RUNTIME_SOURCE_VERIFIED"),
+            )
+            certified_lookup.assert_called_once_with("a" * 40)
+
+    def test_runtime_file_set_and_blob_drift_fail_closed(self):
+        certified = {
+            ".l5/trust-policy.json": "1" * 40,
+            "scripts/l5_control_plane.py": "2" * 40,
+            "scripts/l5_trust_boundary.py": "3" * 40,
+            "scripts/l5_activation.py": "4" * 40,
+            "scripts/l5_recovery.py": "5" * 40,
+            "scripts/l5_state_machine.py": "6" * 40,
+            "scripts/l5_write_adapter.py": "7" * 40,
+        }
+        value = {"control_ref": "a" * 40}
+        extra = {**certified, "scripts/l5_unreviewed.py": "8" * 40}
+        with mock.patch.object(
+            cp,
+            "_certified_runtime_blob_map",
+            return_value=(certified, "CONTROL_PLANE_CERTIFIED_RUNTIME_RESOLVED"),
+        ), mock.patch.object(
+            cp,
+            "_local_runtime_blob_map",
+            return_value=(extra, "CONTROL_PLANE_RUNTIME_SOURCE_RESOLVED"),
+        ):
+            self.assertEqual(
+                cp._runtime_source_verified(value),
+                (False, "CONTROL_PLANE_RUNTIME_FILE_SET_MISMATCH"),
+            )
+
+        changed = dict(certified)
+        changed["scripts/l5_write_adapter.py"] = "9" * 40
+        with mock.patch.object(
+            cp,
+            "_certified_runtime_blob_map",
+            return_value=(certified, "CONTROL_PLANE_CERTIFIED_RUNTIME_RESOLVED"),
+        ), mock.patch.object(
+            cp,
+            "_local_runtime_blob_map",
+            return_value=(changed, "CONTROL_PLANE_RUNTIME_SOURCE_RESOLVED"),
+        ):
+            self.assertEqual(
+                cp._runtime_source_verified(value),
+                (False, "CONTROL_PLANE_RUNTIME_SOURCE_MISMATCH"),
+            )
+
+    def test_required_mutation_runtime_contains_transitive_planner_and_actuator(self):
+        for path in (
+            "scripts/l5_recovery.py",
+            "scripts/l5_state_machine.py",
+            "scripts/l5_write_adapter.py",
+        ):
+            self.assertIn(path, cp.REQUIRED_MUTATION_RUNTIME_FILES)
 
     def test_missing_or_malformed_manifest_fails_closed(self):
         missing = Path(tempfile.gettempdir()) / "missing-onecompany-control-plane.json"

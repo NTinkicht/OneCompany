@@ -12,7 +12,6 @@ from typing import Any, Mapping
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / ".l5" / "control-plane.json"
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
-SHA256 = re.compile(r"^[0-9a-f]{64}$")
 LIVE_SAFE_MAIN_CHANGING = frozenset({"merge_expected_head", "revert"})
 REQUIRED_ACTIVATION = frozenset({
     "trust_boundary_verified",
@@ -60,24 +59,23 @@ def load_manifest(path: Path | None = None) -> Mapping[str, Any]:
     return value
 
 
-def _runtime_source_verified(value: Mapping[str, Any]) -> tuple[bool, str]:
-    """Bind ACTIVE authorization to the exact certified runtime bytes.
+def _git_blob_sha(content: bytes) -> str:
+    """Return the Git object id for exact file bytes."""
+    header = f"blob {len(content)}\0".encode("ascii")
+    return hashlib.sha1(header + content).hexdigest()
 
-    ``control_ref`` identifies the certified OneCompany revision. The activation
-    manifest additionally records SHA-256 digests derived from that revision so
-    downstream repositories can verify byte-for-byte equivalence without
-    requiring the OneCompany Git object to exist in their local repository.
-    The digest map itself is root-governed by the trusted base policy.
-    """
-    digests = value.get("runtime_file_sha256")
-    if not isinstance(digests, Mapping) or set(digests) != set(PINNED_RUNTIME_FILES):
-        return False, "CONTROL_PLANE_RUNTIME_DIGESTS_MISSING"
+
+def _runtime_source_verified(value: Mapping[str, Any]) -> tuple[bool, str]:
+    """Bind ACTIVE authorization to byte-identical certified Git blobs."""
+    blobs = value.get("runtime_file_git_blob_sha")
+    if not isinstance(blobs, Mapping) or set(blobs) != set(PINNED_RUNTIME_FILES):
+        return False, "CONTROL_PLANE_RUNTIME_BLOBS_MISSING"
     for relative_path in PINNED_RUNTIME_FILES:
-        expected = digests.get(relative_path)
-        if not isinstance(expected, str) or not SHA256.fullmatch(expected):
-            return False, "CONTROL_PLANE_RUNTIME_DIGESTS_INVALID"
+        expected = blobs.get(relative_path)
+        if not isinstance(expected, str) or not SHA40.fullmatch(expected):
+            return False, "CONTROL_PLANE_RUNTIME_BLOBS_INVALID"
         try:
-            actual = hashlib.sha256((ROOT / relative_path).read_bytes()).hexdigest()
+            actual = _git_blob_sha((ROOT / relative_path).read_bytes())
         except OSError:
             return False, "CONTROL_PLANE_RUNTIME_SOURCE_UNAVAILABLE"
         if actual != expected:

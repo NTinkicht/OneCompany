@@ -9,6 +9,7 @@
     "fail_closed_if_diff_unavailable": true,
     "protected_paths": [
       ".onecompany/**",
+      ".l5/**",
       "scripts/**",
       "company/**",
       "agents/**",
@@ -25,6 +26,8 @@
       "company/CONSTITUTION.md",
       ".onecompany/governance.json",
       ".onecompany/required-checks.json",
+      ".l5/control-plane.json",
+      ".l5/trust-policy.json",
       ".github/CODEOWNERS",
       ".github/workflows/**",
       ".onecompany/config.json",
@@ -37,7 +40,8 @@
       "scripts/handoff_validate.py",
       "scripts/supervise.py",
       "scripts/supervision_validate.py",
-      "scripts/simulate_supervision.py"
+      "scripts/simulate_supervision.py",
+      "scripts/l5_*.py"
     ]
   },
   "supply_chain": {

@@ -5,10 +5,49 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import re
+import sys
 from pathlib import Path
 from typing import Any
 
-from l5_activation import HARD_BOUNDARY_FIELDS, RETRYABLE_MUTATIONS, SAFE_MUTATIONS, TOKEN64, authorize_mutation, required_bool
+_L5_PYC = re.compile(r"^l5_[^/]+(?:\.[^/]+)*\.pyc$")
+
+
+def _prepare_source_only_l5_imports() -> None:
+    """Remove alternate L5 bytecode before importing the authorization stack."""
+    scripts = Path(__file__).resolve().parent
+    cache = scripts / "__pycache__"
+    try:
+        if cache.exists():
+            if cache.is_symlink() or not cache.is_dir():
+                raise RuntimeError("L5_BOOTSTRAP_BYTECODE_CACHE_INVALID")
+            for path in cache.iterdir():
+                if not _L5_PYC.fullmatch(path.name):
+                    continue
+                if path.is_symlink() or not path.is_file():
+                    raise RuntimeError("L5_BOOTSTRAP_BYTECODE_ARTIFACT_INVALID")
+                path.unlink()
+        for path in scripts.iterdir():
+            if not _L5_PYC.fullmatch(path.name):
+                continue
+            if path.is_symlink() or not path.is_file():
+                raise RuntimeError("L5_BOOTSTRAP_BYTECODE_ARTIFACT_INVALID")
+            path.unlink()
+    except OSError as exc:
+        raise RuntimeError("L5_BOOTSTRAP_BYTECODE_CLEAN_FAILED") from exc
+    sys.dont_write_bytecode = True
+
+
+_prepare_source_only_l5_imports()
+
+from l5_activation import (  # noqa: E402
+    HARD_BOUNDARY_FIELDS,
+    RETRYABLE_MUTATIONS,
+    SAFE_MUTATIONS,
+    TOKEN64,
+    authorize_mutation,
+    required_bool,
+)
 
 MUTATIONS = frozenset(SAFE_MUTATIONS.values())
 REVIEW_SENSITIVE = frozenset({"dispatch_review", "merge_expected_head"})

@@ -179,6 +179,55 @@ class ControlPlaneTests(unittest.TestCase):
                 (None, "CONTROL_PLANE_RUNTIME_SOURCE_UNAVAILABLE"),
             )
 
+    def test_git_replace_and_repository_environment_cannot_redirect_control_ref(self):
+        _directory, root, control_ref = self.certified_runtime()
+        original_blob = subprocess.check_output(
+            ["git", "rev-parse", f"{control_ref}:scripts/l5_write_adapter.py"],
+            cwd=root,
+            text=True,
+        ).strip()
+        (root / "scripts" / "l5_write_adapter.py").write_text(
+            "# replacement commit actuator\n", encoding="utf-8"
+        )
+        subprocess.run(["git", "add", "scripts/l5_write_adapter.py"], cwd=root, check=True)
+        subprocess.run(["git", "commit", "-qm", "replacement runtime"], cwd=root, check=True)
+        replacement = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=root, text=True).strip()
+        subprocess.run(["git", "replace", control_ref, replacement], cwd=root, check=True)
+
+        hostile_env = {
+            "L5_CONTROL_REPOSITORY_ROOT": str(root),
+            "GIT_DIR": str(root / "not-the-repository"),
+            "GIT_WORK_TREE": str(root / "elsewhere"),
+            "GIT_OBJECT_DIRECTORY": str(root / "evil-objects"),
+        }
+        with mock.patch.object(cp, "ROOT", root), mock.patch.dict(os.environ, hostile_env, clear=False):
+            blobs, reason = cp._certified_runtime_blob_map(control_ref)
+            self.assertEqual(reason, "CONTROL_PLANE_CERTIFIED_RUNTIME_RESOLVED")
+            self.assertEqual((blobs or {}).get("scripts/l5_write_adapter.py"), original_blob)
+            self.assertEqual(
+                cp._runtime_source_verified({"control_ref": control_ref}),
+                (False, "CONTROL_PLANE_RUNTIME_SOURCE_MISMATCH"),
+            )
+
+    def test_l5_bytecode_artifacts_and_redirected_pycache_fail_closed(self):
+        _directory, root, control_ref = self.certified_runtime()
+        cache = root / "scripts" / "__pycache__"
+        cache.mkdir()
+        (cache / "l5_recovery.cpython-312.pyc").write_bytes(b"unchecked bytecode")
+        with mock.patch.object(cp, "ROOT", root), mock.patch.dict(
+            os.environ, {"L5_CONTROL_REPOSITORY_ROOT": str(root)}, clear=False
+        ):
+            self.assertEqual(
+                cp._runtime_source_verified({"control_ref": control_ref}),
+                (False, "CONTROL_PLANE_RUNTIME_BYTECODE_PRESENT"),
+            )
+            (cache / "l5_recovery.cpython-312.pyc").unlink()
+            with mock.patch.object(cp.sys, "pycache_prefix", str(root / "external-cache")):
+                self.assertEqual(
+                    cp._runtime_source_verified({"control_ref": control_ref}),
+                    (False, "CONTROL_PLANE_RUNTIME_PYCACHE_PREFIX_SET"),
+                )
+
     def test_certified_ref_must_exist_and_include_mutation_closure(self):
         _directory, root, control_ref = self.certified_runtime()
         with mock.patch.dict(

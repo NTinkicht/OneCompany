@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -79,8 +80,17 @@ class ActivationTests(unittest.TestCase):
     def setUp(self):
         self._old_control_plane = os.environ.get("L5_CONTROL_PLANE_MANIFEST")
         os.environ["L5_CONTROL_PLANE_MANIFEST"] = str(ACTIVE_CONTROL_PLANE)
+        # Runtime/tree binding has dedicated fail-closed coverage in
+        # tests/test_l5_control_plane.py. These acceptance tests isolate the
+        # downstream authorization/CAS/replay semantics after that gate passes.
+        self._runtime_patch = mock.patch(
+            "l5_control_plane._runtime_source_verified",
+            return_value=(True, "CONTROL_PLANE_RUNTIME_SOURCE_VERIFIED"),
+        )
+        self._runtime_patch.start()
 
     def tearDown(self):
+        self._runtime_patch.stop()
         if self._old_control_plane is None:
             os.environ.pop("L5_CONTROL_PLANE_MANIFEST", None)
         else:

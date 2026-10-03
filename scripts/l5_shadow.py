@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Mapping
 
 from l5_kernel import Budget, RepoMode, classify_item, governance_mode, merge_precheck_v11
+from l5_trust_boundary import trust_boundary_from_activation
 
 PLATFORM_FIELDS = (
     "platform_enforcement_ok",
@@ -21,7 +22,8 @@ def shadow_evaluate(
     budget: Budget | None = None,
 ) -> Mapping[str, Any]:
     """Compute a candidate L5 decision while making writes structurally impossible."""
-    state = classify_item(item_snapshot, budget or Budget())
+    effective_budget = budget or Budget()
+    state = classify_item(item_snapshot, effective_budget)
     platform_deferred = not all(repo_snapshot.get(name) is True for name in PLATFORM_FIELDS)
 
     staged_repo = dict(repo_snapshot)
@@ -36,6 +38,16 @@ def shadow_evaluate(
     staged_item["repo_mode"] = staged_mode.value
     staged_item["l5_intent_restraint_required"] = True
     hypothetical_ok, hypothetical_failures = merge_precheck_v11(staged_item)
+    failures = list(hypothetical_failures)
+
+    if effective_budget.exhausted():
+        hypothetical_ok = False
+        failures.append("BUDGET_EXHAUSTED")
+
+    trust_ok, trust_failures = trust_boundary_from_activation(staged_item)
+    if not trust_ok:
+        hypothetical_ok = False
+        failures.extend(trust_failures)
 
     blockers: list[str] = []
     if platform_deferred:
@@ -50,7 +62,7 @@ def shadow_evaluate(
         "state": state.value,
         "activation_blockers": blockers,
         "candidate_merge_ok_if_platform_enforced": hypothetical_ok,
-        "candidate_merge_failures_if_platform_enforced": list(hypothetical_failures),
+        "candidate_merge_failures_if_platform_enforced": list(dict.fromkeys(failures)),
     }
 
 

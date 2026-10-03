@@ -5,8 +5,13 @@ on:
     paths:
       - 'scripts/l5_*.py'
       - 'tests/test_l5_*.py'
+      - 'tests/fixtures/l5-control-plane-active.json'
+      - '.onecompany/selftest/test_l5_activation.py'
+      - '.l5/trust-policy.json'
+      - '.l5/control-plane.json'
       - 'docs/L5-STATE-MACHINE-V1.md'
       - 'docs/L5-INTENT-RESTRAINT-V1.1.md'
+      - 'docs/L5-POST-CLAUDE-CUTOVER.md'
       - '.github/workflows/l5-hostile-controller-ci.yml'
 
 permissions:
@@ -28,9 +33,13 @@ jobs:
           python-version: '3.12'
       - name: Kernel selftest
         run: python scripts/l5_kernel.py
-      - name: Claude L5 unit, ledger, runner, and intent tests
+      - name: Claude L5 unit, ledger, runner, intent, trust, shadow and liveness tests
         run: python -m unittest discover -s tests -p "test_l5_*.py"
+      - name: Activation and guarded-write trust-boundary tests
+        run: python .onecompany/selftest/test_l5_activation.py
       - name: S1-S30 hostile interleavings
         run: python scripts/l5_hostile_sim.py
       - name: S31-S40 intent and restraint hostile traces
         run: python scripts/l5_intent_hostile_sim.py
+      - name: A1-A12 randomized API-level hostile scheduler traces
+        run: python scripts/l5_api_hostile_sim.py --rounds 1000

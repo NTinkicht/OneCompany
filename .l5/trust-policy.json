@@ -1,0 +1,27 @@
+{
+  "schema_version": "1.0",
+  "binding_reviewers": [
+    {
+      "actor": "coderabbit",
+      "github_logins": ["coderabbitai", "coderabbitai[bot]"]
+    }
+  ],
+  "controller_identities": [
+    "ntinkicht",
+    "chatgpt",
+    "codex",
+    "claude",
+    "grok",
+    "gemma",
+    "gemini-cli"
+  ],
+  "production_constraints": {
+    "controller_executes_repository_code": false,
+    "test_worker_has_write_token": false,
+    "write_token_in_test_env": false,
+    "actuator_executes_repository_code": false,
+    "repo_code_runs_in_actuator": false,
+    "actuator_accepts_structured_only": true
+  },
+  "notes": "Binding reviewer identities are human-governed. Add another reviewer only after its exact GitHub identity and non-author provenance are independently verified."
+}

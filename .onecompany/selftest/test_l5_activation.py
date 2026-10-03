@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 import tempfile
 import unittest
@@ -8,11 +9,34 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 import l5_activation as act
+import l5_trust_boundary as tb
 import l5_write_adapter as wa
+
+# This acceptance test validates the OneCompany source repository's pinned L5
+# reviewer/credential trust policy. Fresh bootstrap targets intentionally do
+# not inherit that source authority; in those targets the production gate
+# remains fail-closed until a target-specific policy is established.
+if not (ROOT / ".l5" / "trust-policy.json").exists():
+    raise unittest.SkipTest("source L5 trust policy is not installed in this fresh target")
+
+ACTIVE_CONTROL_PLANE = ROOT / "tests" / "fixtures" / "l5-control-plane-active.json"
+
+
+def _credential_boundary():
+    return {
+        "controller_executes_repository_code":False,
+        "test_worker_has_write_token":False,
+        "write_token_in_test_env":False,
+        "actuator_executes_repository_code":False,
+        "repo_code_runs_in_actuator":False,
+        "actuator_accepts_structured_only":True,
+        "credential_boundary_verified":True,
+    }
 
 
 def snap(**patch):
     h, b = "a" * 40, "b" * 40
+    policy = tb.load_trust_policy()
     row = {
         "repository":"NTinkicht/OneCompany","issue":262,"canonical_pr":263,"active_prs":[263],
         "head_sha":h,"base_sha":b,"head_current":True,"base_current":True,"implementation_complete":True,
@@ -20,9 +44,15 @@ def snap(**patch):
         "destructive_production":False,"spend_required":False,"secret_scope_change":False,"security_control_weakening":False,
         "merged":False,"verified":False,"verified_head_sha":None,"verified_base_sha":None,
         "ci":"SUCCESS","ci_head_sha":h,"ci_base_sha":b,"review":"PASS","review_head_sha":h,"review_base_sha":b,
-        "reviewer_actor":"mistral-vibe","material_authors":["chatgpt"],"material_authors_head_sha":h,
+        "reviewer_actor":"coderabbitai","material_authors":["chatgpt"],"material_authors_head_sha":h,
         "review_eligible":True,"unresolved_threads":False,"mergeable":True,"retry_count":0,"retry_action":None,
         "event_id":"activation-1","ready_candidates":[],
+        "trust_review":{
+            "state":"APPROVED","commit_id":h,"base_sha":b,"complete":True,"skipped":False,
+            "covers_full_diff":True,"identity_source_verified":True,"author":"coderabbitai",
+        },
+        "credential_boundary":_credential_boundary(),
+        "trust_policy_hash":policy.policy_hash,
     }
     row.update(patch); return row
 
@@ -46,11 +76,27 @@ class Client:
 
 
 class ActivationTests(unittest.TestCase):
+    def setUp(self):
+        self._old_control_plane = os.environ.get("L5_CONTROL_PLANE_MANIFEST")
+        os.environ["L5_CONTROL_PLANE_MANIFEST"] = str(ACTIVE_CONTROL_PLANE)
+
+    def tearDown(self):
+        if self._old_control_plane is None:
+            os.environ.pop("L5_CONTROL_PLANE_MANIFEST", None)
+        else:
+            os.environ["L5_CONTROL_PLANE_MANIFEST"] = self._old_control_plane
+
     def test_merge_authorization_exact_refs(self):
         auth = act.authorize_mutation(snap())
         self.assertEqual(auth["mutation"], "merge_expected_head")
         self.assertTrue(auth["mutation_allowed"])
         self.assertEqual(auth["expected_head_sha"], "a"*40)
+
+    def test_merge_authorization_requires_pinned_trust_boundary(self):
+        s = snap(trust_policy_hash="0"*64)
+        auth = act.authorize_mutation(s)
+        self.assertFalse(auth["mutation_allowed"])
+        self.assertEqual(auth["reason"], "TRUST_BOUNDARY_FAILED")
 
     def test_every_hard_boundary_blocks(self):
         for field in act.HARD_BOUNDARY_FIELDS:

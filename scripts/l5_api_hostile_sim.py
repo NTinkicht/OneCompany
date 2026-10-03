@@ -169,7 +169,18 @@ def scenario(sid: int, rng: random.Random) -> None:
     elif sid == 8:
         api = SimAPI(state, FaultPlan())
         observed = api.read()
-        results = [final_merge(api, observed, state.epoch) for _actor in actor_order]
+        # Both actors complete their final observation before either submits a
+        # merge request. This makes the two requests compete using the same
+        # pre-merge evidence and exercises the duplicate-merge guard itself.
+        final_observations = [api.read() for _actor in actor_order]
+        required = ("head", "base", "hold", "review_ok", "checks_ok", "rules_ok", "merged")
+        assert all(all(key in final for key in required) for final in final_observations)
+        assert all(final["head"] == observed["head"] and final["base"] == observed["base"] for final in final_observations)
+        results = [
+            api.merge(str(final["head"]), str(final["base"]), state.epoch)
+            for final in final_observations
+        ]
+        assert state.merge_calls == 2
         assert sum(result["status"] == "COMPLETE" for result in results) == 1
         assert state.mutation_count == 1
     elif sid == 9:

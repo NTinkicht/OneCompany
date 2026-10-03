@@ -2,6 +2,7 @@
 """Executable shared L5 control-plane mode policy."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -11,6 +12,7 @@ from typing import Any, Mapping
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / ".l5" / "control-plane.json"
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
+SHA256 = re.compile(r"^[0-9a-f]{64}$")
 LIVE_SAFE_MAIN_CHANGING = frozenset({"merge_expected_head", "revert"})
 REQUIRED_ACTIVATION = frozenset({
     "trust_boundary_verified",
@@ -19,6 +21,15 @@ REQUIRED_ACTIVATION = frozenset({
     "platform_enforcement_verified_on_all_repositories",
     "governance_drift_human_cleared",
 })
+PINNED_RUNTIME_FILES = (
+    ".l5/trust-policy.json",
+    "scripts/l5_control_plane.py",
+    "scripts/l5_trust_boundary.py",
+    "scripts/l5_shadow.py",
+    "scripts/l5_api_hostile_sim.py",
+    "scripts/l5_liveness.py",
+    "scripts/l5_activation.py",
+)
 
 
 def _manifest_path(path: Path | None = None) -> Path:
@@ -47,6 +58,31 @@ def load_manifest(path: Path | None = None) -> Mapping[str, Any]:
     ):
         raise ValueError("CONTROL_PLANE_REQUIREMENTS_INVALID")
     return value
+
+
+def _runtime_source_verified(value: Mapping[str, Any]) -> tuple[bool, str]:
+    """Bind ACTIVE authorization to the exact certified runtime bytes.
+
+    ``control_ref`` identifies the certified OneCompany revision. The activation
+    manifest additionally records SHA-256 digests derived from that revision so
+    downstream repositories can verify byte-for-byte equivalence without
+    requiring the OneCompany Git object to exist in their local repository.
+    The digest map itself is root-governed by the trusted base policy.
+    """
+    digests = value.get("runtime_file_sha256")
+    if not isinstance(digests, Mapping) or set(digests) != set(PINNED_RUNTIME_FILES):
+        return False, "CONTROL_PLANE_RUNTIME_DIGESTS_MISSING"
+    for relative_path in PINNED_RUNTIME_FILES:
+        expected = digests.get(relative_path)
+        if not isinstance(expected, str) or not SHA256.fullmatch(expected):
+            return False, "CONTROL_PLANE_RUNTIME_DIGESTS_INVALID"
+        try:
+            actual = hashlib.sha256((ROOT / relative_path).read_bytes()).hexdigest()
+        except OSError:
+            return False, "CONTROL_PLANE_RUNTIME_SOURCE_UNAVAILABLE"
+        if actual != expected:
+            return False, "CONTROL_PLANE_RUNTIME_SOURCE_MISMATCH"
+    return True, "CONTROL_PLANE_RUNTIME_SOURCE_VERIFIED"
 
 
 def mutation_policy(operation: str | None, path: Path | None = None) -> tuple[bool, str]:
@@ -80,6 +116,9 @@ def mutation_policy(operation: str | None, path: Path | None = None) -> tuple[bo
         return False, "ACTIVATION_EVIDENCE_MISSING"
     if any(evidence.get(name) is not True for name in REQUIRED_ACTIVATION):
         return False, "ACTIVATION_EVIDENCE_INCOMPLETE"
+    runtime_ok, runtime_reason = _runtime_source_verified(value)
+    if not runtime_ok:
+        return False, runtime_reason
     return True, "CONTROL_PLANE_ACTIVE"
 
 

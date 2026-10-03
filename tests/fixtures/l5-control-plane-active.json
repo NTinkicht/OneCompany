@@ -23,14 +23,5 @@
     "shadow_liveness_validated": true,
     "platform_enforcement_verified_on_all_repositories": true,
     "governance_drift_human_cleared": true
-  },
-  "runtime_file_git_blob_sha": {
-    ".l5/trust-policy.json": "03888c54290c78183e480755f56a6571e7450430",
-    "scripts/l5_control_plane.py": "1258cc4087971da3e36e04661f4c7e2d226d9dc9",
-    "scripts/l5_trust_boundary.py": "248f06d2d4713a8787a1d5ff0c739d7772678c80",
-    "scripts/l5_shadow.py": "4ea248106c8729155169d06377c5b8afe508b203",
-    "scripts/l5_api_hostile_sim.py": "4dd71d1de65422cb47553a28bc3de0f2241c65bf",
-    "scripts/l5_liveness.py": "b489596e3f40071faa92163a6ba9181a5bca0798",
-    "scripts/l5_activation.py": "7b10e95eb8219df94f541f96f668c641a93ca4c6"
   }
 }

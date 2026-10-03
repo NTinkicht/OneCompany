@@ -79,19 +79,19 @@ class ControlPlaneTests(unittest.TestCase):
         )
         self.assertEqual(cp.mutation_policy("merge_expected_head", unpinned)[1], "CONTROL_PLANE_REF_NOT_PINNED")
 
-        no_digests = self.manifest(
+        no_blobs = self.manifest(
             **base,
             activation_evidence={name: True for name in cp.REQUIRED_ACTIVATION},
         )
         self.assertEqual(
-            cp.mutation_policy("merge_expected_head", no_digests)[1],
-            "CONTROL_PLANE_RUNTIME_DIGESTS_MISSING",
+            cp.mutation_policy("merge_expected_head", no_blobs)[1],
+            "CONTROL_PLANE_RUNTIME_BLOBS_MISSING",
         )
 
         complete = self.manifest(
             **base,
             activation_evidence={name: True for name in cp.REQUIRED_ACTIVATION},
-            runtime_file_sha256={name: "b" * 64 for name in cp.PINNED_RUNTIME_FILES},
+            runtime_file_git_blob_sha={name: "b" * 40 for name in cp.PINNED_RUNTIME_FILES},
         )
         with mock.patch.object(cp, "_runtime_source_verified", return_value=(False, "CONTROL_PLANE_RUNTIME_SOURCE_MISMATCH")):
             self.assertEqual(
@@ -101,15 +101,15 @@ class ControlPlaneTests(unittest.TestCase):
         with mock.patch.object(cp, "_runtime_source_verified", return_value=(True, "CONTROL_PLANE_RUNTIME_SOURCE_VERIFIED")):
             self.assertEqual(cp.mutation_policy("merge_expected_head", complete), (True, "CONTROL_PLANE_ACTIVE"))
 
-    def test_runtime_digest_map_shape_fails_closed(self):
+    def test_runtime_blob_map_shape_fails_closed(self):
         self.assertEqual(
-            cp._runtime_source_verified({"runtime_file_sha256": {}}),
-            (False, "CONTROL_PLANE_RUNTIME_DIGESTS_MISSING"),
+            cp._runtime_source_verified({"runtime_file_git_blob_sha": {}}),
+            (False, "CONTROL_PLANE_RUNTIME_BLOBS_MISSING"),
         )
-        malformed = {name: "z" * 64 for name in cp.PINNED_RUNTIME_FILES}
+        malformed = {name: "z" * 40 for name in cp.PINNED_RUNTIME_FILES}
         self.assertEqual(
-            cp._runtime_source_verified({"runtime_file_sha256": malformed}),
-            (False, "CONTROL_PLANE_RUNTIME_DIGESTS_INVALID"),
+            cp._runtime_source_verified({"runtime_file_git_blob_sha": malformed}),
+            (False, "CONTROL_PLANE_RUNTIME_BLOBS_INVALID"),
         )
 
     def test_missing_or_malformed_manifest_fails_closed(self):

@@ -1,9 +1,9 @@
 {
   "schema_version": "1.0",
   "control_repository": "NTinkicht/OneCompany",
-  "control_ref": "88d2c6632543d937add00e1e9da493a260638057",
-  "execution_mode": "ACTIVE",
-  "platform_enforcement": "VERIFIED",
+  "control_ref": "main",
+  "execution_mode": "LIVE_SAFE",
+  "platform_enforcement": "DEFERRED_FOR_VALIDATION",
   "mutation_allowed": true,
   "managed_repositories": [
     "NTinkicht/OneCompany",
@@ -27,12 +27,5 @@
     "shadow_liveness_validated",
     "platform_enforcement_verified_on_all_repositories",
     "governance_drift_human_cleared"
-  ],
-  "activation_evidence": {
-    "trust_boundary_verified": true,
-    "api_hostile_simulation_green": true,
-    "shadow_liveness_validated": true,
-    "platform_enforcement_verified_on_all_repositories": true,
-    "governance_drift_human_cleared": true
-  }
+  ]
 }

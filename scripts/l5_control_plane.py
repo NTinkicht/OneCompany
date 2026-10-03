@@ -7,6 +7,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -14,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / ".l5" / "control-plane.json"
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
 L5_SCRIPT = re.compile(r"^scripts/l5_[^/]+\.py$")
+L5_PYC = re.compile(r"^l5_[^/]+(?:\.[^/]+)*\.pyc$")
 LIVE_SAFE_MAIN_CHANGING = frozenset({"merge_expected_head", "revert"})
 REQUIRED_ACTIVATION = frozenset({
     "trust_boundary_verified",
@@ -84,13 +86,28 @@ def _control_repository_root() -> Path:
 
 
 def _git(control_root: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    """Run one bounded read-only Git object query."""
+    """Run one bounded read-only Git object query without replacement objects.
+
+    The certification lookup must not inherit caller-controlled Git repository
+    redirection (``GIT_DIR``, alternate object directories, replacement refs,
+    config injection, and similar state). Keep only the process-discovery
+    environment needed to launch Git and explicitly disable replacement refs.
+    """
+    clean_env: dict[str, str] = {}
+    for name in ("PATH", "SYSTEMROOT", "WINDIR", "PATHEXT"):
+        value = os.environ.get(name)
+        if value:
+            clean_env[name] = value
+    clean_env["GIT_NO_REPLACE_OBJECTS"] = "1"
+    clean_env["GIT_CONFIG_NOSYSTEM"] = "1"
+    clean_env["GIT_CONFIG_GLOBAL"] = os.devnull
     return subprocess.run(
-        ["git", "-C", str(control_root), *args],
+        ["git", "--no-replace-objects", "-C", str(control_root), *args],
         text=True,
         capture_output=True,
         check=False,
         timeout=10,
+        env=clean_env,
     )
 
 
@@ -142,6 +159,36 @@ def _certified_runtime_blob_map(control_ref: str) -> tuple[dict[str, str] | None
     return blobs, "CONTROL_PLANE_CERTIFIED_RUNTIME_RESOLVED"
 
 
+def _runtime_import_artifacts_safe() -> tuple[bool, str]:
+    """Reject alternate L5 bytecode import artifacts before ACTIVE mutation.
+
+    Production entrypoints set ``sys.dont_write_bytecode`` before importing L5
+    modules. Any pre-existing L5 ``.pyc`` can therefore only be stale or
+    externally supplied and is rejected. A redirected pycache prefix is also
+    rejected because it would hide bytecode outside the certified checkout.
+    """
+    if sys.pycache_prefix is not None:
+        return False, "CONTROL_PLANE_RUNTIME_PYCACHE_PREFIX_SET"
+    scripts = ROOT / "scripts"
+    candidates = [scripts]
+    cache = scripts / "__pycache__"
+    try:
+        if cache.exists():
+            if cache.is_symlink() or not cache.is_dir():
+                return False, "CONTROL_PLANE_RUNTIME_BYTECODE_INVALID"
+            candidates.append(cache)
+        for directory in candidates:
+            for path in directory.iterdir():
+                if not L5_PYC.fullmatch(path.name):
+                    continue
+                if path.is_symlink() or path.is_file():
+                    return False, "CONTROL_PLANE_RUNTIME_BYTECODE_PRESENT"
+                return False, "CONTROL_PLANE_RUNTIME_BYTECODE_INVALID"
+    except OSError:
+        return False, "CONTROL_PLANE_RUNTIME_BYTECODE_UNVERIFIABLE"
+    return True, "CONTROL_PLANE_RUNTIME_BYTECODE_ABSENT"
+
+
 def _local_runtime_blob_map() -> tuple[dict[str, str] | None, str]:
     """Hash the complete executing L5 namespace without following symlinks."""
     paths = [ROOT / ".l5" / "trust-policy.json"]
@@ -173,6 +220,9 @@ def _runtime_source_verified(value: Mapping[str, Any]) -> tuple[bool, str]:
     control_ref = value.get("control_ref")
     if not isinstance(control_ref, str) or not SHA40.fullmatch(control_ref):
         return False, "CONTROL_PLANE_REF_NOT_PINNED"
+    imports_ok, imports_reason = _runtime_import_artifacts_safe()
+    if not imports_ok:
+        return False, imports_reason
     certified, reason = _certified_runtime_blob_map(control_ref)
     if certified is None:
         return False, reason

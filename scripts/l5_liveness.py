@@ -35,7 +35,7 @@ def check_liveness(
         raise ValueError("MAX_STAGNANT_RUNS_INVALID")
     failures: list[str] = []
     stagnant: dict[tuple[str, str], int] = {}
-    last_fingerprint: dict[tuple[str, str], str] = {}
+    last_epoch: dict[tuple[str, str], str] = {}
 
     for event in events:
         repo = str(event.get("repo") or "")
@@ -58,22 +58,24 @@ def check_liveness(
                 if type(value) is not int or value < 0 or value > limit:
                     failures.append(f"BUDGET_INVALID_{name.upper()}")
 
-        writes = event.get("writes", 0)
-        if type(writes) is not int or writes < 0:
+        stable_cycle = event.get("stable_cycle") is True
+        if stable_cycle and "writes" not in event:
             failures.append("WRITE_COUNT_INVALID")
             writes = 0
+        else:
+            writes = event.get("writes", 0)
+            if type(writes) is not int or writes < 0:
+                failures.append("WRITE_COUNT_INVALID")
+                writes = 0
         # A stabilized cycle may write only when a fresh external change is
         # positively evidenced. Missing/unknown evidence is never permission.
-        if event.get("stable_cycle") is True and writes != 0 and event.get("external_changes") is not True:
+        if stable_cycle and writes != 0 and event.get("external_changes") is not True:
             failures.append("IDLE_NOT_QUIESCENT")
 
-        # Reason text is diagnostic, not progress evidence. A controller that
-        # repeatedly changes prose while state/head/base remain fixed is still
-        # stagnant and must eventually trip the bounded-liveness guard.
-        fingerprint = json.dumps(
-            [event.get("state"), event.get("head"), event.get("base")],
-            sort_keys=True,
-        )
+        # State/reason churn on an unchanged head/base is not substantive
+        # progress. Bound the whole exact-head/base epoch so oscillation cannot
+        # reset the stagnation budget indefinitely.
+        epoch = json.dumps([event.get("head"), event.get("base")], sort_keys=True)
         reason = str(event.get("reason") or "")
         named_wait = status_valid and status == "WAIT" and (
             any(reason.startswith(prefix) for prefix in NAMED_WAIT_PREFIXES)
@@ -81,16 +83,16 @@ def check_liveness(
         )
         # Terminal success/idle, explicit parking, and named external waits are
         # bounded outcomes rather than controller stagnation. FAILED is not:
-        # repeated failure on unchanged state/head/base must consume the
-        # stagnation budget and eventually fail closed.
+        # repeated failure or state oscillation on an unchanged head/base must
+        # consume the stagnation budget and eventually fail closed.
         if status_valid and (status in {"COMPLETE", "IDLE"} or event.get("state") == "PARKED" or named_wait):
             stagnant[key] = 0
-        elif last_fingerprint.get(key) == fingerprint:
+        elif last_epoch.get(key) == epoch:
             stagnant[key] = stagnant.get(key, 0) + 1
             if stagnant[key] > max_stagnant_runs:
                 failures.append("UNBOUNDED_STAGNATION")
         else:
             stagnant[key] = 1
-        last_fingerprint[key] = fingerprint
+        last_epoch[key] = epoch
 
     return not failures, tuple(dict.fromkeys(failures))

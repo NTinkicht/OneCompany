@@ -1,16 +1,16 @@
 {
   "schema_version": 2,
   "repository": "NTinkicht/OneCompany",
-  "revision": 1,
-  "mode": "GOVERNANCE_DRIFT",
-  "mode_version": 1,
-  "human_clear_required": true,
+  "revision": 2,
+  "mode": "NORMAL",
+  "mode_version": 2,
+  "human_clear_required": false,
   "leases": {},
   "budgets": {},
   "observations": {},
   "platform_enforcement": {
-    "branch_protected": false,
-    "active_rulesets": 0
+    "branch_protected": true,
+    "active_rulesets": 1
   },
-  "note": "Fail-closed Claude L5 ledger v2. Do not clear GOVERNANCE_DRIFT until live platform enforcement is verified and human-cleared."
+  "note": "Owner-authorized GOVERNANCE_DRIFT clearance after fresh verification of active Main ruleset 24411866; storage update used prior blob SHA as CAS precondition."
 }

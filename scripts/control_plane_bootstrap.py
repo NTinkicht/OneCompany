@@ -9,22 +9,48 @@ update that admits the protected-main control commit here.
 """
 from __future__ import annotations
 
-import hashlib
-import json
+# os/sys are built-in/frozen on the supported CPython runtime. Keep the
+# repository and PYTHONPATH out of sys.path while importing every other
+# bootstrap dependency so a candidate-local sibling cannot shadow stdlib.
 import os
-import re
-import subprocess
 import sys
-from pathlib import Path
-from typing import Any, Mapping
 
-SOURCE_FILE = Path(__file__).absolute()
+_BOOTSTRAP_SOURCE = os.path.abspath(__file__)
+_BOOTSTRAP_SCRIPTS = os.path.dirname(_BOOTSTRAP_SOURCE)
+_BOOTSTRAP_ROOT = os.path.dirname(_BOOTSTRAP_SCRIPTS)
+_ORIGINAL_SYS_PATH = list(sys.path)
+_PYTHONPATH_ENTRIES = {
+    os.path.abspath(entry)
+    for entry in os.environ.get("PYTHONPATH", "").split(os.pathsep)
+    if entry
+}
+_BLOCKED_IMPORT_ROOTS = {
+    os.path.abspath(_BOOTSTRAP_ROOT),
+    os.path.abspath(_BOOTSTRAP_SCRIPTS),
+    os.path.abspath(os.getcwd()),
+    *_PYTHONPATH_ENTRIES,
+}
+try:
+    sys.path[:] = [
+        entry
+        for entry in sys.path
+        if entry
+        and os.path.abspath(entry) not in _BLOCKED_IMPORT_ROOTS
+    ]
+    import hashlib
+    import json
+    import re
+    import subprocess
+    from pathlib import Path
+    from typing import Mapping
+finally:
+    sys.path[:] = _ORIGINAL_SYS_PATH
+
+SOURCE_FILE = Path(_BOOTSTRAP_SOURCE)
 ROOT = SOURCE_FILE.parent.parent
 MANIFEST = ROOT / ".l5" / "control-plane.json"
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
-L5_SCRIPT = re.compile(r"^scripts/l5_[^/]+\.py$")
-L5_PYC = re.compile(r"^l5_[^/]+(?:\.[^/]+)*\.pyc$")
-BOOTSTRAP_PYC = re.compile(r"^control_plane_bootstrap(?:\.[^/]+)*\.pyc$")
+PY_SOURCE = re.compile(r"^scripts/(?:[^/]+/)*[^/]+\.py$")
 BOOTSTRAP_PATH = "scripts/control_plane_bootstrap.py"
 
 TRUSTED_CONTROL_REFS = frozenset({
@@ -52,32 +78,42 @@ def _assert_regular_runtime_roots(root: Path) -> None:
             raise RuntimeError("L5_BOOTSTRAP_RUNTIME_ROOT_UNVERIFIABLE") from exc
 
 
-def _is_executable_cache(name: str) -> bool:
-    """Return whether a cache artifact could supply L5/bootstrap bytecode."""
-    return bool(L5_PYC.fullmatch(name) or BOOTSTRAP_PYC.fullmatch(name))
+def _walk_python_tree(scripts: Path) -> tuple[list[Path], list[Path]]:
+    """Inventory Python source and executable cache artifacts without symlink traversal."""
+    sources: list[Path] = []
+    caches: list[Path] = []
+    try:
+        for directory, dirnames, filenames in os.walk(scripts, followlinks=False):
+            current = Path(directory)
+            if current.is_symlink() or not current.is_dir():
+                raise RuntimeError("L5_BOOTSTRAP_RUNTIME_SOURCE_INVALID")
+            for dirname in list(dirnames):
+                child = current / dirname
+                if child.is_symlink() or not child.is_dir():
+                    raise RuntimeError("L5_BOOTSTRAP_RUNTIME_SOURCE_INVALID")
+            for filename in filenames:
+                path = current / filename
+                if path.is_symlink() or not path.is_file():
+                    raise RuntimeError("L5_BOOTSTRAP_RUNTIME_SOURCE_INVALID")
+                if filename.endswith(".py"):
+                    sources.append(path)
+                elif filename.endswith(".pyc"):
+                    caches.append(path)
+    except OSError as exc:
+        raise RuntimeError("L5_BOOTSTRAP_RUNTIME_SOURCE_UNAVAILABLE") from exc
+    return sorted(sources), sorted(caches)
 
 
 def prepare_source_only_l5_imports(root: Path | None = None) -> None:
-    """Remove executable L5/bootstrap bytecode and disable bytecode generation."""
+    """Reject redirected caches, remove local bytecode, and disable bytecode generation."""
     runtime_root = root or ROOT
     _assert_regular_runtime_roots(runtime_root)
+    if sys.pycache_prefix is not None:
+        raise RuntimeError("L5_BOOTSTRAP_PYCACHE_PREFIX_REDIRECTED")
     scripts = runtime_root / "scripts"
-    cache = scripts / "__pycache__"
+    _sources, caches = _walk_python_tree(scripts)
     try:
-        if cache.exists():
-            if cache.is_symlink() or not cache.is_dir():
-                raise RuntimeError("L5_BOOTSTRAP_BYTECODE_CACHE_INVALID")
-            for path in cache.iterdir():
-                if not _is_executable_cache(path.name):
-                    continue
-                if path.is_symlink() or not path.is_file():
-                    raise RuntimeError("L5_BOOTSTRAP_BYTECODE_ARTIFACT_INVALID")
-                path.unlink()
-        for path in scripts.iterdir():
-            if not _is_executable_cache(path.name):
-                continue
-            if path.is_symlink() or not path.is_file():
-                raise RuntimeError("L5_BOOTSTRAP_BYTECODE_ARTIFACT_INVALID")
+        for path in caches:
             path.unlink()
     except OSError as exc:
         raise RuntimeError("L5_BOOTSTRAP_BYTECODE_CLEAN_FAILED") from exc
@@ -122,7 +158,7 @@ def _control_repository_root() -> Path:
 
 
 def _certified_runtime(control_ref: str) -> dict[str, str]:
-    """Resolve the complete certified L5 namespace from one admitted commit."""
+    """Resolve the complete importable Python runtime from one admitted commit."""
     if control_ref not in TRUSTED_CONTROL_REFS:
         raise RuntimeError("L5_BOOTSTRAP_CONTROL_REF_NOT_TRUSTED")
     control_root = _control_repository_root()
@@ -148,7 +184,7 @@ def _certified_runtime(control_ref: str) -> dict[str, str]:
         for line in tree.stdout.splitlines():
             metadata, path = line.split("\t", 1)
             mode, object_type, blob_sha = metadata.split(" ", 2)
-            if path not in {".l5/trust-policy.json", BOOTSTRAP_PATH} and not L5_SCRIPT.fullmatch(path):
+            if path != ".l5/trust-policy.json" and not PY_SOURCE.fullmatch(path):
                 continue
             if object_type != "blob" or mode not in {"100644", "100755"} or not SHA40.fullmatch(blob_sha):
                 raise RuntimeError("L5_BOOTSTRAP_CERTIFIED_RUNTIME_INVALID")
@@ -163,14 +199,13 @@ def _certified_runtime(control_ref: str) -> dict[str, str]:
 
 
 def _local_runtime(root: Path) -> dict[str, str]:
-    """Hash the executing bootstrap, trust policy, and complete L5 namespace."""
+    """Hash trust policy and every importable Python source below scripts/."""
     _assert_regular_runtime_roots(root)
     scripts = root / "scripts"
-    paths = [root / ".l5" / "trust-policy.json", root / BOOTSTRAP_PATH]
-    try:
-        paths.extend(sorted(scripts.glob("l5_*.py")))
-    except OSError as exc:
-        raise RuntimeError("L5_BOOTSTRAP_RUNTIME_SOURCE_UNAVAILABLE") from exc
+    sources, caches = _walk_python_tree(scripts)
+    if caches:
+        raise RuntimeError("L5_BOOTSTRAP_BYTECODE_ARTIFACT_PRESENT")
+    paths = [root / ".l5" / "trust-policy.json", *sources]
 
     blobs: dict[str, str] = {}
     for path in paths:
@@ -178,7 +213,9 @@ def _local_runtime(root: Path) -> dict[str, str]:
             if path.is_symlink() or not path.is_file():
                 raise RuntimeError("L5_BOOTSTRAP_RUNTIME_SOURCE_INVALID")
             relative = path.relative_to(root).as_posix()
-            if relative not in {".l5/trust-policy.json", BOOTSTRAP_PATH} and not L5_SCRIPT.fullmatch(relative):
+            if relative != ".l5/trust-policy.json" and not PY_SOURCE.fullmatch(relative):
+                raise RuntimeError("L5_BOOTSTRAP_RUNTIME_SOURCE_INVALID")
+            if relative in blobs:
                 raise RuntimeError("L5_BOOTSTRAP_RUNTIME_SOURCE_INVALID")
             blobs[relative] = _git_blob_sha(path.read_bytes())
         except OSError as exc:

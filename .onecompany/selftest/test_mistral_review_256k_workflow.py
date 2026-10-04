@@ -8,6 +8,10 @@ WORKFLOW = ROOT / ".github" / "workflows" / "onecompany-mistral-exact-head-revie
 
 class MistralReview256KWorkflowTests(unittest.TestCase):
     def test_runtime_review_limits_are_raised_to_256k(self):
+        if not WORKFLOW.is_file():
+            self.skipTest(
+                "source-only Mistral reviewer workflow is not installed in fresh bootstrap targets"
+            )
         text = WORKFLOW.read_text(encoding="utf-8")
         self.assertIn('"MAX_DIFF_BYTES = 100_000": "MAX_DIFF_BYTES = 256_000"', text)
         self.assertIn('"MAX_REVIEW_STAGE_DIFF_BYTES = 32_000": "MAX_REVIEW_STAGE_DIFF_BYTES = 256_000"', text)

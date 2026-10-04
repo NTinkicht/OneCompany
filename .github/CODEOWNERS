@@ -2,6 +2,7 @@
 # technical review and exact-head CI; code ownership does not create a manual gate.
 # Only the repository owner is listed; do not automatically request other people.
 /.onecompany/ @NTinkicht
+/.l5/ @NTinkicht
 /.opencodereview/ @NTinkicht
 /scripts/ @NTinkicht
 /company/ @NTinkicht

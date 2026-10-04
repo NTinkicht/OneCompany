@@ -2,8 +2,8 @@
   "schema_version": "1.0",
   "binding_reviewers": [
     {
-      "actor": "coderabbit",
-      "github_logins": ["coderabbitai", "coderabbitai[bot]"]
+      "actor": "mistral-vibe",
+      "github_logins": ["mistral-vibe"]
     }
   ],
   "controller_identities": [
@@ -23,5 +23,5 @@
     "repo_code_runs_in_actuator": false,
     "actuator_accepts_structured_only": true
   },
-  "notes": "Binding reviewer identities are human-governed. Add another reviewer only after its exact GitHub identity and non-author provenance are independently verified."
+  "notes": "Binding reviewer identities are human-governed. Mistral Vibe is accepted only after the existing platform-identity path authenticates its exact-head/base binding review and maps the publisher to actor mistral-vibe."
 }

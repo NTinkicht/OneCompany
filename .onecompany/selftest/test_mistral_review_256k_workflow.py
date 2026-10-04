@@ -18,6 +18,8 @@ class MistralReview256KWorkflowTests(unittest.TestCase):
         self.assertIn('"MAX_REVIEW_STAGE_TOTAL_BYTES = 48_000": "MAX_REVIEW_STAGE_TOTAL_BYTES = 320_000"', text)
         self.assertIn('"MAX_INLINE_BYTES = 50_000": "MAX_INLINE_BYTES = 320_000"', text)
         self.assertIn('"MAX_INPUT_BYTES = 64_000": "MAX_INPUT_BYTES = 256_000"', text)
+        self.assertIn('< /tmp/onecompany-mistral-prompt.txt', text)
+        self.assertNotIn('--prompt "$(cat /tmp/onecompany-mistral-prompt.txt)"', text)
 
 
 if __name__ == "__main__":

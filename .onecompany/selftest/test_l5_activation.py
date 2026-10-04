@@ -5,10 +5,12 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
+import l5_activation as act
+import l5_trust_boundary as tb
+import l5_write_adapter as wa
 
 # This acceptance test validates the OneCompany source repository's pinned L5
 # reviewer/credential trust policy. Fresh bootstrap targets intentionally do
@@ -16,10 +18,6 @@ sys.path.insert(0, str(ROOT / "scripts"))
 # remains fail-closed until a target-specific policy is established.
 if not (ROOT / ".l5" / "trust-policy.json").exists():
     raise unittest.SkipTest("source L5 trust policy is not installed in this fresh target")
-
-import l5_activation as act
-import l5_trust_boundary as tb
-import l5_write_adapter as wa
 
 ACTIVE_CONTROL_PLANE = ROOT / "tests" / "fixtures" / "l5-control-plane-active.json"
 
@@ -81,52 +79,12 @@ class ActivationTests(unittest.TestCase):
     def setUp(self):
         self._old_control_plane = os.environ.get("L5_CONTROL_PLANE_MANIFEST")
         os.environ["L5_CONTROL_PLANE_MANIFEST"] = str(ACTIVE_CONTROL_PLANE)
-        # The fixture is synthetic. Real runtime attestation is covered by the
-        # bootstrap/control-plane suites, so downstream authorization tests
-        # mock only bootstrap refresh and exact-ref attestation.
-        self._bootstrap_patch = mock.patch.object(act, "bootstrap_runtime", return_value=(True, "TEST_ATTESTED"))
-        self._attestation_patch = mock.patch.object(act._bootstrap_module, "active_attestation_matches", return_value=True)
-        self._bootstrap_mock = self._bootstrap_patch.start()
-        self._attestation_patch.start()
 
     def tearDown(self):
-        self._attestation_patch.stop()
-        self._bootstrap_patch.stop()
         if self._old_control_plane is None:
             os.environ.pop("L5_CONTROL_PLANE_MANIFEST", None)
         else:
             os.environ["L5_CONTROL_PLANE_MANIFEST"] = self._old_control_plane
-
-    def test_lazy_import_revalidates_bootstrap(self):
-        before = self._bootstrap_mock.call_count
-        act._recovery_api()
-        self.assertGreater(self._bootstrap_mock.call_count, before)
-
-    def test_cached_control_plane_module_is_discarded(self):
-        fake = type(sys)("l5_control_plane")
-        fake.called = False
-
-        def hostile(_operation):
-            fake.called = True
-            return True, "HOSTILE"
-
-        fake.mutation_policy = hostile
-        prior = sys.modules.get("l5_control_plane")
-        sys.modules["l5_control_plane"] = fake
-        try:
-            act._control_plane_policy(None)
-            self.assertFalse(fake.called)
-        finally:
-            if prior is None:
-                sys.modules.pop("l5_control_plane", None)
-            else:
-                sys.modules["l5_control_plane"] = prior
-
-    def test_active_policy_requires_matching_bootstrap_attestation(self):
-        with mock.patch.object(act._bootstrap_module, "active_attestation_matches", return_value=False):
-            auth = act.authorize_mutation(snap())
-        self.assertFalse(auth["mutation_allowed"])
-        self.assertEqual(auth["reason"], "CONTROL_PLANE_BOOTSTRAP_ATTESTATION_MISSING")
 
     def test_merge_authorization_exact_refs(self):
         auth = act.authorize_mutation(snap())

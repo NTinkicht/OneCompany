@@ -14,6 +14,7 @@ from pathlib import Path
 
 SHA = re.compile(r"[a-f0-9]{40}\Z")
 FILE = re.compile(r"(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\Z")
+SAFE_REASON = re.compile(r"[A-Z0-9_]+\Z")
 MAX_INLINE_BYTES = 50_000
 MAX_INPUT_BYTES = 64_000
 MAX_SOURCE_FILES = 16
@@ -105,7 +106,7 @@ def build_packet(stage: Path, trusted: Path, number: int, head: str, base: str) 
         parts.extend([f"\nBEGIN UNTRUSTED SOURCE {name}\n", data.decode("utf-8"), f"\nEND UNTRUSTED SOURCE {name}\n"])
     result = "".join(parts)
     if len(result.encode("utf-8")) > MAX_INLINE_BYTES:
-        raise ValueError("REVIEW_PACKET_INLINE_BUDGET_EXCEEDED")
+        raise ValueError("INLINE_BUDGET_EXCEEDED")
     return result
 
 
@@ -119,8 +120,10 @@ def main() -> int:
     args = parser.parse_args()
     try:
         prompt = build_packet(args.stage, args.trusted, args.pr, args.head, args.base)
-    except (ValueError, OSError, UnicodeError, RecursionError):
-        print("REVIEW_PACKET_BLOCKED", file=sys.stderr)
+    except (ValueError, OSError, UnicodeError, RecursionError) as exc:
+        candidate = str(exc)
+        reason = candidate if SAFE_REASON.fullmatch(candidate) else "REVIEW_PACKET_INTERNAL_ERROR"
+        print(f"REVIEW_PACKET_BLOCKED:{reason}", file=sys.stderr)
         return 2
     sys.stdout.write(prompt)
     return 0

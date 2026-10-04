@@ -10,9 +10,86 @@ post-merge health verification completes.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
-from enum import Enum
-from typing import Any, Mapping, Protocol, Sequence
+# Enter the same source-only trust boundary before importing dataclasses,
+# typing, l5_kernel, or any other non-frozen module.
+import os
+import sys
+
+
+def _load_controller_bootstrap_from_source():
+    scripts = os.path.dirname(os.path.abspath(__file__))
+    root = os.path.dirname(scripts)
+    source_path = os.path.join(scripts, "control_plane_bootstrap.py")
+    for parent in (root, scripts, os.path.join(root, ".l5")):
+        if os.path.islink(parent) or not os.path.isdir(parent):
+            raise RuntimeError("L5_BOOTSTRAP_RUNTIME_ROOT_INVALID")
+    if os.path.islink(source_path) or not os.path.isfile(source_path):
+        raise RuntimeError("L5_BOOTSTRAP_SOURCE_INVALID")
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(source_path, flags)
+    except OSError as exc:
+        raise RuntimeError("L5_BOOTSTRAP_SOURCE_UNAVAILABLE") from exc
+    try:
+        info = os.fstat(fd)
+        if (info.st_mode & 0o170000) != 0o100000:
+            raise RuntimeError("L5_BOOTSTRAP_SOURCE_INVALID")
+        with os.fdopen(fd, "rb", closefd=False) as handle:
+            source = handle.read()
+    finally:
+        os.close(fd)
+    sys.dont_write_bytecode = True
+    module = type(sys)("control_plane_bootstrap")
+    module.__file__ = source_path
+    module.__package__ = ""
+    try:
+        code = compile(source, source_path, "exec", dont_inherit=True)
+        exec(code, module.__dict__)
+    except Exception as exc:
+        raise RuntimeError("L5_BOOTSTRAP_SOURCE_EXECUTION_FAILED") from exc
+    runtime = module.__dict__.get("bootstrap_runtime")
+    if not callable(runtime):
+        raise RuntimeError("L5_BOOTSTRAP_RUNTIME_MISSING")
+    sys.modules["control_plane_bootstrap"] = module
+    return runtime
+
+
+_controller_bootstrap = _load_controller_bootstrap_from_source()
+_controller_bootstrap_ok, _controller_bootstrap_reason = _controller_bootstrap()
+if not _controller_bootstrap_ok:
+    raise RuntimeError(_controller_bootstrap_reason)
+
+# Import all non-frozen stdlib dependencies without repository/PYTHONPATH
+# entries so candidate-local siblings cannot shadow them in LIVE_SAFE.
+_scripts = os.path.dirname(os.path.abspath(__file__))
+_root = os.path.dirname(_scripts)
+_saved_path = list(sys.path)
+_env_paths = {
+    os.path.abspath(entry)
+    for entry in os.environ.get("PYTHONPATH", "").split(os.pathsep)
+    if entry
+}
+_blocked_paths = {
+    os.path.abspath(_root),
+    os.path.abspath(_scripts),
+    os.path.abspath(os.getcwd()),
+    *_env_paths,
+}
+try:
+    sys.path[:] = [
+        entry for entry in sys.path
+        if entry and os.path.abspath(entry) not in _blocked_paths
+    ]
+    import stat
+    import types
+    from dataclasses import dataclass
+    from enum import Enum
+    from pathlib import Path
+    from typing import Any, Mapping, Protocol, Sequence
+finally:
+    sys.path[:] = _saved_path
 
 from l5_kernel import (
     Budget,
@@ -145,8 +222,6 @@ def _operation_for(state: ItemState, item: Mapping[str, Any]) -> str | None:
         return "update_branch"
     if state == ItemState.MERGE_ELIGIBLE:
         return "merge_expected_head"
-    # MAIN_BROKEN requires its own independently authorized recovery path.
-    # Do not repeatedly select an operation the guarded bridge cannot authorize.
     if state == ItemState.IDLE and item.get("replenish_candidate") is True:
         return "reserve_next_wu"
     return None
@@ -504,7 +579,7 @@ def run_once(
     run_id: str | None = None,
 ) -> RunResult:
     """Execute one deterministic BOOT-to-ACTION controller invocation."""
-    del now_srv  # Compatibility only. All write timing uses fresh trusted time.
+    del now_srv
     rid = run_id or new_run_id()
     repo = io.repo_snapshot()
 
@@ -770,9 +845,6 @@ def run_once(
         )
 
     if status == "BLOCKED":
-        # Abort the no-write intent but deliberately retain the live lease as
-        # a bounded cooldown. _select skips active leases, so one bad item
-        # cannot starve lower-priority work on subsequent invocations.
         if resolve_intent(store, with_intent, "ABORTED") is None:
             return RunResult(rid, RunPhase.ACTION, "WAIT", action=operation, item_id=item_id, reason="INTENT_ABORT_CAS_FAILED", mutation_result=mutation)
         return RunResult(rid, RunPhase.EXIT, "BLOCKED", action=operation, item_id=item_id, reason=result_reason or "ACTION_BLOCKED_COOLDOWN", mutation_result=mutation)
@@ -796,6 +868,77 @@ def run_once(
     )
 
 
+def _load_guarded_runtime_from_source() -> tuple[Any, Any]:
+    """Source-load bootstrap, activation and adapter before any import cache lookup."""
+    scripts = Path(__file__).absolute().parent
+    root = scripts.parent
+    for parent in (root, scripts, root / ".l5"):
+        try:
+            if parent.is_symlink() or not parent.is_dir():
+                raise RuntimeError("L5_GUARDED_RUNTIME_ROOT_INVALID")
+        except OSError as exc:
+            raise RuntimeError("L5_GUARDED_RUNTIME_ROOT_UNVERIFIABLE") from exc
+
+    def read_source(name: str) -> tuple[Path, bytes]:
+        source_path = scripts / f"{name}.py"
+        try:
+            if source_path.is_symlink() or not source_path.is_file():
+                raise RuntimeError("L5_GUARDED_RUNTIME_SOURCE_INVALID")
+        except OSError as exc:
+            raise RuntimeError("L5_GUARDED_RUNTIME_SOURCE_UNVERIFIABLE") from exc
+        flags = os.O_RDONLY
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        try:
+            fd = os.open(source_path, flags)
+        except OSError as exc:
+            raise RuntimeError("L5_GUARDED_RUNTIME_SOURCE_UNAVAILABLE") from exc
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode):
+                raise RuntimeError("L5_GUARDED_RUNTIME_SOURCE_INVALID")
+            with os.fdopen(fd, "rb", closefd=False) as handle:
+                source = handle.read()
+        finally:
+            os.close(fd)
+        return source_path, source
+
+    def exec_source(name: str) -> Any:
+        source_path, source = read_source(name)
+        module = types.ModuleType(name)
+        module.__file__ = str(source_path)
+        module.__package__ = ""
+        previous = sys.modules.get(name)
+        sys.modules[name] = module
+        try:
+            code = compile(source, str(source_path), "exec", dont_inherit=True)
+            exec(code, module.__dict__)
+        except Exception as exc:
+            if previous is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = previous
+            raise RuntimeError(f"L5_GUARDED_RUNTIME_{name.upper()}_LOAD_FAILED") from exc
+        return module
+
+    sys.dont_write_bytecode = True
+    bootstrap = exec_source("control_plane_bootstrap")
+    runtime = getattr(bootstrap, "bootstrap_runtime", None)
+    if not callable(runtime):
+        raise RuntimeError("L5_GUARDED_RUNTIME_BOOTSTRAP_MISSING")
+    ok, reason = runtime()
+    if not ok:
+        raise RuntimeError(str(reason))
+
+    activation = exec_source("l5_activation")
+    adapter = exec_source("l5_write_adapter")
+    authorize_mutation = getattr(activation, "authorize_mutation", None)
+    execute_mutation = getattr(adapter, "execute_mutation", None)
+    if not callable(authorize_mutation) or not callable(execute_mutation):
+        raise RuntimeError("L5_GUARDED_RUNTIME_ENTRYPOINT_MISSING")
+    return authorize_mutation, execute_mutation
+
+
 class GuardedWriteBridge:
     """Bridge controller actions into the existing certified write adapter."""
 
@@ -810,10 +953,11 @@ class GuardedWriteBridge:
         item: Mapping[str, Any],
         lease: Lease,
     ) -> Mapping[str, Any]:
-        """Reproduce authorization and delegate to ``execute_mutation``."""
-        from l5_activation import authorize_mutation
-        from l5_write_adapter import execute_mutation
-
+        """Reproduce authorization and delegate through the source-only boundary."""
+        try:
+            authorize_mutation, execute_mutation = _load_guarded_runtime_from_source()
+        except RuntimeError as exc:
+            return {"status": "BLOCKED", "reason": f"GUARDED_RUNTIME_INVALID:{exc}"}
         snapshot = item.get("activation_snapshot")
         if not isinstance(snapshot, dict):
             return {"status": "BLOCKED", "reason": "ACTIVATION_SNAPSHOT_MISSING"}

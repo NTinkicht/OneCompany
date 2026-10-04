@@ -2,13 +2,95 @@
 """Credential-isolated L5 write adapter with atomic CAS and replay safety."""
 from __future__ import annotations
 
-import fcntl
-import json
+# Keep the pre-attestation surface to built-in/frozen modules only.
 import os
-from pathlib import Path
-from typing import Any
+import sys
 
-from l5_activation import HARD_BOUNDARY_FIELDS, RETRYABLE_MUTATIONS, SAFE_MUTATIONS, TOKEN64, authorize_mutation, required_bool
+
+def _load_bootstrap_runtime_from_source():
+    """Load bootstrap source without consulting Python import/bytecode caches."""
+    scripts = os.path.dirname(os.path.abspath(__file__))
+    root = os.path.dirname(scripts)
+    source_path = os.path.join(scripts, "control_plane_bootstrap.py")
+    for parent in (root, scripts, os.path.join(root, ".l5")):
+        if os.path.islink(parent) or not os.path.isdir(parent):
+            raise RuntimeError("L5_BOOTSTRAP_RUNTIME_ROOT_INVALID")
+    if os.path.islink(source_path) or not os.path.isfile(source_path):
+        raise RuntimeError("L5_BOOTSTRAP_SOURCE_INVALID")
+
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(source_path, flags)
+    except OSError as exc:
+        raise RuntimeError("L5_BOOTSTRAP_SOURCE_UNAVAILABLE") from exc
+    try:
+        info = os.fstat(fd)
+        if (info.st_mode & 0o170000) != 0o100000:
+            raise RuntimeError("L5_BOOTSTRAP_SOURCE_INVALID")
+        with os.fdopen(fd, "rb", closefd=False) as handle:
+            source = handle.read()
+    finally:
+        os.close(fd)
+
+    sys.dont_write_bytecode = True
+    module = type(sys)("control_plane_bootstrap")
+    module.__file__ = source_path
+    module.__package__ = ""
+    try:
+        code = compile(source, source_path, "exec", dont_inherit=True)
+        exec(code, module.__dict__)
+    except Exception as exc:
+        raise RuntimeError("L5_BOOTSTRAP_SOURCE_EXECUTION_FAILED") from exc
+    runtime = module.__dict__.get("bootstrap_runtime")
+    if not callable(runtime):
+        raise RuntimeError("L5_BOOTSTRAP_RUNTIME_MISSING")
+    sys.modules["control_plane_bootstrap"] = module
+    return runtime
+
+
+bootstrap_runtime = _load_bootstrap_runtime_from_source()
+_bootstrap_ok, _bootstrap_reason = bootstrap_runtime()
+if not _bootstrap_ok:
+    raise RuntimeError(_bootstrap_reason)
+
+# Import non-frozen stdlib with repository/PYTHONPATH entries excluded so a
+# candidate-local fcntl/json/pathlib/typing sibling cannot execute in LIVE_SAFE.
+_scripts = os.path.dirname(os.path.abspath(__file__))
+_root = os.path.dirname(_scripts)
+_saved_path = list(sys.path)
+_env_paths = {
+    os.path.abspath(entry)
+    for entry in os.environ.get("PYTHONPATH", "").split(os.pathsep)
+    if entry
+}
+_blocked_paths = {
+    os.path.abspath(_root),
+    os.path.abspath(_scripts),
+    os.path.abspath(os.getcwd()),
+    *_env_paths,
+}
+try:
+    sys.path[:] = [
+        entry for entry in sys.path
+        if entry and os.path.abspath(entry) not in _blocked_paths
+    ]
+    import fcntl  # noqa: E402
+    import json  # noqa: E402
+    from pathlib import Path  # noqa: E402
+    from typing import Any  # noqa: E402
+finally:
+    sys.path[:] = _saved_path
+
+from l5_activation import (  # noqa: E402
+    HARD_BOUNDARY_FIELDS,
+    RETRYABLE_MUTATIONS,
+    SAFE_MUTATIONS,
+    TOKEN64,
+    authorize_mutation,
+    required_bool,
+)
 
 MUTATIONS = frozenset(SAFE_MUTATIONS.values())
 REVIEW_SENSITIVE = frozenset({"dispatch_review", "merge_expected_head"})
@@ -38,6 +120,7 @@ def _blocked(reason: str, token: Any = None) -> dict[str, Any]:
 
 
 def _live_gate(auth: dict[str, Any], stream: str, client: Any, store: Any, *, retry_check: bool, observed_retry: tuple[int, str | None] | None = None) -> str | None:
+    """Re-read live boundaries/refs/stream ownership immediately before write."""
     boundaries = client.fetch_boundaries()
     if not isinstance(boundaries, dict): return "BOUNDARY_STATE_UNKNOWN"
     try:
@@ -62,23 +145,32 @@ def _live_gate(auth: dict[str, Any], stream: str, client: Any, store: Any, *, re
 
 
 def _params(auth):
+    """Build the exact CAS parameter set bound by authorization."""
     return {"canonical_pr":auth["canonical_pr"],"issue":auth["issue"],"expected_head_sha":auth["expected_head_sha"],"expected_base_sha":auth["expected_base_sha"],"selected_issue":auth.get("selected_issue"),"idempotency_key":auth["mutation_token"]}
 
+
 def _reconcile(auth,client,store,*,written):
+    """Reconcile an uncertain write by verifying its externally visible effect."""
     token=auth["mutation_token"]
     if client.verify_effect(auth["mutation"],_params(auth)) is True:
         store.set_status(token,"COMPLETE"); return {"status":"COMPLETE","reason":"EFFECT_VERIFIED","mutation_token":token,"written":written}
     return {"status":"IN_PROGRESS","reason":"EFFECT_NOT_YET_VERIFIED","mutation_token":token,"written":written}
 
+
 def _reproduce(auth,snapshot):
+    """Recompute authorization and require byte-for-byte equivalent semantics."""
     try: reproduced=authorize_mutation(snapshot,enforce_control_plane=True)
     except ValueError: return False
     return reproduced==auth
 
+
 def _persisted_record_matches(auth,record):
+    """Verify persisted retry identity still matches the exact authorization."""
     return isinstance(record,dict) and record.get("mutation")==auth.get("mutation") and record.get("canonical_pr")==auth.get("canonical_pr") and record.get("expected_head_sha")==auth.get("expected_head_sha") and record.get("expected_base_sha")==auth.get("expected_base_sha")
 
+
 def execute_mutation(auth,snapshot,client,store):
+    """Execute one authorized mutation with durable CAS/replay protection."""
     token=auth.get("mutation_token") if isinstance(auth,dict) else None
     if not isinstance(auth,dict) or auth.get("authorized") is not True or auth.get("mutation_allowed") is not True: return _blocked("NOT_AUTHORIZED",token)
     if auth.get("mutation") not in MUTATIONS or not isinstance(token,str) or not TOKEN64.fullmatch(token): return _blocked("AUTHORIZATION_INVALID",token)
@@ -116,7 +208,9 @@ def execute_mutation(auth,snapshot,client,store):
     except Exception:return _reconcile(auth,client,store,written=False)
     return _reconcile(auth,client,store,written=True)
 
+
 class MemoryStore:
+    """In-memory durable-store contract used by hermetic tests."""
     def __init__(self): self.records={}; self.retry={}; self.retry_owners={}
     def get(self,token): return dict(self.records[token]) if token in self.records else None
     def begin(self,token,record,stream,count,action,*,expected_retry=None,expected_owner=_UNSET):
@@ -138,11 +232,11 @@ class MemoryStore:
         if record is not None:record["status"]="RETRYABLE";record["reason"]=reason
         if prior_retry is not None and self.retry_owners.get(stream)==token:
             self.retry[stream]=prior_retry
-            # Keep ownership with the failing token as a monotonic ABA fence.
-            # A later stale token must never regain authority to restore older retry state.
             self.retry_owners[stream]=token
 
+
 class FileStore(MemoryStore):
+    """File-backed token/retry store with process-level locking and fsync."""
     def __init__(self,path):
         super().__init__();self.path=Path(path);self.lock_path=self.path.with_suffix(self.path.suffix+".lock");self.path.parent.mkdir(parents=True,exist_ok=True)
         if self.path.exists():self._reload()
@@ -185,5 +279,5 @@ class FileStore(MemoryStore):
             def __exit__(self_nonlocal,*_):fcntl.flock(fh.fileno(),fcntl.LOCK_UN);fh.close()
         return _Lock()
 
-# Backward-compatible durable-store name retained for certified activation tests.
+
 JsonFileStore = FileStore

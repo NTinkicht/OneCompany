@@ -2,17 +2,94 @@
 """Fail-closed L5 mutation authorization over the certified recovery planner."""
 from __future__ import annotations
 
-import hashlib
-import json
-import re
-from typing import Any
+# Keep the pre-attestation surface to CPython built-in/frozen modules only.
+# Candidate-local stdlib/L5 siblings are not importable until the source-loaded
+# bootstrap has removed bytecode and (for ACTIVE) certified the runtime closure.
+import os
+import sys
 
-from l5_control_plane import mutation_policy
-from l5_recovery import MAX_RETRIES, plan_recovery
-from l5_trust_boundary import trust_boundary_from_activation
+
+def _load_bootstrap_runtime_from_source():
+    """Load bootstrap source without consulting Python import/bytecode caches."""
+    scripts = os.path.dirname(os.path.abspath(__file__))
+    root = os.path.dirname(scripts)
+    source_path = os.path.join(scripts, "control_plane_bootstrap.py")
+    for parent in (root, scripts, os.path.join(root, ".l5")):
+        if os.path.islink(parent) or not os.path.isdir(parent):
+            raise RuntimeError("L5_BOOTSTRAP_RUNTIME_ROOT_INVALID")
+    if os.path.islink(source_path) or not os.path.isfile(source_path):
+        raise RuntimeError("L5_BOOTSTRAP_SOURCE_INVALID")
+
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(source_path, flags)
+    except OSError as exc:
+        raise RuntimeError("L5_BOOTSTRAP_SOURCE_UNAVAILABLE") from exc
+    try:
+        info = os.fstat(fd)
+        if (info.st_mode & 0o170000) != 0o100000:
+            raise RuntimeError("L5_BOOTSTRAP_SOURCE_INVALID")
+        with os.fdopen(fd, "rb", closefd=False) as handle:
+            source = handle.read()
+    finally:
+        os.close(fd)
+
+    sys.dont_write_bytecode = True
+    module = type(sys)("control_plane_bootstrap")
+    module.__file__ = source_path
+    module.__package__ = ""
+    try:
+        code = compile(source, source_path, "exec", dont_inherit=True)
+        exec(code, module.__dict__)
+    except Exception as exc:
+        raise RuntimeError("L5_BOOTSTRAP_SOURCE_EXECUTION_FAILED") from exc
+    runtime = module.__dict__.get("bootstrap_runtime")
+    if not callable(runtime):
+        raise RuntimeError("L5_BOOTSTRAP_RUNTIME_MISSING")
+    sys.modules["control_plane_bootstrap"] = module
+    return runtime
+
+
+bootstrap_runtime = _load_bootstrap_runtime_from_source()
+_bootstrap_ok, _bootstrap_reason = bootstrap_runtime()
+if not _bootstrap_ok:
+    raise RuntimeError(_bootstrap_reason)
+
+# Import non-frozen stdlib with repository/PYTHONPATH entries excluded. This
+# prevents LIVE_SAFE imports from executing candidate-local stdlib shadows.
+_scripts = os.path.dirname(os.path.abspath(__file__))
+_root = os.path.dirname(_scripts)
+_saved_path = list(sys.path)
+_env_paths = {
+    os.path.abspath(entry)
+    for entry in os.environ.get("PYTHONPATH", "").split(os.pathsep)
+    if entry
+}
+_blocked_paths = {
+    os.path.abspath(_root),
+    os.path.abspath(_scripts),
+    os.path.abspath(os.getcwd()),
+    *_env_paths,
+}
+try:
+    sys.path[:] = [
+        entry for entry in sys.path
+        if entry and os.path.abspath(entry) not in _blocked_paths
+    ]
+    import hashlib  # noqa: E402
+    import json  # noqa: E402
+    import re  # noqa: E402
+    from typing import Any  # noqa: E402
+finally:
+    sys.path[:] = _saved_path
+
+from l5_control_plane import mutation_policy  # noqa: E402
 
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
 TOKEN64 = re.compile(r"^[0-9a-f]{64}$")
+
 SAFE_MUTATIONS = {
     "REMEDIATE_SAME_PR_CI": "retry_ci",
     "DISPATCH_ELIGIBLE_NONAUTHOR_REVIEW": "dispatch_review",
@@ -64,6 +141,20 @@ def _mutation_token(plan: dict[str, Any], snapshot: dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(material, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
+def _recovery_api():
+    """Load the certified recovery planner only after control-plane preflight."""
+    from l5_recovery import MAX_RETRIES, plan_recovery
+
+    return MAX_RETRIES, plan_recovery
+
+
+def _trust_boundary(snapshot: dict[str, Any]) -> tuple[bool, tuple[str, ...]]:
+    """Load and evaluate reviewer trust only after control-plane preflight."""
+    from l5_trust_boundary import trust_boundary_from_activation
+
+    return trust_boundary_from_activation(snapshot)
+
+
 def authorize_mutation(
     snapshot: dict[str, Any],
     *,
@@ -86,6 +177,19 @@ def authorize_mutation(
         raise ValueError("L5_ACTIVATION_EXACT_REFS_INVALID")
     if required_bool(snapshot, "head_current") is not True or required_bool(snapshot, "base_current") is not True:
         return {"authorized": False, "mutation_allowed": False, "reason": "STALE_HEAD_OR_BASE"}
+
+    if enforce_control_plane:
+        preflight_ok, preflight_reason = mutation_policy(None)
+        if not preflight_ok:
+            return {
+                "authorized": False,
+                "mutation_allowed": False,
+                "reason": preflight_reason,
+                "expected_head_sha": head,
+                "expected_base_sha": base,
+            }
+
+    max_retries, plan_recovery = _recovery_api()
     plan = plan_recovery(snapshot)
     action = plan.get("next_action")
     if action not in SAFE_MUTATIONS:
@@ -121,7 +225,7 @@ def authorize_mutation(
             raise ValueError("L5_ACTIVATION_MERGE_EVIDENCE_NOT_READY")
         if required_bool(snapshot, "unresolved_threads") or required_bool(snapshot, "mergeable") is not True:
             raise ValueError("L5_ACTIVATION_MERGE_BLOCKED")
-        trust_ok, trust_failures = trust_boundary_from_activation(snapshot)
+        trust_ok, trust_failures = _trust_boundary(snapshot)
         if not trust_ok:
             return {
                 "authorized": False,
@@ -135,7 +239,7 @@ def authorize_mutation(
             }
     if mutation in RETRYABLE_MUTATIONS:
         count = result["retry_count_after"]
-        if type(count) is not int or not 1 <= count <= MAX_RETRIES or not isinstance(result["retry_action_after"], str):
+        if type(count) is not int or not 1 <= count <= max_retries or not isinstance(result["retry_action_after"], str):
             raise ValueError("L5_ACTIVATION_RETRY_STATE_INVALID")
     if mutation == "reserve_next_wu":
         selected = plan.get("selected_issue")

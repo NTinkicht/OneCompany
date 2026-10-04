@@ -7,6 +7,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -62,7 +63,7 @@ class ControlPlaneTests(unittest.TestCase):
         path = self.manifest(execution_mode="SHADOW", mutation_allowed=False)
         self.assertEqual(cp.mutation_policy("retry_ci", path), (False, "CONTROL_PLANE_SHADOW"))
 
-    def test_active_requires_pinned_ref_and_complete_evidence(self):
+    def test_active_requires_pinned_ref_complete_evidence_and_attestation(self):
         base = {
             "execution_mode": "ACTIVE",
             "platform_enforcement": "VERIFIED",
@@ -82,7 +83,12 @@ class ControlPlaneTests(unittest.TestCase):
             **base,
             activation_evidence={name: True for name in cp.REQUIRED_ACTIVATION},
         )
-        self.assertEqual(cp.mutation_policy("merge_expected_head", complete), (True, "CONTROL_PLANE_ACTIVE"))
+        self.assertEqual(
+            cp.mutation_policy("merge_expected_head", complete),
+            (False, "CONTROL_PLANE_BOOTSTRAP_ATTESTATION_MISSING"),
+        )
+        with mock.patch.object(cp, "_bootstrap_attestation_verified", return_value=True):
+            self.assertEqual(cp.mutation_policy("merge_expected_head", complete), (True, "CONTROL_PLANE_ACTIVE"))
 
     def test_missing_or_malformed_manifest_fails_closed(self):
         missing = Path(tempfile.gettempdir()) / "missing-onecompany-control-plane.json"

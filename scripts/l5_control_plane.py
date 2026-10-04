@@ -49,6 +49,16 @@ def load_manifest(path: Path | None = None) -> Mapping[str, Any]:
     return value
 
 
+def _bootstrap_attestation_verified(control_ref: str) -> bool:
+    """Require the source-loaded bootstrap to attest this exact ACTIVE ref."""
+    try:
+        from control_plane_bootstrap import active_attestation_matches
+
+        return active_attestation_matches(control_ref)
+    except (ImportError, RuntimeError):
+        return False
+
+
 def mutation_policy(operation: str | None, path: Path | None = None) -> tuple[bool, str]:
     """Authorize one operation under SHADOW, LIVE_SAFE, or ACTIVE mode."""
     try:
@@ -80,6 +90,8 @@ def mutation_policy(operation: str | None, path: Path | None = None) -> tuple[bo
         return False, "ACTIVATION_EVIDENCE_MISSING"
     if any(evidence.get(name) is not True for name in REQUIRED_ACTIVATION):
         return False, "ACTIVATION_EVIDENCE_INCOMPLETE"
+    if not _bootstrap_attestation_verified(control_ref):
+        return False, "CONTROL_PLANE_BOOTSTRAP_ATTESTATION_MISSING"
     return True, "CONTROL_PLANE_ACTIVE"
 
 

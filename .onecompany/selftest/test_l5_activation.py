@@ -83,13 +83,17 @@ class ActivationTests(unittest.TestCase):
         os.environ["L5_CONTROL_PLANE_MANIFEST"] = str(ACTIVE_CONTROL_PLANE)
         # The fixture is synthetic. Real runtime attestation is covered by the
         # bootstrap/control-plane suites, so downstream authorization tests
-        # mock only bootstrap refresh and exact-ref attestation.
+        # mock bootstrap refresh, exact-ref attestation, and the adapter's
+        # activation reload only at this synthetic CAS boundary.
         self._bootstrap_patch = mock.patch.object(act, "bootstrap_runtime", return_value=(True, "TEST_ATTESTED"))
         self._attestation_patch = mock.patch.object(act._bootstrap_module, "active_attestation_matches", return_value=True)
+        self._activation_reload_patch = mock.patch.object(wa, "_refresh_activation_api", return_value=act)
         self._bootstrap_mock = self._bootstrap_patch.start()
         self._attestation_patch.start()
+        self._activation_reload_patch.start()
 
     def tearDown(self):
+        self._activation_reload_patch.stop()
         self._attestation_patch.stop()
         self._bootstrap_patch.stop()
         if self._old_control_plane is None:

@@ -5,21 +5,19 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
-
-# This acceptance test validates the OneCompany source repository's pinned L5
-# reviewer/credential trust policy. Fresh bootstrap targets intentionally do
-# not inherit that source authority. Skip before importing guarded L5 entrypoints
-# so an unconfigured target never tries to enter the source trust boundary.
-if not (ROOT / ".l5" / "trust-policy.json").exists():
-    raise unittest.SkipTest("source L5 trust policy is not installed in this fresh target")
-
 import l5_activation as act
 import l5_trust_boundary as tb
 import l5_write_adapter as wa
+
+# This acceptance test validates the OneCompany source repository's pinned L5
+# reviewer/credential trust policy. Fresh bootstrap targets intentionally do
+# not inherit that source authority; in those targets the production gate
+# remains fail-closed until a target-specific policy is established.
+if not (ROOT / ".l5" / "trust-policy.json").exists():
+    raise unittest.SkipTest("source L5 trust policy is not installed in this fresh target")
 
 ACTIVE_CONTROL_PLANE = ROOT / "tests" / "fixtures" / "l5-control-plane-active.json"
 
@@ -81,23 +79,8 @@ class ActivationTests(unittest.TestCase):
     def setUp(self):
         self._old_control_plane = os.environ.get("L5_CONTROL_PLANE_MANIFEST")
         os.environ["L5_CONTROL_PLANE_MANIFEST"] = str(ACTIVE_CONTROL_PLANE)
-        # Bootstrap/runtime binding has dedicated fail-closed coverage in
-        # tests/test_l5_control_plane.py. These acceptance tests isolate the
-        # downstream authorization/CAS/replay semantics after those gates pass.
-        self._bootstrap_patch = mock.patch(
-            "l5_control_plane._bootstrap_attestation_verified",
-            return_value=True,
-        )
-        self._runtime_patch = mock.patch(
-            "l5_control_plane._runtime_source_verified",
-            return_value=(True, "CONTROL_PLANE_RUNTIME_SOURCE_VERIFIED"),
-        )
-        self._bootstrap_patch.start()
-        self._runtime_patch.start()
 
     def tearDown(self):
-        self._runtime_patch.stop()
-        self._bootstrap_patch.stop()
         if self._old_control_plane is None:
             os.environ.pop("L5_CONTROL_PLANE_MANIFEST", None)
         else:
@@ -206,7 +189,7 @@ class ActivationTests(unittest.TestCase):
         self.assertEqual(second["status"],"COMPLETE")
 
     def test_retry_state_cas_blocks_stale_concurrent_authorization(self):
-        store=wa.MemoryStore(); s=snap(ci="FAILURE",review="UNKNOWN"); auth=act.authorize_mutation(s); stream=wa.stream_key(aa:=auth,s)
+        store=wa.MemoryStore(); s=snap(ci="FAILURE",review="UNKNOWN"); auth=act.authorize_mutation(s); stream=wa.stream_key(auth,s)
         observed=store.retry_state(stream)
         self.assertTrue(store.begin("1"*64,{"status":"PENDING"},stream,1,"CI",expected_retry=observed))
         self.assertFalse(store.begin("2"*64,{"status":"PENDING"},stream,1,"CI",expected_retry=observed))

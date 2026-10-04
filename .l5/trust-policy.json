@@ -23,5 +23,5 @@
     "repo_code_runs_in_actuator": false,
     "actuator_accepts_structured_only": true
   },
-  "notes": "Binding reviewer identities are human-governed. Mistral Vibe is accepted only after the existing platform-identity path authenticates its exact-head/base binding review and maps the publisher to actor mistral-vibe."
+  "notes": "Binding reviewer identities are human-governed. Owner governance approval for retiring CodeRabbit across all managed repositories is recorded in OneCompany issue #282. Mistral Vibe is accepted only after the existing platform-identity path authenticates its exact-head/base binding review and maps the publisher to actor mistral-vibe."
 }

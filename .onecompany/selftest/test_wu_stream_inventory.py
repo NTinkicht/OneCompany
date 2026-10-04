@@ -33,6 +33,38 @@ class WorkUnitStreamInventoryTests(unittest.TestCase):
         stream = Stream("WU-1", "ntinkicht/onecompany", "wu/1", 301, "a" * 40)
         self.assertEqual(canonical_stream([stream], repository="NTinkicht/OneCompany", wu_id="WU-1", snapshot_complete=True), stream)
 
+    def test_stable_repository_id_survives_rename(self) -> None:
+        stream = Stream("WU-1", "NTinkicht/OldName", "wu/1", 301, "a" * 40, repository_id=1367630104)
+        self.assertEqual(
+            canonical_stream(
+                [stream],
+                repository="NTinkicht/OneCompany",
+                repository_id=1367630104,
+                wu_id="WU-1",
+                snapshot_complete=True,
+            ),
+            stream,
+        )
+
+    def test_repository_id_snapshot_requires_requested_stable_id(self) -> None:
+        stream = Stream("WU-1", "NTinkicht/OneCompany", "wu/1", 301, "a" * 40, repository_id=1367630104)
+        with self.assertRaisesRegex(IncompleteInventoryError, "REPOSITORY_ID_REQUIRED"):
+            canonical_stream([stream], repository="NTinkicht/OneCompany", wu_id="WU-1", snapshot_complete=True)
+
+    def test_mixed_repository_identity_snapshot_fails_closed(self) -> None:
+        streams = [
+            Stream("WU-1", "NTinkicht/OneCompany", "wu/1", 301, "a" * 40, repository_id=1367630104),
+            Stream("WU-2", "NTinkicht/OneCompany", "wu/2", 302, "b" * 40),
+        ]
+        with self.assertRaisesRegex(IncompleteInventoryError, "REPOSITORY_ID_INCOMPLETE"):
+            canonical_stream(
+                streams,
+                repository="NTinkicht/OneCompany",
+                repository_id=1367630104,
+                wu_id="WU-1",
+                snapshot_complete=True,
+            )
+
     def test_replayed_identical_observation_collapses_by_pr_identity(self) -> None:
         stream = Stream("WU-1", "NTinkicht/OneCompany", "wu/1", 301, "a" * 40)
         replay = Stream("WU-1", "ntinkicht/onecompany", "wu/1", 301, "a" * 40)
@@ -65,6 +97,20 @@ class WorkUnitStreamInventoryTests(unittest.TestCase):
         ]
         with self.assertRaisesRegex(ConflictingStreamObservationError, "CANONICAL_BRANCH_WU_CONFLICT"):
             canonical_stream(streams, repository="NTinkicht/OneCompany", wu_id="WU-1", snapshot_complete=True)
+
+    def test_branch_reuse_across_renamed_repository_fails_by_stable_id(self) -> None:
+        streams = [
+            Stream("WU-1", "NTinkicht/OldName", "wu/shared", 301, "a" * 40, repository_id=1367630104),
+            Stream("WU-2", "NTinkicht/OneCompany", "wu/shared", 302, "b" * 40, repository_id=1367630104),
+        ]
+        with self.assertRaisesRegex(ConflictingStreamObservationError, "CANONICAL_BRANCH_WU_CONFLICT"):
+            canonical_stream(
+                streams,
+                repository="NTinkicht/OneCompany",
+                repository_id=1367630104,
+                wu_id="WU-1",
+                snapshot_complete=True,
+            )
 
     def test_multiple_distinct_pr_streams_fail_closed(self) -> None:
         streams = [Stream("WU-1", "NTinkicht/OneCompany", "wu/1-a", 301, "a" * 40), Stream("WU-1", "NTinkicht/OneCompany", "wu/1-b", 302, "b" * 40)]

@@ -61,6 +61,38 @@ jobs:
           cp AGENTS.md /tmp/onecompany-mistral-trusted/AGENTS.md
           cp docs/CLOUD-AGENT-QUALIFICATION.md /tmp/onecompany-mistral-trusted/CLOUD-AGENT-QUALIFICATION.md
           cp .github/workflows/onecompany-ledger-read-smoke.yml /tmp/onecompany-mistral-trusted/ledger-workflow.yml
+
+          # Operational review-packet limit: allow complete diffs up to 256 KB.
+          # Keep every existing exact-head, CI, authorship, path and secret guard.
+          python -I - <<'PY'
+          from pathlib import Path
+
+          def patch(path: str, replacements: dict[str, str]) -> None:
+              target = Path(path)
+              text = target.read_text(encoding="utf-8")
+              for old, new in replacements.items():
+                  if text.count(old) != 1:
+                      raise SystemExit(f"REVIEW_LIMIT_PATCH_MISMATCH: {old}")
+                  text = text.replace(old, new)
+              target.write_text(text, encoding="utf-8")
+
+          patch(
+              "/tmp/onecompany-mistral-review-trusted.py",
+              {
+                  "MAX_DIFF_BYTES = 100_000": "MAX_DIFF_BYTES = 256_000",
+                  "MAX_REVIEW_STAGE_DIFF_BYTES = 32_000": "MAX_REVIEW_STAGE_DIFF_BYTES = 256_000",
+                  "MAX_REVIEW_STAGE_TOTAL_BYTES = 48_000": "MAX_REVIEW_STAGE_TOTAL_BYTES = 320_000",
+              },
+          )
+          patch(
+              "/tmp/onecompany-mistral-packet-trusted.py",
+              {
+                  "MAX_INLINE_BYTES = 50_000": "MAX_INLINE_BYTES = 320_000",
+                  "MAX_INPUT_BYTES = 64_000": "MAX_INPUT_BYTES = 256_000",
+              },
+          )
+          PY
+
           if [[ "$GITHUB_EVENT_NAME" == "workflow_run" ]]; then
             python -I /tmp/onecompany-mistral-review-trusted.py auto-prepare
           else

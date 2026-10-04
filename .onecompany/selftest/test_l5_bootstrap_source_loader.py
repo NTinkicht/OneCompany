@@ -103,6 +103,7 @@ class BootstrapSourceLoaderTests(unittest.TestCase):
         (package / "__init__.py").write_text("SHADOW = True\n", encoding="utf-8")
         code = (
             "import control_plane_bootstrap as b\n"
+            "b.prepare_source_only_l5_imports()\n"
             "runtime = b._local_runtime(b.ROOT)\n"
             "assert 'scripts/l5_kernel/__init__.py' in runtime, runtime\n"
         )

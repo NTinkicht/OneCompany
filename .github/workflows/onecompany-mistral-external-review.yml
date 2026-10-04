@@ -55,7 +55,27 @@ jobs:
           DISPATCH_BODY: ${{ github.event.comment.body || github.event.client_payload.dispatch_body }}
           SOURCE_COMMENT_ID: ${{ github.event.comment.id || github.event.client_payload.source_comment_id }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
-        run: python -I scripts/mistral_external_review.py prepare
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp scripts/mistral_external_review.py /tmp/onecompany-mistral-external-review.py
+          # Keep the external reviewer aligned with the same 256 KB ceiling as
+          # the native reviewer without weakening any target/provenance/secret guard.
+          python -I - <<'PY'
+          from pathlib import Path
+          path = Path('/tmp/onecompany-mistral-external-review.py')
+          text = path.read_text(encoding='utf-8')
+          replacements = {
+              'MAX_DIFF_BYTES = 48_000': 'MAX_DIFF_BYTES = 256_000',
+              'MAX_PROMPT_BYTES = 64_000': 'MAX_PROMPT_BYTES = 320_000',
+          }
+          for old, new in replacements.items():
+              if text.count(old) != 1:
+                  raise SystemExit(f'EXTERNAL_REVIEW_LIMIT_PATCH_MISMATCH:{old}')
+              text = text.replace(old, new)
+          path.write_text(text, encoding='utf-8')
+          PY
+          python -I /tmp/onecompany-mistral-external-review.py prepare
 
       - name: Checkout exact public target without credentials
         if: steps.target.outputs.ready == 'true'
@@ -70,7 +90,7 @@ jobs:
           mkdir -m 700 /tmp/onecompany-external-target
           git -C /tmp/onecompany-external-target init
           git -C /tmp/onecompany-external-target remote add origin "https://github.com/$TARGET_REPO.git"
-          git -C /tmp/onecompany-external-target fetch --no-tags --filter=blob:none origin             main "pull/$TARGET_PR/head:refs/remotes/origin/review-head"
+          git -C /tmp/onecompany-external-target fetch --no-tags --filter=blob:none origin main "pull/$TARGET_PR/head:refs/remotes/origin/review-head"
           test "$(git -C /tmp/onecompany-external-target rev-parse refs/remotes/origin/review-head)" = "$TARGET_HEAD"
           git -C /tmp/onecompany-external-target cat-file -e "$TARGET_BASE^{commit}"
           MERGE_BASE="$(git -C /tmp/onecompany-external-target merge-base "$TARGET_BASE" "$TARGET_HEAD")"
@@ -89,7 +109,7 @@ jobs:
           TARGET_BASE: ${{ steps.target.outputs.base }}
           TARGET_AUTHORS: ${{ steps.target.outputs.authors }}
           TARGET_DIR: /tmp/onecompany-external-target
-        run: python -I scripts/mistral_external_review.py build
+        run: python -I /tmp/onecompany-mistral-external-review.py build
 
       - name: Verify zero-additional-spend Mistral entitlement
         id: preflight
@@ -116,7 +136,10 @@ jobs:
             exit 0
           fi
           set +e
-          code="$(curl --silent --show-error --connect-timeout 10 --max-time 20             --output /dev/null --write-out '%{http_code}'             --header "Authorization: Bearer ${PROVIDER_KEY}"             'https://console.mistral.ai/api/vibe/whoami')"
+          code="$(curl --silent --show-error --connect-timeout 10 --max-time 20 \
+            --output /dev/null --write-out '%{http_code}' \
+            --header "Authorization: Bearer ${PROVIDER_KEY}" \
+            'https://console.mistral.ai/api/vibe/whoami')"
           rc=$?
           set -e
           if [[ "$rc" == "0" && "$code" == "200" ]]; then
@@ -131,7 +154,7 @@ jobs:
         if: steps.preflight.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python -I scripts/mistral_external_review.py safety
+        run: python -I /tmp/onecompany-mistral-external-review.py safety
 
       - name: Install pinned Mistral Vibe
         if: steps.preflight.outputs.ready == 'true'
@@ -141,7 +164,7 @@ jobs:
         if: steps.preflight.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python -I scripts/mistral_external_review.py safety
+        run: python -I /tmp/onecompany-mistral-external-review.py safety
 
       - name: Run isolated no-tool external review
         if: steps.preflight.outputs.ready == 'true'
@@ -160,7 +183,15 @@ jobs:
           enabled_tools = ["re:^(?!)"]
           EOF
           set +e
-          timeout --signal=TERM --kill-after=15s 600s             vibe --trust --agent plan --workdir /tmp/onecompany-external-empty               --enabled-tools 're:^(?!)' --max-turns 2 --max-tokens 64000               --output text               --prompt "$(cat /tmp/onecompany-external-review-prompt.txt)"               > /tmp/onecompany-external-review-output.txt               2> /tmp/onecompany-external-review-error.txt
+          # Feed the trusted packet on stdin; 256 KB reviews must never depend
+          # on the OS per-command argument-size limit.
+          timeout --signal=TERM --kill-after=15s 600s \
+            vibe --trust --agent plan --workdir /tmp/onecompany-external-empty \
+              --enabled-tools 're:^(?!)' --max-turns 2 --max-tokens 64000 \
+              --output text \
+              < /tmp/onecompany-external-review-prompt.txt \
+              > /tmp/onecompany-external-review-output.txt \
+              2> /tmp/onecompany-external-review-error.txt
           code=$?
           set -e
           echo "exit_code=$code" >> "$GITHUB_OUTPUT"
@@ -175,7 +206,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           SOURCE_COMMENT_ID: ${{ github.event.comment.id || github.event.client_payload.source_comment_id }}
-        run: python -I scripts/mistral_external_review.py validate
+        run: python -I /tmp/onecompany-mistral-external-review.py validate
 
       - name: Recheck target before durable publication
         if: steps.result.outputs.ready == 'true'
@@ -188,14 +219,14 @@ jobs:
         run: |
           set -euo pipefail
           status="$(mktemp)"
-          GITHUB_OUTPUT="$status" python -I scripts/mistral_external_review.py prepare
+          GITHUB_OUTPUT="$status" python -I /tmp/onecompany-mistral-external-review.py prepare
           grep -qx 'ready=true' "$status"
 
       - name: Recheck live emergency stop before publication
         if: steps.result.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python -I scripts/mistral_external_review.py safety
+        run: python -I /tmp/onecompany-mistral-external-review.py safety
 
       - name: Publish exact external review evidence on OneCompany wake bus
         if: steps.result.outputs.ready == 'true'

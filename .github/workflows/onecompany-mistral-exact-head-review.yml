@@ -81,6 +81,7 @@ jobs:
               {
                   "MAX_DIFF_BYTES = 100_000": "MAX_DIFF_BYTES = 256_000",
                   "MAX_REVIEW_STAGE_DIFF_BYTES = 32_000": "MAX_REVIEW_STAGE_DIFF_BYTES = 256_000",
+                  "MAX_REVIEW_STAGE_SOURCE_BYTES = 13_000": "MAX_REVIEW_STAGE_SOURCE_BYTES = 64_000",
                   "MAX_REVIEW_STAGE_TOTAL_BYTES = 48_000": "MAX_REVIEW_STAGE_TOTAL_BYTES = 320_000",
               },
           )
@@ -270,6 +271,7 @@ jobs:
               --max-turns 2 \
               --max-tokens 64000 \
               --output text \
+              --prompt '' \
               < /tmp/onecompany-mistral-prompt.txt \
               > /tmp/onecompany-mistral-output.txt \
               2> /tmp/onecompany-mistral-error.txt

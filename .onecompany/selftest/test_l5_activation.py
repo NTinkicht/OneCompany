@@ -83,11 +83,14 @@ class ActivationTests(unittest.TestCase):
         os.environ["L5_CONTROL_PLANE_MANIFEST"] = str(ACTIVE_CONTROL_PLANE)
         # The fixture is synthetic. Real runtime attestation is covered by the
         # bootstrap/control-plane suites, so downstream authorization tests
-        # mock only the activation attestation refresh.
+        # mock only bootstrap refresh and exact-ref attestation.
         self._bootstrap_patch = mock.patch.object(act, "bootstrap_runtime", return_value=(True, "TEST_ATTESTED"))
+        self._attestation_patch = mock.patch.object(act._bootstrap_module, "active_attestation_matches", return_value=True)
         self._bootstrap_mock = self._bootstrap_patch.start()
+        self._attestation_patch.start()
 
     def tearDown(self):
+        self._attestation_patch.stop()
         self._bootstrap_patch.stop()
         if self._old_control_plane is None:
             os.environ.pop("L5_CONTROL_PLANE_MANIFEST", None)
@@ -118,6 +121,12 @@ class ActivationTests(unittest.TestCase):
                 sys.modules.pop("l5_control_plane", None)
             else:
                 sys.modules["l5_control_plane"] = prior
+
+    def test_active_policy_requires_matching_bootstrap_attestation(self):
+        with mock.patch.object(act._bootstrap_module, "active_attestation_matches", return_value=False):
+            auth = act.authorize_mutation(snap())
+        self.assertFalse(auth["mutation_allowed"])
+        self.assertEqual(auth["reason"], "CONTROL_PLANE_BOOTSTRAP_ATTESTATION_MISSING")
 
     def test_merge_authorization_exact_refs(self):
         auth = act.authorize_mutation(snap())

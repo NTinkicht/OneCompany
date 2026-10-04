@@ -114,16 +114,16 @@ class ActivationTests(unittest.TestCase):
         fake.mutation_policy = hostile
         prior = sys.modules.get("l5_control_plane")
         sys.modules["l5_control_plane"] = fake
+        self._control_plane_patch.stop()
         try:
-            # Exercise the real loader rather than the setUp policy stub.
-            with mock.patch.stopall():
-                pass
+            act._control_plane_policy(None)
+            self.assertFalse(fake.called)
         finally:
+            self._control_plane_patch.start()
             if prior is None:
                 sys.modules.pop("l5_control_plane", None)
             else:
                 sys.modules["l5_control_plane"] = prior
-        self.assertFalse(fake.called)
 
     def test_active_policy_requires_matching_bootstrap_attestation(self):
         with mock.patch.object(act, "_control_plane_policy", return_value=(False, "CONTROL_PLANE_BOOTSTRAP_ATTESTATION_MISSING")):

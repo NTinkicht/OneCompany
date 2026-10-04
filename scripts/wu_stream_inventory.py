@@ -29,11 +29,18 @@ class Stream:
     branch: str
     pr_number: int
     head_sha: str
+    repository_id: int | None = None
 
 
-def _repository_identity(value: str) -> str:
-    """Return GitHub's case-insensitive repository identity for comparisons."""
-    return value.casefold()
+def _repository_identity(repository: str, repository_id: int | None = None) -> tuple[str, str | int]:
+    """Return a stable GitHub repository identity when available.
+
+    GitHub repository IDs survive rename/transfer. Name matching remains a
+    compatibility fallback for callers that have not yet supplied the stable ID.
+    """
+    if repository_id is not None:
+        return ("id", repository_id)
+    return ("name", repository.casefold())
 
 
 def _stream_payload(stream: Stream) -> tuple[str, str, str]:
@@ -47,6 +54,7 @@ def canonical_stream(
     repository: str,
     wu_id: str,
     snapshot_complete: bool,
+    repository_id: int | None = None,
 ) -> Stream | None:
     """Reconcile a verified-complete observation of canonical PR streams.
 
@@ -54,7 +62,8 @@ def canonical_stream(
     collapse to one stream. Contradictory observations for the same PR or reuse
     of one canonical branch across Work Units fail closed before Work Unit
     filtering, as do multiple distinct PR streams for the requested WU.
-    Repository identity is compared case-insensitively to match GitHub semantics.
+    Stable GitHub repository IDs are preferred so rename/transfer aliases cannot
+    hide an existing stream; case-insensitive names are the compatibility fallback.
     An empty result is meaningful only when the caller explicitly supplies a
     verified-complete snapshot.
 
@@ -63,13 +72,13 @@ def canonical_stream(
     if snapshot_complete is not True:
         raise IncompleteInventoryError("CANONICAL_STREAM_INVENTORY_INCOMPLETE")
 
-    by_identity: dict[tuple[str, int], list[Stream]] = {}
+    by_identity: dict[tuple[tuple[str, str | int], int], list[Stream]] = {}
     for stream in streams:
-        identity = (_repository_identity(stream.repository), stream.pr_number)
+        identity = (_repository_identity(stream.repository, stream.repository_id), stream.pr_number)
         by_identity.setdefault(identity, []).append(stream)
 
     canonical_observations: list[Stream] = []
-    for identity in sorted(by_identity):
+    for identity in sorted(by_identity, key=repr):
         observations = sorted(
             by_identity[identity],
             key=lambda item: (
@@ -88,13 +97,11 @@ def canonical_stream(
             )
         canonical_observations.append(observations[0])
 
-    # A canonical branch is itself a durable stream identity. Reusing the same
-    # repository/branch for another WU is ambiguous even when PR numbers differ.
-    by_branch: dict[tuple[str, str], list[Stream]] = {}
+    by_branch: dict[tuple[tuple[str, str | int], str], list[Stream]] = {}
     for stream in canonical_observations:
-        identity = (_repository_identity(stream.repository), stream.branch)
+        identity = (_repository_identity(stream.repository, stream.repository_id), stream.branch)
         by_branch.setdefault(identity, []).append(stream)
-    for identity in sorted(by_branch):
+    for identity in sorted(by_branch, key=repr):
         observations = by_branch[identity]
         wu_ids = sorted({item.wu_id for item in observations})
         if len(wu_ids) > 1:
@@ -103,11 +110,11 @@ def canonical_stream(
                 f"{identity[0]}:{identity[1]}:{wu_ids}"
             )
 
-    requested_repository = _repository_identity(repository)
+    requested_repository = _repository_identity(repository, repository_id)
     matches = [
         stream
         for stream in canonical_observations
-        if _repository_identity(stream.repository) == requested_repository
+        if _repository_identity(stream.repository, stream.repository_id) == requested_repository
         and stream.wu_id == wu_id
     ]
     if len(matches) > 1:

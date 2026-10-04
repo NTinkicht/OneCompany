@@ -15,14 +15,10 @@ from pathlib import Path
 SHA = re.compile(r"[a-f0-9]{40}\Z")
 FILE = re.compile(r"(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\Z")
 SAFE_REASON = re.compile(r"[A-Z0-9_]+\Z")
-# Compatibility markers for the already-merged #288 workflow's exact-string
-# temporary patch. They are comments only; permanent limits are below.
-# MAX_INLINE_BYTES = 50_000
-# MAX_INPUT_BYTES = 64_000
-MAX_INLINE_BYTES = 320_000
-MAX_INPUT_BYTES = 256_000
+MAX_INLINE_BYTES = 50_000
+MAX_INPUT_BYTES = 64_000
 MAX_SOURCE_FILES = 16
-MAX_SOURCE_BYTES = 64_000
+MAX_SOURCE_BYTES = 13_000
 MAX_POLICY_BYTES = 8_000
 
 INSTRUCTIONS = """You are Mistral Vibe, the independent NON-MATERIAL-AUTHOR advisory reviewer.
@@ -110,7 +106,7 @@ def build_packet(stage: Path, trusted: Path, number: int, head: str, base: str) 
         parts.extend([f"\nBEGIN UNTRUSTED SOURCE {name}\n", data.decode("utf-8"), f"\nEND UNTRUSTED SOURCE {name}\n"])
     result = "".join(parts)
     if len(result.encode("utf-8")) > MAX_INLINE_BYTES:
-        raise ValueError("REVIEW_PACKET_INLINE_BUDGET_EXCEEDED")
+        raise ValueError("INLINE_BUDGET_EXCEEDED")
     return result
 
 

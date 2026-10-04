@@ -64,7 +64,7 @@ jobs:
 
           # Operational review-packet limit: allow complete diffs up to 256 KB.
           # Keep every existing exact-head, CI, authorship, path and secret guard.
-          python -I - <<'PY'
+          python -I - <<'LIMITS'
           from pathlib import Path
 
           def patch(path: str, replacements: dict[str, str]) -> None:
@@ -91,7 +91,7 @@ jobs:
                   "MAX_INPUT_BYTES = 64_000": "MAX_INPUT_BYTES = 256_000",
               },
           )
-          PY
+          LIMITS
 
           if [[ "$GITHUB_EVENT_NAME" == "workflow_run" ]]; then
             python -I /tmp/onecompany-mistral-review-trusted.py auto-prepare

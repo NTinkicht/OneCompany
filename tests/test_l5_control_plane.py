@@ -27,6 +27,8 @@ class ControlPlaneTests(unittest.TestCase):
         for key in list(env):
             if key.startswith("GIT_"):
                 env.pop(key, None)
+        env["GIT_CONFIG_NOSYSTEM"] = "1"
+        env["GIT_CONFIG_GLOBAL"] = os.devnull
         return env
 
     def manifest(self, **overrides):

@@ -18,7 +18,8 @@ class TrustBoundaryTests(unittest.TestCase):
     def test_policy_loads_and_has_binding_reviewer(self):
         policy = load_trust_policy(ROOT / ".l5" / "trust-policy.json")
         self.assertTrue(policy.binding_reviewer_logins)
-        self.assertIn("coderabbitai", policy.binding_reviewer_logins)
+        self.assertIn("mistral-vibe", policy.binding_reviewer_logins)
+        self.assertNotIn("coderabbitai", policy.binding_reviewer_logins)
         self.assertEqual(len(policy.policy_hash), 64)
 
     def test_exact_head_independent_review_passes(self):
@@ -27,7 +28,7 @@ class TrustBoundaryTests(unittest.TestCase):
         review = {
             "state": "APPROVED", "commit_id": h, "base_sha": b,
             "complete": True, "skipped": False, "covers_full_diff": True,
-            "identity_source_verified": True, "author": "coderabbitai",
+            "identity_source_verified": True, "author": "mistral-vibe",
         }
         ok, reasons = review_is_independent(
             review, policy=policy, head_sha=h, base_sha=b,
@@ -41,7 +42,7 @@ class TrustBoundaryTests(unittest.TestCase):
         stale = {
             "state":"APPROVED","commit_id":"c"*40,"base_sha":b,"complete":True,
             "skipped":False,"covers_full_diff":True,"identity_source_verified":True,
-            "author":"coderabbitai",
+            "author":"mistral-vibe",
         }
         self.assertFalse(review_is_independent(
             stale, policy=policy, head_sha=h, base_sha=b,

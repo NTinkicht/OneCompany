@@ -38,13 +38,13 @@ MISTRAL_BINDING_REVIEW = re.compile(
     r"verdict=(PASS|FAIL) -->$"
 )
 DIFF_NAME = ".onecompany_mistral_review.diff"
-MAX_DIFF_BYTES = 100_000
-MAX_REVIEW_STAGE_DIFF_BYTES = 32_000
+MAX_DIFF_BYTES = 256_000
+MAX_REVIEW_STAGE_DIFF_BYTES = 256_000
 MAX_REVIEW_STAGE_FULL_SOURCE_BYTES = 4_096
 MAX_REVIEW_STAGE_SOURCE_BYTES = 13_000
 MAX_REVIEW_STAGE_SOURCE_FILE_BYTES = 96_000
 MAX_REVIEW_STAGE_CONTEXT_LINES = 12
-MAX_REVIEW_STAGE_TOTAL_BYTES = 48_000
+MAX_REVIEW_STAGE_TOTAL_BYTES = 320_000
 
 
 def parse_dispatch(body: str) -> tuple[int, str, str]:
@@ -221,12 +221,10 @@ def latest_ci_green(number: int, head: str) -> bool:
     return True
 
 
-
 def clean_git_env() -> dict[str, str]:
     """Pin each Git read to this checked-out repository, not inherited overrides."""
     return {key: value for key, value in os.environ.items()
             if not key.startswith("GIT_")}
-
 
 
 def output(**fields: object) -> None:
@@ -306,7 +304,6 @@ def prepare() -> None:
         if not latest_ci_green(number, head):
             raise ValueError("REVIEW_CI_NOT_GREEN")
     except (ValueError, subprocess.CalledProcessError, subprocess.TimeoutExpired, KeyError):
-        # No untrusted input or token is echoed to Actions outputs.
         output(ready="false", status="REVIEW_TARGET_BLOCKED")
         return
     output(ready="true", status="OK", pr=number, sha=head, base=base)

@@ -8,16 +8,17 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
-import l5_activation as act
-import l5_trust_boundary as tb
-import l5_write_adapter as wa
 
 # This acceptance test validates the OneCompany source repository's pinned L5
 # reviewer/credential trust policy. Fresh bootstrap targets intentionally do
-# not inherit that source authority; in those targets the production gate
-# remains fail-closed until a target-specific policy is established.
+# not inherit that source authority. Skip before importing guarded L5 entrypoints
+# so an unconfigured target never tries to enter the source trust boundary.
 if not (ROOT / ".l5" / "trust-policy.json").exists():
     raise unittest.SkipTest("source L5 trust policy is not installed in this fresh target")
+
+import l5_activation as act
+import l5_trust_boundary as tb
+import l5_write_adapter as wa
 
 ACTIVE_CONTROL_PLANE = ROOT / "tests" / "fixtures" / "l5-control-plane-active.json"
 

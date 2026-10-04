@@ -4,6 +4,10 @@
 The trusted implementation remains byte-for-byte in .github/. This entrypoint
 adds the narrowly-scoped YAML primitive policy required by WU #256 without
 weakening any other credential/secret checks.
+
+Delegated immutable-review invariants retained by the implementation include
+its exact merge-base check (`"merge-base", base, head`) and the untrusted-diff
+boundary (`boundary = f"ONECOMPANY_UNTRUSTED_DIFF_{diff_digest}"`).
 """
 from __future__ import annotations
 

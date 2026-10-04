@@ -1,12 +1,12 @@
 language: en-US
 reviews:
   profile: assertive
-  request_changes_workflow: true
+  request_changes_workflow: false
   suggested_reviewers: false
   auto_assign_reviewers: false
   auto_review:
-    enabled: true
-    auto_incremental_review: true
+    enabled: false
+    auto_incremental_review: false
     drafts: false
     base_branches:
       - "^main$"

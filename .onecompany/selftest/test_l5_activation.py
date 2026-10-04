@@ -12,8 +12,8 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 # This acceptance test validates the OneCompany source repository's pinned L5
 # reviewer/credential trust policy. Fresh bootstrap targets intentionally do
-# not inherit that source authority. Skip before importing guarded L5 entrypoints
-# so an unconfigured target never tries to enter the source trust boundary.
+# not inherit that source authority; in those targets the production gate
+# remains fail-closed until a target-specific policy is established.
 if not (ROOT / ".l5" / "trust-policy.json").exists():
     raise unittest.SkipTest("source L5 trust policy is not installed in this fresh target")
 
@@ -81,27 +81,55 @@ class ActivationTests(unittest.TestCase):
     def setUp(self):
         self._old_control_plane = os.environ.get("L5_CONTROL_PLANE_MANIFEST")
         os.environ["L5_CONTROL_PLANE_MANIFEST"] = str(ACTIVE_CONTROL_PLANE)
-        # Bootstrap/runtime binding has dedicated fail-closed coverage in
-        # tests/test_l5_control_plane.py. These acceptance tests isolate the
-        # downstream authorization/CAS/replay semantics after those gates pass.
-        self._bootstrap_patch = mock.patch(
-            "l5_control_plane._bootstrap_attestation_verified",
-            return_value=True,
-        )
-        self._runtime_patch = mock.patch(
-            "l5_control_plane._runtime_source_verified",
-            return_value=(True, "CONTROL_PLANE_RUNTIME_SOURCE_VERIFIED"),
-        )
-        self._bootstrap_patch.start()
-        self._runtime_patch.start()
+        # This downstream harness does not re-prove the immutable runtime
+        # certification already covered by test_l5_control_plane.py. It mocks
+        # only the certified policy result and bootstrap refresh so these tests
+        # can focus on activation, recovery and guarded-write behavior.
+        self._bootstrap_patch = mock.patch.object(act, "bootstrap_runtime", return_value=(True, "TEST_ATTESTED"))
+        self._control_plane_patch = mock.patch.object(act, "_control_plane_policy", return_value=(True, "CONTROL_PLANE_ACTIVE"))
+        self._bootstrap_mock = self._bootstrap_patch.start()
+        self._control_plane_patch.start()
 
     def tearDown(self):
-        self._runtime_patch.stop()
+        self._control_plane_patch.stop()
         self._bootstrap_patch.stop()
         if self._old_control_plane is None:
             os.environ.pop("L5_CONTROL_PLANE_MANIFEST", None)
         else:
             os.environ["L5_CONTROL_PLANE_MANIFEST"] = self._old_control_plane
+
+    def test_lazy_import_revalidates_bootstrap(self):
+        before = self._bootstrap_mock.call_count
+        act._recovery_api()
+        self.assertGreater(self._bootstrap_mock.call_count, before)
+
+    def test_cached_control_plane_module_is_discarded(self):
+        fake = type(sys)("l5_control_plane")
+        fake.called = False
+
+        def hostile(_operation):
+            fake.called = True
+            return True, "HOSTILE"
+
+        fake.mutation_policy = hostile
+        prior = sys.modules.get("l5_control_plane")
+        sys.modules["l5_control_plane"] = fake
+        self._control_plane_patch.stop()
+        try:
+            act._control_plane_policy(None)
+            self.assertFalse(fake.called)
+        finally:
+            self._control_plane_patch.start()
+            if prior is None:
+                sys.modules.pop("l5_control_plane", None)
+            else:
+                sys.modules["l5_control_plane"] = prior
+
+    def test_active_policy_requires_matching_bootstrap_attestation(self):
+        with mock.patch.object(act, "_control_plane_policy", return_value=(False, "CONTROL_PLANE_BOOTSTRAP_ATTESTATION_MISSING")):
+            auth = act.authorize_mutation(snap())
+        self.assertFalse(auth["mutation_allowed"])
+        self.assertEqual(auth["reason"], "CONTROL_PLANE_BOOTSTRAP_ATTESTATION_MISSING")
 
     def test_merge_authorization_exact_refs(self):
         auth = act.authorize_mutation(snap())
@@ -206,7 +234,7 @@ class ActivationTests(unittest.TestCase):
         self.assertEqual(second["status"],"COMPLETE")
 
     def test_retry_state_cas_blocks_stale_concurrent_authorization(self):
-        store=wa.MemoryStore(); s=snap(ci="FAILURE",review="UNKNOWN"); auth=act.authorize_mutation(s); stream=wa.stream_key(aa:=auth,s)
+        store=wa.MemoryStore(); s=snap(ci="FAILURE",review="UNKNOWN"); auth=act.authorize_mutation(s); stream=wa.stream_key(auth,s)
         observed=store.retry_state(stream)
         self.assertTrue(store.begin("1"*64,{"status":"PENDING"},stream,1,"CI",expected_retry=observed))
         self.assertFalse(store.begin("2"*64,{"status":"PENDING"},stream,1,"CI",expected_retry=observed))
@@ -246,4 +274,4 @@ class ActivationTests(unittest.TestCase):
         self.assertEqual(wa.execute_mutation(auth,s,client,wa.MemoryStore())["reason"],"REVIEWER_NOT_ELIGIBLE")
 
 
-if __name__ == "__main__": unittest.main()
+if __name__=="__main__": unittest.main()

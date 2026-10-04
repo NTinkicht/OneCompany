@@ -183,12 +183,12 @@ jobs:
           enabled_tools = ["re:^(?!)"]
           EOF
           set +e
-          # Feed the trusted packet on stdin; 256 KB reviews must never depend
-          # on the OS per-command argument-size limit.
+          # Feed the trusted packet on stdin; keep --prompt present so the pinned
+          # Vibe CLI stays in bounded programmatic mode rather than opening a TUI.
           timeout --signal=TERM --kill-after=15s 600s \
             vibe --trust --agent plan --workdir /tmp/onecompany-external-empty \
               --enabled-tools 're:^(?!)' --max-turns 2 --max-tokens 64000 \
-              --output text \
+              --prompt '' --output text \
               < /tmp/onecompany-external-review-prompt.txt \
               > /tmp/onecompany-external-review-output.txt \
               2> /tmp/onecompany-external-review-error.txt

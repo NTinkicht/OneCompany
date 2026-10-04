@@ -33,12 +33,10 @@ class Stream:
 
 
 def _repository_identity(repository: str, repository_id: int | None = None) -> tuple[str, str | int]:
-    """Return a stable GitHub repository identity when available.
-
-    GitHub repository IDs survive rename/transfer. Name matching remains a
-    compatibility fallback for callers that have not yet supplied the stable ID.
-    """
+    """Return a stable GitHub repository identity when available."""
     if repository_id is not None:
+        if type(repository_id) is not int or repository_id < 1:
+            raise IncompleteInventoryError("CANONICAL_STREAM_REPOSITORY_ID_INVALID")
         return ("id", repository_id)
     return ("name", repository.casefold())
 
@@ -62,19 +60,35 @@ def canonical_stream(
     collapse to one stream. Contradictory observations for the same PR or reuse
     of one canonical branch across Work Units fail closed before Work Unit
     filtering, as do multiple distinct PR streams for the requested WU.
-    Stable GitHub repository IDs are preferred so rename/transfer aliases cannot
-    hide an existing stream; case-insensitive names are the compatibility fallback.
-    An empty result is meaningful only when the caller explicitly supplies a
-    verified-complete snapshot.
 
-    This function is not a start gate and never grants a branch/PR lease.
+    GitHub repository IDs survive rename/transfer and are therefore the canonical
+    identity when supplied. If any observation carries a repository ID, every
+    observation and the requested repository must carry one; mixed ID/name-only
+    snapshots fail closed rather than guessing aliases. Legacy snapshots that
+    contain no IDs remain case-insensitive for compatibility.
+
+    An empty result is meaningful only when the caller explicitly supplies a
+    verified-complete snapshot. This function is not a start gate and never
+    grants a branch/PR lease.
     """
     if snapshot_complete is not True:
         raise IncompleteInventoryError("CANONICAL_STREAM_INVENTORY_INCOMPLETE")
 
+    id_presence = [stream.repository_id is not None for stream in streams]
+    if any(id_presence):
+        if not all(id_presence):
+            raise IncompleteInventoryError("CANONICAL_STREAM_REPOSITORY_ID_INCOMPLETE")
+        if repository_id is None:
+            raise IncompleteInventoryError("CANONICAL_STREAM_REPOSITORY_ID_REQUIRED")
+
+    requested_repository = _repository_identity(repository, repository_id)
+
     by_identity: dict[tuple[tuple[str, str | int], int], list[Stream]] = {}
     for stream in streams:
-        identity = (_repository_identity(stream.repository, stream.repository_id), stream.pr_number)
+        identity = (
+            _repository_identity(stream.repository, stream.repository_id),
+            stream.pr_number,
+        )
         by_identity.setdefault(identity, []).append(stream)
 
     canonical_observations: list[Stream] = []
@@ -99,7 +113,10 @@ def canonical_stream(
 
     by_branch: dict[tuple[tuple[str, str | int], str], list[Stream]] = {}
     for stream in canonical_observations:
-        identity = (_repository_identity(stream.repository, stream.repository_id), stream.branch)
+        identity = (
+            _repository_identity(stream.repository, stream.repository_id),
+            stream.branch,
+        )
         by_branch.setdefault(identity, []).append(stream)
     for identity in sorted(by_branch, key=repr):
         observations = by_branch[identity]
@@ -110,7 +127,6 @@ def canonical_stream(
                 f"{identity[0]}:{identity[1]}:{wu_ids}"
             )
 
-    requested_repository = _repository_identity(repository, repository_id)
     matches = [
         stream
         for stream in canonical_observations

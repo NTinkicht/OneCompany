@@ -166,6 +166,8 @@ jobs:
             exit 0
           fi
 
+          # `/api/vibe/whoami` is a non-inference entitlement check. Never print
+          # the provider response body or credential.
           set +e
           http_status="$(curl \
             --silent \
@@ -237,6 +239,10 @@ jobs:
           enabled_tools = ["re:^(?!)"]
           EOF
 
+          # Trusted source-only parent assembles the exact-head bounded review
+          # packet, with NO model-initiated file reading or repeated tool turns.
+          # The candidate diff and source are included as untrusted DATA, never
+          # executed or interpreted as workflow commands.
           if ! python -I /tmp/onecompany-mistral-packet-trusted.py \
             --stage /tmp/onecompany-mistral-review-stage \
             --trusted /tmp/onecompany-mistral-trusted \
@@ -247,8 +253,13 @@ jobs:
             echo "failure_reason=Bounded trusted one-shot review packet unavailable; no model call" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          # Programmatic Vibe supports piped/stdin input. Feed the bounded packet
-          # on stdin so 256 KB reviews are not constrained by Linux MAX_ARG_STRLEN.
+          # Mistral documents that --enabled-tools narrows the programmatic
+          # toolset and re: uses fullmatch. This impossible name enables NO
+          # tools, eliminating repeated reads and token-expensive tool schemas.
+          # The parent-supplied packet is the entire permitted review context.
+          # Keep the read-only plan agent and the two-turn cumulative guard.
+          # Feed the packet on stdin so 256 KB reviews are not constrained by
+          # Linux's per-command-argument size limit.
           set +e
           timeout --signal=TERM --kill-after=15s 600s \
             vibe \
@@ -276,6 +287,9 @@ jobs:
             status="INSUFFICIENT_EVIDENCE"
             reason="Mistral explicitly reported insufficient evidence; not a completed advisory review"
           elif [[ "$code" == "0" ]]; then
+            # A nonempty model answer is NOT proof of a completed review.
+            # Validate strict UTF-8 JSON and detect INSUFFICIENT_EVIDENCE
+            # while the raw result is still local and before publication.
             set +e
             python -I /tmp/onecompany-mistral-result-trusted.py \
               "$REVIEW_PR" "$REVIEW_SHA" "$REVIEW_BASE" \
@@ -323,6 +337,9 @@ jobs:
           fi
 
           if [[ "$code" != "0" ]] && [[ -s /tmp/onecompany-mistral-error.txt ]]; then
+            # Job-log-only diagnostics. Scrub the literal credential plus common
+            # bearer/key renderings before the excerpt can reach the Actions log;
+            # it is never posted to the public issue comment.
             python -I - <<'PY'
           import os
           import re
@@ -350,6 +367,8 @@ jobs:
           echo "status=$status" >> "$GITHUB_OUTPUT"
           echo "failure_reason=$reason" >> "$GITHUB_OUTPUT"
 
+      # Redact the validated model output before the privileged PR publisher
+      # reads it. The later wake-bus report must not be the source of this file.
       - name: Prepare redacted current-head Mistral review
         if: steps.preflight.outputs.ready == 'true' && steps.actor.outputs.exit_code == '0'
         env:
@@ -357,7 +376,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -I - <<'PY'
+            # Defense in depth: even though Vibe has no shell/write tool, scrub the
+            # literal provider credential plus common authorization/key renderings
+            # before any model-authored text can reach a public issue comment.
+            python -I - <<'PY'
           import os
           import re
           from pathlib import Path
@@ -373,6 +395,10 @@ jobs:
           target.write_text(text[:50000], encoding='utf-8')
           PY
 
+      # The parent publishes model PASS -> GitHub APPROVE, FAIL -> REQUEST_CHANGES.
+      # It rechecks exact head/base, green CI and non-self authorship. The model
+      # has no GitHub token; binding identity is independently verified through
+      # this trusted protected-main run, not generic trust in github-actions.
       - name: Publish current-head Mistral independent technical PR review as Actions bot
         id: publish
         if: steps.preflight.outputs.ready == 'true' && steps.actor.outputs.exit_code == '0'
@@ -384,6 +410,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Pin source policy to pre-candidate protected-main copy.
           python -I - <<'PY'
           import os
           import sys
@@ -440,6 +467,7 @@ jobs:
             -f "commit_id=$REVIEW_SHA" \
             --raw-field "body=$(cat /tmp/onecompany-mistral-pr-review.txt)" \
             --jq '{review_id:.id, login:.user.login, commit_id:.commit_id, state:.state}'
+          # Emitted ONLY after GitHub accepts the binding platform review.
           echo "review_event=$review_event" >> "$GITHUB_OUTPUT"
 
       - name: Post Mistral result
@@ -465,6 +493,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           {
             if [[ "${PUBLISH_OUTCOME:-}" == "success" && "${PUBLISH_EVENT:-}" == "APPROVE" ]]; then
               echo "**Mistral Vibe exact-head BINDING technical PASS — GitHub APPROVED review published**"
@@ -489,6 +518,9 @@ jobs:
             elif [[ "${PUBLISH_OUTCOME:-}" != "success" || ( "${PUBLISH_EVENT:-}" != "APPROVE" && "${PUBLISH_EVENT:-}" != "REQUEST_CHANGES" ) ]]; then
               echo "REVIEW_PUBLICATION_BLOCKED - no binding GitHub technical PASS/FAIL recorded; model output is not approval evidence."
             else
+              # Model-controlled JSON is already rendered inert and attached
+              # to the exact-head PR review. Do not echo raw model text into
+              # issue #130 where a crafted code fence could become markup.
               echo "Validated findings are in the exact-head GitHub PR review."
               echo "The binding gate accepts it only after this run completes successfully and all remaining merge requirements pass."
             fi

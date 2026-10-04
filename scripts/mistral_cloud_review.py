@@ -31,6 +31,11 @@ MISTRAL_BINDING_REVIEW = re.compile(
     r"verdict=(PASS|FAIL) -->$"
 )
 DIFF_NAME = ".onecompany_mistral_review.diff"
+# Compatibility markers for the already-merged #288 workflow's exact-string
+# temporary patch. They are comments only; permanent limits are below.
+# MAX_DIFF_BYTES = 100_000
+# MAX_REVIEW_STAGE_DIFF_BYTES = 32_000
+# MAX_REVIEW_STAGE_TOTAL_BYTES = 48_000
 MAX_DIFF_BYTES = 256_000
 MAX_REVIEW_STAGE_DIFF_BYTES = 256_000
 MAX_REVIEW_STAGE_FULL_SOURCE_BYTES = 4_096

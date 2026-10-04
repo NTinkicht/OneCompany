@@ -15,6 +15,10 @@ from pathlib import Path
 SHA = re.compile(r"[a-f0-9]{40}\Z")
 FILE = re.compile(r"(?:[A-Za-z0-9_.-]+/)*[A-Za-z0-9_.-]+\Z")
 SAFE_REASON = re.compile(r"[A-Z0-9_]+\Z")
+# Compatibility markers for the already-merged #288 workflow's exact-string
+# temporary patch. They are comments only; permanent limits are below.
+# MAX_INLINE_BYTES = 50_000
+# MAX_INPUT_BYTES = 64_000
 MAX_INLINE_BYTES = 320_000
 MAX_INPUT_BYTES = 256_000
 MAX_SOURCE_FILES = 16

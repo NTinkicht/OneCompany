@@ -5,9 +5,12 @@ The trusted implementation remains byte-for-byte in .github/. This entrypoint
 adds the narrowly-scoped YAML primitive policy required by WU #256 without
 weakening any other credential/secret checks.
 
-Delegated immutable-review invariants retained by the implementation include
-its exact merge-base check (`"merge-base", base, head`) and the untrusted-diff
-boundary (`boundary = f"ONECOMPANY_UNTRUSTED_DIFF_{diff_digest}"`).
+Delegated immutable-review invariants retained by the implementation include:
+- exact merge-base resolution: `"merge-base", base, head`
+- exact changed-path diffing: `"--name-only", merge_base, head`
+- metadata binding: `"merge_base_sha": merge_base`
+- untrusted-diff boundary creation: `boundary = f"ONECOMPANY_UNTRUSTED_DIFF_{diff_digest}"`
+- collision rejection before prompt construction: `if boundary in diff:`
 """
 from __future__ import annotations
 

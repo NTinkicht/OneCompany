@@ -10,7 +10,7 @@
   "ci_rerun_budget_per_head_check": 2,
   "max_fix_iterations": 5,
   "max_review_rounds": 3,
-  "independent_reviewers": ["CodeRabbit", "human"],
+  "independent_reviewers": ["Mistral Vibe", "Claude", "human"],
   "controller_instances_are_independent_reviewers": false,
   "unknown_gate_is_false": true,
   "mandatory_check_conclusion": "success",

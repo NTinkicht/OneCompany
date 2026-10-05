@@ -68,17 +68,88 @@ try:
 finally:
     sys.path[:] = _saved_path
 
-# Never accept a preloaded activation module. Bootstrap has removed local
-# bytecode, so discarding this cache forces the current source to execute.
-sys.modules.pop("l5_activation", None)
-from l5_activation import (  # noqa: E402
-    HARD_BOUNDARY_FIELDS,
-    RETRYABLE_MUTATIONS,
-    SAFE_MUTATIONS,
-    TOKEN64,
-    authorize_mutation,
-    required_bool,
-)
+
+def _attest_runtime() -> None:
+    """Fail closed unless the current source runtime is still certified."""
+    ok, reason = bootstrap_runtime()
+    if not ok:
+        raise RuntimeError(str(reason))
+
+
+def _read_activation_source() -> tuple[str, bytes]:
+    """Read l5_activation from the guarded scripts directory without following links."""
+    source_path = os.path.join(_scripts, "l5_activation.py")
+    if os.path.islink(source_path) or not os.path.isfile(source_path):
+        raise RuntimeError("L5_ACTIVATION_SOURCE_INVALID")
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(source_path, flags)
+    except OSError as exc:
+        raise RuntimeError("L5_ACTIVATION_SOURCE_UNAVAILABLE") from exc
+    try:
+        info = os.fstat(fd)
+        if (info.st_mode & 0o170000) != 0o100000:
+            raise RuntimeError("L5_ACTIVATION_SOURCE_INVALID")
+        with os.fdopen(fd, "rb", closefd=False) as handle:
+            source = handle.read()
+    finally:
+        os.close(fd)
+    return source_path, source
+
+
+def _load_activation_api_from_source():
+    """Re-attest and execute the exact activation source, never a sys.path candidate."""
+    _attest_runtime()
+    source_path, source = _read_activation_source()
+    # Re-attest after the read so a mutation observed during the read fails closed.
+    _attest_runtime()
+    verify_path, verify_source = _read_activation_source()
+    if verify_path != source_path or verify_source != source:
+        raise RuntimeError("L5_ACTIVATION_SOURCE_RACE")
+
+    module = type(sys)("l5_activation")
+    module.__file__ = source_path
+    module.__package__ = ""
+    previous = sys.modules.get("l5_activation")
+    sys.modules["l5_activation"] = module
+    saved_path = list(sys.path)
+    try:
+        sys.path[:] = [
+            entry for entry in sys.path
+            if entry and os.path.abspath(entry) not in _blocked_paths
+        ]
+        code = compile(source, source_path, "exec", dont_inherit=True)
+        exec(code, module.__dict__)
+    except Exception as exc:
+        if previous is None:
+            sys.modules.pop("l5_activation", None)
+        else:
+            sys.modules["l5_activation"] = previous
+        raise RuntimeError("L5_ACTIVATION_SOURCE_EXECUTION_FAILED") from exc
+    finally:
+        sys.path[:] = saved_path
+
+    required = (
+        "HARD_BOUNDARY_FIELDS", "RETRYABLE_MUTATIONS", "SAFE_MUTATIONS",
+        "TOKEN64", "authorize_mutation", "required_bool",
+    )
+    if any(not hasattr(module, name) for name in required):
+        raise RuntimeError("L5_ACTIVATION_API_INCOMPLETE")
+    if not callable(module.authorize_mutation) or not callable(module.required_bool):
+        raise RuntimeError("L5_ACTIVATION_API_INVALID")
+    return module
+
+
+# Initial adapter API is sourced through the same guarded path used for refreshes.
+_activation_api = _load_activation_api_from_source()
+HARD_BOUNDARY_FIELDS = _activation_api.HARD_BOUNDARY_FIELDS
+RETRYABLE_MUTATIONS = _activation_api.RETRYABLE_MUTATIONS
+SAFE_MUTATIONS = _activation_api.SAFE_MUTATIONS
+TOKEN64 = _activation_api.TOKEN64
+authorize_mutation = _activation_api.authorize_mutation
+required_bool = _activation_api.required_bool
 
 MUTATIONS = frozenset(SAFE_MUTATIONS.values())
 REVIEW_SENSITIVE = frozenset({"dispatch_review", "merge_expected_head"})
@@ -98,20 +169,8 @@ class WriteRejected(Exception):
 
 
 def _refresh_activation_api():
-    """Re-attest and source-reload activation before reproducing a write."""
-    ok, reason = bootstrap_runtime()
-    if not ok:
-        raise RuntimeError(str(reason))
-    sys.modules.pop("l5_activation", None)
-    import l5_activation as current
-    if (
-        current.HARD_BOUNDARY_FIELDS != HARD_BOUNDARY_FIELDS
-        or current.RETRYABLE_MUTATIONS != RETRYABLE_MUTATIONS
-        or current.SAFE_MUTATIONS != SAFE_MUTATIONS
-        or current.TOKEN64.pattern != TOKEN64.pattern
-    ):
-        raise RuntimeError("L5_ACTIVATION_API_DRIFT")
-    return current
+    """Return a freshly source-loaded and re-attested activation API."""
+    return _load_activation_api_from_source()
 
 
 def stream_key(auth: dict[str, Any], snapshot: dict[str, Any]) -> str:

@@ -2,13 +2,154 @@
 """Credential-isolated L5 write adapter with atomic CAS and replay safety."""
 from __future__ import annotations
 
-import fcntl
-import json
+# Keep the pre-attestation surface to built-in/frozen modules only.
 import os
-from pathlib import Path
-from typing import Any
+import sys
 
-from l5_activation import HARD_BOUNDARY_FIELDS, RETRYABLE_MUTATIONS, SAFE_MUTATIONS, TOKEN64, authorize_mutation, required_bool
+
+def _load_bootstrap_runtime_from_source():
+    """Load bootstrap source without consulting Python import/bytecode caches."""
+    scripts = os.path.dirname(os.path.abspath(__file__))
+    root = os.path.dirname(scripts)
+    source_path = os.path.join(scripts, "control_plane_bootstrap.py")
+    for parent in (root, scripts, os.path.join(root, ".l5")):
+        if os.path.islink(parent) or not os.path.isdir(parent):
+            raise RuntimeError("L5_BOOTSTRAP_RUNTIME_ROOT_INVALID")
+    if os.path.islink(source_path) or not os.path.isfile(source_path):
+        raise RuntimeError("L5_BOOTSTRAP_SOURCE_INVALID")
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(source_path, flags)
+    except OSError as exc:
+        raise RuntimeError("L5_BOOTSTRAP_SOURCE_UNAVAILABLE") from exc
+    try:
+        info = os.fstat(fd)
+        if (info.st_mode & 0o170000) != 0o100000:
+            raise RuntimeError("L5_BOOTSTRAP_SOURCE_INVALID")
+        with os.fdopen(fd, "rb", closefd=False) as handle:
+            source = handle.read()
+    finally:
+        os.close(fd)
+    sys.dont_write_bytecode = True
+    module = type(sys)("control_plane_bootstrap")
+    module.__file__ = source_path
+    module.__package__ = ""
+    try:
+        code = compile(source, source_path, "exec", dont_inherit=True)
+        exec(code, module.__dict__)
+    except Exception as exc:
+        raise RuntimeError("L5_BOOTSTRAP_SOURCE_EXECUTION_FAILED") from exc
+    runtime = module.__dict__.get("bootstrap_runtime")
+    if not callable(runtime):
+        raise RuntimeError("L5_BOOTSTRAP_RUNTIME_MISSING")
+    sys.modules["control_plane_bootstrap"] = module
+    return runtime
+
+
+bootstrap_runtime = _load_bootstrap_runtime_from_source()
+_bootstrap_ok, _bootstrap_reason = bootstrap_runtime()
+if not _bootstrap_ok:
+    raise RuntimeError(_bootstrap_reason)
+
+# Import non-frozen stdlib with repository/PYTHONPATH entries excluded.
+_scripts = os.path.dirname(os.path.abspath(__file__))
+_root = os.path.dirname(_scripts)
+_saved_path = list(sys.path)
+_env_paths = {os.path.abspath(entry) for entry in os.environ.get("PYTHONPATH", "").split(os.pathsep) if entry}
+_blocked_paths = {os.path.abspath(_root), os.path.abspath(_scripts), os.path.abspath(os.getcwd()), *_env_paths}
+try:
+    sys.path[:] = [entry for entry in sys.path if entry and os.path.abspath(entry) not in _blocked_paths]
+    import fcntl  # noqa: E402
+    import json  # noqa: E402
+    from pathlib import Path  # noqa: E402
+    from typing import Any  # noqa: E402
+finally:
+    sys.path[:] = _saved_path
+
+
+def _attest_runtime() -> None:
+    """Fail closed unless the current source runtime is still certified."""
+    ok, reason = bootstrap_runtime()
+    if not ok:
+        raise RuntimeError(str(reason))
+
+
+def _read_activation_source() -> tuple[str, bytes]:
+    """Read l5_activation from the guarded scripts directory without following links."""
+    source_path = os.path.join(_scripts, "l5_activation.py")
+    if os.path.islink(source_path) or not os.path.isfile(source_path):
+        raise RuntimeError("L5_ACTIVATION_SOURCE_INVALID")
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(source_path, flags)
+    except OSError as exc:
+        raise RuntimeError("L5_ACTIVATION_SOURCE_UNAVAILABLE") from exc
+    try:
+        info = os.fstat(fd)
+        if (info.st_mode & 0o170000) != 0o100000:
+            raise RuntimeError("L5_ACTIVATION_SOURCE_INVALID")
+        with os.fdopen(fd, "rb", closefd=False) as handle:
+            source = handle.read()
+    finally:
+        os.close(fd)
+    return source_path, source
+
+
+def _load_activation_api_from_source():
+    """Re-attest and execute the exact activation source, never a sys.path candidate."""
+    _attest_runtime()
+    source_path, source = _read_activation_source()
+    # Re-attest after the read so a mutation observed during the read fails closed.
+    _attest_runtime()
+    verify_path, verify_source = _read_activation_source()
+    if verify_path != source_path or verify_source != source:
+        raise RuntimeError("L5_ACTIVATION_SOURCE_RACE")
+
+    module = type(sys)("l5_activation")
+    module.__file__ = source_path
+    module.__package__ = ""
+    previous = sys.modules.get("l5_activation")
+    sys.modules["l5_activation"] = module
+    saved_path = list(sys.path)
+    try:
+        sys.path[:] = [
+            entry for entry in sys.path
+            if entry and os.path.abspath(entry) not in _blocked_paths
+        ]
+        code = compile(source, source_path, "exec", dont_inherit=True)
+        exec(code, module.__dict__)
+    except Exception as exc:
+        if previous is None:
+            sys.modules.pop("l5_activation", None)
+        else:
+            sys.modules["l5_activation"] = previous
+        raise RuntimeError("L5_ACTIVATION_SOURCE_EXECUTION_FAILED") from exc
+    finally:
+        sys.path[:] = saved_path
+
+    required = (
+        "HARD_BOUNDARY_FIELDS", "RETRYABLE_MUTATIONS", "SAFE_MUTATIONS",
+        "TOKEN64", "authorize_mutation", "required_bool",
+    )
+    if any(not hasattr(module, name) for name in required):
+        raise RuntimeError("L5_ACTIVATION_API_INCOMPLETE")
+    if not callable(module.authorize_mutation) or not callable(module.required_bool):
+        raise RuntimeError("L5_ACTIVATION_API_INVALID")
+    return module
+
+
+# Initial adapter API is sourced through the same guarded path used for refreshes.
+_activation_api = _load_activation_api_from_source()
+HARD_BOUNDARY_FIELDS = _activation_api.HARD_BOUNDARY_FIELDS
+RETRYABLE_MUTATIONS = _activation_api.RETRYABLE_MUTATIONS
+SAFE_MUTATIONS = _activation_api.SAFE_MUTATIONS
+TOKEN64 = _activation_api.TOKEN64
+authorize_mutation = _activation_api.authorize_mutation
+required_bool = _activation_api.required_bool
 
 MUTATIONS = frozenset(SAFE_MUTATIONS.values())
 REVIEW_SENSITIVE = frozenset({"dispatch_review", "merge_expected_head"})
@@ -27,13 +168,16 @@ class WriteRejected(Exception):
     """Raised only when the client proves the remote write was not applied."""
 
 
+def _refresh_activation_api():
+    """Return a freshly source-loaded and re-attested activation API."""
+    return _load_activation_api_from_source()
+
+
 def stream_key(auth: dict[str, Any], snapshot: dict[str, Any]) -> str:
-    """Return the durable retry-stream identity for one canonical PR."""
     return json.dumps([snapshot.get("repository"), auth.get("issue"), auth.get("canonical_pr")], separators=(",", ":"))
 
 
 def _blocked(reason: str, token: Any = None) -> dict[str, Any]:
-    """Return a uniform non-writing blocked result."""
     return {"status": "BLOCKED", "reason": reason, "mutation_token": token, "written": False}
 
 
@@ -64,19 +208,26 @@ def _live_gate(auth: dict[str, Any], stream: str, client: Any, store: Any, *, re
 def _params(auth):
     return {"canonical_pr":auth["canonical_pr"],"issue":auth["issue"],"expected_head_sha":auth["expected_head_sha"],"expected_base_sha":auth["expected_base_sha"],"selected_issue":auth.get("selected_issue"),"idempotency_key":auth["mutation_token"]}
 
+
 def _reconcile(auth,client,store,*,written):
     token=auth["mutation_token"]
     if client.verify_effect(auth["mutation"],_params(auth)) is True:
         store.set_status(token,"COMPLETE"); return {"status":"COMPLETE","reason":"EFFECT_VERIFIED","mutation_token":token,"written":written}
     return {"status":"IN_PROGRESS","reason":"EFFECT_NOT_YET_VERIFIED","mutation_token":token,"written":written}
 
+
 def _reproduce(auth,snapshot):
-    try: reproduced=authorize_mutation(snapshot,enforce_control_plane=True)
-    except ValueError: return False
+    try:
+        current = _refresh_activation_api()
+        reproduced=current.authorize_mutation(snapshot,enforce_control_plane=True)
+    except (ValueError, RuntimeError):
+        return False
     return reproduced==auth
+
 
 def _persisted_record_matches(auth,record):
     return isinstance(record,dict) and record.get("mutation")==auth.get("mutation") and record.get("canonical_pr")==auth.get("canonical_pr") and record.get("expected_head_sha")==auth.get("expected_head_sha") and record.get("expected_base_sha")==auth.get("expected_base_sha")
+
 
 def execute_mutation(auth,snapshot,client,store):
     token=auth.get("mutation_token") if isinstance(auth,dict) else None
@@ -116,6 +267,7 @@ def execute_mutation(auth,snapshot,client,store):
     except Exception:return _reconcile(auth,client,store,written=False)
     return _reconcile(auth,client,store,written=True)
 
+
 class MemoryStore:
     def __init__(self): self.records={}; self.retry={}; self.retry_owners={}
     def get(self,token): return dict(self.records[token]) if token in self.records else None
@@ -138,9 +290,8 @@ class MemoryStore:
         if record is not None:record["status"]="RETRYABLE";record["reason"]=reason
         if prior_retry is not None and self.retry_owners.get(stream)==token:
             self.retry[stream]=prior_retry
-            # Keep ownership with the failing token as a monotonic ABA fence.
-            # A later stale token must never regain authority to restore older retry state.
             self.retry_owners[stream]=token
+
 
 class FileStore(MemoryStore):
     def __init__(self,path):
@@ -151,14 +302,11 @@ class FileStore(MemoryStore):
         try:
             with tmp.open("w") as fh:
                 json.dump({"records":self.records,"retry":self.retry,"retry_owners":self.retry_owners},fh,sort_keys=True)
-                fh.flush()
-                os.fsync(fh.fileno())
+                fh.flush();os.fsync(fh.fileno())
             os.replace(tmp,self.path)
         except Exception:
-            try:
-                tmp.unlink(missing_ok=True)
-            except OSError:
-                pass
+            try:tmp.unlink(missing_ok=True)
+            except OSError:pass
             raise
         dir_fd=os.open(str(self.path.parent),os.O_RDONLY)
         try:os.fsync(dir_fd)
@@ -185,5 +333,5 @@ class FileStore(MemoryStore):
             def __exit__(self_nonlocal,*_):fcntl.flock(fh.fileno(),fcntl.LOCK_UN);fh.close()
         return _Lock()
 
-# Backward-compatible durable-store name retained for certified activation tests.
+
 JsonFileStore = FileStore

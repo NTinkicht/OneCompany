@@ -81,16 +81,18 @@ class ActivationTests(unittest.TestCase):
     def setUp(self):
         self._old_control_plane = os.environ.get("L5_CONTROL_PLANE_MANIFEST")
         os.environ["L5_CONTROL_PLANE_MANIFEST"] = str(ACTIVE_CONTROL_PLANE)
-        # This downstream harness does not re-prove the immutable runtime
-        # certification already covered by test_l5_control_plane.py. It mocks
-        # only the certified policy result and bootstrap refresh so these tests
-        # can focus on activation, recovery and guarded-write behavior.
+        # Control-plane certification/source-loading is covered independently.
+        # This downstream harness stubs only that result so it can exercise
+        # activation and guarded-write semantics deterministically.
         self._bootstrap_patch = mock.patch.object(act, "bootstrap_runtime", return_value=(True, "TEST_ATTESTED"))
         self._control_plane_patch = mock.patch.object(act, "_control_plane_policy", return_value=(True, "CONTROL_PLANE_ACTIVE"))
+        self._activation_reload_patch = mock.patch.object(wa, "_refresh_activation_api", return_value=act)
         self._bootstrap_mock = self._bootstrap_patch.start()
         self._control_plane_patch.start()
+        self._activation_reload_patch.start()
 
     def tearDown(self):
+        self._activation_reload_patch.stop()
         self._control_plane_patch.stop()
         self._bootstrap_patch.stop()
         if self._old_control_plane is None:
@@ -116,8 +118,10 @@ class ActivationTests(unittest.TestCase):
         sys.modules["l5_control_plane"] = fake
         self._control_plane_patch.stop()
         try:
-            act._control_plane_policy(None)
+            ok, reason = act._control_plane_policy(None)
             self.assertFalse(fake.called)
+            self.assertFalse(ok)
+            self.assertEqual(reason, "CONTROL_PLANE_BOOTSTRAP_ATTESTATION_MISSING")
         finally:
             self._control_plane_patch.start()
             if prior is None:
@@ -274,4 +278,4 @@ class ActivationTests(unittest.TestCase):
         self.assertEqual(wa.execute_mutation(auth,s,client,wa.MemoryStore())["reason"],"REVIEWER_NOT_ELIGIBLE")
 
 
-if __name__=="__main__": unittest.main()
+if __name__ == "__main__": unittest.main()

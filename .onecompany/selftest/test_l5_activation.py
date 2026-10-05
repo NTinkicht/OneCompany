@@ -81,23 +81,19 @@ class ActivationTests(unittest.TestCase):
     def setUp(self):
         self._old_control_plane = os.environ.get("L5_CONTROL_PLANE_MANIFEST")
         os.environ["L5_CONTROL_PLANE_MANIFEST"] = str(ACTIVE_CONTROL_PLANE)
-        # The adapter source-loads a fresh bootstrap and installs it in
-        # sys.modules. Synthetic ACTIVE tests therefore patch attestation on
-        # both the activation-held bootstrap and the current policy bootstrap.
-        self._policy_bootstrap = sys.modules["control_plane_bootstrap"]
+        # Control-plane certification/source-loading is covered independently.
+        # This downstream harness stubs only that result so it can exercise
+        # activation and guarded-write semantics deterministically.
         self._bootstrap_patch = mock.patch.object(act, "bootstrap_runtime", return_value=(True, "TEST_ATTESTED"))
-        self._activation_attestation_patch = mock.patch.object(act._bootstrap_module, "active_attestation_matches", return_value=True)
-        self._policy_attestation_patch = mock.patch.object(self._policy_bootstrap, "active_attestation_matches", return_value=True)
+        self._control_plane_patch = mock.patch.object(act, "_control_plane_policy", return_value=(True, "CONTROL_PLANE_ACTIVE"))
         self._activation_reload_patch = mock.patch.object(wa, "_refresh_activation_api", return_value=act)
         self._bootstrap_mock = self._bootstrap_patch.start()
-        self._activation_attestation_patch.start()
-        self._policy_attestation_patch.start()
+        self._control_plane_patch.start()
         self._activation_reload_patch.start()
 
     def tearDown(self):
         self._activation_reload_patch.stop()
-        self._policy_attestation_patch.stop()
-        self._activation_attestation_patch.stop()
+        self._control_plane_patch.stop()
         self._bootstrap_patch.stop()
         if self._old_control_plane is None:
             os.environ.pop("L5_CONTROL_PLANE_MANIFEST", None)
@@ -120,20 +116,21 @@ class ActivationTests(unittest.TestCase):
         fake.mutation_policy = hostile
         prior = sys.modules.get("l5_control_plane")
         sys.modules["l5_control_plane"] = fake
+        self._control_plane_patch.stop()
         try:
-            act._control_plane_policy(None)
+            ok, reason = act._control_plane_policy(None)
             self.assertFalse(fake.called)
+            self.assertFalse(ok)
+            self.assertEqual(reason, "CONTROL_PLANE_BOOTSTRAP_ATTESTATION_MISSING")
         finally:
+            self._control_plane_patch.start()
             if prior is None:
                 sys.modules.pop("l5_control_plane", None)
             else:
                 sys.modules["l5_control_plane"] = prior
 
     def test_active_policy_requires_matching_bootstrap_attestation(self):
-        with (
-            mock.patch.object(act._bootstrap_module, "active_attestation_matches", return_value=False),
-            mock.patch.object(self._policy_bootstrap, "active_attestation_matches", return_value=False),
-        ):
+        with mock.patch.object(act, "_control_plane_policy", return_value=(False, "CONTROL_PLANE_BOOTSTRAP_ATTESTATION_MISSING")):
             auth = act.authorize_mutation(snap())
         self.assertFalse(auth["mutation_allowed"])
         self.assertEqual(auth["reason"], "CONTROL_PLANE_BOOTSTRAP_ATTESTATION_MISSING")

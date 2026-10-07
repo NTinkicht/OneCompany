@@ -106,7 +106,7 @@
       "id": "WU-CLOUD-MISTRAL-DEV-001",
       "title": "Qualify Mistral cloud developer/tester with a real bounded source-and-test pilot",
       "work_kind": "ENABLER",
-      "status": "BLOCKED",
+      "status": "READY",
       "priority": 100,
       "dependencies": [],
       "issue": 133,
@@ -141,9 +141,7 @@
         "pr": 9,
         "merge_sha": "92351502fe85e83da5609269ef868f6d768004f4",
         "cutover": "legacy-merged-before-v2-ledger"
-      },
-      "blocked_reason": "PR #224 merged scaffold-only without model-authored source/tests or independent non-Mistral exact-head review. Recovery WU-MISTRAL-RECOVERY-001 (#231) must complete before this qualification can be promoted.",
-      "blocked_owner": "WU-MISTRAL-RECOVERY-001"
+      }
     },
     {
       "id": "WU-CLOUD-GROK-DEV-REVIEW-QA-001",

@@ -23,7 +23,7 @@ class MistralQualificationPilotTests(unittest.TestCase):
     def setUpClass(cls):
         cls.actors = json.loads((ROOT / ".onecompany/actors.json").read_text())
         cls.readiness = json.loads((ROOT / ".onecompany/readiness.json").read_text())
-        cls.queue = json.loads((ROOT / ".onecompany/queue.json").read_text())
+        cls.queue = json.loads((ROOT / ".onecompany/selftest/fixtures/mistral_queue_v1.json").read_text())
         cls.budget = json.loads((ROOT / ".onecompany/budget.json").read_text())
         cls.config = json.loads((ROOT / ".onecompany/config.json").read_text())
 

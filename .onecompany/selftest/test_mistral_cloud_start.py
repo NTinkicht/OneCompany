@@ -93,17 +93,21 @@ class MistralCanonicalIntakeTests(unittest.TestCase):
             f"@mistral-vibe\nMISTRAL_START_V1\n"
             f"work_unit: WU-MISTRAL-RECOVERY-001\nmain_sha: {SHA}"
         )
-        row = next(w for w in self.fixture_queue["work_units"]
+        # Force the previously unbound recovery fixture into the bound case.
+        # The assertion must execute even when the frozen baseline has pr=null.
+        bound_queue = copy.deepcopy(self.fixture_queue)
+        row = next(w for w in bound_queue["work_units"]
                    if w["id"] == "WU-MISTRAL-RECOVERY-001")
-        if row.get("pr") is not None:
-            with patch.dict(os.environ, {
-                "GITHUB_REPOSITORY": start.REPO,
-                "ONECOMPANY_EMERGENCY_STOP": "false",
-            }), self.assertRaisesRegex(ValueError, "START_WU_ALREADY_BOUND"):
-                start.policy_ticket(
-                    start.assignment(command), queue=self.fixture_queue,
-                    budget=self.budget, config=self.config,
-                    actual_main_sha=SHA)
+        self.assertIsNone(row.get("pr"))
+        row["pr"] = 777
+        with patch.dict(os.environ, {
+            "GITHUB_REPOSITORY": start.REPO,
+            "ONECOMPANY_EMERGENCY_STOP": "false",
+        }), self.assertRaisesRegex(ValueError, "START_WU_ALREADY_BOUND"):
+            start.policy_ticket(
+                start.assignment(command), queue=bound_queue,
+                budget=self.budget, config=self.config,
+                actual_main_sha=SHA)
 
     def test_strict_owner_assignment_cannot_inject_other_scope(self):
         for body in (
@@ -156,9 +160,9 @@ class MistralCanonicalIntakeTests(unittest.TestCase):
     def test_bound_fixture_unit_cannot_start_second_pr(self):
         row = next(w for w in self.fixture_queue["work_units"]
                    if w["id"] == "WU-CLOUD-MISTRAL-DEV-001")
-        if row.get("pr") is not None:
-            with self.assertRaisesRegex(ValueError, "START_WU_ALREADY_BOUND"):
-                self.ticket(queue=self.fixture_queue)
+        self.assertIsNotNone(row.get("pr"))
+        with self.assertRaisesRegex(ValueError, "START_WU_ALREADY_BOUND"):
+            self.ticket(queue=self.fixture_queue)
 
     def test_no_paid_fallback_and_emergency_stop(self):
         for field, value in (

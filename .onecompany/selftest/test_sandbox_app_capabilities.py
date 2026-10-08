@@ -70,6 +70,23 @@ class SandboxAppCapabilityTests(unittest.TestCase):
             self.assertEqual(api.call_count, 1)
             self.assertEqual(api.call_args.args[0], "GET")
 
+
+    def test_direct_rest_path_outside_sandbox_is_refused_without_network(self):
+        app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
+        with patch("sandbox_app_capabilities.urlopen") as network:
+            with self.assertRaisesRegex(CapabilityBlocked, "OUTSIDE_SANDBOX"):
+                app.api("POST", "/repos/NTinkicht/Tabibi/issues", {"title": "bad"})
+            network.assert_not_called()
+
+    def test_node_nested_repository_is_verified(self):
+        app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
+        with patch.object(app, "api", return_value={
+            "data": {"node": {"isResolved": True, "pullRequest": {
+                "number": 3, "repository": {"nameWithOwner": app.repo}}}}
+        }):
+            with self.assertRaisesRegex(CapabilityBlocked, "ALREADY_RESOLVED"):
+                app.resolve_thread("thread-id", 3)
+
     def test_installation_not_proven_fails_before_push(self):
         app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
         with patch.object(app, "api", return_value={"repositories": []}):

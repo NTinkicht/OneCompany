@@ -64,6 +64,14 @@ class SandboxApp:
             raise CapabilityBlocked("API_METHOD_FORBIDDEN")
         if not path.startswith("/") or path.startswith("//"):
             raise CapabilityBlocked("API_PATH_INVALID")
+        repo_root = "/repos/" + self.repo
+        if not (
+            (method == "GET" and path.startswith("/installation/repositories?"))
+            or (method == "POST" and path == "/graphql")
+            or path == repo_root
+            or path.startswith(repo_root + "/")
+        ):
+            raise CapabilityBlocked("API_PATH_OUTSIDE_SANDBOX")
         # All request paths are constructed by this class; no arbitrary
         # caller-supplied REST URL can redirect a token to another host.
         request = Request(
@@ -95,7 +103,7 @@ class SandboxApp:
             raise CapabilityBlocked("WAIT_EXTERNAL:NETWORK_UNAVAILABLE") from None
 
     def _repo_api(self, method: str, suffix: str, payload: dict | None = None) -> dict:
-        if not suffix.startswith("/") or "//" in suffix or ".." in suffix:
+        if (suffix and not suffix.startswith("/")) or "//" in suffix or ".." in suffix:
             raise CapabilityBlocked("API_PATH_INVALID")
         return self.api(method, "/repos/" + self.repo + suffix, payload)
 
@@ -149,7 +157,10 @@ class SandboxApp:
         node = (response.get("data") or {}).get("node")
         if not isinstance(node, dict):
             raise CapabilityBlocked("GRAPHQL_NODE_UNVERIFIED")
-        if ((node.get("repository") or {}).get("nameWithOwner") or "").lower() != self.repo.lower():
+        node_repo = (node.get("repository") or {}).get("nameWithOwner")
+        if not node_repo:
+            node_repo = ((node.get("pullRequest") or {}).get("repository") or {}).get("nameWithOwner")
+        if (node_repo or "").lower() != self.repo.lower():
             raise CapabilityBlocked("GRAPHQL_NODE_OTHER_REPOSITORY")
         return node
 
@@ -176,7 +187,7 @@ class SandboxApp:
     def resolve_thread(self, thread_id: str, pr_number: int) -> dict:
         node = self._graph_node(
             thread_id,
-            "... on PullRequestReviewThread {isResolved pullRequest{number} repository{nameWithOwner}}",
+            "... on PullRequestReviewThread {isResolved pullRequest{number repository{nameWithOwner}}}",
         )
         if (node.get("pullRequest") or {}).get("number") != pr_number:
             raise CapabilityBlocked("THREAD_NOT_ON_PROBE_PR")

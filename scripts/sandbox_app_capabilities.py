@@ -234,6 +234,32 @@ def shell(cmd: list[str], *, cwd: Path | None = None, env: dict | None = None) -
     return run.stdout.strip()
 
 
+
+def isolated_git_env(app: SandboxApp, askpass: Path, home: Path) -> dict[str, str]:
+    """Run Git without host credentials, URL rewrites, hooks or inherited config."""
+    keep = ("PATH", "SYSTEMROOT", "WINDIR", "TMP", "TEMP", "TMPDIR",
+            "LANG", "LC_ALL", "SSL_CERT_FILE", "SSL_CERT_DIR")
+    env = {name: os.environ[name] for name in keep if name in os.environ}
+    xdg = home / "xdg"
+    xdg.mkdir(mode=0o700, exist_ok=True)
+    env.update({
+        "HOME": str(home),
+        "XDG_CONFIG_HOME": str(xdg),
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_SYSTEM": os.devnull,
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_COUNT": "2",
+        "GIT_CONFIG_KEY_0": "credential.helper",
+        "GIT_CONFIG_VALUE_0": "",
+        "GIT_CONFIG_KEY_1": "core.hooksPath",
+        "GIT_CONFIG_VALUE_1": os.devnull,
+        "GIT_ALLOW_PROTOCOL": "https",
+        "L5_APP_INSTALLATION_TOKEN": app._token,
+        "GIT_ASKPASS": str(askpass),
+        "GIT_TERMINAL_PROMPT": "0",
+    })
+    return env
+
 def push_canary(app: SandboxApp) -> tuple[str, str]:
     """Prove real shell checkout, single atomic git commit and fenced push."""
     if shutil.which("git") is None:
@@ -248,12 +274,7 @@ def push_canary(app: SandboxApp) -> tuple[str, str]:
             encoding="utf-8",
         )
         askpass.chmod(0o700)
-        env = dict(os.environ)
-        for name in ("GH_TOKEN", "GITHUB_TOKEN", "GITHUB_PAT", "GIT_ASKPASS"):
-            env.pop(name, None)
-        env["L5_APP_INSTALLATION_TOKEN"] = app._token
-        env["GIT_ASKPASS"] = str(askpass)
-        env["GIT_TERMINAL_PROMPT"] = "0"
+        env = isolated_git_env(app, askpass, home)
         checkout = home / "checkout"
         shell(["git", "clone", "--quiet", "https://github.com/" + app.repo + ".git", str(checkout)], env=env)
         base = shell(["git", "symbolic-ref", "--short", "refs/remotes/origin/HEAD"], cwd=checkout, env=env)
@@ -261,7 +282,9 @@ def push_canary(app: SandboxApp) -> tuple[str, str]:
             raise CapabilityBlocked("DEFAULT_BRANCH_UNKNOWN")
         shell(["git", "checkout", "-q", "-b", branch], cwd=checkout, env=env)
         target = checkout / ".l5-sandbox-probes"
-        target.mkdir()
+        if target.is_symlink() or (target.exists() and not target.is_dir()):
+            raise CapabilityBlocked("PROBE_DIRECTORY_UNSAFE")
+        target.mkdir(exist_ok=True)
         (target / (branch.split("/", 1)[1] + ".txt")).write_text(
             "Scoped installation-token git write qualification.\n", encoding="utf-8",
         )

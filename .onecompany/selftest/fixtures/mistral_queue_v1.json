@@ -220,5 +220,12 @@
         "Mistral implementation readiness remains zero until all evidence is verified; no PAYG, Codespace or model-held GitHub token"
       ]
     }
-  ]
+  ],
+  "project": {
+    "repository": "example/mistral-intake-qualification"
+  },
+  "snapshot": {
+    "source": "fixture-mistral-queue-v1"
+  },
+  "fixture_note": "Synthetic frozen regression fixture for Mistral intake; no live planning or execution authority."
 }

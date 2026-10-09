@@ -129,13 +129,24 @@ class SandboxApp:
                 result = json.loads(raw) if raw else {}
                 return result if isinstance(result, dict) else {"items": result}
         except HTTPError as exc:
-            # GitHub returns either 403 or 429 for rate limiting.
-            # Never confuse temporary exhaustion with revoked permissions.
-            is_limit = (exc.code == 429 or (
-                exc.code == 403 and (
-                    exc.headers.get("Retry-After") is not None or
-                    exc.headers.get("x-ratelimit-remaining") == "0"
-                )
+            # GitHub returns 403 OR 429 on primary/secondary throttles.
+            # A secondary-limit 403 may lack Retry-After and remaining=0.
+            headers = exc.headers or {}
+            body = b""
+            if exc.code == 403:
+                try:
+                    body = exc.read(2048)
+                except (OSError, TypeError):
+                    body = b""
+            reason = body.decode("utf-8", errors="replace").lower()
+            secondary = any(marker in reason for marker in (
+                "secondary rate limit", "rate limit exceeded",
+                "api rate limit exceeded", "abuse detection mechanism",
+                "please wait a few minutes before you try again",
+            ))
+            is_limit = exc.code == 429 or (exc.code == 403 and (
+                headers.get("Retry-After") is not None or
+                headers.get("x-ratelimit-remaining") == "0" or secondary
             ))
             if is_limit:
                 raise CapabilityBlocked("WAIT_RATE_LIMIT") from None
@@ -246,19 +257,22 @@ class SandboxApp:
         candidate = self._repo_api("GET", f"/pulls/{pr_number}")
         if not ((candidate.get("head") or {}).get("ref") or "").startswith("l5-probe/"):
             raise CapabilityBlocked("GRAPHQL_TARGET_NOT_SANDBOX_PROBE")
-        self._authorized_graph_nodes[node_id] = (
-            "ready" if fragment == GRAPH_PR_FRAGMENT else "resolve"
-        )
+        # Querying a verified node never grants mutation authority.
+        # Operation-specific checks must succeed before authorization.
         return node
 
     def _mutate_graph(self, query: str, node_id: str, key: str) -> dict:
-        response = self.api("POST", "/graphql", {
-            "query": query, "variables": {"id": node_id},
-        })
-        if response.get("errors") or not isinstance((response.get("data") or {}).get(key), dict):
-            raise CapabilityBlocked("GRAPHQL_MUTATION_NOT_VERIFIED")
-        self._authorized_graph_nodes.pop(node_id, None)
-        return response["data"][key]
+        try:
+            response = self.api("POST", "/graphql", {
+                "query": query, "variables": {"id": node_id},
+            })
+            if response.get("errors") or not isinstance((response.get("data") or {}).get(key), dict):
+                raise CapabilityBlocked("GRAPHQL_MUTATION_NOT_VERIFIED")
+            return response["data"][key]
+        finally:
+            # An ambiguous network failure MUST NOT leave an authorization
+            # usable by a later direct GraphQL mutation call.
+            self._authorized_graph_nodes.pop(node_id, None)
 
     def mark_ready(self, pr_node_id: str) -> dict:
         node = self._graph_node(
@@ -267,6 +281,7 @@ class SandboxApp:
         )
         if node.get("isDraft") is not True:
             raise CapabilityBlocked("PR_NOT_DRAFT")
+        self._authorized_graph_nodes[pr_node_id] = "ready"
         return self._mutate_graph(
             GRAPH_READY_MUTATION,
             pr_node_id, "markPullRequestReadyForReview",
@@ -281,6 +296,7 @@ class SandboxApp:
             raise CapabilityBlocked("THREAD_NOT_ON_PROBE_PR")
         if node.get("isResolved") is True:
             raise CapabilityBlocked("THREAD_ALREADY_RESOLVED")
+        self._authorized_graph_nodes[thread_id] = "resolve"
         return self._mutate_graph(
             GRAPH_RESOLVE_MUTATION,
             thread_id, "resolveReviewThread",

@@ -302,20 +302,28 @@ class SandboxApp:
         ref_name = conditions.get("ref_name") if isinstance(conditions, dict) else None
         rules = rule.get("rules")
         bypass = rule.get("bypass_actors")
+        source = rule.get("source")
+        rule_types = (
+            [item.get("type") for item in rules]
+            if isinstance(rules, list) and all(isinstance(item, dict) for item in rules)
+            else None
+        )
         if (
             type(rule.get("id")) is not int
             or rule["id"] != PROBE_RULESET_ID
             or rule.get("name") != "L5 Sandbox - Exclusive App Probe Branches"
             or rule.get("target") != "branch"
             or rule.get("source_type") != "Repository"
-            or rule.get("source", "").lower() != PROBE_REPO.lower()
+            or not isinstance(source, str)
+            or source.lower() != PROBE_REPO.lower()
             or rule.get("enforcement") != "active"
             or not isinstance(ref_name, dict)
             or ref_name.get("include") != [PROBE_BRANCH_PATTERN]
             or ref_name.get("exclude") != []
-            or not isinstance(rules, list)
-            or any(not isinstance(item, dict) for item in rules)
-            or {item.get("type") for item in rules} != PROBE_RULE_TYPES
+            or not isinstance(rule_types, list)
+            or any(not isinstance(kind, str) for kind in rule_types)
+            or set(rule_types) != PROBE_RULE_TYPES
+            or len(rule_types) != len(PROBE_RULE_TYPES)
             or not isinstance(bypass, list)
             or bypass != [{
                 "actor_id": PROBE_APP_ACTOR_ID,

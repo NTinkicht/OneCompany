@@ -842,14 +842,42 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                     run_sandbox_push_pr(repo, "t" * 32, probe_id)
                 canary.assert_not_called()
 
+    def test_unprotected_sandbox_probe_ref_cannot_create_app_pr(self):
+        repo = "NTinkicht/qualification-l5-sandbox"
+        app = SandboxApp(repo, "t" * 32)
+        app._scope_verified = True
+        app._default_branch = "main"
+        branch = "l5-probe/00000000-0000-0000-0000-000000000001"
+        app._pr_push_authorizations[branch] = "a" * 40
+        with patch.object(app, "branch", return_value={
+                "commit": {"sha": "a" * 40}
+        }), patch("sandbox_app_capabilities.urlopen") as network, patch.object(
+                app, "_repo_api") as api:
+            with self.assertRaisesRegex(
+                CapabilityBlocked, "PROBE_REF_EXCLUSIVITY_UNVERIFIED"
+            ):
+                app.api("POST", "/repos/" + repo + "/pulls", {
+                    "head": branch, "base": "main", "draft": True,
+                })
+            with self.assertRaisesRegex(
+                CapabilityBlocked, "PROBE_REF_EXCLUSIVITY_UNVERIFIED"
+            ):
+                app.create_draft_pr(branch, "main")
+            network.assert_not_called()
+            api.assert_not_called()
+            self.assertEqual(app._pr_push_authorizations[branch], "a" * 40)
+
     def test_successful_pr_post_uses_one_time_exact_sha_authorization(self):
         repo = "NTinkicht/qualification-l5-sandbox"
         app = SandboxApp(repo, "t" * 32)
         branch = "l5-probe/00000000-0000-0000-0000-000000000001"
         app._default_branch = "main"
         app._pr_push_authorizations[branch] = "a" * 40
-        with patch.object(app, "branch", return_value={
-                "commit": {"sha": "a" * 40}}), patch.object(
+        # Model future reviewed protection proof; production currently refuses
+        # to grant it until probe branch exclusivity can be attested.
+        with patch.object(app, "_require_exclusive_probe_ref"), patch.object(
+                app, "branch", return_value={"commit": {"sha": "a" * 40}}
+        ), patch.object(
                 app, "_repo_api", return_value={"number": 17}) as call:
             result = app.create_draft_pr(branch, "main")
         self.assertEqual(result["number"], 17)
@@ -869,8 +897,9 @@ class SandboxAppCapabilityTests(unittest.TestCase):
             "status": 201,
             "read": lambda self: b'{"number":17}',
         })()
-        with patch.object(app, "branch", return_value={
-                "commit": {"sha": "a" * 40}}), patch(
+        with patch.object(app, "_require_exclusive_probe_ref"), patch.object(
+                app, "branch", return_value={"commit": {"sha": "a" * 40}}
+        ), patch(
                 "sandbox_app_capabilities.urlopen",
                 return_value=contextlib.nullcontext(response)) as network:
             self.assertEqual(app.api("POST", "/repos/" + repo + "/pulls", payload)["number"], 17)

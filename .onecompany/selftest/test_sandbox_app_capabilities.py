@@ -151,7 +151,8 @@ class SandboxAppCapabilityTests(unittest.TestCase):
             if suffix.startswith("/pulls?"):
                 return {"items": [{"number": 17, "head": {"ref": branch}}]}
             if suffix == "/pulls/17":
-                return {"head": {"ref": branch}, "draft": True}
+                return {"head": {"ref": branch}, "draft": True,
+                        "user": {"login": "ntinkicht-l5-sandbox[bot]"}}
             raise AssertionError((method, suffix))
         with patch.object(SandboxApp, "verify_installation",
                           return_value={"default_branch": "main"}), patch.object(
@@ -206,25 +207,14 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                 run_sandbox_push_pr(repo, "t" * 32, probe_id)
             push.assert_not_called()
 
-    def test_duplicate_comment_operation_is_reconciled_without_post(self):
+    def test_comment_requires_durable_cas_before_any_network(self):
         app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
-        uid = "00000000-0000-0000-0000-000000000701"
-        marker = "<!-- l5-sandbox-comment:" + uid + " -->"
-        operations = []
-        def fake_api(method, suffix, payload=None):
-            operations.append((method, suffix))
-            if suffix == "/pulls/17":
-                return {"head": {"ref": "l5-probe/" + uid}}
-            if suffix.startswith("/issues/17/comments?"):
-                return {"items": [{"id": 81, "body": "Note\n\n" + marker,
-                                   "user": {"login": "ntinkicht-l5-sandbox[bot]"}}]}
-            raise AssertionError((method, suffix))
-        with patch.object(app, "_repo_api", side_effect=fake_api):
-            result = app.comment(17, "Note", uid)
-        self.assertTrue(result["reconciled"])
-        self.assertEqual(result["comment"]["id"], 81)
-        self.assertTrue(all(method == "GET" for method, _ in operations))
-
+        with patch.object(app, "_repo_api") as api:
+            with self.assertRaisesRegex(
+                CapabilityBlocked, "COMMENT_REQUIRES_DURABLE_CAS_LEASE"
+            ):
+                app.comment(17, "Note", "00000000-0000-0000-0000-000000000701")
+            api.assert_not_called()
 
     def test_sandbox_graphql_refuses_organization_scope_mutation(self):
         app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
@@ -276,7 +266,8 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                 ).decode()}
             if suffix == "/pulls/17":
                 return {"number": 17, "head": {"ref": branch, "repo": {
-                    "full_name": repo}}, "draft": True}
+                    "full_name": repo}}, "draft": True,
+                    "user": {"login": "ntinkicht-l5-sandbox[bot]"}}
             raise AssertionError(suffix)
         with patch.object(SandboxApp, "verify_installation", return_value={
             "default_branch": "main"}), patch.object(
@@ -305,7 +296,8 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                     ("Sandbox App qualification probe ID: " + probe_id + "\n").encode()
                 ).decode()}
             if suffix == "/pulls/17":
-                return {"number": 17, "head": {"ref": branch}, "merged": True}
+                return {"number": 17, "head": {"ref": branch}, "merged": True,
+                        "user": {"login": "ntinkicht-l5-sandbox[bot]"}}
             raise AssertionError(suffix)
         with patch.object(SandboxApp, "verify_installation", return_value={
             "default_branch": "main"}), patch.object(
@@ -317,20 +309,75 @@ class SandboxAppCapabilityTests(unittest.TestCase):
             canary.assert_not_called()
 
 
-    def test_untrusted_comment_marker_cannot_claim_app_write(self):
+    def test_missing_comment_operation_identity_blocks(self):
         app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
-        uid = "00000000-0000-0000-0000-000000000701"
-        marker = "<!-- l5-sandbox-comment:" + uid + " -->"
-        def fake_api(method, suffix, payload=None):
+        with patch.object(app, "_repo_api") as api:
+            with self.assertRaisesRegex(CapabilityBlocked, "COMMENT_OPERATION_ID_INVALID"):
+                app.comment(17, "Note", "malformed")
+            api.assert_not_called()
+
+
+    def test_expected_app_id_is_mandatory(self):
+        repo = "NTinkicht/qualification-l5-sandbox"
+        app = SandboxApp(repo, "ghs_5245673_not-a-real-token")
+        def api(method, path, payload=None):
+            if path.startswith("/installation/repositories"):
+                return {"total_count": 1, "repositories": [{"full_name": repo}]}
+            return {"full_name": repo, "private": True}
+        with patch.object(app, "api", side_effect=api), patch.dict(
+                os.environ, {}, clear=True):
+            with self.assertRaisesRegex(CapabilityBlocked, "EXPECTED_APP_ID_MISSING"):
+                app.verify_installation()
+
+    def test_wrong_github_app_token_is_never_qualified(self):
+        repo = "NTinkicht/qualification-l5-sandbox"
+        app = SandboxApp(repo, "ghs_1234567_different-app-token")
+        def api(method, path, payload=None):
+            if path.startswith("/installation/repositories"):
+                return {"total_count": 1, "repositories": [{"full_name": repo}]}
+            return {"full_name": repo, "private": True}
+        with patch.object(app, "api", side_effect=api), patch.dict(
+                os.environ, {"L5_EXPECTED_APP_ID": "5245673"}):
+            with self.assertRaisesRegex(CapabilityBlocked, "APP_ID_NOT_ATTESTED"):
+                app.verify_installation()
+        self.assertFalse(app._scope_verified)
+
+    def test_expected_github_app_token_can_qualify_preflight(self):
+        repo = "NTinkicht/qualification-l5-sandbox"
+        app = SandboxApp(repo, "ghs_5245673_matching-token")
+        def api(method, path, payload=None):
+            if path.startswith("/installation/repositories"):
+                return {"total_count": 1, "repositories": [{"full_name": repo}]}
+            return {"full_name": repo, "private": True}
+        with patch.object(app, "api", side_effect=api), patch.dict(
+                os.environ, {"L5_EXPECTED_APP_ID": "5245673"}):
+            self.assertEqual(app.verify_installation()["full_name"], repo)
+        self.assertTrue(app._scope_verified)
+
+    def test_wrong_pr_bot_cannot_claim_sandbox_write_proof(self):
+        repo = "NTinkicht/qualification-l5-sandbox"
+        probe_id = "00000000-0000-0000-0000-000000000001"
+        branch = "l5-probe/" + probe_id
+        def fake_api(_app, method, suffix, payload=None):
+            if suffix.startswith("/pulls?"):
+                return {"items": [{"number": 17, "head": {"ref": branch}}]}
+            if suffix.startswith("/branches/"):
+                return {"commit": {"sha": "a" * 40}}
+            if suffix.startswith("/contents/"):
+                return {"content": base64.b64encode(
+                    ("Sandbox App qualification probe ID: " + probe_id + "\n").encode()
+                ).decode()}
             if suffix == "/pulls/17":
-                return {"head": {"ref": "l5-probe/" + uid}}
-            if suffix.startswith("/issues/17/comments?"):
-                return {"items": [{"id": 81, "body": "Note\n\n" + marker,
-                                   "user": {"login": "malicious-user"}}]}
-            raise AssertionError("a malicious marker must not cause POST")
-        with patch.object(app, "_repo_api", side_effect=fake_api):
-            with self.assertRaisesRegex(CapabilityBlocked, "COMMENT_MARKER_UNTRUSTED"):
-                app.comment(17, "Note", uid)
+                return {"head": {"ref": branch}, "user": {"login": "wrong-app[bot]"}}
+            raise AssertionError(suffix)
+        with patch.object(SandboxApp, "verify_installation",
+                          return_value={"default_branch": "main"}), patch.object(
+                              SandboxApp, "_repo_api", autospec=True, side_effect=fake_api
+                          ), patch("sandbox_app_capabilities.push_canary") as push:
+            with self.assertRaisesRegex(CapabilityBlocked, "PR_APP_IDENTITY_MISMATCH"):
+                run_sandbox_push_pr(repo, "t" * 32, probe_id)
+            push.assert_not_called()
+
 
     def test_unqualified_rerun_never_dispatches(self):
         app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)

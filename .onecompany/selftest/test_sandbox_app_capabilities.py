@@ -830,6 +830,27 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                 })
             network.assert_not_called()
 
+    def test_pr_post_rejects_malformed_remote_commit_at_both_gates(self):
+        repo = "NTinkicht/qualification-l5-sandbox"
+        branch = "l5-probe/00000000-0000-0000-0000-000000000001"
+        for malformed in (None, False, 1, [], "not-an-object"):
+            with self.subTest(malformed=malformed):
+                app = SandboxApp(repo, "t" * 32)
+                app._scope_verified = True
+                app._default_branch = "main"
+                app._pr_push_authorizations[branch] = "a" * 40
+                payload = {"head": branch, "base": "main", "draft": True}
+                with patch.object(app, "branch", return_value={"commit": malformed}), patch(
+                        "sandbox_app_capabilities.urlopen") as network:
+                    with self.assertRaisesRegex(CapabilityBlocked, "PROBE_PR_HEAD_CHANGED"):
+                        app.api("POST", "/repos/" + repo + "/pulls", payload)
+                    network.assert_not_called()
+                with patch.object(app, "branch", return_value={"commit": malformed}), patch.object(
+                        app, "_repo_api") as api:
+                    with self.assertRaisesRegex(CapabilityBlocked, "PROBE_PR_HEAD_CHANGED"):
+                        app.create_draft_pr(branch, "main")
+                    api.assert_not_called()
+
     def test_push_probe_never_runs_without_installation(self):
         with patch.object(SandboxApp, "verify_installation",
                           side_effect=CapabilityBlocked("BLOCK_PERMISSION")):

@@ -167,6 +167,17 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                 app.api("POST", "/repos/NTinkicht/qualification-l5-sandbox/issues", {})
             network.assert_not_called()
 
+    def test_installation_with_non_object_repository_fails_closed(self):
+        app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
+        with patch.object(app, "api", return_value={
+            "total_count": 1, "repositories": [None]
+        }):
+            with self.assertRaisesRegex(
+                CapabilityBlocked, "INSTALLATION_NOT_EXCLUSIVE"
+            ):
+                app.verify_installation()
+        self.assertFalse(app._scope_verified)
+
     def test_installation_with_extra_repository_is_refused(self):
         app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
         with patch.object(app, "api", return_value={"total_count": 2, "repositories": [

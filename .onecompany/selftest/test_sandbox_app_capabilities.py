@@ -677,6 +677,25 @@ class SandboxAppCapabilityTests(unittest.TestCase):
             with self.assertRaisesRegex(CapabilityBlocked, "WAIT_EXTERNAL:GIT_TRANSPORT_TIMEOUT"):
                 shell(["git", "push"], env={})
 
+    def test_broken_403_body_read_remains_transient(self):
+        app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
+
+        class FailedResponseBody:
+            def read(self, *args):
+                raise OSError("connection reset")
+
+        with patch(
+            "sandbox_app_capabilities.urlopen",
+            side_effect=HTTPError(
+                "https://api.github.com", 403, "Forbidden", {},
+                FailedResponseBody(),
+            ),
+        ):
+            with self.assertRaisesRegex(
+                CapabilityBlocked, "WAIT_EXTERNAL:GITHUB_ERROR_BODY_IO_FAILURE"
+            ):
+                app.api("GET", "/repos/NTinkicht/qualification-l5-sandbox")
+
     def test_actual_forbidden_403_is_permission_block(self):
         app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
         with patch("sandbox_app_capabilities.urlopen",

@@ -345,6 +345,31 @@ def isolated_git_env(app: SandboxApp, askpass: Path, home: Path) -> dict[str, st
     })
     return env
 
+def write_probe_canary(target: Path, probe_id: str) -> None:
+    """Create a new probe marker without following repository-owned symlinks."""
+    try:
+        probe_id = str(uuid.UUID(probe_id))
+    except (ValueError, TypeError, AttributeError):
+        raise CapabilityBlocked("PROBE_ID_INVALID") from None
+    if target.is_symlink() or not target.is_dir():
+        raise CapabilityBlocked("PROBE_DIRECTORY_UNSAFE")
+    leaf = target / (probe_id + ".txt")
+    if leaf.is_symlink() or leaf.exists():
+        raise CapabilityBlocked("PROBE_FILE_ALREADY_EXISTS")
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise CapabilityBlocked("PROBE_NOFOLLOW_UNAVAILABLE")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
+    try:
+        fd = os.open(leaf, flags, 0o600)
+    except OSError:
+        raise CapabilityBlocked("PROBE_FILE_CREATE_REFUSED") from None
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write("Sandbox App qualification probe ID: " + probe_id + "\n")
+    except OSError:
+        raise CapabilityBlocked("PROBE_FILE_WRITE_REFUSED") from None
+
+
 def push_canary(app: SandboxApp, probe_id: str) -> tuple[str, str]:
     """Prove real shell checkout, single atomic git commit and fenced push."""
     if shutil.which("git") is None:
@@ -370,10 +395,7 @@ def push_canary(app: SandboxApp, probe_id: str) -> tuple[str, str]:
         if target.is_symlink() or (target.exists() and not target.is_dir()):
             raise CapabilityBlocked("PROBE_DIRECTORY_UNSAFE")
         target.mkdir(exist_ok=True)
-        (target / (branch.split("/", 1)[1] + ".txt")).write_text(
-            "Sandbox App qualification probe ID: " + probe_id + "\n",
-            encoding="utf-8",
-        )
+        write_probe_canary(target, probe_id)
         shell(["git", "add", ".l5-sandbox-probes"], cwd=checkout, env=env)
         shell(["git", "-c", "user.name=L5 Sandbox App", "-c",
                "user.email=l5-sandbox-app@users.noreply.github.com",
@@ -392,68 +414,111 @@ def push_canary(app: SandboxApp, probe_id: str) -> tuple[str, str]:
 
 
 def run_sandbox_push_pr(repo: str, token: str, probe_id: str) -> dict:
-    """Reconcile one stable probe across retries, never create a second WU."""
+    """Replay-safe sandbox probe with separate evidence for push and PR writes."""
     app = SandboxApp(repo, token)
-    app.verify_installation()
+    meta = app.verify_installation()
     try:
         probe_id = str(uuid.UUID(probe_id))
     except (ValueError, TypeError, AttributeError):
         raise CapabilityBlocked("PROBE_ID_INVALID") from None
     branch = "l5-probe/" + probe_id
-    # Read back the exact probe first. A lost response MUST NOT create a
-    # second branch or PR with another identity.
+    base = meta.get("default_branch")
+    if not isinstance(base, str) or not re.fullmatch(r"[A-Za-z0-9._/-]+", base):
+        raise CapabilityBlocked("DEFAULT_BRANCH_UNKNOWN")
+
+    # Inspect all PR states BEFORE probing the ref: GitHub often auto-deletes
+    # merged head refs, but their canonical PRs must remain replayable.
+    # Refuse oversized result sets rather than guessing that no PR exists.
+    matching = []
+    for page in range(1, 11):
+        result = app._repo_api("GET", f"/pulls?state=all&per_page=100&page={page}")
+        rows = result.get("items")
+        if not isinstance(rows, list):
+            raise CapabilityBlocked("PROBE_PR_LIST_INVALID")
+        matching.extend(
+            row for row in rows
+            if (row.get("head") or {}).get("ref") == branch
+            and (row.get("head") or {}).get("repo", {}).get("full_name", "").lower()
+                in ("", repo.lower())
+        )
+        if len(matching) > 1:
+            raise CapabilityBlocked("DUPLICATE_PROBE_PRS")
+        if len(rows) < 100:
+            break
+    else:
+        raise CapabilityBlocked("PROBE_PR_PAGINATION_LIMIT")
+    prior_pr = matching[0] if matching else None
+
     try:
         existing = app.branch(branch)
     except CapabilityBlocked as exc:
         if str(exc) != "REMOTE_REQUEST_FAILED:404":
             raise
         existing = None
-    reconciled = existing is not None
-    if reconciled:
+
+    if existing is None and prior_pr is not None:
+        # A completed PR may have a deleted head branch. Never remake the
+        # same probe or re-credit missing, already-merged work as new.
+        if prior_pr.get("merged_at") is None:
+            raise CapabilityBlocked("PROBE_PR_BRANCH_MISSING")
+        marker_ref = base
+    else:
+        marker_ref = branch
+
+    if existing is not None:
         if not SHA40.fullmatch((existing.get("commit") or {}).get("sha", "")):
             raise CapabilityBlocked("PROBE_BRANCH_SHA_INVALID")
-        base = app.verify_installation().get("default_branch")
-        if not isinstance(base, str) or not base:
-            raise CapabilityBlocked("DEFAULT_BRANCH_UNKNOWN")
-    else:
+    elif prior_pr is None:
+        # A previous merged commit can remain in the base even if PR listing
+        # metadata no longer retains its original head reference.
+        try:
+            base_marker = app._repo_api(
+                "GET", "/contents/.l5-sandbox-probes/" + probe_id + ".txt?ref=" + base
+            )
+        except CapabilityBlocked as exc:
+            if str(exc) != "REMOTE_REQUEST_FAILED:404":
+                raise
+        else:
+            if isinstance(base_marker, dict):
+                raise CapabilityBlocked("PROBE_ID_ALREADY_ON_DEFAULT")
         branch, base = push_canary(app, probe_id)
-    # Read back a probe-specific marker in the actual remote commit. Existing
-    # objects are reconciled, NEVER re-credited as fresh App writes.
-    marker_path = "/contents/.l5-sandbox-probes/" + probe_id + ".txt?ref=" + branch.replace("/", "%2F")
+
+    marker_path = ("/contents/.l5-sandbox-probes/" + probe_id
+                   + ".txt?ref=" + marker_ref.replace("/", "%2F"))
     marker_data = app._repo_api("GET", marker_path)
     try:
-        marker_text = base64.b64decode(marker_data["content"], validate=False).decode("utf-8")
+        marker_text = base64.b64decode(
+            marker_data["content"], validate=False
+        ).decode("utf-8")
     except (KeyError, ValueError, TypeError, UnicodeDecodeError):
         raise CapabilityBlocked("PROBE_CANARY_UNVERIFIED") from None
     if marker_text != "Sandbox App qualification probe ID: " + probe_id + "\n":
         raise CapabilityBlocked("PROBE_CANARY_MISMATCH")
-    listed = app._repo_api("GET", "/pulls?state=all&head=" + repo.split("/")[0] + ":" + branch)
-    matching = [x for x in listed.get("items", [])
-                if (x.get("head") or {}).get("ref") == branch]
-    if len(matching) > 1:
-        raise CapabilityBlocked("DUPLICATE_PROBE_PRS")
-    if matching:
-        pr = matching[0]
+
+    fresh_push = existing is None and prior_pr is None
+    fresh_pr = prior_pr is None
+    if prior_pr is None:
+        pr = app.create_draft_pr(branch, base)
     else:
-        try:
-            pr = app.create_draft_pr(branch, base)
-        except CapabilityBlocked:
-            # Ambiguous remote response: next invocation will reconcile using
-            # the SAME --probe-id; never mint another probe.
-            raise
+        pr = prior_pr
     number = pr.get("number")
     if type(number) is not int or number < 1:
         raise CapabilityBlocked("PR_CREATE_NOT_VERIFIED")
     current = app._repo_api("GET", f"/pulls/{number}")
     if (current.get("head") or {}).get("ref") != branch:
         raise CapabilityBlocked("PR_READBACK_MISMATCH")
+    if (current.get("head") or {}).get("repo", {}).get("full_name", repo).lower() != repo.lower():
+        raise CapabilityBlocked("PR_HEAD_OTHER_REPOSITORY")
+
+    verified = (["push"] if fresh_push else []) + (["create_pr"] if fresh_pr else [])
+    reconciled = (["push"] if not fresh_push else []) + (["create_pr"] if not fresh_pr else [])
     return {
         "repo": app.repo, "sandbox_pr": number, "sandbox_branch": branch,
-        "verified_write_classes": [] if reconciled else ["push", "create_pr"],
-        "reconciled_write_classes": ["push", "create_pr"] if reconciled else [],
+        "verified_write_classes": verified,
+        "reconciled_write_classes": reconciled,
         "unverified_write_classes": list(WRITE_CLASSES[2:]),
         "production_enabled": False,
-        "status": "SANDBOX_RECONCILED_PREVIOUS_OPERATION" if reconciled else "SANDBOX_PARTIAL_PROOF",
+        "status": "SANDBOX_PARTIAL_PROOF" if verified else "SANDBOX_RECONCILED_PREVIOUS_OPERATION",
     }
 
 

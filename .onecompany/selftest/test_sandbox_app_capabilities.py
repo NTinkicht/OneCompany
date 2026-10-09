@@ -16,7 +16,7 @@ from urllib.error import HTTPError
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from sandbox_app_capabilities import (
     CapabilityBlocked, SandboxApp, WRITE_CLASSES, require_sandbox, require_sha,
-    run_sandbox_push_pr, isolated_git_env, write_probe_canary, main, shell,
+    run_sandbox_push_pr, isolated_git_env, write_probe_canary, push_canary, main, shell,
 )
 
 
@@ -386,7 +386,8 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                     ("Sandbox App qualification probe ID: " + probe_id + "\n").encode()
                 ).decode()}
             if suffix == "/pulls/17":
-                return {"head": {"ref": branch, "sha": "a" * 40},
+                return {"head": {"ref": branch, "sha": "a" * 40,
+                                 "repo": {"full_name": repo}},
                         "user": {"login": "wrong-app[bot]"}}
             raise AssertionError(suffix)
         def tracked_push(app, probe_id):
@@ -459,7 +460,8 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                     ("Sandbox App qualification probe ID: " + probe_id + "\n").encode()
                 ).decode()}
             if suffix == "/pulls/17":
-                return {"head": {"ref": branch, "sha": "a" * 40},
+                return {"head": {"ref": branch, "sha": "a" * 40,
+                                 "repo": {"full_name": repo}},
                         "user": {"login": False}}
             raise AssertionError(suffix)
 
@@ -475,6 +477,60 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                 "sandbox_app_capabilities.push_canary", side_effect=tracked_push):
             with self.assertRaisesRegex(CapabilityBlocked, "PR_APP_IDENTITY_MISMATCH"):
                 run_sandbox_push_pr(repo, "t" * 32, probe_id)
+
+    def test_created_pr_readback_requires_head_repository_object(self):
+        repo = "NTinkicht/qualification-l5-sandbox"
+        probe_id = "00000000-0000-0000-0000-000000000001"
+        branch = "l5-probe/" + probe_id
+        for bad_repo in (None, 0, [], "not-an-object"):
+            with self.subTest(head_repo=bad_repo):
+                def fake_api(_app, method, suffix, payload=None):
+                    if suffix.startswith("/pulls?"):
+                        return {"items": []}
+                    if suffix.startswith("/branches/"):
+                        raise CapabilityBlocked("REMOTE_REQUEST_FAILED:404")
+                    if suffix.startswith("/contents/") and "ref=main" in suffix:
+                        raise CapabilityBlocked("REMOTE_REQUEST_FAILED:404")
+                    if suffix.startswith("/contents/"):
+                        return {"content": base64.b64encode(
+                            ("Sandbox App qualification probe ID: " + probe_id + "\n").encode()
+                        ).decode()}
+                    if suffix == "/pulls/17":
+                        return {"head": {"ref": branch, "sha": "a" * 40,
+                                         "repo": bad_repo},
+                                "user": {"login": "ntinkicht-l5-sandbox[bot]"}}
+                    raise AssertionError(suffix)
+
+                def tracked_push(app, probe_id):
+                    app._pr_push_authorizations[branch] = "a" * 40
+                    return branch, "main"
+
+                with patch.object(SandboxApp, "verify_installation",
+                                  return_value={"default_branch": "main"}), patch.object(
+                        SandboxApp, "_repo_api", autospec=True, side_effect=fake_api
+                    ), patch.object(SandboxApp, "create_draft_pr",
+                                    return_value={"number": 17}), patch(
+                        "sandbox_app_capabilities.push_canary",
+                        side_effect=tracked_push):
+                    with self.assertRaisesRegex(CapabilityBlocked, "PR_HEAD_OTHER_REPOSITORY"):
+                        run_sandbox_push_pr(repo, "t" * 32, probe_id)
+
+    def test_post_push_branch_readback_rejects_non_object_commit(self):
+        repo = "NTinkicht/qualification-l5-sandbox"
+        app = SandboxApp(repo, "t" * 32)
+        probe_id = "00000000-0000-0000-0000-000000000001"
+        for invalid in (None, 1, False, [], "sha"):
+            with self.subTest(commit=invalid), patch(
+                    "sandbox_app_capabilities.shutil.which", return_value="/usr/bin/git"
+                ), patch("sandbox_app_capabilities.shell") as git, patch(
+                    "sandbox_app_capabilities.write_probe_canary"), patch.object(
+                    app, "branch", return_value={"commit": invalid}):
+                git.side_effect = lambda args, **kwargs: (
+                    "origin/main" if "symbolic-ref" in args
+                    else "a" * 40 if "rev-parse" in args else ""
+                )
+                with self.assertRaisesRegex(CapabilityBlocked, "PUSH_READBACK_MISMATCH"):
+                    push_canary(app, probe_id)
 
     def test_rate_limit_403_waits_not_permission_denied(self):
         app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)

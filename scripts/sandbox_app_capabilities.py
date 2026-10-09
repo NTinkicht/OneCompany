@@ -162,6 +162,11 @@ class SandboxApp:
                 raise CapabilityBlocked("WAIT_RATE_LIMIT") from None
             if exc.code in {401, 403}:
                 raise CapabilityBlocked("BLOCK_PERMISSION:APP_REQUEST_REFUSED") from None
+            # Provider-side failures can happen AFTER a successful write.
+            # Classify them as transient; retry callers must reconcile the
+            # stable probe ID against remote state rather than duplicate writes.
+            if 500 <= exc.code <= 599:
+                raise CapabilityBlocked("WAIT_EXTERNAL:GITHUB_SERVER_ERROR") from None
             raise CapabilityBlocked("REMOTE_REQUEST_FAILED:" + str(exc.code)) from None
         except (URLError, TimeoutError):
             raise CapabilityBlocked("WAIT_EXTERNAL:NETWORK_UNAVAILABLE") from None

@@ -105,7 +105,10 @@ class SandboxApp:
             raise CapabilityBlocked("REST_WRITE_NOT_QUALIFIED")
         if method == "POST" and path == repo_root + "/pulls":
             head = payload.get("head") if isinstance(payload, dict) else None
-            if (not isinstance(head, str) or
+            if (not isinstance(payload, dict) or
+                    not {"head", "base", "draft"}.issubset(payload) or
+                    not set(payload).issubset({"head", "base", "draft", "title", "body"}) or
+                    not isinstance(head, str) or
                     not re.fullmatch(
                         r"l5-probe/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
                         r"[0-9a-f]{4}-[0-9a-f]{12}", head
@@ -220,10 +223,12 @@ class SandboxApp:
             or not isinstance(repos[0], dict)
         ):
             raise CapabilityBlocked("BLOCK_PERMISSION:INSTALLATION_NOT_EXCLUSIVE")
-        if (repos[0].get("full_name") or "").lower() != self.repo.lower():
+        installed_name = repos[0].get("full_name")
+        if not isinstance(installed_name, str) or installed_name.lower() != self.repo.lower():
             raise CapabilityBlocked("BLOCK_PERMISSION:SANDBOX_OUTSIDE_INSTALLATION")
         meta = self._repo_api("GET", "")
-        if meta.get("full_name", "").lower() != self.repo.lower():
+        meta_name = meta.get("full_name") if isinstance(meta, dict) else None
+        if not isinstance(meta_name, str) or meta_name.lower() != self.repo.lower():
             raise CapabilityBlocked("BLOCK_PERMISSION:SANDBOX_READBACK_MISMATCH")
         if meta.get("private") is not True:
             raise CapabilityBlocked("BLOCK_PERMISSION:SANDBOX_MUST_BE_PRIVATE")

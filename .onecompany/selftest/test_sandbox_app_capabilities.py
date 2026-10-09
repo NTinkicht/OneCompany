@@ -421,6 +421,25 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                 with self.assertRaisesRegex(CapabilityBlocked, "WAIT_RATE_LIMIT"):
                     app.api("GET", "/repos/NTinkicht/qualification-l5-sandbox")
 
+    def test_github_5xx_errors_are_retryable(self):
+        app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
+        for code in (500, 502, 503, 504, 599):
+            with self.subTest(code=code), patch(
+                "sandbox_app_capabilities.urlopen",
+                side_effect=HTTPError("https://api.github.com", code,
+                                      "Server error", {}, None),
+            ):
+                with self.assertRaisesRegex(CapabilityBlocked, "WAIT_EXTERNAL:GITHUB_SERVER_ERROR"):
+                    app.api("GET", "/repos/NTinkicht/qualification-l5-sandbox")
+
+    def test_github_404_remains_not_found_for_probe_reconciliation(self):
+        app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
+        with patch("sandbox_app_capabilities.urlopen",
+                   side_effect=HTTPError("https://api.github.com", 404,
+                                         "Not found", {}, None)):
+            with self.assertRaisesRegex(CapabilityBlocked, "REMOTE_REQUEST_FAILED:404"):
+                app.api("GET", "/repos/NTinkicht/qualification-l5-sandbox")
+
     def test_actual_forbidden_403_is_permission_block(self):
         app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
         with patch("sandbox_app_capabilities.urlopen",

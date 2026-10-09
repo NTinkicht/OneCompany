@@ -172,12 +172,17 @@ class SandboxApp:
         # or rely on the newer ghs_APPID_JWT format being universal.
         app_id = os.environ.get("L5_EXPECTED_APP_ID", "").strip()
         slug = os.environ.get("L5_ATTESTED_APP_SLUG", "").strip().lower()
-        if not re.fullmatch(r"[1-9][0-9]*", app_id):
-            raise CapabilityBlocked("BLOCK_PERMISSION:EXPECTED_APP_ID_MISSING")
+        # Phase-1 sandbox is pinned to the registered App 5245673. Since
+        # GitHub's Oct 2026 rollout, freshly issued installation tokens have
+        # the ghs_APPID_JWT form. Match only the authenticated token's public
+        # application-ID prefix; never parse or attempt to validate its JWT.
+        # An opaque/legacy or different-App token is unqualified (fail closed).
+        if app_id != "5245673":
+            raise CapabilityBlocked("BLOCK_PERMISSION:EXPECTED_APP_ID_MISMATCH")
         if slug != "ntinkicht-l5-sandbox":
             raise CapabilityBlocked("BLOCK_PERMISSION:APP_SLUG_ATTESTATION_FAILED")
-        if not self._token.startswith("ghs_"):
-            raise CapabilityBlocked("BLOCK_PERMISSION:NOT_INSTALLATION_TOKEN")
+        if not self._token.startswith("ghs_5245673_"):
+            raise CapabilityBlocked("BLOCK_PERMISSION:APP_ID_NOT_ATTESTED")
         self._scope_verified = True
         return meta
 

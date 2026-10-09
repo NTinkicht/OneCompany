@@ -382,7 +382,7 @@ def run_sandbox_push_pr(repo: str, token: str, probe_id: str) -> dict:
         marker_text = base64.b64decode(marker_data["content"], validate=False).decode("utf-8")
     except (KeyError, ValueError, TypeError, UnicodeDecodeError):
         raise CapabilityBlocked("PROBE_CANARY_UNVERIFIED") from None
-    if marker_text != "Sandbox App qualification probe ID: " + probe_id + "\\n":
+    if marker_text != "Sandbox App qualification probe ID: " + probe_id + "\n":
         raise CapabilityBlocked("PROBE_CANARY_MISMATCH")
     listed = app._repo_api("GET", "/pulls?state=all&head=" + repo.split("/")[0] + ":" + branch)
     matching = [x for x in listed.get("items", [])

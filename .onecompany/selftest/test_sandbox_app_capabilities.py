@@ -386,15 +386,19 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                     ("Sandbox App qualification probe ID: " + probe_id + "\n").encode()
                 ).decode()}
             if suffix == "/pulls/17":
-                return {"head": {"ref": branch}, "user": {"login": "wrong-app[bot]"}}
+                return {"head": {"ref": branch, "sha": "a" * 40},
+                        "user": {"login": "wrong-app[bot]"}}
             raise AssertionError(suffix)
+        def tracked_push(app, probe_id):
+            app._pr_push_authorizations[branch] = "a" * 40
+            return branch, "main"
         with patch.object(SandboxApp, "verify_installation",
                           return_value={"default_branch": "main"}), patch.object(
                               SandboxApp, "_repo_api", autospec=True, side_effect=fake_api
                           ), patch.object(SandboxApp, "create_draft_pr",
                                           return_value={"number": 17}), patch(
                               "sandbox_app_capabilities.push_canary",
-                              return_value=(branch, "main")) as push:
+                              side_effect=tracked_push) as push:
             with self.assertRaisesRegex(CapabilityBlocked, "PR_APP_IDENTITY_MISMATCH"):
                 run_sandbox_push_pr(repo, "t" * 32, probe_id)
             push.assert_called_once()
@@ -591,6 +595,64 @@ class SandboxAppCapabilityTests(unittest.TestCase):
             with self.assertRaisesRegex(CapabilityBlocked, "RERUN_JOB_NOT_QUALIFIED"):
                 app.rerun_job(123)
             api.assert_not_called()
+
+
+    def test_direct_draft_pr_post_without_verified_push_is_blocked(self):
+        repo = "NTinkicht/qualification-l5-sandbox"
+        app = SandboxApp(repo, "t" * 32)
+        app._scope_verified = True
+        app._default_branch = "main"
+        branch = "l5-probe/00000000-0000-0000-0000-000000000001"
+        with patch("sandbox_app_capabilities.urlopen") as network:
+            with self.assertRaisesRegex(CapabilityBlocked, "PROBE_PR_POST_NOT_QUALIFIED"):
+                app.api("POST", "/repos/" + repo + "/pulls", {
+                    "head": branch, "base": "main", "draft": True,
+                })
+            with self.assertRaisesRegex(CapabilityBlocked, "PROBE_PR_REQUIRES_VERIFIED_PUSH"):
+                app.create_draft_pr(branch, "main")
+            network.assert_not_called()
+
+    def test_verified_commit_changes_before_pr_post_block_without_network(self):
+        repo = "NTinkicht/qualification-l5-sandbox"
+        app = SandboxApp(repo, "t" * 32)
+        app._scope_verified = True
+        app._default_branch = "main"
+        branch = "l5-probe/00000000-0000-0000-0000-000000000001"
+        app._pr_push_authorizations[branch] = "a" * 40
+        with patch.object(app, "branch", return_value={"commit": {"sha": "b" * 40}}), patch(
+                "sandbox_app_capabilities.urlopen") as network:
+            with self.assertRaisesRegex(CapabilityBlocked, "PROBE_PR_HEAD_CHANGED"):
+                app.create_draft_pr(branch, "main")
+            network.assert_not_called()
+
+    def test_pr_list_rejects_non_mapping_response_entries(self):
+        repo = "NTinkicht/qualification-l5-sandbox"
+        probe_id = "00000000-0000-0000-0000-000000000001"
+        for malformed in ([{"head": None}, None], [1], [{"head": {
+                "ref": "irrelevant", "repo": "not-an-object"}}]):
+            with self.subTest(malformed=malformed), patch.object(
+                    SandboxApp, "verify_installation",
+                    return_value={"default_branch": "main"}), patch.object(
+                        SandboxApp, "_repo_api",
+                        return_value={"items": malformed}), patch(
+                            "sandbox_app_capabilities.push_canary") as canary:
+                with self.assertRaisesRegex(CapabilityBlocked, "PROBE_PR_"):
+                    run_sandbox_push_pr(repo, "t" * 32, probe_id)
+                canary.assert_not_called()
+
+    def test_successful_pr_post_uses_one_time_exact_sha_authorization(self):
+        repo = "NTinkicht/qualification-l5-sandbox"
+        app = SandboxApp(repo, "t" * 32)
+        branch = "l5-probe/00000000-0000-0000-0000-000000000001"
+        app._default_branch = "main"
+        app._pr_push_authorizations[branch] = "a" * 40
+        with patch.object(app, "branch", return_value={
+                "commit": {"sha": "a" * 40}}), patch.object(
+                app, "_repo_api", return_value={"number": 17}) as call:
+            result = app.create_draft_pr(branch, "main")
+        self.assertEqual(result["number"], 17)
+        self.assertEqual(call.call_count, 1)
+        self.assertNotIn(branch, app._pr_push_authorizations)
 
     def test_push_probe_never_runs_without_installation(self):
         with patch.object(SandboxApp, "verify_installation",

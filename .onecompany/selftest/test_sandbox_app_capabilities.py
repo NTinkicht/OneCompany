@@ -864,8 +864,103 @@ class SandboxAppCapabilityTests(unittest.TestCase):
             ):
                 app.create_draft_pr(branch, "main")
             network.assert_not_called()
-            api.assert_not_called()
+            self.assertEqual(api.call_count, 2)
+            for request in api.call_args_list:
+                self.assertEqual(
+                    request.args, ("GET", "/rulesets/24816225")
+                )
             self.assertEqual(app._pr_push_authorizations[branch], "a" * 40)
+
+    def test_readonly_ruleset_attestation_does_not_authorize_pr_publication(self):
+        app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
+        app._scope_verified = True
+        branch = "l5-probe/00000000-0000-0000-0000-000000000001"
+        policy = {
+            "id": 24816225,
+            "name": "L5 Sandbox - Exclusive App Probe Branches",
+            "target": "branch",
+            "source_type": "Repository",
+            "source": "NTinkicht/qualification-l5-sandbox",
+            "enforcement": "active",
+            "conditions": {"ref_name": {
+                "include": ["refs/heads/l5-probe/*"], "exclude": [],
+            }},
+            "rules": [{"type": name} for name in (
+                "creation", "update", "deletion", "non_fast_forward"
+            )],
+            "bypass_actors": [{
+                "actor_id": 5245673,
+                "actor_type": "Integration",
+                "bypass_mode": "always",
+            }],
+        }
+        with patch.object(app, "_repo_api", return_value=policy) as reader:
+            app._inspect_exclusive_probe_ruleset(branch)
+            with self.assertRaisesRegex(
+                CapabilityBlocked, "PROBE_NEGATIVE_RACE_EVIDENCE_UNVERIFIED"
+            ):
+                app._require_exclusive_probe_ref(branch)
+            self.assertEqual(reader.call_count, 2)
+            for request in reader.call_args_list:
+                self.assertEqual(
+                    request.args, ("GET", "/rulesets/24816225")
+                )
+
+        import copy
+        failures = []
+        for name, mutate in [
+            ("inactive", lambda p: p.update(enforcement="evaluate")),
+            ("missing_creation", lambda p: p["rules"].pop(0)),
+            ("no_force_push_guard", lambda p: p["rules"].pop()),
+            ("wide_match", lambda p: p["conditions"]["ref_name"].update(
+                include=["refs/heads/*"]
+            )),
+            ("excluded_probe", lambda p: p["conditions"]["ref_name"].update(
+                exclude=["refs/heads/l5-probe/*"]
+            )),
+            ("wrong_actor", lambda p: p["bypass_actors"][0].update(actor_id=1)),
+            ("wrong_mode", lambda p: p["bypass_actors"][0].update(
+                bypass_mode="pull_request"
+            )),
+            ("extra_bypass", lambda p: p["bypass_actors"].append({
+                "actor_id": 2, "actor_type": "OrganizationAdmin",
+                "bypass_mode": "always",
+            })),
+            ("wrong_repository", lambda p: p.update(source="NTinkicht/Tabibi")),
+            ("wrong_id", lambda p: p.update(id=1)),
+            ("wrong_name", lambda p: p.update(name="lookalike")),
+        ]:
+            changed = copy.deepcopy(policy)
+            mutate(changed)
+            failures.append(name)
+            with self.subTest(malformed=name), patch.object(
+                app, "_repo_api", return_value=changed
+            ):
+                with self.assertRaisesRegex(
+                    CapabilityBlocked, "PROBE_REF_EXCLUSIVITY_UNVERIFIED"
+                ):
+                    app._require_exclusive_probe_ref(branch)
+        self.assertEqual(len(failures), 11)
+
+        with patch.object(app, "_repo_api", side_effect=CapabilityBlocked(
+            "BLOCK_PERMISSION:APP_REQUEST_REFUSED"
+        )):
+            with self.assertRaisesRegex(
+                CapabilityBlocked, "PROBE_REF_EXCLUSIVITY_UNVERIFIED"
+            ):
+                app._require_exclusive_probe_ref(branch)
+
+    def test_foreign_sandbox_cannot_inherit_pinned_ruleset(self):
+        app = SandboxApp("someone/other-l5-sandbox", "t" * 32)
+        app._scope_verified = True
+        with patch.object(app, "_repo_api") as reader:
+            with self.assertRaisesRegex(
+                CapabilityBlocked, "PROBE_REF_EXCLUSIVITY_UNVERIFIED"
+            ):
+                app._require_exclusive_probe_ref(
+                    "l5-probe/00000000-0000-0000-0000-000000000001"
+                )
+            reader.assert_not_called()
 
     def test_successful_pr_post_uses_one_time_exact_sha_authorization(self):
         repo = "NTinkicht/qualification-l5-sandbox"

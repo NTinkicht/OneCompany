@@ -136,7 +136,7 @@ class SandboxApp:
             if exc.code == 403:
                 try:
                     body = exc.read(2048)
-                except (OSError, TypeError):
+                except (OSError, TypeError, AttributeError):
                     body = b""
             reason = body.decode("utf-8", errors="replace").lower()
             secondary = any(marker in reason for marker in (

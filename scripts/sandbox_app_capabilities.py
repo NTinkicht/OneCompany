@@ -201,7 +201,7 @@ class SandboxApp:
                 item = found[0]
                 author = ((item.get("user") or {}).get("login") or "").lower()
                 expected = "ntinkicht-l5-sandbox[bot]"
-                payload = body + "\\n\\n" + marker
+                payload = body + "\n\n" + marker
                 if author != expected or item.get("body") != payload:
                     raise CapabilityBlocked("COMMENT_MARKER_UNTRUSTED")
                 return {"reconciled": True, "comment": item}
@@ -213,7 +213,7 @@ class SandboxApp:
             "POST", f"/issues/{number}/comments",
             {"body": body + "\n\n" + marker},
         )
-        if created.get("body") != body + "\\n\\n" + marker:
+        if created.get("body") != body + "\n\n" + marker:
             raise CapabilityBlocked("COMMENT_READBACK_MISMATCH")
         author = ((created.get("user") or {}).get("login") or "").lower()
         if author != "ntinkicht-l5-sandbox[bot]":

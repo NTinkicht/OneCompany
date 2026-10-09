@@ -144,7 +144,7 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                 return {"commit": {"sha": "a" * 40}}
             if suffix.startswith("/contents/.l5-sandbox-probes/"):
                 return {"content": base64.b64encode(
-                    ("Sandbox App qualification probe ID: " + probe_id + "\\n").encode()
+                    ("Sandbox App qualification probe ID: " + probe_id + "\n").encode()
                 ).decode()}
             if suffix.startswith("/pulls?"):
                 return {"items": [{"number": 17, "head": {"ref": branch}}]}
@@ -211,7 +211,7 @@ class SandboxAppCapabilityTests(unittest.TestCase):
             if suffix == "/pulls/17":
                 return {"head": {"ref": "l5-probe/" + uid}}
             if suffix.startswith("/issues/17/comments?"):
-                return {"items": [{"id": 81, "body": "Note\\n" + marker}]}
+                return {"items": [{"id": 81, "body": "Note\n" + marker}]}
             raise AssertionError((method, suffix))
         with patch.object(app, "_repo_api", side_effect=fake_api):
             result = app.comment(17, "Note", uid)

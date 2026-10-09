@@ -956,6 +956,17 @@ class SandboxAppCapabilityTests(unittest.TestCase):
             ):
                 app._require_exclusive_probe_ref(branch)
 
+    def test_ruleset_readback_preserves_transient_wait_codes(self):
+        app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
+        app._scope_verified = True
+        branch = "l5-probe/00000000-0000-0000-0000-000000000001"
+        for code in ("WAIT_RATE_LIMIT", "WAIT_EXTERNAL:NETWORK_UNAVAILABLE"):
+            with self.subTest(code=code):
+                with patch.object(app, "_repo_api",
+                                  side_effect=CapabilityBlocked(code)):
+                    with self.assertRaisesRegex(CapabilityBlocked, code):
+                        app._require_exclusive_probe_ref(branch)
+
     def test_foreign_sandbox_cannot_inherit_pinned_ruleset(self):
         app = SandboxApp("someone/other-l5-sandbox", "t" * 32)
         app._scope_verified = True

@@ -74,6 +74,7 @@ class SandboxApp:
             raise CapabilityBlocked("BLOCK_PERMISSION:APP_TOKEN_MISSING")
         self._token = token.strip()
         self._scope_verified = False
+        self._default_branch: str | None = None
         self._authorized_graph_nodes: dict[str, str] = {}
 
     def api(self, method: str, path: str, payload: dict | None = None) -> dict:
@@ -93,20 +94,27 @@ class SandboxApp:
         # installation token proves EXCLUSIVE access to this one sandbox.
         if method != "GET" and not self._scope_verified:
             raise CapabilityBlocked("BLOCK_PERMISSION:INSTALLATION_SCOPE_UNVERIFIED")
+        # Only the two Phase-1 write classes are available. Even callers
+        # invoking api() directly cannot bypass unqualified public methods.
+        if method != "GET" and (method != "POST" or
+                                path not in ("/graphql", repo_root + "/pulls")):
+            raise CapabilityBlocked("REST_WRITE_NOT_QUALIFIED")
+        if method == "POST" and path == repo_root + "/pulls":
+            head = payload.get("head") if isinstance(payload, dict) else None
+            if (not isinstance(head, str) or
+                    not re.fullmatch(r"l5-probe/[0-9a-f-]{36}", head) or
+                    str(uuid.UUID(head.split("/", 1)[1])) != head.split("/", 1)[1] or
+                    payload.get("draft") is not True or
+                    payload.get("base") != self._default_branch):
+                raise CapabilityBlocked("PROBE_PR_POST_NOT_QUALIFIED")
         if path == "/graphql":
             query = payload.get("query") if isinstance(payload, dict) else None
             variables = payload.get("variables") if isinstance(payload, dict) else None
             node_id = variables.get("id") if isinstance(variables, dict) else None
             if not isinstance(node_id, str) or set(variables) != {"id"}:
                 raise CapabilityBlocked("GRAPHQL_VARIABLES_INVALID")
-            if query not in GRAPH_QUERIES and query not in (
-                GRAPH_READY_MUTATION, GRAPH_RESOLVE_MUTATION
-            ):
+            if query not in GRAPH_QUERIES:
                 raise CapabilityBlocked("GRAPHQL_OPERATION_FORBIDDEN")
-            if query in (GRAPH_READY_MUTATION, GRAPH_RESOLVE_MUTATION):
-                operation = "ready" if query == GRAPH_READY_MUTATION else "resolve"
-                if self._authorized_graph_nodes.get(node_id) != operation:
-                    raise CapabilityBlocked("GRAPHQL_MUTATION_TARGET_UNVERIFIED")
         # All request paths are constructed by this class; no arbitrary
         # caller-supplied REST URL can redirect a token to another host.
         request = Request(
@@ -196,6 +204,10 @@ class SandboxApp:
             raise CapabilityBlocked("BLOCK_PERMISSION:APP_SLUG_ATTESTATION_FAILED")
         if not self._token.startswith("ghs_5245673_"):
             raise CapabilityBlocked("BLOCK_PERMISSION:APP_ID_NOT_ATTESTED")
+        default_branch = meta.get("default_branch")
+        if not isinstance(default_branch, str) or not default_branch:
+            raise CapabilityBlocked("DEFAULT_BRANCH_UNKNOWN")
+        self._default_branch = default_branch
         self._scope_verified = True
         return meta
 
@@ -224,11 +236,8 @@ class SandboxApp:
         raise CapabilityBlocked("COMMENT_REQUIRES_DURABLE_CAS_LEASE")
 
     def request_review(self, number: int, reviewer: str) -> dict:
-        if not re.fullmatch(r"[A-Za-z0-9-]{1,39}", reviewer):
-            raise CapabilityBlocked("REVIEWER_INVALID")
-        return self._repo_api(
-            "POST", f"/pulls/{number}/requested_reviewers", {"reviewers": [reviewer]}
-        )
+        """Requires a replay-safe operation record and tested reviewer gate."""
+        raise CapabilityBlocked("REQUEST_REVIEW_NOT_QUALIFIED")
 
     def _graph_node(self, node_id: str, fragment: str) -> dict:
         if not isinstance(node_id, str) or len(node_id) > 256 or not node_id:
@@ -275,32 +284,12 @@ class SandboxApp:
             self._authorized_graph_nodes.pop(node_id, None)
 
     def mark_ready(self, pr_node_id: str) -> dict:
-        node = self._graph_node(
-            pr_node_id,
-            GRAPH_PR_FRAGMENT,
-        )
-        if node.get("isDraft") is not True:
-            raise CapabilityBlocked("PR_NOT_DRAFT")
-        self._authorized_graph_nodes[pr_node_id] = "ready"
-        return self._mutate_graph(
-            GRAPH_READY_MUTATION,
-            pr_node_id, "markPullRequestReadyForReview",
-        )
+        """GraphQL mutation retries are not yet durably reconciled."""
+        raise CapabilityBlocked("MARK_READY_NOT_QUALIFIED")
 
     def resolve_thread(self, thread_id: str, pr_number: int) -> dict:
-        node = self._graph_node(
-            thread_id,
-            GRAPH_THREAD_FRAGMENT,
-        )
-        if (node.get("pullRequest") or {}).get("number") != pr_number:
-            raise CapabilityBlocked("THREAD_NOT_ON_PROBE_PR")
-        if node.get("isResolved") is True:
-            raise CapabilityBlocked("THREAD_ALREADY_RESOLVED")
-        self._authorized_graph_nodes[thread_id] = "resolve"
-        return self._mutate_graph(
-            GRAPH_RESOLVE_MUTATION,
-            thread_id, "resolveReviewThread",
-        )
+        """GraphQL mutation retries are not yet durably reconciled."""
+        raise CapabilityBlocked("RESOLVE_THREAD_NOT_QUALIFIED")
 
     def rerun_job(self, job_id: int) -> dict:
         """Not yet qualified: a job rerun needs durable run-attempt fencing."""
@@ -309,20 +298,12 @@ class SandboxApp:
         raise CapabilityBlocked("RERUN_JOB_NOT_QUALIFIED")
 
     def update_branch(self, number: int, expected_sha: str) -> dict:
-        return self._repo_api(
-            "PUT", f"/pulls/{number}/update-branch",
-            {"expected_head_sha": require_sha(expected_sha)},
-        )
+        """Requires an exact-base/head fenced, replay-safe update."""
+        raise CapabilityBlocked("UPDATE_BRANCH_NOT_QUALIFIED")
 
     def merge(self, number: int, expected_sha: str) -> dict:
-        """Sandbox-only test merge; no production endpoint is accessible."""
-        current = self._repo_api("GET", f"/pulls/{number}")
-        if (current.get("head") or {}).get("sha") != require_sha(expected_sha):
-            raise CapabilityBlocked("MERGE_STALE_HEAD")
-        return self._repo_api(
-            "PUT", f"/pulls/{number}/merge",
-            {"sha": expected_sha, "merge_method": "squash"},
-        )
+        """No merge until exact head/base review is durably fenced."""
+        raise CapabilityBlocked("MERGE_NOT_QUALIFIED")
 
 
 def shell(cmd: list[str], *, cwd: Path | None = None, env: dict | None = None) -> str:

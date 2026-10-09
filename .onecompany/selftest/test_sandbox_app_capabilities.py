@@ -927,7 +927,13 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                 "bypass_mode": "always",
             })),
             ("wrong_repository", lambda p: p.update(source="NTinkicht/Tabibi")),
+            ("malformed_repository", lambda p: p.update(source={"bad": "data"})),
+            ("malformed_rule_type", lambda p: p["rules"][0].update(
+                type={"unexpected": "object"}
+            )),
+            ("malformed_rules", lambda p: p.update(rules=[["unexpected"]])),
             ("wrong_id", lambda p: p.update(id=1)),
+            ("bool_id", lambda p: p.update(id=True)),
             ("wrong_name", lambda p: p.update(name="lookalike")),
         ]:
             changed = copy.deepcopy(policy)
@@ -940,7 +946,7 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                     CapabilityBlocked, "PROBE_REF_EXCLUSIVITY_UNVERIFIED"
                 ):
                     app._require_exclusive_probe_ref(branch)
-        self.assertEqual(len(failures), 11)
+        self.assertEqual(len(failures), 15)
 
         with patch.object(app, "_repo_api", side_effect=CapabilityBlocked(
             "BLOCK_PERMISSION:APP_REQUEST_REFUSED"

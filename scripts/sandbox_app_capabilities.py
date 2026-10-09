@@ -30,6 +30,20 @@ WRITE_CLASSES = (
     "push", "create_pr", "comment", "request_review", "mark_ready",
     "resolve_thread", "rerun_job", "update_branch", "merge",
 )
+GRAPH_PR_FRAGMENT = "... on PullRequest {number isDraft repository{nameWithOwner}}"
+GRAPH_THREAD_FRAGMENT = (
+    "... on PullRequestReviewThread {isResolved pullRequest{number repository{nameWithOwner}}}"
+)
+GRAPH_READY_MUTATION = (
+    "mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{id isDraft}}}"
+)
+GRAPH_RESOLVE_MUTATION = (
+    "mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{id isResolved}}}"
+)
+GRAPH_QUERIES = frozenset({
+    "query($id:ID!){node(id:$id){" + GRAPH_PR_FRAGMENT + "}}",
+    "query($id:ID!){node(id:$id){" + GRAPH_THREAD_FRAGMENT + "}}",
+})
 
 
 class CapabilityBlocked(RuntimeError):
@@ -60,6 +74,7 @@ class SandboxApp:
             raise CapabilityBlocked("BLOCK_PERMISSION:APP_TOKEN_MISSING")
         self._token = token.strip()
         self._scope_verified = False
+        self._authorized_graph_nodes: dict[str, str] = {}
 
     def api(self, method: str, path: str, payload: dict | None = None) -> dict:
         if method not in {"GET", "POST", "PUT", "PATCH"}:
@@ -78,6 +93,20 @@ class SandboxApp:
         # installation token proves EXCLUSIVE access to this one sandbox.
         if method != "GET" and not self._scope_verified:
             raise CapabilityBlocked("BLOCK_PERMISSION:INSTALLATION_SCOPE_UNVERIFIED")
+        if path == "/graphql":
+            query = payload.get("query") if isinstance(payload, dict) else None
+            variables = payload.get("variables") if isinstance(payload, dict) else None
+            node_id = variables.get("id") if isinstance(variables, dict) else None
+            if not isinstance(node_id, str) or set(variables) != {"id"}:
+                raise CapabilityBlocked("GRAPHQL_VARIABLES_INVALID")
+            if query not in GRAPH_QUERIES and query not in (
+                GRAPH_READY_MUTATION, GRAPH_RESOLVE_MUTATION
+            ):
+                raise CapabilityBlocked("GRAPHQL_OPERATION_FORBIDDEN")
+            if query in (GRAPH_READY_MUTATION, GRAPH_RESOLVE_MUTATION):
+                operation = "ready" if query == GRAPH_READY_MUTATION else "resolve"
+                if self._authorized_graph_nodes.get(node_id) != operation:
+                    raise CapabilityBlocked("GRAPHQL_MUTATION_TARGET_UNVERIFIED")
         # All request paths are constructed by this class; no arbitrary
         # caller-supplied REST URL can redirect a token to another host.
         request = Request(
@@ -190,6 +219,8 @@ class SandboxApp:
     def _graph_node(self, node_id: str, fragment: str) -> dict:
         if not isinstance(node_id, str) or len(node_id) > 256 or not node_id:
             raise CapabilityBlocked("NODE_ID_INVALID")
+        if fragment not in (GRAPH_PR_FRAGMENT, GRAPH_THREAD_FRAGMENT):
+            raise CapabilityBlocked("GRAPHQL_FRAGMENT_FORBIDDEN")
         response = self.api("POST", "/graphql", {
             "query": "query($id:ID!){node(id:$id){" + fragment + "}}",
             "variables": {"id": node_id},
@@ -204,6 +235,17 @@ class SandboxApp:
             node_repo = ((node.get("pullRequest") or {}).get("repository") or {}).get("nameWithOwner")
         if (node_repo or "").lower() != self.repo.lower():
             raise CapabilityBlocked("GRAPHQL_NODE_OTHER_REPOSITORY")
+        pr_number = node.get("number") if fragment == GRAPH_PR_FRAGMENT else (
+            (node.get("pullRequest") or {}).get("number")
+        )
+        if type(pr_number) is not int or pr_number < 1:
+            raise CapabilityBlocked("GRAPHQL_PROBE_PR_INVALID")
+        candidate = self._repo_api("GET", f"/pulls/{pr_number}")
+        if not ((candidate.get("head") or {}).get("ref") or "").startswith("l5-probe/"):
+            raise CapabilityBlocked("GRAPHQL_TARGET_NOT_SANDBOX_PROBE")
+        self._authorized_graph_nodes[node_id] = (
+            "ready" if fragment == GRAPH_PR_FRAGMENT else "resolve"
+        )
         return node
 
     def _mutate_graph(self, query: str, node_id: str, key: str) -> dict:
@@ -212,31 +254,32 @@ class SandboxApp:
         })
         if response.get("errors") or not isinstance((response.get("data") or {}).get(key), dict):
             raise CapabilityBlocked("GRAPHQL_MUTATION_NOT_VERIFIED")
+        self._authorized_graph_nodes.pop(node_id, None)
         return response["data"][key]
 
     def mark_ready(self, pr_node_id: str) -> dict:
         node = self._graph_node(
             pr_node_id,
-            "... on PullRequest {number isDraft repository{nameWithOwner}}",
+            GRAPH_PR_FRAGMENT,
         )
         if node.get("isDraft") is not True:
             raise CapabilityBlocked("PR_NOT_DRAFT")
         return self._mutate_graph(
-            "mutation($id:ID!){markPullRequestReadyForReview(input:{pullRequestId:$id}){pullRequest{id isDraft}}}",
+            GRAPH_READY_MUTATION,
             pr_node_id, "markPullRequestReadyForReview",
         )
 
     def resolve_thread(self, thread_id: str, pr_number: int) -> dict:
         node = self._graph_node(
             thread_id,
-            "... on PullRequestReviewThread {isResolved pullRequest{number repository{nameWithOwner}}}",
+            GRAPH_THREAD_FRAGMENT,
         )
         if (node.get("pullRequest") or {}).get("number") != pr_number:
             raise CapabilityBlocked("THREAD_NOT_ON_PROBE_PR")
         if node.get("isResolved") is True:
             raise CapabilityBlocked("THREAD_ALREADY_RESOLVED")
         return self._mutate_graph(
-            "mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{id isResolved}}}",
+            GRAPH_RESOLVE_MUTATION,
             thread_id, "resolveReviewThread",
         )
 

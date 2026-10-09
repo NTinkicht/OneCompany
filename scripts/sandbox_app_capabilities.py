@@ -126,6 +126,7 @@ class SandboxApp:
             commit_data = remote.get("commit") if isinstance(remote, dict) else None
             if not isinstance(commit_data, dict) or commit_data.get("sha") != expected_sha:
                 raise CapabilityBlocked("PROBE_PR_HEAD_CHANGED")
+            self._require_exclusive_probe_ref(head)
             # Consume at the underlying HTTP boundary: direct api() callers
             # cannot reuse an authorization after a lost POST response.
             self._pr_push_authorizations.pop(head, None)
@@ -264,6 +265,19 @@ class SandboxApp:
             raise CapabilityBlocked("PROBE_BRANCH_INVALID")
         return self._repo_api("GET", "/branches/" + branch.replace("/", "%2F"))
 
+    def _require_exclusive_probe_ref(self, branch: str) -> None:
+        """Fail closed until reviewed sandbox branch exclusivity is provable.
+
+        GitHub creates a PR from a branch *name*, not a compare-and-swap SHA.
+        Without a verified exclusive protection rule, any collaborator may
+        force-push between commit readback and POST, attributing their new
+        content to the App's PR. The sandbox currently has no rulesets;
+        ordinary SHA readbacks alone cannot close this TOCTOU race.
+        """
+        if not isinstance(branch, str) or not branch.startswith("l5-probe/"):
+            raise CapabilityBlocked("PROBE_BRANCH_INVALID")
+        raise CapabilityBlocked("BLOCK_PERMISSION:PROBE_REF_EXCLUSIVITY_UNVERIFIED")
+
     def create_draft_pr(self, branch: str, base: str) -> dict:
         expected = self._pr_push_authorizations.get(branch)
         if not isinstance(expected, str) or not SHA40.fullmatch(expected):
@@ -274,6 +288,7 @@ class SandboxApp:
         commit_data = remote.get("commit") if isinstance(remote, dict) else None
         if not isinstance(commit_data, dict) or commit_data.get("sha") != expected:
             raise CapabilityBlocked("PROBE_PR_HEAD_CHANGED")
+        self._require_exclusive_probe_ref(branch)
         try:
             return self._repo_api("POST", "/pulls", {
                 "title": "L5 V2 sandbox App write qualification",

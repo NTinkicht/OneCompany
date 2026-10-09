@@ -191,12 +191,20 @@ class SandboxApp:
             comments = result.get("items")
             if not isinstance(comments, list):
                 raise CapabilityBlocked("COMMENTS_READBACK_INVALID")
-            found = [item for item in comments
-                     if marker in (item.get("body") or "")]
+            found = [
+                item for item in comments
+                if marker in (item.get("body") or "")
+            ]
             if len(found) > 1:
                 raise CapabilityBlocked("DUPLICATE_OPERATION_COMMENT")
             if found:
-                return {"reconciled": True, "comment": found[0]}
+                item = found[0]
+                author = ((item.get("user") or {}).get("login") or "").lower()
+                expected = "ntinkicht-l5-sandbox[bot]"
+                payload = body + "\\n\\n" + marker
+                if author != expected or item.get("body") != payload:
+                    raise CapabilityBlocked("COMMENT_MARKER_UNTRUSTED")
+                return {"reconciled": True, "comment": item}
             if len(comments) < 100:
                 break
         else:
@@ -205,8 +213,11 @@ class SandboxApp:
             "POST", f"/issues/{number}/comments",
             {"body": body + "\n\n" + marker},
         )
-        if marker not in (created.get("body") or ""):
+        if created.get("body") != body + "\\n\\n" + marker:
             raise CapabilityBlocked("COMMENT_READBACK_MISMATCH")
+        author = ((created.get("user") or {}).get("login") or "").lower()
+        if author != "ntinkicht-l5-sandbox[bot]":
+            raise CapabilityBlocked("COMMENT_AUTHOR_UNVERIFIED")
         return {"reconciled": False, "comment": created}
 
     def request_review(self, number: int, reviewer: str) -> dict:
@@ -284,9 +295,10 @@ class SandboxApp:
         )
 
     def rerun_job(self, job_id: int) -> dict:
+        """Not yet qualified: a job rerun needs durable run-attempt fencing."""
         if type(job_id) is not int or job_id < 1:
             raise CapabilityBlocked("JOB_ID_INVALID")
-        return self._repo_api("POST", f"/actions/jobs/{job_id}/rerun", {})
+        raise CapabilityBlocked("RERUN_JOB_NOT_QUALIFIED")
 
     def update_branch(self, number: int, expected_sha: str) -> dict:
         return self._repo_api(

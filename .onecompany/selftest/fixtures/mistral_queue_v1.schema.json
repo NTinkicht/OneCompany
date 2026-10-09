@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OneCompany Synthetic Mistral Queue Fixture",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "work_units",
+    "project",
+    "snapshot",
+    "fixture_note"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "schema_version": {
+      "$ref": "../../schemas/queue.schema.json#/properties/schema_version"
+    },
+    "work_units": {
+      "$ref": "../../schemas/queue.schema.json#/properties/work_units"
+    },
+    "project": {
+      "type": "object",
+      "required": [
+        "repository"
+      ],
+      "properties": {
+        "repository": {
+          "type": "string",
+          "pattern": "^example/"
+        }
+      },
+      "additionalProperties": false
+    },
+    "snapshot": {
+      "type": "object",
+      "required": [
+        "source"
+      ],
+      "properties": {
+        "source": {
+          "const": "fixture-mistral-queue-v1"
+        }
+      },
+      "additionalProperties": false
+    },
+    "fixture_note": {
+      "type": "string",
+      "pattern": "Synthetic"
+    }
+  },
+  "additionalProperties": false
+}

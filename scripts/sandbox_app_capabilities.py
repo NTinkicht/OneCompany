@@ -118,7 +118,8 @@ class SandboxApp:
             if not isinstance(expected_sha, str) or not SHA40.fullmatch(expected_sha):
                 raise CapabilityBlocked("PROBE_PR_POST_NOT_QUALIFIED")
             remote = self.branch(head)
-            if ((remote.get("commit") or {}).get("sha")) != expected_sha:
+            commit_data = remote.get("commit") if isinstance(remote, dict) else None
+            if not isinstance(commit_data, dict) or commit_data.get("sha") != expected_sha:
                 raise CapabilityBlocked("PROBE_PR_HEAD_CHANGED")
             # Consume at the underlying HTTP boundary: direct api() callers
             # cannot reuse an authorization after a lost POST response.
@@ -263,7 +264,8 @@ class SandboxApp:
         if base != self._default_branch:
             raise CapabilityBlocked("PROBE_PR_BASE_MISMATCH")
         remote = self.branch(branch)
-        if ((remote.get("commit") or {}).get("sha")) != expected:
+        commit_data = remote.get("commit") if isinstance(remote, dict) else None
+        if not isinstance(commit_data, dict) or commit_data.get("sha") != expected:
             raise CapabilityBlocked("PROBE_PR_HEAD_CHANGED")
         try:
             return self._repo_api("POST", "/pulls", {

@@ -9,6 +9,7 @@ Only repositories explicitly named *-l5-sandbox are eligible for mutation.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
 import re
@@ -58,6 +59,7 @@ class SandboxApp:
         if not isinstance(token, str) or len(token.strip()) < 10:
             raise CapabilityBlocked("BLOCK_PERMISSION:APP_TOKEN_MISSING")
         self._token = token.strip()
+        self._scope_verified = False
 
     def api(self, method: str, path: str, payload: dict | None = None) -> dict:
         if method not in {"GET", "POST", "PUT", "PATCH"}:
@@ -72,6 +74,10 @@ class SandboxApp:
             or path.startswith(repo_root + "/")
         ):
             raise CapabilityBlocked("API_PATH_OUTSIDE_SANDBOX")
+        # No write path, including GraphQL, is available until the
+        # installation token proves EXCLUSIVE access to this one sandbox.
+        if method != "GET" and not self._scope_verified:
+            raise CapabilityBlocked("BLOCK_PERMISSION:INSTALLATION_SCOPE_UNVERIFIED")
         # All request paths are constructed by this class; no arbitrary
         # caller-supplied REST URL can redirect a token to another host.
         request = Request(
@@ -108,20 +114,24 @@ class SandboxApp:
         return self.api(method, "/repos/" + self.repo + suffix, payload)
 
     def verify_installation(self) -> dict:
-        """Installation-only endpoint proves this is not a user OAuth token."""
-        page = 1
-        while page <= 10:
-            result = self.api("GET", "/installation/repositories?per_page=100&page=" + str(page))
-            repos = result.get("repositories")
-            if not isinstance(repos, list):
-                raise CapabilityBlocked("BLOCK_PERMISSION:INSTALLATION_NOT_VERIFIED")
-            for item in repos:
-                if isinstance(item, dict) and item.get("full_name", "").lower() == self.repo.lower():
-                    return self._repo_api("GET", "")
-            if len(repos) < 100:
-                break
-            page += 1
-        raise CapabilityBlocked("BLOCK_PERMISSION:SANDBOX_OUTSIDE_INSTALLATION")
+        """Require an actual App token with exactly one installed sandbox.
+
+        A token that can also write to OneCompany/Tabibi/Veritas must fail
+        before invoking ANY write method or GraphQL mutation.
+        """
+        result = self.api("GET", "/installation/repositories?per_page=100&page=1")
+        repos = result.get("repositories")
+        if not isinstance(repos, list) or result.get("total_count") != 1 or len(repos) != 1:
+            raise CapabilityBlocked("BLOCK_PERMISSION:INSTALLATION_NOT_EXCLUSIVE")
+        if (repos[0].get("full_name") or "").lower() != self.repo.lower():
+            raise CapabilityBlocked("BLOCK_PERMISSION:SANDBOX_OUTSIDE_INSTALLATION")
+        meta = self._repo_api("GET", "")
+        if meta.get("full_name", "").lower() != self.repo.lower():
+            raise CapabilityBlocked("BLOCK_PERMISSION:SANDBOX_READBACK_MISMATCH")
+        if meta.get("private") is not True:
+            raise CapabilityBlocked("BLOCK_PERMISSION:SANDBOX_MUST_BE_PRIVATE")
+        self._scope_verified = True
+        return meta
 
     def branch(self, branch: str) -> dict:
         if not branch.startswith("l5-probe/") or not re.fullmatch(r"l5-probe/[a-f0-9-]{36}", branch):
@@ -135,8 +145,40 @@ class SandboxApp:
             "body": "Sandbox-only qualification. Never use this as production review evidence.",
         })
 
-    def comment(self, number: int, body: str) -> dict:
-        return self._repo_api("POST", f"/issues/{number}/comments", {"body": body})
+    def comment(self, number: int, body: str, operation_id: str) -> dict:
+        """Post at most one sandbox comment per stable operation identity."""
+        try:
+            marker = "<!-- l5-sandbox-comment:" + str(uuid.UUID(operation_id)) + " -->"
+        except (ValueError, TypeError, AttributeError):
+            raise CapabilityBlocked("COMMENT_OPERATION_ID_INVALID") from None
+        pr = self._repo_api("GET", f"/pulls/{number}")
+        head = ((pr.get("head") or {}).get("ref") or "")
+        if not head.startswith("l5-probe/"):
+            raise CapabilityBlocked("COMMENT_TARGET_NOT_PROBE")
+        for page in range(1, 11):
+            result = self._repo_api(
+                "GET", f"/issues/{number}/comments?per_page=100&page={page}"
+            )
+            comments = result.get("items")
+            if not isinstance(comments, list):
+                raise CapabilityBlocked("COMMENTS_READBACK_INVALID")
+            found = [item for item in comments
+                     if marker in (item.get("body") or "")]
+            if len(found) > 1:
+                raise CapabilityBlocked("DUPLICATE_OPERATION_COMMENT")
+            if found:
+                return {"reconciled": True, "comment": found[0]}
+            if len(comments) < 100:
+                break
+        else:
+            raise CapabilityBlocked("COMMENT_PAGINATION_LIMIT")
+        created = self._repo_api(
+            "POST", f"/issues/{number}/comments",
+            {"body": body + "\n\n" + marker},
+        )
+        if marker not in (created.get("body") or ""):
+            raise CapabilityBlocked("COMMENT_READBACK_MISMATCH")
+        return {"reconciled": False, "comment": created}
 
     def request_review(self, number: int, reviewer: str) -> dict:
         if not re.fullmatch(r"[A-Za-z0-9-]{1,39}", reviewer):
@@ -286,7 +328,8 @@ def push_canary(app: SandboxApp, probe_id: str) -> tuple[str, str]:
             raise CapabilityBlocked("PROBE_DIRECTORY_UNSAFE")
         target.mkdir(exist_ok=True)
         (target / (branch.split("/", 1)[1] + ".txt")).write_text(
-            "Scoped installation-token git write qualification.\n", encoding="utf-8",
+            "Sandbox App qualification probe ID: " + probe_id + "\n",
+            encoding="utf-8",
         )
         shell(["git", "add", ".l5-sandbox-probes"], cwd=checkout, env=env)
         shell(["git", "-c", "user.name=L5 Sandbox App", "-c",
@@ -322,7 +365,8 @@ def run_sandbox_push_pr(repo: str, token: str, probe_id: str) -> dict:
         if str(exc) != "REMOTE_REQUEST_FAILED:404":
             raise
         existing = None
-    if existing is not None:
+    reconciled = existing is not None
+    if reconciled:
         if not SHA40.fullmatch((existing.get("commit") or {}).get("sha", "")):
             raise CapabilityBlocked("PROBE_BRANCH_SHA_INVALID")
         base = app.verify_installation().get("default_branch")
@@ -330,6 +374,16 @@ def run_sandbox_push_pr(repo: str, token: str, probe_id: str) -> dict:
             raise CapabilityBlocked("DEFAULT_BRANCH_UNKNOWN")
     else:
         branch, base = push_canary(app, probe_id)
+    # Read back a probe-specific marker in the actual remote commit. Existing
+    # objects are reconciled, NEVER re-credited as fresh App writes.
+    marker_path = "/contents/.l5-sandbox-probes/" + probe_id + ".txt?ref=" + branch.replace("/", "%2F")
+    marker_data = app._repo_api("GET", marker_path)
+    try:
+        marker_text = base64.b64decode(marker_data["content"], validate=False).decode("utf-8")
+    except (KeyError, ValueError, TypeError, UnicodeDecodeError):
+        raise CapabilityBlocked("PROBE_CANARY_UNVERIFIED") from None
+    if marker_text != "Sandbox App qualification probe ID: " + probe_id + "\\n":
+        raise CapabilityBlocked("PROBE_CANARY_MISMATCH")
     listed = app._repo_api("GET", "/pulls?state=all&head=" + repo.split("/")[0] + ":" + branch)
     matching = [x for x in listed.get("items", [])
                 if (x.get("head") or {}).get("ref") == branch]
@@ -352,9 +406,11 @@ def run_sandbox_push_pr(repo: str, token: str, probe_id: str) -> dict:
         raise CapabilityBlocked("PR_READBACK_MISMATCH")
     return {
         "repo": app.repo, "sandbox_pr": number, "sandbox_branch": branch,
-        "verified_write_classes": ["push", "create_pr"],
+        "verified_write_classes": [] if reconciled else ["push", "create_pr"],
+        "reconciled_write_classes": ["push", "create_pr"] if reconciled else [],
         "unverified_write_classes": list(WRITE_CLASSES[2:]),
-        "production_enabled": False, "status": "SANDBOX_PARTIAL_PROOF",
+        "production_enabled": False,
+        "status": "SANDBOX_RECONCILED_PREVIOUS_OPERATION" if reconciled else "SANDBOX_PARTIAL_PROOF",
     }
 
 

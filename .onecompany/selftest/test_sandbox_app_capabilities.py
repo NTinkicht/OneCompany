@@ -6,6 +6,7 @@ import io
 import json
 import os
 import sys
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,7 +16,7 @@ from urllib.error import HTTPError
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from sandbox_app_capabilities import (
     CapabilityBlocked, SandboxApp, WRITE_CLASSES, require_sandbox, require_sha,
-    run_sandbox_push_pr, isolated_git_env, write_probe_canary, main,
+    run_sandbox_push_pr, isolated_git_env, write_probe_canary, main, shell,
 )
 
 
@@ -439,6 +440,50 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                                          "Not found", {}, None)):
             with self.assertRaisesRegex(CapabilityBlocked, "REMOTE_REQUEST_FAILED:404"):
                 app.api("GET", "/repos/NTinkicht/qualification-l5-sandbox")
+
+    def test_malformed_successful_api_bodies_return_structured_wait(self):
+        app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
+        for payload in (b"{truncated", b'"scalar"', b'\xff'):
+            with self.subTest(payload=payload):
+                response = type("Response", (), {
+                    "status": 200,
+                    "read": lambda self, p=payload: p,
+                })()
+                with patch("sandbox_app_capabilities.urlopen",
+                           return_value=contextlib.nullcontext(response)):
+                    with self.assertRaisesRegex(CapabilityBlocked, "WAIT_EXTERNAL"):
+                        app.api("GET", "/repos/NTinkicht/qualification-l5-sandbox")
+
+    def test_git_transient_errors_do_not_become_permission_blocks(self):
+        failures = [
+            "fatal: unable to access repository: Could not resolve host: github.com",
+            "fatal: unable to access repository: Connection reset by peer",
+            "fatal: unable to access repository: The requested URL returned error: 503",
+        ]
+        for stderr in failures:
+            with self.subTest(stderr=stderr), patch(
+                "sandbox_app_capabilities.subprocess.run",
+                return_value=subprocess.CompletedProcess(
+                    ["git", "push"], 128, stdout="", stderr=stderr,
+                ),
+            ):
+                with self.assertRaisesRegex(CapabilityBlocked, "WAIT_EXTERNAL:GIT_TRANSPORT_FAILURE"):
+                    shell(["git", "push"], env={})
+
+    def test_git_auth_failure_is_not_misclassified_as_transient(self):
+        with patch("sandbox_app_capabilities.subprocess.run",
+                   return_value=subprocess.CompletedProcess(
+                       ["git", "push"], 128, stdout="",
+                       stderr="fatal: Authentication failed",
+                   )):
+            with self.assertRaisesRegex(CapabilityBlocked, "LOCAL_COMMAND_FAILED:git"):
+                shell(["git", "push"], env={})
+
+    def test_git_timeout_is_retryable(self):
+        with patch("sandbox_app_capabilities.subprocess.run",
+                   side_effect=subprocess.TimeoutExpired(["git", "push"], 120)):
+            with self.assertRaisesRegex(CapabilityBlocked, "WAIT_EXTERNAL:GIT_TRANSPORT_TIMEOUT"):
+                shell(["git", "push"], env={})
 
     def test_actual_forbidden_403_is_permission_block(self):
         app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)

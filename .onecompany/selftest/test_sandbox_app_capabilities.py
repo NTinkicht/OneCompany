@@ -454,6 +454,47 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                 self.assertEqual(payload["status"], expected)
                 self.assertEqual(payload["reason"], reason)
 
+
+    def test_rejected_graphql_thread_never_leaves_mutation_authorized(self):
+        from sandbox_app_capabilities import GRAPH_RESOLVE_MUTATION
+        app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
+        app._scope_verified = True
+        node = {"data": {"node": {
+            "isResolved": False,
+            "pullRequest": {"number": 17, "repository": {"nameWithOwner": app.repo}},
+        }}}
+        with patch.object(app, "api", return_value=node), patch.object(
+                app, "_repo_api", return_value={"head": {"ref": "l5-probe/test"}}):
+            with self.assertRaisesRegex(CapabilityBlocked, "THREAD_NOT_ON_PROBE_PR"):
+                app.resolve_thread("thread-id", 18)
+        self.assertFalse(app._authorized_graph_nodes)
+        with patch("sandbox_app_capabilities.urlopen") as network:
+            with self.assertRaisesRegex(CapabilityBlocked, "GRAPHQL_MUTATION_TARGET_UNVERIFIED"):
+                app.api("POST", "/graphql", {
+                    "query": GRAPH_RESOLVE_MUTATION,
+                    "variables": {"id": "thread-id"},
+                })
+            network.assert_not_called()
+
+    def test_failed_graphql_network_mutation_clears_authorization(self):
+        from sandbox_app_capabilities import GRAPH_RESOLVE_MUTATION
+        app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
+        app._authorized_graph_nodes["thread-id"] = "resolve"
+        with patch.object(app, "api",
+                          side_effect=CapabilityBlocked("WAIT_EXTERNAL:NETWORK_UNAVAILABLE")):
+            with self.assertRaisesRegex(CapabilityBlocked, "WAIT_EXTERNAL"):
+                app._mutate_graph(GRAPH_RESOLVE_MUTATION, "thread-id", "resolveReviewThread")
+        self.assertEqual(app._authorized_graph_nodes, {})
+
+    def test_headerless_secondary_403_still_reports_wait(self):
+        app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
+        message = b'{"message":"You have exceeded a secondary rate limit. Please wait."}'
+        with patch("sandbox_app_capabilities.urlopen",
+                   side_effect=HTTPError("https://api.github.com", 403,
+                                         "Forbidden", {}, io.BytesIO(message))):
+            with self.assertRaisesRegex(CapabilityBlocked, "WAIT_RATE_LIMIT"):
+                app.api("GET", "/repos/NTinkicht/qualification-l5-sandbox")
+
     def test_unqualified_rerun_never_dispatches(self):
         app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
         with patch.object(app, "_repo_api") as api:

@@ -20,10 +20,10 @@ COMMAND = f"@mistral-vibe\nMISTRAL_START_V1\nwork_unit: WU-CLOUD-MISTRAL-DEV-001
 class MistralCanonicalIntakeTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.live_queue = json.loads((ROOT / ".onecompany/queue.json").read_text())
+        cls.fixture_queue = json.loads((ROOT / ".onecompany/selftest/fixtures/mistral_queue_v1.json").read_text())
         # The intake unit becomes bound to its canonical PR after the first
-        # successful start. Keep pre-intake fixtures independent of live state.
-        cls.queue = copy.deepcopy(cls.live_queue)
+        # successful start. Keep pre-intake and already-bound cases independent of live planning state.
+        cls.queue = copy.deepcopy(cls.fixture_queue)
         row = next(w for w in cls.queue["work_units"]
                    if w["id"] == "WU-CLOUD-MISTRAL-DEV-001")
         row["pr"] = None
@@ -59,7 +59,7 @@ class MistralCanonicalIntakeTests(unittest.TestCase):
             f"@mistral-vibe\nMISTRAL_START_V1\n"
             f"work_unit: WU-MISTRAL-RECOVERY-001\nmain_sha: {SHA}"
         )
-        recovery_queue = copy.deepcopy(self.live_queue)
+        recovery_queue = copy.deepcopy(self.fixture_queue)
         recovery_row = next(
             w for w in recovery_queue["work_units"]
             if w["id"] == "WU-MISTRAL-RECOVERY-001"
@@ -93,17 +93,21 @@ class MistralCanonicalIntakeTests(unittest.TestCase):
             f"@mistral-vibe\nMISTRAL_START_V1\n"
             f"work_unit: WU-MISTRAL-RECOVERY-001\nmain_sha: {SHA}"
         )
-        row = next(w for w in self.live_queue["work_units"]
+        # Force the previously unbound recovery fixture into the bound case.
+        # The assertion must execute even when the frozen baseline has pr=null.
+        bound_queue = copy.deepcopy(self.fixture_queue)
+        row = next(w for w in bound_queue["work_units"]
                    if w["id"] == "WU-MISTRAL-RECOVERY-001")
-        if row.get("pr") is not None:
-            with patch.dict(os.environ, {
-                "GITHUB_REPOSITORY": start.REPO,
-                "ONECOMPANY_EMERGENCY_STOP": "false",
-            }), self.assertRaisesRegex(ValueError, "START_WU_ALREADY_BOUND"):
-                start.policy_ticket(
-                    start.assignment(command), queue=self.live_queue,
-                    budget=self.budget, config=self.config,
-                    actual_main_sha=SHA)
+        self.assertIsNone(row.get("pr"))
+        row["pr"] = 777
+        with patch.dict(os.environ, {
+            "GITHUB_REPOSITORY": start.REPO,
+            "ONECOMPANY_EMERGENCY_STOP": "false",
+        }), self.assertRaisesRegex(ValueError, "START_WU_ALREADY_BOUND"):
+            start.policy_ticket(
+                start.assignment(command), queue=bound_queue,
+                budget=self.budget, config=self.config,
+                actual_main_sha=SHA)
 
     def test_strict_owner_assignment_cannot_inject_other_scope(self):
         for body in (
@@ -153,12 +157,12 @@ class MistralCanonicalIntakeTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "BRANCH_CONFLICT"):
             self.ticket(queue=q)
 
-    def test_bound_live_unit_cannot_start_second_pr(self):
-        row = next(w for w in self.live_queue["work_units"]
+    def test_bound_fixture_unit_cannot_start_second_pr(self):
+        row = next(w for w in self.fixture_queue["work_units"]
                    if w["id"] == "WU-CLOUD-MISTRAL-DEV-001")
-        if row.get("pr") is not None:
-            with self.assertRaisesRegex(ValueError, "START_WU_ALREADY_BOUND"):
-                self.ticket(queue=self.live_queue)
+        self.assertIsNotNone(row.get("pr"))
+        with self.assertRaisesRegex(ValueError, "START_WU_ALREADY_BOUND"):
+            self.ticket(queue=self.fixture_queue)
 
     def test_no_paid_fallback_and_emergency_stop(self):
         for field, value in (

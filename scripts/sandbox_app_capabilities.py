@@ -438,8 +438,8 @@ def run_sandbox_push_pr(repo: str, token: str, probe_id: str) -> dict:
         matching.extend(
             row for row in rows
             if (row.get("head") or {}).get("ref") == branch
-            and (row.get("head") or {}).get("repo", {}).get("full_name", "").lower()
-                in ("", repo.lower())
+            and (((row.get("head") or {}).get("repo") or {}).get("full_name") or
+                 "").lower() in ("", repo.lower())
         )
         if len(matching) > 1:
             raise CapabilityBlocked("DUPLICATE_PROBE_PRS")

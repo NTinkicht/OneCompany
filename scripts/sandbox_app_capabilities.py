@@ -129,10 +129,18 @@ class SandboxApp:
                 result = json.loads(raw) if raw else {}
                 return result if isinstance(result, dict) else {"items": result}
         except HTTPError as exc:
+            # GitHub returns either 403 or 429 for rate limiting.
+            # Never confuse temporary exhaustion with revoked permissions.
+            is_limit = (exc.code == 429 or (
+                exc.code == 403 and (
+                    exc.headers.get("Retry-After") is not None or
+                    exc.headers.get("x-ratelimit-remaining") == "0"
+                )
+            ))
+            if is_limit:
+                raise CapabilityBlocked("WAIT_RATE_LIMIT") from None
             if exc.code in {401, 403}:
                 raise CapabilityBlocked("BLOCK_PERMISSION:APP_REQUEST_REFUSED") from None
-            if exc.code == 429:
-                raise CapabilityBlocked("WAIT_RATE_LIMIT") from None
             raise CapabilityBlocked("REMOTE_REQUEST_FAILED:" + str(exc.code)) from None
         except (URLError, TimeoutError):
             raise CapabilityBlocked("WAIT_EXTERNAL:NETWORK_UNAVAILABLE") from None
@@ -159,14 +167,17 @@ class SandboxApp:
             raise CapabilityBlocked("BLOCK_PERMISSION:SANDBOX_READBACK_MISMATCH")
         if meta.get("private") is not True:
             raise CapabilityBlocked("BLOCK_PERMISSION:SANDBOX_MUST_BE_PRIVATE")
-        # GitHub's newer installation-token format encodes the App ID.
-        # Unknown/legacy tokens cannot establish the exact intended App
-        # identity in this sandbox-only qualifier and MUST fail closed.
+        # The trusted GitHub Actions token-minting step attests the App slug.
+        # Installation tokens are opaque: do not parse their internal JWT
+        # or rely on the newer ghs_APPID_JWT format being universal.
         app_id = os.environ.get("L5_EXPECTED_APP_ID", "").strip()
+        slug = os.environ.get("L5_ATTESTED_APP_SLUG", "").strip().lower()
         if not re.fullmatch(r"[1-9][0-9]*", app_id):
             raise CapabilityBlocked("BLOCK_PERMISSION:EXPECTED_APP_ID_MISSING")
-        if not self._token.startswith("ghs_" + app_id + "_"):
-            raise CapabilityBlocked("BLOCK_PERMISSION:APP_ID_NOT_ATTESTED")
+        if slug != "ntinkicht-l5-sandbox":
+            raise CapabilityBlocked("BLOCK_PERMISSION:APP_SLUG_ATTESTATION_FAILED")
+        if not self._token.startswith("ghs_"):
+            raise CapabilityBlocked("BLOCK_PERMISSION:NOT_INSTALLATION_TOKEN")
         self._scope_verified = True
         return meta
 
@@ -540,8 +551,10 @@ def main() -> int:
         print(json.dumps(result, sort_keys=True))
         return 0 if args.push_pr else 2
     except CapabilityBlocked as exc:
-        print(json.dumps({"status": "BLOCK_PERMISSION",
-                          "reason": str(exc), "production_enabled": False}, sort_keys=True))
+        reason = str(exc)
+        status = reason.split(":", 1)[0] if reason.startswith("WAIT_") else "BLOCK_PERMISSION"
+        print(json.dumps({"status": status,
+                          "reason": reason, "production_enabled": False}, sort_keys=True))
         return 2
 
 

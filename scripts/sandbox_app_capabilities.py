@@ -479,7 +479,8 @@ def push_canary(app: SandboxApp, probe_id: str) -> tuple[str, str]:
                "--force-with-lease=refs/heads/" + branch + ":",
                "origin", "HEAD:refs/heads/" + branch], cwd=checkout, env=env)
     remote = app.branch(branch)
-    if (remote.get("commit") or {}).get("sha") != sha:
+    commit_data = remote.get("commit") if isinstance(remote, dict) else None
+    if not isinstance(commit_data, dict) or commit_data.get("sha") != sha:
         raise CapabilityBlocked("PUSH_READBACK_MISMATCH")
     app._pr_push_authorizations[branch] = sha
     return branch, base.removeprefix("origin/")
@@ -584,13 +585,12 @@ def run_sandbox_push_pr(repo: str, token: str, probe_id: str) -> dict:
     if current_head.get("sha") != pushed_sha:
         raise CapabilityBlocked("PR_COMMIT_READBACK_MISMATCH")
     head_repo_data = current_head.get("repo")
-    if head_repo_data is not None and not isinstance(head_repo_data, dict):
+    # A newly created sandbox PR MUST prove the exact head repository.
+    # Omission/null cannot establish scope, even with a matching ref/SHA/bot.
+    if not isinstance(head_repo_data, dict):
         raise CapabilityBlocked("PR_HEAD_OTHER_REPOSITORY")
-    head_repo = (head_repo_data or {}).get("full_name")
-    # Validate the raw field BEFORE lowercasing; false/0/[] must not crash
-    # the CLI after the sandbox branch and PR have already been written.
-    if head_repo is not None and (
-            not isinstance(head_repo, str) or head_repo.lower() != repo.lower()):
+    head_repo = head_repo_data.get("full_name")
+    if not isinstance(head_repo, str) or head_repo.lower() != repo.lower():
         raise CapabilityBlocked("PR_HEAD_OTHER_REPOSITORY")
     # An App-scoped token can be mistakenly substituted by another bot.
     # Do not credit any App write unless GitHub attributes the created

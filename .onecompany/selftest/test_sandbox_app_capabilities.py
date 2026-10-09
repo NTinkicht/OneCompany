@@ -418,7 +418,7 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                         raise CapabilityBlocked("REMOTE_REQUEST_FAILED:404")
                     if suffix.startswith("/contents/"):
                         return {"content": base64.b64encode(
-                            ("Sandbox App qualification probe ID: " + probe_id + "\\n").encode()
+                            ("Sandbox App qualification probe ID: " + probe_id + "\n").encode()
                         ).decode()}
                     if suffix == "/pulls/17":
                         return {"head": {
@@ -456,7 +456,7 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                 raise CapabilityBlocked("REMOTE_REQUEST_FAILED:404")
             if suffix.startswith("/contents/"):
                 return {"content": base64.b64encode(
-                    ("Sandbox App qualification probe ID: " + probe_id + "\\n").encode()
+                    ("Sandbox App qualification probe ID: " + probe_id + "\n").encode()
                 ).decode()}
             if suffix == "/pulls/17":
                 return {"head": {"ref": branch, "sha": "a" * 40},

@@ -114,6 +114,15 @@ class SandboxApp:
                     payload.get("base") != self._default_branch or
                     head not in self._pr_push_authorizations):
                 raise CapabilityBlocked("PROBE_PR_POST_NOT_QUALIFIED")
+            expected_sha = self._pr_push_authorizations.get(head)
+            if not isinstance(expected_sha, str) or not SHA40.fullmatch(expected_sha):
+                raise CapabilityBlocked("PROBE_PR_POST_NOT_QUALIFIED")
+            remote = self.branch(head)
+            if ((remote.get("commit") or {}).get("sha")) != expected_sha:
+                raise CapabilityBlocked("PROBE_PR_HEAD_CHANGED")
+            # Consume at the underlying HTTP boundary: direct api() callers
+            # cannot reuse an authorization after a lost POST response.
+            self._pr_push_authorizations.pop(head, None)
         if path == "/graphql":
             query = payload.get("query") if isinstance(payload, dict) else None
             variables = payload.get("variables") if isinstance(payload, dict) else None
@@ -507,9 +516,10 @@ def run_sandbox_push_pr(repo: str, token: str, probe_id: str) -> dict:
             head_repo = head.get("repo")
             if head_repo is not None and not isinstance(head_repo, dict):
                 raise CapabilityBlocked("PROBE_PR_HEAD_REPOSITORY_INVALID")
-            full_name = (head_repo or {}).get("full_name") or ""
-            if not isinstance(full_name, str):
+            raw_name = (head_repo or {}).get("full_name")
+            if raw_name is not None and not isinstance(raw_name, str):
                 raise CapabilityBlocked("PROBE_PR_HEAD_REPOSITORY_INVALID")
+            full_name = raw_name if raw_name is not None else ""
             if head.get("ref") == branch and full_name.lower() in ("", repo.lower()):
                 matching.append(row)
         if len(matching) > 1:

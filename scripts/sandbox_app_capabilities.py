@@ -102,8 +102,10 @@ class SandboxApp:
         if method == "POST" and path == repo_root + "/pulls":
             head = payload.get("head") if isinstance(payload, dict) else None
             if (not isinstance(head, str) or
-                    not re.fullmatch(r"l5-probe/[0-9a-f-]{36}", head) or
-                    str(uuid.UUID(head.split("/", 1)[1])) != head.split("/", 1)[1] or
+                    not re.fullmatch(
+                        r"l5-probe/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
+                        r"[0-9a-f]{4}-[0-9a-f]{12}", head
+                    ) or
                     payload.get("draft") is not True or
                     payload.get("base") != self._default_branch):
                 raise CapabilityBlocked("PROBE_PR_POST_NOT_QUALIFIED")

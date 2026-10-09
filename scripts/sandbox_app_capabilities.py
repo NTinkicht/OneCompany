@@ -260,11 +260,11 @@ def isolated_git_env(app: SandboxApp, askpass: Path, home: Path) -> dict[str, st
     })
     return env
 
-def push_canary(app: SandboxApp) -> tuple[str, str]:
+def push_canary(app: SandboxApp, probe_id: str) -> tuple[str, str]:
     """Prove real shell checkout, single atomic git commit and fenced push."""
     if shutil.which("git") is None:
         raise CapabilityBlocked("LOCAL_EXECUTION_UNAVAILABLE:GIT")
-    branch = "l5-probe/" + str(uuid.uuid4())
+    branch = "l5-probe/" + str(uuid.UUID(probe_id))
     with tempfile.TemporaryDirectory(prefix="l5-app-sandbox-") as directory:
         home = Path(directory)
         askpass = home / "git-askpass.sh"
@@ -305,16 +305,50 @@ def push_canary(app: SandboxApp) -> tuple[str, str]:
     return branch, base.removeprefix("origin/")
 
 
-def run_sandbox_push_pr(repo: str, token: str) -> dict:
+def run_sandbox_push_pr(repo: str, token: str, probe_id: str) -> dict:
+    """Reconcile one stable probe across retries, never create a second WU."""
     app = SandboxApp(repo, token)
     app.verify_installation()
-    branch, base = push_canary(app)
-    pr = app.create_draft_pr(branch, base)
+    try:
+        probe_id = str(uuid.UUID(probe_id))
+    except (ValueError, TypeError, AttributeError):
+        raise CapabilityBlocked("PROBE_ID_INVALID") from None
+    branch = "l5-probe/" + probe_id
+    # Read back the exact probe first. A lost response MUST NOT create a
+    # second branch or PR with another identity.
+    try:
+        existing = app.branch(branch)
+    except CapabilityBlocked as exc:
+        if str(exc) != "REMOTE_REQUEST_FAILED:404":
+            raise
+        existing = None
+    if existing is not None:
+        if not SHA40.fullmatch((existing.get("commit") or {}).get("sha", "")):
+            raise CapabilityBlocked("PROBE_BRANCH_SHA_INVALID")
+        base = app.verify_installation().get("default_branch")
+        if not isinstance(base, str) or not base:
+            raise CapabilityBlocked("DEFAULT_BRANCH_UNKNOWN")
+    else:
+        branch, base = push_canary(app, probe_id)
+    listed = app._repo_api("GET", "/pulls?state=all&head=" + repo.split("/")[0] + ":" + branch)
+    matching = [x for x in listed.get("items", [])
+                if (x.get("head") or {}).get("ref") == branch]
+    if len(matching) > 1:
+        raise CapabilityBlocked("DUPLICATE_PROBE_PRS")
+    if matching:
+        pr = matching[0]
+    else:
+        try:
+            pr = app.create_draft_pr(branch, base)
+        except CapabilityBlocked:
+            # Ambiguous remote response: next invocation will reconcile using
+            # the SAME --probe-id; never mint another probe.
+            raise
     number = pr.get("number")
     if type(number) is not int or number < 1:
         raise CapabilityBlocked("PR_CREATE_NOT_VERIFIED")
     current = app._repo_api("GET", f"/pulls/{number}")
-    if current.get("draft") is not True or (current.get("head") or {}).get("ref") != branch:
+    if (current.get("head") or {}).get("ref") != branch:
         raise CapabilityBlocked("PR_READBACK_MISMATCH")
     return {
         "repo": app.repo, "sandbox_pr": number, "sandbox_branch": branch,
@@ -327,6 +361,7 @@ def run_sandbox_push_pr(repo: str, token: str) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sandbox-repo", required=True)
+    parser.add_argument("--probe-id", help="stable UUID for idempotent write qualification")
     parser.add_argument("--push-pr", action="store_true",
                         help="Mutate ONLY the explicit sandbox to qualify git push and PR creation")
     args = parser.parse_args()
@@ -336,7 +371,9 @@ def main() -> int:
         app = SandboxApp(repo, token)
         meta = app.verify_installation()
         if args.push_pr:
-            result = run_sandbox_push_pr(repo, token)
+            if not args.probe_id:
+                raise CapabilityBlocked("PROBE_ID_REQUIRED_FOR_WRITES")
+            result = run_sandbox_push_pr(repo, token, args.probe_id)
         else:
             result = {
                 "repo": repo, "default_branch": meta.get("default_branch"),

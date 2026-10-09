@@ -177,6 +177,8 @@ class SandboxApp:
         # the ghs_APPID_JWT form. Match only the authenticated token's public
         # application-ID prefix; never parse or attempt to validate its JWT.
         # An opaque/legacy or different-App token is unqualified (fail closed).
+        if not app_id:
+            raise CapabilityBlocked("BLOCK_PERMISSION:EXPECTED_APP_ID_MISSING")
         if app_id != "5245673":
             raise CapabilityBlocked("BLOCK_PERMISSION:EXPECTED_APP_ID_MISMATCH")
         if slug != "ntinkicht-l5-sandbox":

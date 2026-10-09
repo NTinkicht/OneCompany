@@ -156,7 +156,7 @@ class SandboxApp:
             if exc.code == 403:
                 try:
                     body = exc.read(2048)
-                except (OSError, TypeError, AttributeError):
+                except (OSError, TypeError, AttributeError, HTTPException):
                     body = b""
             reason = body.decode("utf-8", errors="replace").lower()
             secondary = any(marker in reason for marker in (
@@ -194,7 +194,12 @@ class SandboxApp:
         """
         result = self.api("GET", "/installation/repositories?per_page=100&page=1")
         repos = result.get("repositories")
-        if not isinstance(repos, list) or result.get("total_count") != 1 or len(repos) != 1:
+        if (
+            not isinstance(repos, list)
+            or result.get("total_count") != 1
+            or len(repos) != 1
+            or not isinstance(repos[0], dict)
+        ):
             raise CapabilityBlocked("BLOCK_PERMISSION:INSTALLATION_NOT_EXCLUSIVE")
         if (repos[0].get("full_name") or "").lower() != self.repo.lower():
             raise CapabilityBlocked("BLOCK_PERMISSION:SANDBOX_OUTSIDE_INSTALLATION")

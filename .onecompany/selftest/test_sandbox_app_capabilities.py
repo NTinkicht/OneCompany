@@ -830,6 +830,50 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                 })
             network.assert_not_called()
 
+    def test_installation_names_must_be_strings_before_lowercasing(self):
+        repo = "NTinkicht/qualification-l5-sandbox"
+        for bad in (1, True, [], {"name": "not-a-string"}):
+            with self.subTest(bad=bad):
+                app = SandboxApp(repo, "t" * 32)
+                installation = {
+                    "total_count": 1,
+                    "repositories": [{"full_name": bad}],
+                }
+                with patch.object(app, "api", return_value=installation):
+                    with self.assertRaisesRegex(
+                        CapabilityBlocked, "SANDBOX_OUTSIDE_INSTALLATION"
+                    ):
+                        app.verify_installation()
+
+                app = SandboxApp(repo, "t" * 32)
+                def response(method, path, payload=None):
+                    if path.startswith("/installation/repositories"):
+                        return {"total_count": 1, "repositories": [{"full_name": repo}]}
+                    return {"full_name": bad, "private": True}
+                with patch.object(app, "api", side_effect=response):
+                    with self.assertRaisesRegex(
+                        CapabilityBlocked, "SANDBOX_READBACK_MISMATCH"
+                    ):
+                        app.verify_installation()
+
+    def test_raw_pr_post_rejects_issue_conversion_fields(self):
+        repo = "NTinkicht/qualification-l5-sandbox"
+        app = SandboxApp(repo, "t" * 32)
+        branch = "l5-probe/00000000-0000-0000-0000-000000000001"
+        app._scope_verified = True
+        app._default_branch = "main"
+        app._pr_push_authorizations[branch] = "a" * 40
+        for extra in ({"issue": 5}, {"maintainer_can_modify": True}):
+            payload = {"head": branch, "base": "main", "draft": True, **extra}
+            with self.subTest(extra=extra), patch(
+                "sandbox_app_capabilities.urlopen"
+            ) as network:
+                with self.assertRaisesRegex(
+                    CapabilityBlocked, "PROBE_PR_POST_NOT_QUALIFIED"
+                ):
+                    app.api("POST", "/repos/" + repo + "/pulls", payload)
+                network.assert_not_called()
+
     def test_pr_post_rejects_malformed_remote_commit_at_both_gates(self):
         repo = "NTinkicht/qualification-l5-sandbox"
         branch = "l5-probe/00000000-0000-0000-0000-000000000001"

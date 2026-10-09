@@ -507,7 +507,8 @@ def run_sandbox_push_pr(repo: str, token: str, probe_id: str) -> dict:
     current = app._repo_api("GET", f"/pulls/{number}")
     if (current.get("head") or {}).get("ref") != branch:
         raise CapabilityBlocked("PR_READBACK_MISMATCH")
-    if (current.get("head") or {}).get("repo", {}).get("full_name", repo).lower() != repo.lower():
+    head_repo = ((current.get("head") or {}).get("repo") or {}).get("full_name")
+    if head_repo is not None and head_repo.lower() != repo.lower():
         raise CapabilityBlocked("PR_HEAD_OTHER_REPOSITORY")
 
     verified = (["push"] if fresh_push else []) + (["create_pr"] if fresh_pr else [])

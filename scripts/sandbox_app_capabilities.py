@@ -17,6 +17,7 @@ import shutil
 import subprocess
 import tempfile
 import uuid
+from http.client import HTTPException
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -138,7 +139,7 @@ class SandboxApp:
                 try:
                     raw = response.read()
                     result = json.loads(raw) if raw else {}
-                except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+                except (json.JSONDecodeError, UnicodeDecodeError, OSError, HTTPException):
                     # An applied write can return a truncated/malformed reply.
                     # Require probe readback on retry; never credit this result.
                     raise CapabilityBlocked("WAIT_EXTERNAL:MALFORMED_GITHUB_RESPONSE") from None
@@ -490,32 +491,28 @@ def run_sandbox_push_pr(repo: str, token: str, probe_id: str) -> dict:
             raise
         existing = None
 
-    if existing is None and prior_pr is not None:
-        # A completed PR may have a deleted head branch. Never remake the
-        # same probe or re-credit missing, already-merged work as new.
-        if prior_pr.get("merged_at") is None:
-            raise CapabilityBlocked("PROBE_PR_BRANCH_MISSING")
-        marker_ref = base
-    else:
-        marker_ref = branch
+    # This phase cannot prove that an existing remote ref was pushed by the
+    # intended App: a collaborator may have force-pushed an identical marker.
+    # No cached PR or branch is accepted as App-authored until a durable,
+    # immutable commit-SHA attestation is implemented. A retry is safe and
+    # idempotent (it makes zero writes), but the probe must be requalified.
+    if existing is not None or prior_pr is not None:
+        raise CapabilityBlocked("PROBE_RECONCILIATION_REQUIRES_IMMUTABLE_PROOF")
 
-    if existing is not None:
-        if not SHA40.fullmatch((existing.get("commit") or {}).get("sha", "")):
-            raise CapabilityBlocked("PROBE_BRANCH_SHA_INVALID")
-    elif prior_pr is None:
-        # A previous merged commit can remain in the base even if PR listing
-        # metadata no longer retains its original head reference.
-        try:
-            base_marker = app._repo_api(
-                "GET", "/contents/.l5-sandbox-probes/" + probe_id + ".txt?ref=" + base
-            )
-        except CapabilityBlocked as exc:
-            if str(exc) != "REMOTE_REQUEST_FAILED:404":
-                raise
-        else:
-            if isinstance(base_marker, dict):
-                raise CapabilityBlocked("PROBE_ID_ALREADY_ON_DEFAULT")
-        branch, base = push_canary(app, probe_id)
+    # Also refuse a previously merged probe whose marker has reached main,
+    # even if GitHub no longer retains its deleted head-ref metadata.
+    try:
+        base_marker = app._repo_api(
+            "GET", "/contents/.l5-sandbox-probes/" + probe_id + ".txt?ref=" + base
+        )
+    except CapabilityBlocked as exc:
+        if str(exc) != "REMOTE_REQUEST_FAILED:404":
+            raise
+    else:
+        if isinstance(base_marker, dict):
+            raise CapabilityBlocked("PROBE_ID_ALREADY_ON_DEFAULT")
+    branch, base = push_canary(app, probe_id)
+    marker_ref = branch
 
     marker_path = ("/contents/.l5-sandbox-probes/" + probe_id
                    + ".txt?ref=" + marker_ref.replace("/", "%2F"))
@@ -529,12 +526,7 @@ def run_sandbox_push_pr(repo: str, token: str, probe_id: str) -> dict:
     if marker_text != "Sandbox App qualification probe ID: " + probe_id + "\n":
         raise CapabilityBlocked("PROBE_CANARY_MISMATCH")
 
-    fresh_push = existing is None and prior_pr is None
-    fresh_pr = prior_pr is None
-    if prior_pr is None:
-        pr = app.create_draft_pr(branch, base)
-    else:
-        pr = prior_pr
+    pr = app.create_draft_pr(branch, base)
     number = pr.get("number")
     if type(number) is not int or number < 1:
         raise CapabilityBlocked("PR_CREATE_NOT_VERIFIED")
@@ -551,15 +543,13 @@ def run_sandbox_push_pr(repo: str, token: str, probe_id: str) -> dict:
     if author != "ntinkicht-l5-sandbox[bot]":
         raise CapabilityBlocked("BLOCK_PERMISSION:PR_APP_IDENTITY_MISMATCH")
 
-    verified = (["push"] if fresh_push else []) + (["create_pr"] if fresh_pr else [])
-    reconciled = (["push"] if not fresh_push else []) + (["create_pr"] if not fresh_pr else [])
     return {
         "repo": app.repo, "sandbox_pr": number, "sandbox_branch": branch,
-        "verified_write_classes": verified,
-        "reconciled_write_classes": reconciled,
+        "verified_write_classes": ["push", "create_pr"],
+        "reconciled_write_classes": [],
         "unverified_write_classes": list(WRITE_CLASSES[2:]),
         "production_enabled": False,
-        "status": "SANDBOX_PARTIAL_PROOF" if verified else "SANDBOX_RECONCILED_PREVIOUS_OPERATION",
+        "status": "SANDBOX_PARTIAL_PROOF",
     }
 
 

@@ -1,37 +1,9 @@
 name: OneCompany Validate
 
 on:
+  # Required branch-rule check: produce 'validate' on every PR, including
+  # documentation and coordination-only changes. Never gate this job on paths.
   pull_request:
-    paths:
-      - '.onecompany/**'
-      - '.opencodereview/**'
-      - 'agents/**'
-      - 'company/**'
-      - 'patterns/**'
-      - 'overlays/**'
-      - 'docs/**'
-      - 'scripts/**'
-      - 'schemas/**'
-      - 'tests/**'
-      - 'examples/**'
-      - 'source-evidence/**'
-      - 'evidence/**'
-      - 'AGENTS.md'
-      - 'CLAUDE.md'
-      - 'GEMINI.md'
-      - 'BOOTSTRAP.md'
-      - 'README.md'
-      - 'CHANGELOG.md'
-      - 'CONTRIBUTING.md'
-      - 'SECURITY.md'
-      - 'CODE_OF_CONDUCT.md'
-      - 'onecompany.py'
-      - 'Makefile'
-      - '.github/CODEOWNERS'
-      - '.github/copilot-instructions.md'
-      - '.github/ISSUE_TEMPLATE/**'
-      - '.github/PULL_REQUEST_TEMPLATE.md'
-      - '.github/workflows/onecompany-validate.yml'
   push:
     branches: [main]
     paths:

@@ -93,6 +93,71 @@ class SandboxAppCapabilityTests(unittest.TestCase):
             self.assertTrue(node["isResolved"])
             self.assertEqual(app._authorized_graph_nodes, {})
 
+    def test_graphql_readback_rejects_malformed_nested_objects(self):
+        from sandbox_app_capabilities import GRAPH_THREAD_FRAGMENT
+        repo = "NTinkicht/qualification-l5-sandbox"
+        app = SandboxApp(repo, "t" * 32)
+        malformed = [
+            {"data": ["not-an-object"]},
+            {"data": {"node": {"repository": 1}}},
+            {"data": {"node": {"pullRequest": ["not-an-object"]}}},
+            {"data": {"node": {"pullRequest": {"repository": ["bad"]}}}},
+            {"data": {"node": {"repository": {"nameWithOwner": 1}}}},
+        ]
+        for payload in malformed:
+            with self.subTest(payload=payload), patch.object(
+                app, "api", return_value=payload
+            ), patch.object(app, "_repo_api") as network:
+                with self.assertRaises(CapabilityBlocked):
+                    app._graph_node("thread-id", GRAPH_THREAD_FRAGMENT)
+                network.assert_not_called()
+
+        valid = {"data": {"node": {
+            "repository": {"nameWithOwner": repo},
+            "pullRequest": {"number": 7},
+        }}}
+        for bad_head in (1, [], {"ref": 9}, None):
+            with self.subTest(head=bad_head), patch.object(
+                app, "api", return_value=valid
+            ), patch.object(
+                app, "_repo_api", return_value={"head": bad_head}
+            ):
+                with self.assertRaisesRegex(CapabilityBlocked, "GRAPHQL_TARGET_NOT_SANDBOX_PROBE"):
+                    app._graph_node("thread-id", GRAPH_THREAD_FRAGMENT)
+
+    def test_graphql_mutation_readback_rejects_malformed_data(self):
+        from sandbox_app_capabilities import GRAPH_RESOLVE_MUTATION
+        repo = "NTinkicht/qualification-l5-sandbox"
+        app = SandboxApp(repo, "t" * 32)
+        for malformed in ({"data": 1}, {"data": []}, {"data": {"resolveReviewThread": 1}}):
+            with self.subTest(payload=malformed), patch.object(
+                app, "api", return_value=malformed
+            ):
+                app._authorized_graph_nodes["thread-id"] = "resolve"
+                with self.assertRaisesRegex(CapabilityBlocked, "GRAPHQL_MUTATION_NOT_VERIFIED"):
+                    app._mutate_graph(GRAPH_RESOLVE_MUTATION, "thread-id", "resolveReviewThread")
+                self.assertFalse(app._authorized_graph_nodes)
+
+    def test_raw_pr_optional_fields_reject_non_strings_without_grant_consumption(self):
+        repo = "NTinkicht/qualification-l5-sandbox"
+        branch = "l5-probe/00000000-0000-0000-0000-000000000001"
+        app = SandboxApp(repo, "t" * 32)
+        app._scope_verified = True
+        app._default_branch = "main"
+        app._pr_push_authorizations[branch] = "a" * 40
+        path = "/repos/" + repo + "/pulls"
+        for field in ("title", "body"):
+            for invalid in (None, 0, False, ["bad"], {"unexpected": "object"}, object()):
+                with self.subTest(field=field, value=invalid), patch(
+                    "sandbox_app_capabilities.urlopen"
+                ) as network, patch.object(app, "branch") as readback:
+                    payload = {"head": branch, "base": "main", "draft": True, field: invalid}
+                    with self.assertRaisesRegex(CapabilityBlocked, "PROBE_PR_POST_NOT_QUALIFIED"):
+                        app.api("POST", path, payload)
+                    self.assertEqual(app._pr_push_authorizations[branch], "a" * 40)
+                    readback.assert_not_called()
+                    network.assert_not_called()
+
     def test_git_subprocess_env_excludes_host_credentials_and_rewrites(self):
         app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
         with tempfile.TemporaryDirectory() as directory:

@@ -449,7 +449,7 @@ class MistralFencedWorkerTests(unittest.TestCase):
             )
 
     def test_merged_scaffold_never_promotes_mistral_readiness(self):
-        queue = json.loads((ROOT / ".onecompany/queue.json").read_text())
+        queue = json.loads((ROOT / ".onecompany/selftest/fixtures/mistral_queue_v1.json").read_text())
         readiness = json.loads((ROOT / ".onecompany/readiness.json").read_text())
         wu = next(
             item for item in queue["work_units"]

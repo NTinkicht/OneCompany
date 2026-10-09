@@ -292,7 +292,12 @@ class SandboxApp:
             raise CapabilityBlocked("BLOCK_PERMISSION:PROBE_REF_EXCLUSIVITY_UNVERIFIED")
         try:
             rule = self._repo_api("GET", f"/rulesets/{PROBE_RULESET_ID}")
-        except CapabilityBlocked:
+        except CapabilityBlocked as error:
+            # A temporary provider outage is not a failed protection policy.
+            # Preserve supervisor retry semantics while STILL denying writes.
+            reason = str(error)
+            if reason == "WAIT_RATE_LIMIT" or reason.startswith("WAIT_EXTERNAL:"):
+                raise
             raise CapabilityBlocked(
                 "BLOCK_PERMISSION:PROBE_REF_EXCLUSIVITY_UNVERIFIED"
             ) from None

@@ -578,18 +578,26 @@ def run_sandbox_push_pr(repo: str, token: str, probe_id: str) -> dict:
     if type(number) is not int or number < 1:
         raise CapabilityBlocked("PR_CREATE_NOT_VERIFIED")
     current = app._repo_api("GET", f"/pulls/{number}")
-    if (current.get("head") or {}).get("ref") != branch:
+    current_head = current.get("head")
+    if not isinstance(current_head, dict) or current_head.get("ref") != branch:
         raise CapabilityBlocked("PR_READBACK_MISMATCH")
-    if ((current.get("head") or {}).get("sha")) != pushed_sha:
+    if current_head.get("sha") != pushed_sha:
         raise CapabilityBlocked("PR_COMMIT_READBACK_MISMATCH")
-    head_repo = ((current.get("head") or {}).get("repo") or {}).get("full_name")
-    if head_repo is not None and head_repo.lower() != repo.lower():
+    head_repo_data = current_head.get("repo")
+    if head_repo_data is not None and not isinstance(head_repo_data, dict):
+        raise CapabilityBlocked("PR_HEAD_OTHER_REPOSITORY")
+    head_repo = (head_repo_data or {}).get("full_name")
+    # Validate the raw field BEFORE lowercasing; false/0/[] must not crash
+    # the CLI after the sandbox branch and PR have already been written.
+    if head_repo is not None and (
+            not isinstance(head_repo, str) or head_repo.lower() != repo.lower()):
         raise CapabilityBlocked("PR_HEAD_OTHER_REPOSITORY")
     # An App-scoped token can be mistakenly substituted by another bot.
     # Do not credit any App write unless GitHub attributes the created
     # canonical PR to this exact intended installation.
-    author = ((current.get("user") or {}).get("login") or "").lower()
-    if author != "ntinkicht-l5-sandbox[bot]":
+    user_data = current.get("user")
+    author = user_data.get("login") if isinstance(user_data, dict) else None
+    if not isinstance(author, str) or author.lower() != "ntinkicht-l5-sandbox[bot]":
         raise CapabilityBlocked("BLOCK_PERMISSION:PR_APP_IDENTITY_MISMATCH")
 
     return {

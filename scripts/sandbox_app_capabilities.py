@@ -135,9 +135,18 @@ class SandboxApp:
             with urlopen(request, timeout=30) as response:
                 if response.status not in {200, 201, 202, 204}:
                     raise CapabilityBlocked("REMOTE_WRITE_NOT_VERIFIED")
-                raw = response.read()
-                result = json.loads(raw) if raw else {}
-                return result if isinstance(result, dict) else {"items": result}
+                try:
+                    raw = response.read()
+                    result = json.loads(raw) if raw else {}
+                except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+                    # An applied write can return a truncated/malformed reply.
+                    # Require probe readback on retry; never credit this result.
+                    raise CapabilityBlocked("WAIT_EXTERNAL:MALFORMED_GITHUB_RESPONSE") from None
+                if isinstance(result, dict):
+                    return result
+                if isinstance(result, list):
+                    return {"items": result}
+                raise CapabilityBlocked("WAIT_EXTERNAL:UNEXPECTED_GITHUB_RESPONSE")
         except HTTPError as exc:
             # GitHub returns 403 OR 429 on primary/secondary throttles.
             # A secondary-limit 403 may lack Retry-After and remaining=0.
@@ -319,10 +328,27 @@ def shell(cmd: list[str], *, cwd: Path | None = None, env: dict | None = None) -
             cmd, cwd=cwd, env=env, text=True, capture_output=True, timeout=120,
             check=False,
         )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        raise CapabilityBlocked("LOCAL_EXECUTION_UNAVAILABLE") from exc
+    except subprocess.TimeoutExpired:
+        if cmd and cmd[0] == "git":
+            raise CapabilityBlocked("WAIT_EXTERNAL:GIT_TRANSPORT_TIMEOUT") from None
+        raise CapabilityBlocked("LOCAL_EXECUTION_UNAVAILABLE") from None
+    except OSError:
+        raise CapabilityBlocked("LOCAL_EXECUTION_UNAVAILABLE") from None
     if run.returncode:
-        # Never echo stderr/stdout; git might reveal checkout URL or credentials.
+        # Match sanitized transient conditions without ever echoing git output:
+        # logs can contain URLs, credential-helper output or sensitive tokens.
+        error = (run.stderr or "").lower()
+        transient = (
+            "could not resolve host", "couldn't resolve host",
+            "temporary failure in name resolution", "connection timed out",
+            "operation timed out", "connection reset", "failed to connect",
+            "could not connect to server", "network is unreachable",
+            "remote end hung up", "tls connect error",
+            "ssl connection error", "http 500", "http 502",
+            "http 503", "http 504", "the requested url returned error: 5",
+        )
+        if cmd and cmd[0] == "git" and any(marker in error for marker in transient):
+            raise CapabilityBlocked("WAIT_EXTERNAL:GIT_TRANSPORT_FAILURE")
         raise CapabilityBlocked("LOCAL_COMMAND_FAILED:" + cmd[0])
     return run.stdout.strip()
 

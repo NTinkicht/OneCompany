@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
 """Fail-closed contract tests for the sandbox-only GitHub App executor."""
 import base64
+import contextlib
+import io
+import json
 import os
 import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+from urllib.error import HTTPError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 from sandbox_app_capabilities import (
     CapabilityBlocked, SandboxApp, WRITE_CLASSES, require_sandbox, require_sha,
-    run_sandbox_push_pr, isolated_git_env, write_probe_canary,
+    run_sandbox_push_pr, isolated_git_env, write_probe_canary, main,
 )
 
 
@@ -337,8 +341,9 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                 return {"total_count": 1, "repositories": [{"full_name": repo}]}
             return {"full_name": repo, "private": True}
         with patch.object(app, "api", side_effect=api), patch.dict(
-                os.environ, {"L5_EXPECTED_APP_ID": "5245673"}):
-            with self.assertRaisesRegex(CapabilityBlocked, "APP_ID_NOT_ATTESTED"):
+                os.environ, {"L5_EXPECTED_APP_ID": "5245673",
+                             "L5_ATTESTED_APP_SLUG": "wrong-app"}):
+            with self.assertRaisesRegex(CapabilityBlocked, "APP_SLUG_ATTESTATION_FAILED"):
                 app.verify_installation()
         self.assertFalse(app._scope_verified)
 
@@ -350,7 +355,8 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                 return {"total_count": 1, "repositories": [{"full_name": repo}]}
             return {"full_name": repo, "private": True}
         with patch.object(app, "api", side_effect=api), patch.dict(
-                os.environ, {"L5_EXPECTED_APP_ID": "5245673"}):
+                os.environ, {"L5_EXPECTED_APP_ID": "5245673",
+                             "L5_ATTESTED_APP_SLUG": "ntinkicht-l5-sandbox"}):
             self.assertEqual(app.verify_installation()["full_name"], repo)
         self.assertTrue(app._scope_verified)
 
@@ -378,6 +384,47 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                 run_sandbox_push_pr(repo, "t" * 32, probe_id)
             push.assert_not_called()
 
+
+
+    def test_rate_limit_403_waits_not_permission_denied(self):
+        app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
+        cases = [{"Retry-After": "10"}, {"x-ratelimit-remaining": "0"}]
+        for headers in cases:
+            with self.subTest(headers=headers), patch(
+                "sandbox_app_capabilities.urlopen",
+                side_effect=HTTPError("https://api.github.com", 403,
+                                      "Forbidden", headers, None),
+            ):
+                with self.assertRaisesRegex(CapabilityBlocked, "WAIT_RATE_LIMIT"):
+                    app.api("GET", "/repos/NTinkicht/qualification-l5-sandbox")
+
+    def test_actual_forbidden_403_is_permission_block(self):
+        app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
+        with patch("sandbox_app_capabilities.urlopen",
+                   side_effect=HTTPError("https://api.github.com", 403,
+                                         "Forbidden", {}, None)):
+            with self.assertRaisesRegex(CapabilityBlocked, "APP_REQUEST_REFUSED"):
+                app.api("GET", "/repos/NTinkicht/qualification-l5-sandbox")
+
+    def test_cli_preserves_wait_classification(self):
+        argv = ["sandbox_app_capabilities.py", "--sandbox-repo",
+                "NTinkicht/qualification-l5-sandbox"]
+        for reason, expected in (
+            ("WAIT_RATE_LIMIT", "WAIT_RATE_LIMIT"),
+            ("WAIT_EXTERNAL:NETWORK_UNAVAILABLE", "WAIT_EXTERNAL"),
+        ):
+            with self.subTest(reason=reason), patch.object(
+                    SandboxApp, "verify_installation",
+                    side_effect=CapabilityBlocked(reason)), patch.object(
+                        sys, "argv", argv), patch.dict(
+                            os.environ, {"L5_APP_INSTALLATION_TOKEN": "t" * 32}):
+                output = io.StringIO()
+                with contextlib.redirect_stdout(output):
+                    code = main()
+                self.assertEqual(code, 2)
+                payload = json.loads(output.getvalue())
+                self.assertEqual(payload["status"], expected)
+                self.assertEqual(payload["reason"], reason)
 
     def test_unqualified_rerun_never_dispatches(self):
         app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)

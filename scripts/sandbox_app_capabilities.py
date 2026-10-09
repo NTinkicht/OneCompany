@@ -27,6 +27,13 @@ MANAGED = frozenset({
 })
 REPOSITORY = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 SHA40 = re.compile(r"^[0-9a-f]{40}$")
+# Owner-provisioned 2026-10-10: this is a policy *readback* pin, not a
+# bypass of sandbox-write qualification or independent negative race tests.
+PROBE_RULESET_ID = 24816225
+PROBE_APP_ACTOR_ID = 5245673
+PROBE_REPO = "NTinkicht/qualification-l5-sandbox"
+PROBE_BRANCH_PATTERN = "refs/heads/l5-probe/*"
+PROBE_RULE_TYPES = frozenset({"creation", "update", "deletion", "non_fast_forward"})
 WRITE_CLASSES = (
     "push", "create_pr", "comment", "request_review", "mark_ready",
     "resolve_thread", "rerun_job", "update_branch", "merge",
@@ -265,18 +272,69 @@ class SandboxApp:
             raise CapabilityBlocked("PROBE_BRANCH_INVALID")
         return self._repo_api("GET", "/branches/" + branch.replace("/", "%2F"))
 
-    def _require_exclusive_probe_ref(self, branch: str) -> None:
-        """Fail closed until reviewed sandbox branch exclusivity is provable.
+    def _inspect_exclusive_probe_ruleset(self, branch: str) -> None:
+        """Verify the current owner-managed policy, with zero write authority.
 
-        GitHub creates a PR from a branch *name*, not a compare-and-swap SHA.
-        Without a verified exclusive protection rule, any collaborator may
-        force-push between commit readback and POST, attributing their new
-        content to the App's PR. The sandbox currently has no rulesets;
-        ordinary SHA readbacks alone cannot close this TOCTOU race.
+        Exact active ruleset, ref pattern, restrictions and sole App bypass
+        must come from GitHub through the scoped installation token. Any
+        unreadable, missing or changed rule fails closed, not advisory.
+        This readback alone is NOT adversarial branch-race qualification.
         """
-        if not isinstance(branch, str) or not branch.startswith("l5-probe/"):
+        if (
+            not isinstance(branch, str)
+            or not re.fullmatch(
+                r"l5-probe/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
+                r"[0-9a-f]{4}-[0-9a-f]{12}", branch
+            )
+        ):
             raise CapabilityBlocked("PROBE_BRANCH_INVALID")
-        raise CapabilityBlocked("BLOCK_PERMISSION:PROBE_REF_EXCLUSIVITY_UNVERIFIED")
+        if self.repo.lower() != PROBE_REPO.lower() or not self._scope_verified:
+            raise CapabilityBlocked("BLOCK_PERMISSION:PROBE_REF_EXCLUSIVITY_UNVERIFIED")
+        try:
+            rule = self._repo_api("GET", f"/rulesets/{PROBE_RULESET_ID}")
+        except CapabilityBlocked:
+            raise CapabilityBlocked(
+                "BLOCK_PERMISSION:PROBE_REF_EXCLUSIVITY_UNVERIFIED"
+            ) from None
+        if not isinstance(rule, dict):
+            raise CapabilityBlocked("BLOCK_PERMISSION:PROBE_REF_EXCLUSIVITY_UNVERIFIED")
+        conditions = rule.get("conditions")
+        ref_name = conditions.get("ref_name") if isinstance(conditions, dict) else None
+        rules = rule.get("rules")
+        bypass = rule.get("bypass_actors")
+        if (
+            type(rule.get("id")) is not int
+            or rule["id"] != PROBE_RULESET_ID
+            or rule.get("name") != "L5 Sandbox - Exclusive App Probe Branches"
+            or rule.get("target") != "branch"
+            or rule.get("source_type") != "Repository"
+            or rule.get("source", "").lower() != PROBE_REPO.lower()
+            or rule.get("enforcement") != "active"
+            or not isinstance(ref_name, dict)
+            or ref_name.get("include") != [PROBE_BRANCH_PATTERN]
+            or ref_name.get("exclude") != []
+            or not isinstance(rules, list)
+            or any(not isinstance(item, dict) for item in rules)
+            or {item.get("type") for item in rules} != PROBE_RULE_TYPES
+            or not isinstance(bypass, list)
+            or bypass != [{
+                "actor_id": PROBE_APP_ACTOR_ID,
+                "actor_type": "Integration",
+                "bypass_mode": "always",
+            }]
+        ):
+            raise CapabilityBlocked("BLOCK_PERMISSION:PROBE_REF_EXCLUSIVITY_UNVERIFIED")
+
+    def _require_exclusive_probe_ref(self, branch: str) -> None:
+        """Keep PR publication disabled until adversarial race proof is reviewed.
+
+        The ruleset proves policy intent, but not tested cross-token exclusivity
+        throughout GitHub's branch-name-only REST PR creation window.
+        """
+        self._inspect_exclusive_probe_ruleset(branch)
+        raise CapabilityBlocked(
+            "BLOCK_PERMISSION:PROBE_NEGATIVE_RACE_EVIDENCE_UNVERIFIED"
+        )
 
     def create_draft_pr(self, branch: str, base: str) -> dict:
         expected = self._pr_push_authorizations.get(branch)

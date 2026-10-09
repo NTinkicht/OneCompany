@@ -121,12 +121,48 @@ class SandboxAppCapabilityTests(unittest.TestCase):
             with self.assertRaisesRegex(CapabilityBlocked, "SANDBOX_OUTSIDE_INSTALLATION"):
                 app.verify_installation()
 
+
+    def test_probe_identity_required_and_validated_before_write(self):
+        app_token = "t" * 32
+        with patch.object(SandboxApp, "verify_installation",
+                          return_value={"default_branch": "main"}), patch(
+                              "sandbox_app_capabilities.push_canary") as canary:
+            with self.assertRaisesRegex(CapabilityBlocked, "PROBE_ID_INVALID"):
+                run_sandbox_push_pr("NTinkicht/qualification-l5-sandbox",
+                                    app_token, "not-a-uuid")
+            canary.assert_not_called()
+
+    def test_existing_probe_reconciles_without_second_push_or_pr(self):
+        repo = "NTinkicht/qualification-l5-sandbox"
+        token = "t" * 32
+        probe_id = "00000000-0000-0000-0000-000000000001"
+        branch = "l5-probe/" + probe_id
+        app = SandboxApp(repo, token)
+        def pretend_api(method, suffix, payload=None):
+            if suffix.startswith("/branches/"):
+                return {"commit": {"sha": "a" * 40}}
+            if suffix.startswith("/pulls?"):
+                return {"items": [{"number": 17, "head": {"ref": branch}}]}
+            if suffix == "/pulls/17":
+                return {"head": {"ref": branch}, "draft": True}
+            raise AssertionError((method, suffix))
+        with patch.object(SandboxApp, "verify_installation",
+                          return_value={"default_branch": "main"}), patch.object(
+                              SandboxApp, "_repo_api", autospec=True,
+                              side_effect=lambda _app, m, path, data=None: pretend_api(m, path, data)
+                          ), patch("sandbox_app_capabilities.push_canary") as push, patch.object(
+                              SandboxApp, "create_draft_pr") as create:
+            result = run_sandbox_push_pr(repo, token, probe_id)
+            self.assertEqual(result["sandbox_pr"], 17)
+            push.assert_not_called()
+            create.assert_not_called()
+
     def test_push_probe_never_runs_without_installation(self):
         with patch.object(SandboxApp, "verify_installation",
                           side_effect=CapabilityBlocked("BLOCK_PERMISSION")):
             with patch("sandbox_app_capabilities.push_canary") as canary:
                 with self.assertRaises(CapabilityBlocked):
-                    run_sandbox_push_pr("NTinkicht/qualification-l5-sandbox", "t" * 32)
+                    run_sandbox_push_pr("NTinkicht/qualification-l5-sandbox", "t" * 32, "00000000-0000-0000-0000-000000000001")
                 canary.assert_not_called()
 
 

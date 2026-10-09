@@ -188,8 +188,16 @@ class SandboxApp:
                     # Without its complete body we cannot distinguish auth
                     # rejection from transient throttling; fail retryably.
                     raise CapabilityBlocked("WAIT_EXTERNAL:TRUNCATED_GITHUB_ERROR_RESPONSE") from None
-                except (OSError, TypeError, AttributeError):
-                    body = b""
+                except OSError:
+                    # A reset/timeout while reading a 403 body is transient:
+                    # without the body, rate limiting cannot be ruled out.
+                    raise CapabilityBlocked(
+                        "WAIT_EXTERNAL:GITHUB_ERROR_BODY_IO_FAILURE"
+                    ) from None
+                except (TypeError, AttributeError):
+                    raise CapabilityBlocked(
+                        "WAIT_EXTERNAL:TRUNCATED_GITHUB_ERROR_RESPONSE"
+                    ) from None
             reason = body.decode("utf-8", errors="replace").lower()
             secondary = any(marker in reason for marker in (
                 "secondary rate limit", "rate limit exceeded",

@@ -376,7 +376,7 @@ class SandboxAppCapabilityTests(unittest.TestCase):
         def api(method, path, payload=None):
             if path.startswith("/installation/repositories"):
                 return {"total_count": 1, "repositories": [{"full_name": repo}]}
-            return {"full_name": repo, "private": True}
+            return {"full_name": repo, "private": True, "default_branch": "main"}
         with patch.object(app, "api", side_effect=api), patch.dict(
                 os.environ, {"L5_EXPECTED_APP_ID": "5245673",
                              "L5_ATTESTED_APP_SLUG": "ntinkicht-l5-sandbox"}):

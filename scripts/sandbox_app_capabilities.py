@@ -108,6 +108,8 @@ class SandboxApp:
             if (not isinstance(payload, dict) or
                     not {"head", "base", "draft"}.issubset(payload) or
                     not set(payload).issubset({"head", "base", "draft", "title", "body"}) or
+                    ("title" in payload and not isinstance(payload["title"], str)) or
+                    ("body" in payload and not isinstance(payload["body"], str)) or
                     not isinstance(head, str) or
                     not re.fullmatch(
                         r"l5-probe/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-"
@@ -308,23 +310,37 @@ class SandboxApp:
             "query": "query($id:ID!){node(id:$id){" + fragment + "}}",
             "variables": {"id": node_id},
         })
-        if response.get("errors"):
+        if not isinstance(response, dict) or response.get("errors"):
             raise CapabilityBlocked("GRAPHQL_QUERY_FAILED")
-        node = (response.get("data") or {}).get("node")
+        data = response.get("data")
+        if not isinstance(data, dict):
+            raise CapabilityBlocked("GRAPHQL_NODE_UNVERIFIED")
+        node = data.get("node")
         if not isinstance(node, dict):
             raise CapabilityBlocked("GRAPHQL_NODE_UNVERIFIED")
-        node_repo = (node.get("repository") or {}).get("nameWithOwner")
-        if not node_repo:
-            node_repo = ((node.get("pullRequest") or {}).get("repository") or {}).get("nameWithOwner")
-        if (node_repo or "").lower() != self.repo.lower():
+        node_repository = node.get("repository")
+        if node_repository is not None and not isinstance(node_repository, dict):
+            raise CapabilityBlocked("GRAPHQL_NODE_OTHER_REPOSITORY")
+        pull_request = node.get("pullRequest")
+        if pull_request is not None and not isinstance(pull_request, dict):
+            raise CapabilityBlocked("GRAPHQL_PROBE_PR_INVALID")
+        pr_repository = pull_request.get("repository") if isinstance(pull_request, dict) else None
+        if pr_repository is not None and not isinstance(pr_repository, dict):
+            raise CapabilityBlocked("GRAPHQL_NODE_OTHER_REPOSITORY")
+        node_repo = node_repository.get("nameWithOwner") if isinstance(node_repository, dict) else None
+        if node_repo is None and isinstance(pr_repository, dict):
+            node_repo = pr_repository.get("nameWithOwner")
+        if not isinstance(node_repo, str) or node_repo.lower() != self.repo.lower():
             raise CapabilityBlocked("GRAPHQL_NODE_OTHER_REPOSITORY")
         pr_number = node.get("number") if fragment == GRAPH_PR_FRAGMENT else (
-            (node.get("pullRequest") or {}).get("number")
+            pull_request.get("number") if isinstance(pull_request, dict) else None
         )
         if type(pr_number) is not int or pr_number < 1:
             raise CapabilityBlocked("GRAPHQL_PROBE_PR_INVALID")
         candidate = self._repo_api("GET", f"/pulls/{pr_number}")
-        if not ((candidate.get("head") or {}).get("ref") or "").startswith("l5-probe/"):
+        candidate_head = candidate.get("head") if isinstance(candidate, dict) else None
+        head_ref = candidate_head.get("ref") if isinstance(candidate_head, dict) else None
+        if not isinstance(head_ref, str) or not head_ref.startswith("l5-probe/"):
             raise CapabilityBlocked("GRAPHQL_TARGET_NOT_SANDBOX_PROBE")
         # Querying a verified node never grants mutation authority.
         # Operation-specific checks must succeed before authorization.
@@ -335,9 +351,11 @@ class SandboxApp:
             response = self.api("POST", "/graphql", {
                 "query": query, "variables": {"id": node_id},
             })
-            if response.get("errors") or not isinstance((response.get("data") or {}).get(key), dict):
+            response_data = response.get("data") if isinstance(response, dict) else None
+            if (not isinstance(response_data, dict) or response.get("errors")
+                    or not isinstance(response_data.get(key), dict)):
                 raise CapabilityBlocked("GRAPHQL_MUTATION_NOT_VERIFIED")
-            return response["data"][key]
+            return response_data[key]
         finally:
             # An ambiguous network failure MUST NOT leave an authorization
             # usable by a later direct GraphQL mutation call.

@@ -159,6 +159,14 @@ class SandboxApp:
             raise CapabilityBlocked("BLOCK_PERMISSION:SANDBOX_READBACK_MISMATCH")
         if meta.get("private") is not True:
             raise CapabilityBlocked("BLOCK_PERMISSION:SANDBOX_MUST_BE_PRIVATE")
+        # GitHub's newer installation-token format encodes the App ID.
+        # Unknown/legacy tokens cannot establish the exact intended App
+        # identity in this sandbox-only qualifier and MUST fail closed.
+        app_id = os.environ.get("L5_EXPECTED_APP_ID", "").strip()
+        if not re.fullmatch(r"[1-9][0-9]*", app_id):
+            raise CapabilityBlocked("BLOCK_PERMISSION:EXPECTED_APP_ID_MISSING")
+        if not self._token.startswith("ghs_" + app_id + "_"):
+            raise CapabilityBlocked("BLOCK_PERMISSION:APP_ID_NOT_ATTESTED")
         self._scope_verified = True
         return meta
 
@@ -175,50 +183,16 @@ class SandboxApp:
         })
 
     def comment(self, number: int, body: str, operation_id: str) -> dict:
-        """Post at most one sandbox comment per stable operation identity."""
+        """Blocked until a durable CAS lock serializes identical operations.
+
+        A read-before-write marker alone cannot prevent simultaneous workers
+        from posting duplicates. Comment capability remains UNVERIFIED.
+        """
         try:
-            marker = "<!-- l5-sandbox-comment:" + str(uuid.UUID(operation_id)) + " -->"
+            uuid.UUID(operation_id)
         except (ValueError, TypeError, AttributeError):
             raise CapabilityBlocked("COMMENT_OPERATION_ID_INVALID") from None
-        pr = self._repo_api("GET", f"/pulls/{number}")
-        head = ((pr.get("head") or {}).get("ref") or "")
-        if not head.startswith("l5-probe/"):
-            raise CapabilityBlocked("COMMENT_TARGET_NOT_PROBE")
-        for page in range(1, 11):
-            result = self._repo_api(
-                "GET", f"/issues/{number}/comments?per_page=100&page={page}"
-            )
-            comments = result.get("items")
-            if not isinstance(comments, list):
-                raise CapabilityBlocked("COMMENTS_READBACK_INVALID")
-            found = [
-                item for item in comments
-                if marker in (item.get("body") or "")
-            ]
-            if len(found) > 1:
-                raise CapabilityBlocked("DUPLICATE_OPERATION_COMMENT")
-            if found:
-                item = found[0]
-                author = ((item.get("user") or {}).get("login") or "").lower()
-                expected = "ntinkicht-l5-sandbox[bot]"
-                payload = body + "\n\n" + marker
-                if author != expected or item.get("body") != payload:
-                    raise CapabilityBlocked("COMMENT_MARKER_UNTRUSTED")
-                return {"reconciled": True, "comment": item}
-            if len(comments) < 100:
-                break
-        else:
-            raise CapabilityBlocked("COMMENT_PAGINATION_LIMIT")
-        created = self._repo_api(
-            "POST", f"/issues/{number}/comments",
-            {"body": body + "\n\n" + marker},
-        )
-        if created.get("body") != body + "\n\n" + marker:
-            raise CapabilityBlocked("COMMENT_READBACK_MISMATCH")
-        author = ((created.get("user") or {}).get("login") or "").lower()
-        if author != "ntinkicht-l5-sandbox[bot]":
-            raise CapabilityBlocked("COMMENT_AUTHOR_UNVERIFIED")
-        return {"reconciled": False, "comment": created}
+        raise CapabilityBlocked("COMMENT_REQUIRES_DURABLE_CAS_LEASE")
 
     def request_review(self, number: int, reviewer: str) -> dict:
         if not re.fullmatch(r"[A-Za-z0-9-]{1,39}", reviewer):
@@ -522,6 +496,12 @@ def run_sandbox_push_pr(repo: str, token: str, probe_id: str) -> dict:
     head_repo = ((current.get("head") or {}).get("repo") or {}).get("full_name")
     if head_repo is not None and head_repo.lower() != repo.lower():
         raise CapabilityBlocked("PR_HEAD_OTHER_REPOSITORY")
+    # An App-scoped token can be mistakenly substituted by another bot.
+    # Do not credit any App write unless GitHub attributes the created
+    # canonical PR to this exact intended installation.
+    author = ((current.get("user") or {}).get("login") or "").lower()
+    if author != "ntinkicht-l5-sandbox[bot]":
+        raise CapabilityBlocked("BLOCK_PERMISSION:PR_APP_IDENTITY_MISMATCH")
 
     verified = (["push"] if fresh_push else []) + (["create_pr"] if fresh_pr else [])
     reconciled = (["push"] if not fresh_push else []) + (["create_pr"] if not fresh_pr else [])

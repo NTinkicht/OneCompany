@@ -135,39 +135,28 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                                     app_token, "not-a-uuid")
             canary.assert_not_called()
 
-    def test_existing_probe_reconciles_without_second_push_or_pr(self):
+    def test_existing_probe_needs_immutable_app_commit_evidence(self):
         repo = "NTinkicht/qualification-l5-sandbox"
         token = "t" * 32
         probe_id = "00000000-0000-0000-0000-000000000001"
         branch = "l5-probe/" + probe_id
-        app = SandboxApp(repo, token)
-        def pretend_api(method, suffix, payload=None):
-            if suffix.startswith("/branches/"):
-                return {"commit": {"sha": "a" * 40}}
-            if suffix.startswith("/contents/.l5-sandbox-probes/"):
-                return {"content": base64.b64encode(
-                    ("Sandbox App qualification probe ID: " + probe_id + "\n").encode()
-                ).decode()}
+        def fake_api(_app, method, suffix, payload=None):
             if suffix.startswith("/pulls?"):
                 return {"items": [{"number": 17, "head": {"ref": branch}}]}
-            if suffix == "/pulls/17":
-                return {"head": {"ref": branch}, "draft": True,
-                        "user": {"login": "ntinkicht-l5-sandbox[bot]"}}
-            raise AssertionError((method, suffix))
+            if suffix.startswith("/branches/"):
+                return {"commit": {"sha": "a" * 40}}
+            raise AssertionError(suffix)
         with patch.object(SandboxApp, "verify_installation",
                           return_value={"default_branch": "main"}), patch.object(
-                              SandboxApp, "_repo_api", autospec=True,
-                              side_effect=lambda _app, m, path, data=None: pretend_api(m, path, data)
+                              SandboxApp, "_repo_api", autospec=True, side_effect=fake_api
                           ), patch("sandbox_app_capabilities.push_canary") as push, patch.object(
                               SandboxApp, "create_draft_pr") as create:
-            result = run_sandbox_push_pr(repo, token, probe_id)
-            self.assertEqual(result["sandbox_pr"], 17)
-            self.assertEqual(result["verified_write_classes"], [])
-            self.assertEqual(result["reconciled_write_classes"], ["push", "create_pr"])
-            self.assertEqual(result["status"], "SANDBOX_RECONCILED_PREVIOUS_OPERATION")
+            with self.assertRaisesRegex(
+                CapabilityBlocked, "PROBE_RECONCILIATION_REQUIRES_IMMUTABLE_PROOF"
+            ):
+                run_sandbox_push_pr(repo, token, probe_id)
             push.assert_not_called()
             create.assert_not_called()
-
 
     def test_direct_writes_need_exclusive_installation_preflight(self):
         app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
@@ -251,37 +240,28 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                 write_probe_canary(probes, probe_id)
             self.assertEqual(victim.read_text(encoding="utf-8"), "original")
 
-    def test_partial_retry_credits_only_new_pr_creation(self):
+    def test_partial_retry_never_credits_unattributed_push(self):
         repo = "NTinkicht/qualification-l5-sandbox"
         probe_id = "00000000-0000-0000-0000-000000000001"
-        branch = "l5-probe/" + probe_id
         def fake_api(_app, method, suffix, payload=None):
             if suffix.startswith("/pulls?"):
                 return {"items": []}
             if suffix.startswith("/branches/"):
                 return {"commit": {"sha": "a" * 40}}
-            if suffix.startswith("/contents/"):
-                return {"content": base64.b64encode(
-                    ("Sandbox App qualification probe ID: " + probe_id + "\n").encode()
-                ).decode()}
-            if suffix == "/pulls/17":
-                return {"number": 17, "head": {"ref": branch, "repo": {
-                    "full_name": repo}}, "draft": True,
-                    "user": {"login": "ntinkicht-l5-sandbox[bot]"}}
             raise AssertionError(suffix)
-        with patch.object(SandboxApp, "verify_installation", return_value={
-            "default_branch": "main"}), patch.object(
-                SandboxApp, "_repo_api", autospec=True, side_effect=fake_api
-            ), patch.object(SandboxApp, "create_draft_pr",
-                            return_value={"number": 17}), patch(
-                "sandbox_app_capabilities.push_canary"
-            ) as canary:
-            result = run_sandbox_push_pr(repo, "t" * 32, probe_id)
-            self.assertEqual(result["verified_write_classes"], ["create_pr"])
-            self.assertEqual(result["reconciled_write_classes"], ["push"])
-            canary.assert_not_called()
+        with patch.object(SandboxApp, "verify_installation",
+                          return_value={"default_branch": "main"}), patch.object(
+                              SandboxApp, "_repo_api", autospec=True, side_effect=fake_api
+                          ), patch.object(SandboxApp, "create_draft_pr") as create, patch(
+                              "sandbox_app_capabilities.push_canary") as push:
+            with self.assertRaisesRegex(
+                CapabilityBlocked, "PROBE_RECONCILIATION_REQUIRES_IMMUTABLE_PROOF"
+            ):
+                run_sandbox_push_pr(repo, "t" * 32, probe_id)
+            push.assert_not_called()
+            create.assert_not_called()
 
-    def test_merged_deleted_probe_reconciles_without_new_push(self):
+    def test_merged_deleted_probe_does_not_claim_unverified_reconciliation(self):
         repo = "NTinkicht/qualification-l5-sandbox"
         probe_id = "00000000-0000-0000-0000-000000000001"
         branch = "l5-probe/" + probe_id
@@ -291,23 +271,16 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                                    "merged_at": "2026-10-09T02:00:00Z"}]}
             if suffix.startswith("/branches/"):
                 raise CapabilityBlocked("REMOTE_REQUEST_FAILED:404")
-            if suffix.startswith("/contents/"):
-                return {"content": base64.b64encode(
-                    ("Sandbox App qualification probe ID: " + probe_id + "\n").encode()
-                ).decode()}
-            if suffix == "/pulls/17":
-                return {"number": 17, "head": {"ref": branch}, "merged": True,
-                        "user": {"login": "ntinkicht-l5-sandbox[bot]"}}
             raise AssertionError(suffix)
-        with patch.object(SandboxApp, "verify_installation", return_value={
-            "default_branch": "main"}), patch.object(
-                SandboxApp, "_repo_api", autospec=True, side_effect=fake_api
-            ), patch("sandbox_app_capabilities.push_canary") as canary:
-            result = run_sandbox_push_pr(repo, "t" * 32, probe_id)
-            self.assertEqual(result["verified_write_classes"], [])
-            self.assertEqual(result["reconciled_write_classes"], ["push", "create_pr"])
-            canary.assert_not_called()
-
+        with patch.object(SandboxApp, "verify_installation",
+                          return_value={"default_branch": "main"}), patch.object(
+                              SandboxApp, "_repo_api", autospec=True, side_effect=fake_api
+                          ), patch("sandbox_app_capabilities.push_canary") as push:
+            with self.assertRaisesRegex(
+                CapabilityBlocked, "PROBE_RECONCILIATION_REQUIRES_IMMUTABLE_PROOF"
+            ):
+                run_sandbox_push_pr(repo, "t" * 32, probe_id)
+            push.assert_not_called()
 
     def test_missing_comment_operation_identity_blocks(self):
         app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)

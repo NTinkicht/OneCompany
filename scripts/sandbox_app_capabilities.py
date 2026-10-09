@@ -156,7 +156,12 @@ class SandboxApp:
             if exc.code == 403:
                 try:
                     body = exc.read(2048)
-                except (OSError, TypeError, AttributeError, HTTPException):
+                except HTTPException:
+                    # A truncated 403 can be a secondary-rate-limit response.
+                    # Without its complete body we cannot distinguish auth
+                    # rejection from transient throttling; fail retryably.
+                    raise CapabilityBlocked("WAIT_EXTERNAL:TRUNCATED_GITHUB_ERROR_RESPONSE") from None
+                except (OSError, TypeError, AttributeError):
                     body = b""
             reason = body.decode("utf-8", errors="replace").lower()
             secondary = any(marker in reason for marker in (

@@ -50,34 +50,28 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                 require_sha(value)
 
     def test_cross_repository_graphql_thread_is_rejected(self):
+        from sandbox_app_capabilities import GRAPH_THREAD_FRAGMENT
         app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
         with patch.object(app, "api", return_value={
             "data": {"node": {"isResolved": False, "repository": {
                 "nameWithOwner": "NTinkicht/Tabibi"}, "pullRequest": {"number": 7}}}
         }):
             with self.assertRaisesRegex(CapabilityBlocked, "OTHER_REPOSITORY"):
-                app.resolve_thread("thread-id", 7)
+                app._graph_node("thread-id", GRAPH_THREAD_FRAGMENT)
 
-    def test_wrong_pr_graphql_thread_is_rejected(self):
+    def test_resolve_thread_blocked_until_replay_safe(self):
         app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
-        with patch.object(app, "api", return_value={
-            "data": {"node": {"isResolved": False, "repository": {
-                "nameWithOwner": app.repo}, "pullRequest": {"number": 2}}}
-        }), patch.object(app, "_repo_api",
-                         return_value={"head": {"ref": "l5-probe/valid-probe"}}):
-            with self.assertRaisesRegex(CapabilityBlocked, "NOT_ON_PROBE_PR"):
+        with patch.object(app, "api") as network:
+            with self.assertRaisesRegex(CapabilityBlocked, "RESOLVE_THREAD_NOT_QUALIFIED"):
                 app.resolve_thread("thread-id", 7)
+            network.assert_not_called()
 
-    def test_merge_rejects_stale_head_before_write(self):
+    def test_merge_is_blocked_until_exact_base_head_review(self):
         app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
-        with patch.object(app, "_repo_api", return_value={
-            "head": {"sha": "b" * 40}
-        }) as api:
-            with self.assertRaisesRegex(CapabilityBlocked, "STALE_HEAD"):
+        with patch.object(app, "_repo_api") as api:
+            with self.assertRaisesRegex(CapabilityBlocked, "MERGE_NOT_QUALIFIED"):
                 app.merge(7, "a" * 40)
-            self.assertEqual(api.call_count, 1)
-            self.assertEqual(api.call_args.args[0], "GET")
-
+            api.assert_not_called()
 
     def test_direct_rest_path_outside_sandbox_is_refused_without_network(self):
         app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
@@ -86,16 +80,17 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                 app.api("POST", "/repos/NTinkicht/Tabibi/issues", {"title": "bad"})
             network.assert_not_called()
 
-    def test_node_nested_repository_is_verified(self):
+    def test_node_nested_repository_can_be_read_without_write_authority(self):
+        from sandbox_app_capabilities import GRAPH_THREAD_FRAGMENT
         app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
         with patch.object(app, "api", return_value={
             "data": {"node": {"isResolved": True, "pullRequest": {
                 "number": 3, "repository": {"nameWithOwner": app.repo}}}}
         }), patch.object(app, "_repo_api",
                          return_value={"head": {"ref": "l5-probe/valid-probe"}}):
-            with self.assertRaisesRegex(CapabilityBlocked, "ALREADY_RESOLVED"):
-                app.resolve_thread("thread-id", 3)
-
+            node = app._graph_node("thread-id", GRAPH_THREAD_FRAGMENT)
+            self.assertTrue(node["isResolved"])
+            self.assertEqual(app._authorized_graph_nodes, {})
 
     def test_git_subprocess_env_excludes_host_credentials_and_rewrites(self):
         app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
@@ -231,12 +226,12 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                 })
             network.assert_not_called()
 
-    def test_sandbox_graphql_unverified_mutation_node_is_refused(self):
+    def test_sandbox_graphql_mutations_are_unqualified(self):
         from sandbox_app_capabilities import GRAPH_READY_MUTATION
         app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
         app._scope_verified = True
         with patch("sandbox_app_capabilities.urlopen") as network:
-            with self.assertRaisesRegex(CapabilityBlocked, "GRAPHQL_MUTATION_TARGET_UNVERIFIED"):
+            with self.assertRaisesRegex(CapabilityBlocked, "GRAPHQL_OPERATION_FORBIDDEN"):
                 app.api("POST", "/graphql", {
                     "query": GRAPH_READY_MUTATION, "variables": {"id": "other-org"}
                 })
@@ -455,24 +450,17 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                 self.assertEqual(payload["reason"], reason)
 
 
-    def test_rejected_graphql_thread_never_leaves_mutation_authorized(self):
+    def test_rejected_graphql_thread_cannot_grant_mutation(self):
         from sandbox_app_capabilities import GRAPH_RESOLVE_MUTATION
         app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
         app._scope_verified = True
-        node = {"data": {"node": {
-            "isResolved": False,
-            "pullRequest": {"number": 17, "repository": {"nameWithOwner": app.repo}},
-        }}}
-        with patch.object(app, "api", return_value=node), patch.object(
-                app, "_repo_api", return_value={"head": {"ref": "l5-probe/test"}}):
-            with self.assertRaisesRegex(CapabilityBlocked, "THREAD_NOT_ON_PROBE_PR"):
-                app.resolve_thread("thread-id", 18)
-        self.assertFalse(app._authorized_graph_nodes)
         with patch("sandbox_app_capabilities.urlopen") as network:
-            with self.assertRaisesRegex(CapabilityBlocked, "GRAPHQL_MUTATION_TARGET_UNVERIFIED"):
+            with self.assertRaisesRegex(CapabilityBlocked, "RESOLVE_THREAD_NOT_QUALIFIED"):
+                app.resolve_thread("thread-id", 18)
+            self.assertFalse(app._authorized_graph_nodes)
+            with self.assertRaisesRegex(CapabilityBlocked, "GRAPHQL_OPERATION_FORBIDDEN"):
                 app.api("POST", "/graphql", {
-                    "query": GRAPH_RESOLVE_MUTATION,
-                    "variables": {"id": "thread-id"},
+                    "query": GRAPH_RESOLVE_MUTATION, "variables": {"id": "thread-id"}
                 })
             network.assert_not_called()
 
@@ -494,6 +482,55 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                                          "Forbidden", {}, io.BytesIO(message))):
             with self.assertRaisesRegex(CapabilityBlocked, "WAIT_RATE_LIMIT"):
                 app.api("GET", "/repos/NTinkicht/qualification-l5-sandbox")
+
+    def test_direct_rest_unqualified_writes_are_refused_without_network(self):
+        app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
+        app._scope_verified = True
+        blocked = [
+            ("POST", "/repos/NTinkicht/qualification-l5-sandbox/issues/1/comments"),
+            ("POST", "/repos/NTinkicht/qualification-l5-sandbox/actions/jobs/2/rerun"),
+            ("POST", "/repos/NTinkicht/qualification-l5-sandbox/pulls/1/requested_reviewers"),
+            ("PUT", "/repos/NTinkicht/qualification-l5-sandbox/pulls/1/merge"),
+            ("PUT", "/repos/NTinkicht/qualification-l5-sandbox/pulls/1/update-branch"),
+        ]
+        with patch("sandbox_app_capabilities.urlopen") as network:
+            for method, path in blocked:
+                with self.subTest(method=method, path=path):
+                    with self.assertRaisesRegex(CapabilityBlocked, "REST_WRITE_NOT_QUALIFIED"):
+                        app.api(method, path, {})
+            network.assert_not_called()
+
+    def test_forged_probe_pr_payload_is_refused(self):
+        app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
+        app._scope_verified = True
+        app._default_branch = "main"
+        path = "/repos/NTinkicht/qualification-l5-sandbox/pulls"
+        with patch("sandbox_app_capabilities.urlopen") as network:
+            for payload in [
+                {"head": "main", "base": "main", "draft": True},
+                {"head": "l5-probe/not-a-uuid", "base": "main", "draft": True},
+                {"head": "l5-probe/00000000-0000-0000-0000-000000000001",
+                 "base": "production", "draft": True},
+                {"head": "l5-probe/00000000-0000-0000-0000-000000000001",
+                 "base": "main", "draft": False},
+            ]:
+                with self.subTest(payload=payload):
+                    with self.assertRaisesRegex(CapabilityBlocked, "PROBE_PR_POST_NOT_QUALIFIED"):
+                        app.api("POST", path, payload)
+            network.assert_not_called()
+
+    def test_other_unqualified_operations_have_no_network(self):
+        app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
+        with patch.object(app, "_repo_api") as api:
+            for method, args in [
+                (app.request_review, (7, "reviewer")),
+                (app.update_branch, (7, "a" * 40)),
+                (app.mark_ready, ("prnode",)),
+            ]:
+                with self.subTest(method=method.__name__):
+                    with self.assertRaisesRegex(CapabilityBlocked, "NOT_QUALIFIED"):
+                        method(*args)
+            api.assert_not_called()
 
     def test_unqualified_rerun_never_dispatches(self):
         app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)

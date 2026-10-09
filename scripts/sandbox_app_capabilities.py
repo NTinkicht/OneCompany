@@ -77,6 +77,9 @@ class SandboxApp:
         self._scope_verified = False
         self._default_branch: str | None = None
         self._authorized_graph_nodes: dict[str, str] = {}
+        # One-time, exact-commit authorization produced ONLY by successful
+        # sandbox App git push and verified through GitHub branch readback.
+        self._pr_push_authorizations: dict[str, str] = {}
 
     def api(self, method: str, path: str, payload: dict | None = None) -> dict:
         if method not in {"GET", "POST", "PUT", "PATCH"}:
@@ -108,7 +111,8 @@ class SandboxApp:
                         r"[0-9a-f]{4}-[0-9a-f]{12}", head
                     ) or
                     payload.get("draft") is not True or
-                    payload.get("base") != self._default_branch):
+                    payload.get("base") != self._default_branch or
+                    head not in self._pr_push_authorizations):
                 raise CapabilityBlocked("PROBE_PR_POST_NOT_QUALIFIED")
         if path == "/graphql":
             query = payload.get("query") if isinstance(payload, dict) else None
@@ -244,11 +248,24 @@ class SandboxApp:
         return self._repo_api("GET", "/branches/" + branch.replace("/", "%2F"))
 
     def create_draft_pr(self, branch: str, base: str) -> dict:
-        return self._repo_api("POST", "/pulls", {
-            "title": "L5 V2 sandbox App write qualification",
-            "head": branch, "base": base, "draft": True,
-            "body": "Sandbox-only qualification. Never use this as production review evidence.",
-        })
+        expected = self._pr_push_authorizations.get(branch)
+        if not isinstance(expected, str) or not SHA40.fullmatch(expected):
+            raise CapabilityBlocked("PROBE_PR_REQUIRES_VERIFIED_PUSH")
+        if base != self._default_branch:
+            raise CapabilityBlocked("PROBE_PR_BASE_MISMATCH")
+        remote = self.branch(branch)
+        if ((remote.get("commit") or {}).get("sha")) != expected:
+            raise CapabilityBlocked("PROBE_PR_HEAD_CHANGED")
+        try:
+            return self._repo_api("POST", "/pulls", {
+                "title": "L5 V2 sandbox App write qualification",
+                "head": branch, "base": base, "draft": True,
+                "body": "Sandbox-only qualification. Never use this as production review evidence.",
+            })
+        finally:
+            # On ambiguous POST failure do not authorize any second write:
+            # retrying the same probe safely stops for immutable reconciliation.
+            self._pr_push_authorizations.pop(branch, None)
 
     def comment(self, number: int, body: str, operation_id: str) -> dict:
         """Blocked until a durable CAS lock serializes identical operations.
@@ -455,6 +472,7 @@ def push_canary(app: SandboxApp, probe_id: str) -> tuple[str, str]:
     remote = app.branch(branch)
     if (remote.get("commit") or {}).get("sha") != sha:
         raise CapabilityBlocked("PUSH_READBACK_MISMATCH")
+    app._pr_push_authorizations[branch] = sha
     return branch, base.removeprefix("origin/")
 
 
@@ -480,12 +498,20 @@ def run_sandbox_push_pr(repo: str, token: str, probe_id: str) -> dict:
         rows = result.get("items")
         if not isinstance(rows, list):
             raise CapabilityBlocked("PROBE_PR_LIST_INVALID")
-        matching.extend(
-            row for row in rows
-            if (row.get("head") or {}).get("ref") == branch
-            and (((row.get("head") or {}).get("repo") or {}).get("full_name") or
-                 "").lower() in ("", repo.lower())
-        )
+        for row in rows:
+            if not isinstance(row, dict):
+                raise CapabilityBlocked("PROBE_PR_ENTRY_INVALID")
+            head = row.get("head")
+            if not isinstance(head, dict):
+                raise CapabilityBlocked("PROBE_PR_HEAD_INVALID")
+            head_repo = head.get("repo")
+            if head_repo is not None and not isinstance(head_repo, dict):
+                raise CapabilityBlocked("PROBE_PR_HEAD_REPOSITORY_INVALID")
+            full_name = (head_repo or {}).get("full_name") or ""
+            if not isinstance(full_name, str):
+                raise CapabilityBlocked("PROBE_PR_HEAD_REPOSITORY_INVALID")
+            if head.get("ref") == branch and full_name.lower() in ("", repo.lower()):
+                matching.append(row)
         if len(matching) > 1:
             raise CapabilityBlocked("DUPLICATE_PROBE_PRS")
         if len(rows) < 100:
@@ -536,6 +562,7 @@ def run_sandbox_push_pr(repo: str, token: str, probe_id: str) -> dict:
     if marker_text != "Sandbox App qualification probe ID: " + probe_id + "\n":
         raise CapabilityBlocked("PROBE_CANARY_MISMATCH")
 
+    pushed_sha = app._pr_push_authorizations.get(branch)
     pr = app.create_draft_pr(branch, base)
     number = pr.get("number")
     if type(number) is not int or number < 1:
@@ -543,6 +570,8 @@ def run_sandbox_push_pr(repo: str, token: str, probe_id: str) -> dict:
     current = app._repo_api("GET", f"/pulls/{number}")
     if (current.get("head") or {}).get("ref") != branch:
         raise CapabilityBlocked("PR_READBACK_MISMATCH")
+    if ((current.get("head") or {}).get("sha")) != pushed_sha:
+        raise CapabilityBlocked("PR_COMMIT_READBACK_MISMATCH")
     head_repo = ((current.get("head") or {}).get("repo") or {}).get("full_name")
     if head_repo is not None and head_repo.lower() != repo.lower():
         raise CapabilityBlocked("PR_HEAD_OTHER_REPOSITORY")

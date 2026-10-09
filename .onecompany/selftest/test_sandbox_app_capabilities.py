@@ -192,7 +192,9 @@ class SandboxAppCapabilityTests(unittest.TestCase):
             "default_branch": "main"}), patch.object(
                 SandboxApp, "_repo_api", autospec=True, side_effect=fake_api
             ), patch("sandbox_app_capabilities.push_canary") as push:
-            with self.assertRaisesRegex(CapabilityBlocked, "PROBE_CANARY_MISMATCH"):
+            with self.assertRaisesRegex(
+                CapabilityBlocked, "PROBE_RECONCILIATION_REQUIRES_IMMUTABLE_PROOF"
+            ):
                 run_sandbox_push_pr(repo, "t" * 32, probe_id)
             push.assert_not_called()
 
@@ -363,9 +365,11 @@ class SandboxAppCapabilityTests(unittest.TestCase):
         branch = "l5-probe/" + probe_id
         def fake_api(_app, method, suffix, payload=None):
             if suffix.startswith("/pulls?"):
-                return {"items": [{"number": 17, "head": {"ref": branch}}]}
+                return {"items": []}
             if suffix.startswith("/branches/"):
-                return {"commit": {"sha": "a" * 40}}
+                raise CapabilityBlocked("REMOTE_REQUEST_FAILED:404")
+            if suffix.startswith("/contents/") and "ref=main" in suffix:
+                raise CapabilityBlocked("REMOTE_REQUEST_FAILED:404")
             if suffix.startswith("/contents/"):
                 return {"content": base64.b64encode(
                     ("Sandbox App qualification probe ID: " + probe_id + "\n").encode()
@@ -376,12 +380,13 @@ class SandboxAppCapabilityTests(unittest.TestCase):
         with patch.object(SandboxApp, "verify_installation",
                           return_value={"default_branch": "main"}), patch.object(
                               SandboxApp, "_repo_api", autospec=True, side_effect=fake_api
-                          ), patch("sandbox_app_capabilities.push_canary") as push:
+                          ), patch.object(SandboxApp, "create_draft_pr",
+                                          return_value={"number": 17}), patch(
+                              "sandbox_app_capabilities.push_canary",
+                              return_value=(branch, "main")) as push:
             with self.assertRaisesRegex(CapabilityBlocked, "PR_APP_IDENTITY_MISMATCH"):
                 run_sandbox_push_pr(repo, "t" * 32, probe_id)
-            push.assert_not_called()
-
-
+            push.assert_called_once()
 
     def test_rate_limit_403_waits_not_permission_denied(self):
         app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)

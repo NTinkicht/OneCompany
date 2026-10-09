@@ -216,7 +216,8 @@ class SandboxAppCapabilityTests(unittest.TestCase):
             if suffix == "/pulls/17":
                 return {"head": {"ref": "l5-probe/" + uid}}
             if suffix.startswith("/issues/17/comments?"):
-                return {"items": [{"id": 81, "body": "Note\n" + marker}]}
+                return {"items": [{"id": 81, "body": "Note\n\n" + marker,
+                                   "user": {"login": "ntinkicht-l5-sandbox[bot]"}}]}
             raise AssertionError((method, suffix))
         with patch.object(app, "_repo_api", side_effect=fake_api):
             result = app.comment(17, "Note", uid)
@@ -314,6 +315,29 @@ class SandboxAppCapabilityTests(unittest.TestCase):
             self.assertEqual(result["verified_write_classes"], [])
             self.assertEqual(result["reconciled_write_classes"], ["push", "create_pr"])
             canary.assert_not_called()
+
+
+    def test_untrusted_comment_marker_cannot_claim_app_write(self):
+        app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
+        uid = "00000000-0000-0000-0000-000000000701"
+        marker = "<!-- l5-sandbox-comment:" + uid + " -->"
+        def fake_api(method, suffix, payload=None):
+            if suffix == "/pulls/17":
+                return {"head": {"ref": "l5-probe/" + uid}}
+            if suffix.startswith("/issues/17/comments?"):
+                return {"items": [{"id": 81, "body": "Note\n\n" + marker,
+                                   "user": {"login": "malicious-user"}}]}
+            raise AssertionError("a malicious marker must not cause POST")
+        with patch.object(app, "_repo_api", side_effect=fake_api):
+            with self.assertRaisesRegex(CapabilityBlocked, "COMMENT_MARKER_UNTRUSTED"):
+                app.comment(17, "Note", uid)
+
+    def test_unqualified_rerun_never_dispatches(self):
+        app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
+        with patch.object(app, "_repo_api") as api:
+            with self.assertRaisesRegex(CapabilityBlocked, "RERUN_JOB_NOT_QUALIFIED"):
+                app.rerun_job(123)
+            api.assert_not_called()
 
     def test_push_probe_never_runs_without_installation(self):
         with patch.object(SandboxApp, "verify_installation",

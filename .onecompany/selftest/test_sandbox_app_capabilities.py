@@ -347,6 +347,34 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                 app.verify_installation()
         self.assertFalse(app._scope_verified)
 
+    def test_forged_attested_slug_cannot_override_other_app_token(self):
+        repo = "NTinkicht/qualification-l5-sandbox"
+        app = SandboxApp(repo, "ghs_1234567_other-app-token")
+        def api(method, path, payload=None):
+            if path.startswith("/installation/repositories"):
+                return {"total_count": 1, "repositories": [{"full_name": repo}]}
+            return {"full_name": repo, "private": True}
+        with patch.object(app, "api", side_effect=api), patch.dict(
+                os.environ, {"L5_EXPECTED_APP_ID": "5245673",
+                             "L5_ATTESTED_APP_SLUG": "ntinkicht-l5-sandbox"}):
+            with self.assertRaisesRegex(CapabilityBlocked, "APP_ID_NOT_ATTESTED"):
+                app.verify_installation()
+        self.assertFalse(app._scope_verified)
+
+    def test_wrong_expected_app_id_does_not_mutate(self):
+        repo = "NTinkicht/qualification-l5-sandbox"
+        app = SandboxApp(repo, "ghs_1234567_other-app-token")
+        def api(method, path, payload=None):
+            if path.startswith("/installation/repositories"):
+                return {"total_count": 1, "repositories": [{"full_name": repo}]}
+            return {"full_name": repo, "private": True}
+        with patch.object(app, "api", side_effect=api), patch.dict(
+                os.environ, {"L5_EXPECTED_APP_ID": "1234567",
+                             "L5_ATTESTED_APP_SLUG": "ntinkicht-l5-sandbox"}):
+            with self.assertRaisesRegex(CapabilityBlocked, "EXPECTED_APP_ID_MISMATCH"):
+                app.verify_installation()
+        self.assertFalse(app._scope_verified)
+
     def test_expected_github_app_token_can_qualify_preflight(self):
         repo = "NTinkicht/qualification-l5-sandbox"
         app = SandboxApp(repo, "ghs_5245673_matching-token")

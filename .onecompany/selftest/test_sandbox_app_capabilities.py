@@ -403,6 +403,79 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                 run_sandbox_push_pr(repo, "t" * 32, probe_id)
             push.assert_called_once()
 
+    def test_malformed_created_pr_readback_never_credits_app_writes(self):
+        repo = "NTinkicht/qualification-l5-sandbox"
+        probe_id = "00000000-0000-0000-0000-000000000001"
+        branch = "l5-probe/" + probe_id
+        for invalid in (False, 0, [], {}, ["spoof"], 17):
+            with self.subTest(raw_repo_name=invalid):
+                def fake_api(_app, method, suffix, payload=None):
+                    if suffix.startswith("/pulls?"):
+                        return {"items": []}
+                    if suffix.startswith("/branches/"):
+                        raise CapabilityBlocked("REMOTE_REQUEST_FAILED:404")
+                    if suffix.startswith("/contents/") and "ref=main" in suffix:
+                        raise CapabilityBlocked("REMOTE_REQUEST_FAILED:404")
+                    if suffix.startswith("/contents/"):
+                        return {"content": base64.b64encode(
+                            ("Sandbox App qualification probe ID: " + probe_id + "\\n").encode()
+                        ).decode()}
+                    if suffix == "/pulls/17":
+                        return {"head": {
+                            "ref": branch, "sha": "a" * 40,
+                            "repo": {"full_name": invalid},
+                        }, "user": {"login": "ntinkicht-l5-sandbox[bot]"}}
+                    raise AssertionError(suffix)
+
+                def tracked_push(app, probe_id):
+                    app._pr_push_authorizations[branch] = "a" * 40
+                    return branch, "main"
+
+                with patch.object(SandboxApp, "verify_installation",
+                                  return_value={"default_branch": "main"}), patch.object(
+                        SandboxApp, "_repo_api", autospec=True, side_effect=fake_api
+                    ), patch.object(SandboxApp, "create_draft_pr",
+                                    return_value={"number": 17}), patch(
+                        "sandbox_app_capabilities.push_canary",
+                        side_effect=tracked_push) as push:
+                    with self.assertRaisesRegex(CapabilityBlocked, "PR_HEAD_OTHER_REPOSITORY"):
+                        run_sandbox_push_pr(repo, "t" * 32, probe_id)
+                    push.assert_called_once()
+
+    def test_malformed_app_author_readback_never_credits_writes(self):
+        repo = "NTinkicht/qualification-l5-sandbox"
+        probe_id = "00000000-0000-0000-0000-000000000001"
+        branch = "l5-probe/" + probe_id
+
+        def fake_api(_app, method, suffix, payload=None):
+            if suffix.startswith("/pulls?"):
+                return {"items": []}
+            if suffix.startswith("/branches/"):
+                raise CapabilityBlocked("REMOTE_REQUEST_FAILED:404")
+            if suffix.startswith("/contents/") and "ref=main" in suffix:
+                raise CapabilityBlocked("REMOTE_REQUEST_FAILED:404")
+            if suffix.startswith("/contents/"):
+                return {"content": base64.b64encode(
+                    ("Sandbox App qualification probe ID: " + probe_id + "\\n").encode()
+                ).decode()}
+            if suffix == "/pulls/17":
+                return {"head": {"ref": branch, "sha": "a" * 40},
+                        "user": {"login": False}}
+            raise AssertionError(suffix)
+
+        def tracked_push(app, probe_id):
+            app._pr_push_authorizations[branch] = "a" * 40
+            return branch, "main"
+
+        with patch.object(SandboxApp, "verify_installation",
+                          return_value={"default_branch": "main"}), patch.object(
+                SandboxApp, "_repo_api", autospec=True, side_effect=fake_api
+            ), patch.object(SandboxApp, "create_draft_pr",
+                            return_value={"number": 17}), patch(
+                "sandbox_app_capabilities.push_canary", side_effect=tracked_push):
+            with self.assertRaisesRegex(CapabilityBlocked, "PR_APP_IDENTITY_MISMATCH"):
+                run_sandbox_push_pr(repo, "t" * 32, probe_id)
+
     def test_rate_limit_403_waits_not_permission_denied(self):
         app = SandboxApp("NTinkicht/qualification-l5-sandbox", "t" * 32)
         cases = [{"Retry-After": "10"}, {"x-ratelimit-remaining": "0"}]

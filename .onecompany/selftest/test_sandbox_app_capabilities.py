@@ -525,10 +525,15 @@ class SandboxAppCapabilityTests(unittest.TestCase):
                 ), patch("sandbox_app_capabilities.shell") as git, patch(
                     "sandbox_app_capabilities.write_probe_canary"), patch.object(
                     app, "branch", return_value={"commit": invalid}):
-                git.side_effect = lambda args, **kwargs: (
-                    "origin/main" if "symbolic-ref" in args
-                    else "a" * 40 if "rev-parse" in args else ""
-                )
+                def fake_git(args, **kwargs):
+                    if "clone" in args:
+                        Path(args[-1]).mkdir(parents=True, exist_ok=True)
+                    if "symbolic-ref" in args:
+                        return "origin/main"
+                    if "rev-parse" in args:
+                        return "a" * 40
+                    return ""
+                git.side_effect = fake_git
                 with self.assertRaisesRegex(CapabilityBlocked, "PUSH_READBACK_MISMATCH"):
                     push_canary(app, probe_id)
 

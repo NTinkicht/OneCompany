@@ -3,9 +3,13 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 import unittest
+import tempfile
+from unittest.mock import patch
+from contextlib import redirect_stdout
+import io
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from l5_shadow_agreement import evaluate, strict_json_loads
+from l5_shadow_agreement import evaluate, strict_json_loads, read_bounded_evidence, main
 
 REPO = "NTinkicht/OneCompany"
 
@@ -106,6 +110,27 @@ class ShadowAgreementTests(unittest.TestCase):
         malicious = "[" * 10_000 + "0" + "]" * 10_000
         with self.assertRaisesRegex(ValueError, "SHADOW_JSON_NESTING_TOO_DEEP"):
             strict_json_loads(malicious)
+
+    def test_oversized_input_is_refused_before_parser_and_cli_exits_two(self):
+        # A tiny monkeypatched cap tests the real byte-boundary without
+        # allocating an attacker-sized file in CI.
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory) / "oversized.json"
+            evidence.write_bytes(b" " * 17)
+            with self.assertRaisesRegex(ValueError, "SHADOW_EVIDENCE_TOO_LARGE"):
+                read_bounded_evidence(evidence, limit=16)
+            output = io.StringIO()
+            with patch("l5_shadow_agreement.MAX_EVIDENCE_BYTES", 16):
+                # Function default expressions bind at definition time;
+                # patch the bounded reader itself for the CLI path.
+                with patch("l5_shadow_agreement.read_bounded_evidence",
+                           side_effect=ValueError("SHADOW_EVIDENCE_TOO_LARGE")):
+                    with patch.object(sys, "argv", ["shadow", str(evidence)]):
+                        with redirect_stdout(output):
+                            result = main()
+            self.assertEqual(result, 2)
+            self.assertIn('"status": "INVALID_EVIDENCE"', output.getvalue())
+            self.assertIn("SHADOW_EVIDENCE_TOO_LARGE", output.getvalue())
 
     def test_empty_data_is_not_a_pass(self):
         result = evaluate(self.payload([]))

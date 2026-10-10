@@ -113,6 +113,32 @@ class ExternalMistralReviewTests(unittest.TestCase):
                 '+password="exampleThisIsARealPassword123"',
             )
 
+    def test_exact_false_h8_verification_flag_is_not_a_credential(self):
+        # This is a negative assurance status, not credential material.
+        m.validate_diff(
+            ["scripts/release_source_drift.py"],
+            'diff --git a/scripts/release_source_drift.py b/scripts/release_source_drift.py\n'
+            '+        "h8_credential_rollback_e2e_verified": False,\n',
+        )
+        for candidate in (
+            'True',
+            '"untrusted"',
+            '"not-a-safe-reference"',
+        ):
+            with self.subTest(value=candidate), self.assertRaisesRegex(
+                ValueError, "EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED"
+            ):
+                m.validate_diff(
+                    ["scripts/release_source_drift.py"],
+                    f'+"h8_credential_rollback_e2e_verified": {candidate},\n',
+                )
+        # No generic exemption for credential-bearing keys.
+        with self.assertRaisesRegex(ValueError, "EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED"):
+            m.validate_diff(
+                ["scripts/release_source_drift.py"],
+                '+"api_key": False,\n',
+            )
+
     def test_non_text_changes_fail_closed(self):
         with self.assertRaisesRegex(
             ValueError, "EXTERNAL_REVIEW_NON_TEXT_CONTENT_BLOCKED"

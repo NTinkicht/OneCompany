@@ -121,13 +121,9 @@ class ShadowAgreementTests(unittest.TestCase):
                 read_bounded_evidence(evidence, limit=16)
             output = io.StringIO()
             with patch("l5_shadow_agreement.MAX_EVIDENCE_BYTES", 16):
-                # Function default expressions bind at definition time;
-                # patch the bounded reader itself for the CLI path.
-                with patch("l5_shadow_agreement.read_bounded_evidence",
-                           side_effect=ValueError("SHADOW_EVIDENCE_TOO_LARGE")):
-                    with patch.object(sys, "argv", ["shadow", str(evidence)]):
-                        with redirect_stdout(output):
-                            result = main()
+                with patch.object(sys, "argv", ["shadow", str(evidence)]):
+                    with redirect_stdout(output):
+                        result = main()
             self.assertEqual(result, 2)
             self.assertIn('"status": "INVALID_EVIDENCE"', output.getvalue())
             self.assertIn("SHADOW_EVIDENCE_TOO_LARGE", output.getvalue())

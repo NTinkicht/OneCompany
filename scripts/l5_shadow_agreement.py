@@ -45,9 +45,11 @@ def strict_json_loads(text: str) -> Any:
         raise ValueError("SHADOW_JSON_NESTING_TOO_DEEP") from exc
 
 
-def read_bounded_evidence(path: Path, *, limit: int = MAX_EVIDENCE_BYTES) -> str:
+def read_bounded_evidence(path: Path, *, limit: int | None = None) -> str:
     # A single bounded read also handles attacker-controlled sparse/large
     # files without ever materializing their entire contents in memory.
+    if limit is None:
+        limit = MAX_EVIDENCE_BYTES
     with path.open("rb") as stream:
         content = stream.read(limit + 1)
     if len(content) > limit:

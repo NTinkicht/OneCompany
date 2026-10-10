@@ -58,21 +58,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Both files come from the protected-main checkout. Preserve the
-          # wrapper's relative .github/ implementation path in an isolated
-          # source-only stage; never execute files from the target PR checkout.
-          install -d -m 700 /tmp/onecompany-external-review-trusted
-          install -d -m 700 /tmp/onecompany-external-review-trusted/scripts
-          install -d -m 700 /tmp/onecompany-external-review-trusted/.github
-          install -m 600 scripts/mistral_external_review.py \
-            /tmp/onecompany-external-review-trusted/scripts/mistral_external_review.py
-          install -m 600 .github/mistral_external_review_impl.py \
-            /tmp/onecompany-external-review-trusted/.github/mistral_external_review_impl.py
-          # Raise only the isolated implementation's review packet bounds.
-          # Require exact old constants: malformed/stale source fails closed.
+          cp scripts/mistral_external_review.py /tmp/onecompany-mistral-external-review.py
+          # Keep the external reviewer aligned with the same 256 KB ceiling as
+          # the native reviewer without weakening any target/provenance/secret guard.
           python -I - <<'PY'
           from pathlib import Path
-          path = Path('/tmp/onecompany-external-review-trusted/.github/mistral_external_review_impl.py')
+          path = Path('/tmp/onecompany-mistral-external-review.py')
           text = path.read_text(encoding='utf-8')
           replacements = {
               'MAX_DIFF_BYTES = 48_000': 'MAX_DIFF_BYTES = 256_000',
@@ -84,7 +75,7 @@ jobs:
               text = text.replace(old, new)
           path.write_text(text, encoding='utf-8')
           PY
-          python -I /tmp/onecompany-external-review-trusted/scripts/mistral_external_review.py prepare
+          python -I /tmp/onecompany-mistral-external-review.py prepare
 
       - name: Checkout exact public target without credentials
         if: steps.target.outputs.ready == 'true'
@@ -118,7 +109,7 @@ jobs:
           TARGET_BASE: ${{ steps.target.outputs.base }}
           TARGET_AUTHORS: ${{ steps.target.outputs.authors }}
           TARGET_DIR: /tmp/onecompany-external-target
-        run: python -I /tmp/onecompany-external-review-trusted/scripts/mistral_external_review.py build
+        run: python -I /tmp/onecompany-mistral-external-review.py build
 
       - name: Verify zero-additional-spend Mistral entitlement
         id: preflight
@@ -163,7 +154,7 @@ jobs:
         if: steps.preflight.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python -I /tmp/onecompany-external-review-trusted/scripts/mistral_external_review.py safety
+        run: python -I /tmp/onecompany-mistral-external-review.py safety
 
       - name: Install pinned Mistral Vibe
         if: steps.preflight.outputs.ready == 'true'
@@ -173,7 +164,7 @@ jobs:
         if: steps.preflight.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python -I /tmp/onecompany-external-review-trusted/scripts/mistral_external_review.py safety
+        run: python -I /tmp/onecompany-mistral-external-review.py safety
 
       - name: Run isolated no-tool external review
         if: steps.preflight.outputs.ready == 'true'
@@ -215,7 +206,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           SOURCE_COMMENT_ID: ${{ github.event.comment.id || github.event.client_payload.source_comment_id }}
-        run: python -I /tmp/onecompany-external-review-trusted/scripts/mistral_external_review.py validate
+        run: python -I /tmp/onecompany-mistral-external-review.py validate
 
       - name: Recheck target before durable publication
         if: steps.result.outputs.ready == 'true'
@@ -228,14 +219,14 @@ jobs:
         run: |
           set -euo pipefail
           status="$(mktemp)"
-          GITHUB_OUTPUT="$status" python -I /tmp/onecompany-external-review-trusted/scripts/mistral_external_review.py prepare
+          GITHUB_OUTPUT="$status" python -I /tmp/onecompany-mistral-external-review.py prepare
           grep -qx 'ready=true' "$status"
 
       - name: Recheck live emergency stop before publication
         if: steps.result.outputs.ready == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: python -I /tmp/onecompany-external-review-trusted/scripts/mistral_external_review.py safety
+        run: python -I /tmp/onecompany-mistral-external-review.py safety
 
       - name: Publish exact external review evidence on OneCompany wake bus
         if: steps.result.outputs.ready == 'true'

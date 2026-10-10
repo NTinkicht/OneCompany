@@ -100,6 +100,13 @@ class ShadowAgreementTests(unittest.TestCase):
             ):
                 strict_json_loads(raw)
 
+    def test_excessively_nested_json_is_invalid_evidence_without_traceback(self):
+        # Real decoder recursion exhaustion must not escape to the CLI as
+        # an unhandled exception or be mistaken for positive shadow proof.
+        malicious = "[" * 10_000 + "0" + "]" * 10_000
+        with self.assertRaisesRegex(ValueError, "SHADOW_JSON_NESTING_TOO_DEEP"):
+            strict_json_loads(malicious)
+
     def test_empty_data_is_not_a_pass(self):
         result = evaluate(self.payload([]))
         self.assertIsNone(result["results"][REPO]["agreement_percent"])

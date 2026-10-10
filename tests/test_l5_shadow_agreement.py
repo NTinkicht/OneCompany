@@ -70,6 +70,13 @@ class ShadowAgreementTests(unittest.TestCase):
             evaluate(self.payload([{**sample(1, "2026-10-11"),
                                     "shadow_decision": ""}]))
 
+    def test_unknown_but_matching_labels_do_not_inflate_agreement(self):
+        records = [sample(i, f"2026-10-{10 + i:02}") for i in range(3)]
+        records[0]["labeled_decision"] = "NOT_A_DECISION"
+        records[0]["shadow_decision"] = "NOT_A_DECISION"
+        with self.assertRaisesRegex(ValueError, "SHADOW_UNSUPPORTED_DECISION"):
+            evaluate(self.payload(records))
+
     def test_empty_data_is_not_a_pass(self):
         result = evaluate(self.payload([]))
         self.assertIsNone(result["results"][REPO]["agreement_percent"])

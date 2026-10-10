@@ -18,6 +18,9 @@ from typing import Any
 ALLOWED_REPOS = frozenset({"NTinkicht/OneCompany", "NTinkicht/Tabibi", "NTinkicht/veritas-atlas"})
 FIELDS = frozenset({"run_id", "repository", "day", "labeled_decision", "shadow_decision"})
 IDENTIFIER = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.:/-]{0,127}$")
+# This is a binary Phase-2 selector agreement schema, NOT the full executor
+# action vocabulary. Widening it requires a reviewed new evidence version.
+SUPPORTED_DECISIONS = frozenset({"SELECT", "BLOCK"})
 
 
 def evaluate(payload: Any) -> dict:
@@ -38,8 +41,10 @@ def evaluate(payload: Any) -> dict:
             raise ValueError("SHADOW_TARGET_NOT_ALLOWED")
         run = row["run_id"]
         label, candidate = row["labeled_decision"], row["shadow_decision"]
-        if not all(isinstance(s, str) and IDENTIFIER.fullmatch(s) for s in (run, label, candidate)):
+        if not isinstance(run, str) or not IDENTIFIER.fullmatch(run):
             raise ValueError("SHADOW_DECISION_OR_RUN_INVALID")
+        if label not in SUPPORTED_DECISIONS or candidate not in SUPPORTED_DECISIONS:
+            raise ValueError("SHADOW_UNSUPPORTED_DECISION")
         day = row["day"]
         if not isinstance(day, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
             raise ValueError("SHADOW_DAY_INVALID")

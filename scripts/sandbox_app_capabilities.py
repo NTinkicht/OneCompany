@@ -605,8 +605,14 @@ def push_canary(app: SandboxApp, probe_id: str) -> tuple[str, str]:
     return branch, base.removeprefix("origin/")
 
 
-def run_sandbox_push_pr(repo: str, token: str, probe_id: str) -> dict:
-    """Replay-safe sandbox probe with separate evidence for push and PR writes."""
+def run_sandbox_push_pr(repo: str, token: str, probe_id: str, *,
+                        push_only: bool = False) -> dict:
+    """Replay-safe sandbox probe with independent push / PR authorization.
+
+    A push-only qualification never calls the PR API. It proves only the
+    installation-token git push, exact remote SHA and protected canary bytes.
+    The separately gated branch-name-only PR creation remains unqualified.
+    """
     app = SandboxApp(repo, token)
     meta = app.verify_installation()
     try:
@@ -677,11 +683,17 @@ def run_sandbox_push_pr(repo: str, token: str, probe_id: str) -> dict:
     else:
         if isinstance(base_marker, dict):
             raise CapabilityBlocked("PROBE_ID_ALREADY_ON_DEFAULT")
+    # A positive *push-only* experiment requires verified active sandbox
+    # policy before any write, but does not mistake policy for the unproven
+    # negative force-push race needed before PR creation.
+    if push_only:
+        app._inspect_exclusive_probe_ruleset(branch)
     branch, base = push_canary(app, probe_id)
-    marker_ref = branch
-
+    # Never bind a positive attestation to a mutable branch-name content
+    # lookup. Fetch the canary from the exact commit proven by git push.
+    pushed_sha = require_sha(app._pr_push_authorizations.get(branch))
     marker_path = ("/contents/.l5-sandbox-probes/" + probe_id
-                   + ".txt?ref=" + marker_ref.replace("/", "%2F"))
+                   + ".txt?ref=" + pushed_sha)
     marker_data = app._repo_api("GET", marker_path)
     try:
         marker_text = base64.b64decode(
@@ -692,7 +704,21 @@ def run_sandbox_push_pr(repo: str, token: str, probe_id: str) -> dict:
     if marker_text != "Sandbox App qualification probe ID: " + probe_id + "\n":
         raise CapabilityBlocked("PROBE_CANARY_MISMATCH")
 
-    pushed_sha = app._pr_push_authorizations.get(branch)
+    if push_only:
+        # Recheck the live ref AFTER immutable content readback. Another
+        # actor moving the branch during the probe invalidates qualification.
+        current = app.branch(branch)
+        at_head = current.get("commit") if isinstance(current, dict) else None
+        if not isinstance(at_head, dict) or at_head.get("sha") != pushed_sha:
+            raise CapabilityBlocked("PROBE_PUSH_HEAD_CHANGED")
+        return {
+            "repo": app.repo, "sandbox_branch": branch,
+            "verified_head_sha": pushed_sha,
+            "verified_write_classes": ["push"],
+            "unverified_write_classes": list(WRITE_CLASSES[1:]),
+            "production_enabled": False,
+            "status": "SANDBOX_PUSH_ONLY_PROOF",
+        }
     pr = app.create_draft_pr(branch, base)
     number = pr.get("number")
     if type(number) is not int or number < 1:
@@ -733,18 +759,23 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--sandbox-repo", required=True)
     parser.add_argument("--probe-id", help="stable UUID for idempotent write qualification")
-    parser.add_argument("--push-pr", action="store_true",
-                        help="Mutate ONLY the explicit sandbox to qualify git push and PR creation")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--push-only", action="store_true",
+                      help="Qualify App git push only; PR creation remains blocked")
+    mode.add_argument("--push-pr", action="store_true",
+                      help="Sandbox push plus independently gated draft PR")
     args = parser.parse_args()
     try:
         repo = require_sandbox(args.sandbox_repo)
         token = os.environ.get("L5_APP_INSTALLATION_TOKEN", "")
         app = SandboxApp(repo, token)
         meta = app.verify_installation()
-        if args.push_pr:
+        if args.push_pr or args.push_only:
             if not args.probe_id:
                 raise CapabilityBlocked("PROBE_ID_REQUIRED_FOR_WRITES")
-            result = run_sandbox_push_pr(repo, token, args.probe_id)
+            result = run_sandbox_push_pr(
+                repo, token, args.probe_id, push_only=args.push_only,
+            )
         else:
             result = {
                 "repo": repo, "default_branch": meta.get("default_branch"),
@@ -752,7 +783,7 @@ def main() -> int:
                 "status": "SANDBOX_READ_ONLY_PREFLIGHT", "production_enabled": False,
             }
         print(json.dumps(result, sort_keys=True))
-        return 0 if args.push_pr else 2
+        return 0 if (args.push_pr or args.push_only) else 2
     except CapabilityBlocked as exc:
         reason = str(exc)
         status = reason.split(":", 1)[0] if reason.startswith("WAIT_") else "BLOCK_PERMISSION"

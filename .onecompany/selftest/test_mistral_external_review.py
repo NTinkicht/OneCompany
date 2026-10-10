@@ -113,6 +113,32 @@ class ExternalMistralReviewTests(unittest.TestCase):
                 '+password="exampleThisIsARealPassword123"',
             )
 
+    def test_exact_false_h8_verification_flag_is_not_a_credential(self):
+        # This is a negative assurance status, not credential material.
+        m.validate_diff(
+            ["scripts/release_source_drift.py"],
+            'diff --git a/scripts/release_source_drift.py b/scripts/release_source_drift.py\n'
+            '+        "h8_credential_rollback_e2e_verified": False,\n',
+        )
+        for candidate in (
+            'True',
+            '"untrusted"',
+            '"not-a-safe-reference"',
+        ):
+            with self.subTest(value=candidate), self.assertRaisesRegex(
+                ValueError, "EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED"
+            ):
+                m.validate_diff(
+                    ["scripts/release_source_drift.py"],
+                    f'+"h8_credential_rollback_e2e_verified": {candidate},\n',
+                )
+        # No generic exemption for credential-bearing keys.
+        with self.assertRaisesRegex(ValueError, "EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED"):
+            m.validate_diff(
+                ["scripts/release_source_drift.py"],
+                '+"api_key": False,\n',
+            )
+
     def test_non_text_changes_fail_closed(self):
         with self.assertRaisesRegex(
             ValueError, "EXTERNAL_REVIEW_NON_TEXT_CONTENT_BLOCKED"
@@ -858,7 +884,36 @@ class ExternalMistralReviewTests(unittest.TestCase):
             parse.assert_not_called()
         output_text = open(output_path, encoding="utf-8").read()
         self.assertIn("ready=false", output_text)
-        self.assertIn("status=EXTERNAL_REVIEW_TARGET_BLOCKED", output_text)
+        self.assertIn("status=EXTERNAL_REVIEW_AUTHORITY_REVOKED", output_text)
+
+    def test_prepare_failure_codes_are_exact_allowlisted_and_nonleaking(self):
+        import urllib.error
+
+        for code in (
+            "EXTERNAL_REVIEW_AUTHORITY_REVOKED",
+            "EXTERNAL_REVIEW_TARGET_STALE",
+            "EXTERNAL_REVIEW_DECLARED_AUTHORS_MISMATCH",
+            "EXTERNAL_REVIEW_HISTORY_UNAVAILABLE",
+            "MISTRAL_SELF_REVIEW_BLOCKED",
+        ):
+            with self.subTest(code=code):
+                self.assertEqual(m._safe_prepare_failure_status(ValueError(code)), code)
+        for error in (
+            ValueError("EXTERNAL_REVIEW_TARGET_STALE: leaked-token-example"),
+            ValueError("GH_TOKEN=leaked-token-example"),
+            RuntimeError("Authorization: Bearer leaked-token-example"),
+            KeyError("MISTRAL_API_KEY"),
+        ):
+            with self.subTest(error=type(error).__name__):
+                self.assertEqual(
+                    m._safe_prepare_failure_status(error),
+                    "EXTERNAL_REVIEW_TARGET_BLOCKED",
+                )
+        self.assertEqual(
+            m._safe_prepare_failure_status(urllib.error.URLError("secret-token")),
+            "EXTERNAL_REVIEW_EVIDENCE_READBACK_FAILED",
+        )
+
 
     def test_encoded_structured_sensitive_key_is_blocked(self):
         with self.assertRaisesRegex(

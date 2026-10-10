@@ -18,13 +18,67 @@ import importlib.util
 import re
 import sys
 from pathlib import Path
+import os
+import subprocess
+import types
 
-_IMPL_PATH = Path(__file__).resolve().parents[1] / ".github" / "mistral_external_review_impl.py"
-_SPEC = importlib.util.spec_from_file_location("_onecompany_mistral_external_review_impl", _IMPL_PATH)
-if _SPEC is None or _SPEC.loader is None:
-    raise ImportError("external review implementation loader unavailable")
-_IMPL = importlib.util.module_from_spec(_SPEC)
-_SPEC.loader.exec_module(_IMPL)
+# These exact protected-workflow patch markers are deliberately retained in
+# the source-only wrapper. The trusted owner-dispatched Actions workflow
+# patches its isolated /tmp copy, never a PR-controlled file.
+MAX_DIFF_BYTES = 48_000
+MAX_PROMPT_BYTES = 64_000
+
+_SCRIPT_PATH = Path(__file__).resolve()
+_IMPL_PATH = _SCRIPT_PATH.parents[1] / ".github" / "mistral_external_review_impl.py"
+if not _IMPL_PATH.is_file():
+    # The existing trusted workflow copies only the wrapper to /tmp. Resolve
+    # the implementation from the still-trusted OneCompany checkout, never
+    # from the public candidate checkout or from a model-provided workdir.
+    if (
+        _SCRIPT_PATH.name != "onecompany-mistral-external-review.py"
+        or os.environ.get("GITHUB_REPOSITORY") != "NTinkicht/OneCompany"
+        or os.environ.get("GITHUB_REF") != "refs/heads/main"
+    ):
+        raise ImportError("UNTRUSTED_EXTERNAL_REVIEW_WRAPPER_CONTEXT")
+    _workspace = os.environ.get("GITHUB_WORKSPACE")
+    _sha = os.environ.get("GITHUB_SHA", "")
+    if not _workspace or not re.fullmatch(r"[0-9a-f]{40}", _sha):
+        raise ImportError("EXTERNAL_REVIEW_SOURCE_IDENTITY_UNAVAILABLE")
+    _root = Path(_workspace).resolve(strict=True)
+    _verified = subprocess.run(
+        ["git", "-C", str(_root), "rev-parse", "HEAD"],
+        text=True, capture_output=True, timeout=10, check=False,
+    )
+    if _verified.returncode != 0 or _verified.stdout.strip() != _sha:
+        raise ImportError("EXTERNAL_REVIEW_SOURCE_SHA_MISMATCH")
+    # Do NOT read the mutable worktree file here. Git HEAD alone does not
+    # establish that the checkout is clean after the model step. Read the blob
+    # from the pinned commit into memory and compile precisely those bytes;
+    # never verify one file and open a possibly replaced file afterward.
+    _blob = subprocess.run(
+        [
+            "git", "-C", str(_root), "show",
+            _sha + ":.github/mistral_external_review_impl.py",
+        ],
+        capture_output=True, timeout=10, check=False,
+    )
+    if _blob.returncode != 0 or not 1 <= len(_blob.stdout) <= 150_000:
+        raise ImportError("EXTERNAL_REVIEW_PINNED_BLOB_UNAVAILABLE")
+    _IMPL = types.ModuleType("_onecompany_mistral_external_review_impl")
+    _IMPL.__file__ = _sha + ":.github/mistral_external_review_impl.py"
+    exec(compile(_blob.stdout, _IMPL.__file__, "exec"), _IMPL.__dict__)
+else:
+    _SPEC = importlib.util.spec_from_file_location(
+        "_onecompany_mistral_external_review_impl", _IMPL_PATH,
+    )
+    if _SPEC is None or _SPEC.loader is None:
+        raise ImportError("external review implementation loader unavailable")
+    _IMPL = importlib.util.module_from_spec(_SPEC)
+    _SPEC.loader.exec_module(_IMPL)
+# The protected workflow's exact-marker 256 KB/320 KB patch applies only to
+# the trusted staged wrapper, and propagates into the immutable implementation.
+_IMPL.MAX_DIFF_BYTES = MAX_DIFF_BYTES
+_IMPL.MAX_PROMPT_BYTES = MAX_PROMPT_BYTES
 
 MAX_SAFE_NUMERIC_LITERAL_CHARS = 64
 _SAFE_DECIMAL = re.compile(r"[-+]?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][-+]?[0-9]+)?\Z")

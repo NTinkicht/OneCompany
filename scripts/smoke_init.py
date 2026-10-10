@@ -29,6 +29,24 @@ def require(condition: bool, message: str) -> None:
 
 def main() -> int:
     try:
+        # A source-only reviewer regression is present on OneCompany itself,
+        # but not in disposable customer template installations. Execute it
+        # from this required Validate smoke step when packaged in the source.
+        wrapper_regression = ROOT / "tests" / "test_l5_external_wrapper_trusted_bootstrap.py"
+        if wrapper_regression.is_file():
+            reviewed = run(
+                [
+                    sys.executable, "-m", "unittest", "discover",
+                    "-s", "tests", "-p",
+                    "test_l5_external_wrapper_trusted_bootstrap.py",
+                ],
+                ROOT,
+            )
+            require(
+                reviewed.returncode == 0,
+                "trusted external reviewer regression failed:\n"
+                + reviewed.stdout + "\n" + reviewed.stderr,
+            )
         with tempfile.TemporaryDirectory(prefix="onecompany-init-") as temp:
             target = Path(temp) / "template-copy"
             target.mkdir()

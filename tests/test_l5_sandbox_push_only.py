@@ -31,6 +31,8 @@ class SandboxPushOnlyContractTests(unittest.TestCase):
         if suffix == "/contents/.l5-sandbox-probes/" + PROBE + ".txt?ref=main":
             raise CapabilityBlocked("REMOTE_REQUEST_FAILED:404")
         if suffix.startswith("/contents/.l5-sandbox-probes/") and "?ref=" in suffix:
+            if suffix != "/contents/.l5-sandbox-probes/" + PROBE + ".txt?ref=" + SHA:
+                raise AssertionError("canary must be pinned to immutable commit SHA")
             return {"content": base64.b64encode(
                 ("Sandbox App qualification probe ID: " + PROBE + "\n").encode()
             ).decode()}
@@ -49,10 +51,16 @@ class SandboxPushOnlyContractTests(unittest.TestCase):
             SandboxApp, "_repo_api", autospec=True, side_effect=self._api
         ), patch.object(
             SandboxApp, "_inspect_exclusive_probe_ruleset"
-        ) as policy, patch(
+        ) as policy, patch.object(
+            SandboxApp, "branch", side_effect=[
+                CapabilityBlocked("REMOTE_REQUEST_FAILED:404"),
+                {"commit": {"sha": SHA}},
+            ],
+        ) as branch_read, patch(
             "sandbox_app_capabilities.push_canary", side_effect=self._push
         ) as pushed, patch.object(SandboxApp, "create_draft_pr") as forbidden:
             out = run_sandbox_push_pr(REPO, "t" * 32, PROBE, push_only=True)
+            self.assertEqual(branch_read.call_count, 2)
             self.assertEqual(out["status"], "SANDBOX_PUSH_ONLY_PROOF")
             self.assertEqual(out["sandbox_branch"], BRANCH)
             self.assertEqual(out["verified_head_sha"], SHA)
@@ -62,6 +70,28 @@ class SandboxPushOnlyContractTests(unittest.TestCase):
             self.assertFalse(out["production_enabled"])
             policy.assert_called_once_with(BRANCH)
             pushed.assert_called_once()
+            forbidden.assert_not_called()
+
+    def test_branch_change_after_immutable_readback_refuses_proof(self):
+        with patch.object(
+            SandboxApp, "verify_installation",
+            return_value={"default_branch": "main"},
+        ), patch.object(
+            SandboxApp, "_repo_api", autospec=True, side_effect=self._api
+        ), patch.object(
+            SandboxApp, "_inspect_exclusive_probe_ruleset"
+        ), patch.object(
+            SandboxApp, "branch", side_effect=[
+                CapabilityBlocked("REMOTE_REQUEST_FAILED:404"),
+                {"commit": {"sha": "b" * 40}},
+            ],
+        ), patch(
+            "sandbox_app_capabilities.push_canary", side_effect=self._push
+        ), patch.object(SandboxApp, "create_draft_pr") as forbidden:
+            with self.assertRaisesRegex(
+                CapabilityBlocked, "PROBE_PUSH_HEAD_CHANGED"
+            ):
+                run_sandbox_push_pr(REPO, "t" * 32, PROBE, push_only=True)
             forbidden.assert_not_called()
 
     def test_unattested_policy_never_pushes(self):

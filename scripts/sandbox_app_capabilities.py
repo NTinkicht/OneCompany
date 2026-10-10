@@ -689,10 +689,11 @@ def run_sandbox_push_pr(repo: str, token: str, probe_id: str, *,
     if push_only:
         app._inspect_exclusive_probe_ruleset(branch)
     branch, base = push_canary(app, probe_id)
-    marker_ref = branch
-
+    # Never bind a positive attestation to a mutable branch-name content
+    # lookup. Fetch the canary from the exact commit proven by git push.
+    pushed_sha = require_sha(app._pr_push_authorizations.get(branch))
     marker_path = ("/contents/.l5-sandbox-probes/" + probe_id
-                   + ".txt?ref=" + marker_ref.replace("/", "%2F"))
+                   + ".txt?ref=" + pushed_sha)
     marker_data = app._repo_api("GET", marker_path)
     try:
         marker_text = base64.b64decode(
@@ -703,11 +704,13 @@ def run_sandbox_push_pr(repo: str, token: str, probe_id: str, *,
     if marker_text != "Sandbox App qualification probe ID: " + probe_id + "\n":
         raise CapabilityBlocked("PROBE_CANARY_MISMATCH")
 
-    pushed_sha = app._pr_push_authorizations.get(branch)
     if push_only:
-        require_sha(pushed_sha)
-        # The existing push_canary readback and this content readback are
-        # the only qualified positive evidence. Never create any PR here.
+        # Recheck the live ref AFTER immutable content readback. Another
+        # actor moving the branch during the probe invalidates qualification.
+        current = app.branch(branch)
+        at_head = current.get("commit") if isinstance(current, dict) else None
+        if not isinstance(at_head, dict) or at_head.get("sha") != pushed_sha:
+            raise CapabilityBlocked("PROBE_PUSH_HEAD_CHANGED")
         return {
             "repo": app.repo, "sandbox_branch": branch,
             "verified_head_sha": pushed_sha,

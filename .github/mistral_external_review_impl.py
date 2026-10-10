@@ -617,6 +617,49 @@ def safety() -> None:
         raise SystemExit("EXTERNAL_REVIEW_AUTHORITY_REVOKED")
 
 
+# Exactly matched trusted denial codes only. Never expose raw exception text,
+# transport failures, user-controlled data, credentials or model output.
+_SAFE_PREPARE_DENIAL_CODES = frozenset({
+    "EXTERNAL_REVIEW_WRONG_HOST_REPO",
+    "EXTERNAL_REVIEW_EMERGENCY_STOP_ACTIVE",
+    "EXTERNAL_REVIEW_AUTHORITY_REVOKED",
+    "EXTERNAL_REVIEW_EVENT_NOT_ALLOWED",
+    "EXTERNAL_REVIEW_SOURCE_COMMENT_INVALID",
+    "EXTERNAL_REVIEW_SOURCE_COMMENT_UNTRUSTED",
+    "EXTERNAL_REVIEW_DISPATCH_RUN_UNTRUSTED",
+    "EXTERNAL_REVIEW_MARKER_INVALID",
+    "EXTERNAL_REVIEW_MARKER_UNANCHORED",
+    "EXTERNAL_REVIEW_FIELD_DUPLICATED",
+    "EXTERNAL_REVIEW_FIELD_SET_INVALID",
+    "EXTERNAL_REVIEW_REPO_NOT_ALLOWED",
+    "EXTERNAL_REVIEW_PR_INVALID",
+    "EXTERNAL_REVIEW_SHA_INVALID",
+    "EXTERNAL_REVIEW_AUTHORS_INVALID",
+    "MISTRAL_SELF_REVIEW_BLOCKED",
+    "EXTERNAL_REVIEW_TARGET_NOT_PUBLIC",
+    "EXTERNAL_REVIEW_TARGET_STALE",
+    "EXTERNAL_REVIEW_COMMITS_UNAVAILABLE",
+    "EXTERNAL_REVIEW_COMMIT_SHA_INVALID",
+    "EXTERNAL_REVIEW_AUTHOR_PROVENANCE_INCOMPLETE",
+    "EXTERNAL_REVIEW_COMMIT_PROVENANCE_STALE",
+    "EXTERNAL_REVIEW_COMMITS_OVER_LIMIT",
+    "EXTERNAL_REVIEW_DECLARED_AUTHORS_MISMATCH",
+    "EXTERNAL_REVIEW_HISTORY_UNAVAILABLE",
+    "EXTERNAL_REVIEW_HISTORY_OVER_LIMIT",
+    "LIVE_CONTROL_FILE_INVALID",
+    "LIVE_CONTROL_FILE_UNAVAILABLE",
+    "LIVE_EMERGENCY_STOP_STATE_INVALID",
+})
+
+
+def _safe_prepare_failure_status(error: Exception) -> str:
+    if type(error) is ValueError and str(error) in _SAFE_PREPARE_DENIAL_CODES:
+        return str(error)
+    if isinstance(error, (urllib.error.URLError, subprocess.CalledProcessError)):
+        return "EXTERNAL_REVIEW_EVIDENCE_READBACK_FAILED"
+    return "EXTERNAL_REVIEW_TARGET_BLOCKED"
+
+
 def prepare() -> None:
     try:
         if os.environ.get("GITHUB_REPOSITORY") != WAKE_REPO:
@@ -633,8 +676,8 @@ def prepare() -> None:
         if existing_result(repo, number, head, base, authors):
             output(ready="false", status="EXACT_HEAD_EXTERNAL_REVIEW_ALREADY_EXISTS")
             return
-    except Exception:
-        output(ready="false", status="EXTERNAL_REVIEW_TARGET_BLOCKED")
+    except Exception as error:
+        output(ready="false", status=_safe_prepare_failure_status(error))
         return
     output(
         ready="true", status="OK", repo=repo, pr=number, head=head, base=base,

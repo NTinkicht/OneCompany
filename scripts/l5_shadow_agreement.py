@@ -23,6 +23,20 @@ IDENTIFIER = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.:/-]{0,127}$")
 SUPPORTED_DECISIONS = frozenset({"SELECT", "BLOCK"})
 
 
+def reject_duplicate_json_fields(pairs: list[tuple[str, Any]]) -> dict:
+    """JSON's last-key-wins default is unsafe for contradictory labels."""
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("SHADOW_DUPLICATE_JSON_KEY")
+        result[key] = value
+    return result
+
+
+def strict_json_loads(text: str) -> Any:
+    return json.loads(text, object_pairs_hook=reject_duplicate_json_fields)
+
+
 def evaluate(payload: Any) -> dict:
     if not isinstance(payload, dict) or set(payload) != {"schema", "records"}:
         raise ValueError("SHADOW_INPUT_SCHEMA_INVALID")
@@ -37,13 +51,18 @@ def evaluate(payload: Any) -> dict:
         if not isinstance(row, dict) or set(row) != FIELDS:
             raise ValueError("SHADOW_RECORD_FIELDS_INVALID")
         repo = row["repository"]
-        if repo not in ALLOWED_REPOS:
+        if not isinstance(repo, str) or repo not in ALLOWED_REPOS:
             raise ValueError("SHADOW_TARGET_NOT_ALLOWED")
         run = row["run_id"]
         label, candidate = row["labeled_decision"], row["shadow_decision"]
         if not isinstance(run, str) or not IDENTIFIER.fullmatch(run):
             raise ValueError("SHADOW_DECISION_OR_RUN_INVALID")
-        if label not in SUPPORTED_DECISIONS or candidate not in SUPPORTED_DECISIONS:
+        if (
+            not isinstance(label, str)
+            or not isinstance(candidate, str)
+            or label not in SUPPORTED_DECISIONS
+            or candidate not in SUPPORTED_DECISIONS
+        ):
             raise ValueError("SHADOW_UNSUPPORTED_DECISION")
         day = row["day"]
         if not isinstance(day, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day):
@@ -87,7 +106,7 @@ def main() -> int:
     parser.add_argument("evidence", type=Path)
     args = parser.parse_args()
     try:
-        output = evaluate(json.loads(args.evidence.read_text(encoding="utf-8")))
+        output = evaluate(strict_json_loads(args.evidence.read_text(encoding="utf-8")))
     except (OSError, ValueError, UnicodeError) as exc:
         print(json.dumps({"status": "INVALID_EVIDENCE", "reason": str(exc)}, sort_keys=True))
         return 2

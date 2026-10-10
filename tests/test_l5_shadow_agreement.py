@@ -5,7 +5,7 @@ from pathlib import Path
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from l5_shadow_agreement import evaluate
+from l5_shadow_agreement import evaluate, strict_json_loads
 
 REPO = "NTinkicht/OneCompany"
 
@@ -76,6 +76,29 @@ class ShadowAgreementTests(unittest.TestCase):
         records[0]["shadow_decision"] = "NOT_A_DECISION"
         with self.assertRaisesRegex(ValueError, "SHADOW_UNSUPPORTED_DECISION"):
             evaluate(self.payload(records))
+
+    def test_nonstring_decisions_and_repo_fail_closed_without_traceback(self):
+        for value in ([], {}, 0, None):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "SHADOW_UNSUPPORTED_DECISION"):
+                    evaluate(self.payload([{**sample(1, "2026-10-10"),
+                                            "labeled_decision": value}]))
+                with self.assertRaisesRegex(ValueError, "SHADOW_TARGET_NOT_ALLOWED"):
+                    evaluate(self.payload([{**sample(1, "2026-10-10"),
+                                            "repository": value}]))
+
+    def test_duplicate_raw_json_keys_rejected_before_scoring(self):
+        for raw in (
+            '{"schema":"L5_SHADOW_LABELS_V1","schema":"L5_SHADOW_LABELS_V1","records":[]}',
+            '{"schema":"L5_SHADOW_LABELS_V1","records":[{"run_id":"a",'
+            '"repository":"NTinkicht/OneCompany","day":"2026-10-10",'
+            '"labeled_decision":"BLOCK","labeled_decision":"SELECT",'
+            '"shadow_decision":"SELECT"}]}',
+        ):
+            with self.subTest(raw=raw), self.assertRaisesRegex(
+                ValueError, "SHADOW_DUPLICATE_JSON_KEY"
+            ):
+                strict_json_loads(raw)
 
     def test_empty_data_is_not_a_pass(self):
         result = evaluate(self.payload([]))

@@ -21,6 +21,9 @@ IDENTIFIER = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.:/-]{0,127}$")
 # This is a binary Phase-2 selector agreement schema, NOT the full executor
 # action vocabulary. Widening it requires a reviewed new evidence version.
 SUPPORTED_DECISIONS = frozenset({"SELECT", "BLOCK"})
+# 100,000 compact decision rows fit under this bound. Reject larger input
+# before JSON parsing; length or stat-only checks are raceable.
+MAX_EVIDENCE_BYTES = 24 * 1024 * 1024
 
 
 def reject_duplicate_json_fields(pairs: list[tuple[str, Any]]) -> dict:
@@ -40,6 +43,16 @@ def strict_json_loads(text: str) -> Any:
         # Untrusted, excessively nested input is invalid evidence, not an
         # internal failure with a traceback. Preserve duplicate-key checks.
         raise ValueError("SHADOW_JSON_NESTING_TOO_DEEP") from exc
+
+
+def read_bounded_evidence(path: Path, *, limit: int = MAX_EVIDENCE_BYTES) -> str:
+    # A single bounded read also handles attacker-controlled sparse/large
+    # files without ever materializing their entire contents in memory.
+    with path.open("rb") as stream:
+        content = stream.read(limit + 1)
+    if len(content) > limit:
+        raise ValueError("SHADOW_EVIDENCE_TOO_LARGE")
+    return content.decode("utf-8")
 
 
 def evaluate(payload: Any) -> dict:
@@ -111,7 +124,7 @@ def main() -> int:
     parser.add_argument("evidence", type=Path)
     args = parser.parse_args()
     try:
-        output = evaluate(strict_json_loads(args.evidence.read_text(encoding="utf-8")))
+        output = evaluate(strict_json_loads(read_bounded_evidence(args.evidence)))
     except (OSError, ValueError, UnicodeError) as exc:
         print(json.dumps({"status": "INVALID_EVIDENCE", "reason": str(exc)}, sort_keys=True))
         return 2

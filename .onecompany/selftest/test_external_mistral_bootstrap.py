@@ -56,6 +56,8 @@ class ExternalMistralBootstrapTests(unittest.TestCase):
         self.assertIn("python -I", workflow)
 
     def test_runtime_limit_patch_targets_actual_implementation_only(self):
+        if not IMPLEMENTATION.is_file() or not WRAPPER.is_file():
+            self.skipTest("external reviewer not installed on disposable bootstrap")
         source = IMPLEMENTATION.read_text(encoding="utf-8")
         self.assertNotIn("MAX_DIFF_BYTES = 48_000", WRAPPER.read_text(encoding="utf-8"))
         result = bounded_limit_patch(source)

@@ -34,7 +34,12 @@ def reject_duplicate_json_fields(pairs: list[tuple[str, Any]]) -> dict:
 
 
 def strict_json_loads(text: str) -> Any:
-    return json.loads(text, object_pairs_hook=reject_duplicate_json_fields)
+    try:
+        return json.loads(text, object_pairs_hook=reject_duplicate_json_fields)
+    except RecursionError as exc:
+        # Untrusted, excessively nested input is invalid evidence, not an
+        # internal failure with a traceback. Preserve duplicate-key checks.
+        raise ValueError("SHADOW_JSON_NESTING_TOO_DEEP") from exc
 
 
 def evaluate(payload: Any) -> dict:

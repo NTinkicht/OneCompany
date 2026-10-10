@@ -858,7 +858,36 @@ class ExternalMistralReviewTests(unittest.TestCase):
             parse.assert_not_called()
         output_text = open(output_path, encoding="utf-8").read()
         self.assertIn("ready=false", output_text)
-        self.assertIn("status=EXTERNAL_REVIEW_TARGET_BLOCKED", output_text)
+        self.assertIn("status=EXTERNAL_REVIEW_AUTHORITY_REVOKED", output_text)
+
+    def test_prepare_failure_codes_are_exact_allowlisted_and_nonleaking(self):
+        import urllib.error
+
+        for code in (
+            "EXTERNAL_REVIEW_AUTHORITY_REVOKED",
+            "EXTERNAL_REVIEW_TARGET_STALE",
+            "EXTERNAL_REVIEW_DECLARED_AUTHORS_MISMATCH",
+            "EXTERNAL_REVIEW_HISTORY_UNAVAILABLE",
+            "MISTRAL_SELF_REVIEW_BLOCKED",
+        ):
+            with self.subTest(code=code):
+                self.assertEqual(m._safe_prepare_failure_status(ValueError(code)), code)
+        for error in (
+            ValueError("EXTERNAL_REVIEW_TARGET_STALE: leaked-token-example"),
+            ValueError("GH_TOKEN=leaked-token-example"),
+            RuntimeError("Authorization: Bearer leaked-token-example"),
+            KeyError("MISTRAL_API_KEY"),
+        ):
+            with self.subTest(error=type(error).__name__):
+                self.assertEqual(
+                    m._safe_prepare_failure_status(error),
+                    "EXTERNAL_REVIEW_TARGET_BLOCKED",
+                )
+        self.assertEqual(
+            m._safe_prepare_failure_status(urllib.error.URLError("secret-token")),
+            "EXTERNAL_REVIEW_EVIDENCE_READBACK_FAILED",
+        )
+
 
     def test_encoded_structured_sensitive_key_is_blocked(self):
         with self.assertRaisesRegex(

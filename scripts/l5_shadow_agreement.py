@@ -29,7 +29,7 @@ def evaluate(payload: Any) -> dict:
     if not isinstance(rows, list) or len(rows) > 100_000:
         raise ValueError("SHADOW_RECORDS_INVALID")
     per_repo: dict[str, list[dict]] = defaultdict(list)
-    seen: set[tuple[str, str]] = set()
+    seen: set[str] = set()
     for row in rows:
         if not isinstance(row, dict) or set(row) != FIELDS:
             raise ValueError("SHADOW_RECORD_FIELDS_INVALID")
@@ -48,10 +48,9 @@ def evaluate(payload: Any) -> dict:
                 raise ValueError("SHADOW_DAY_INVALID")
         except ValueError as exc:
             raise ValueError("SHADOW_DAY_INVALID") from exc
-        key = (repo, run)
-        if key in seen:
+        if run in seen:
             raise ValueError("SHADOW_DUPLICATE_RUN_ID")
-        seen.add(key)
+        seen.add(run)
         per_repo[repo].append(row)
     results = {}
     for repo in sorted(ALLOWED_REPOS):
@@ -66,7 +65,7 @@ def evaluate(payload: Any) -> dict:
             "matching": matches,
             "distinct_days": days,
             "agreement_percent": round(matches * 100 / total, 3) if total else None,
-            "numerical_candidate": days >= 3 and score_pass,
+            "numerical_candidate": days == 3 and score_pass,
         }
     return {
         "schema": "L5_SHADOW_AGREEMENT_REPORT_V1",

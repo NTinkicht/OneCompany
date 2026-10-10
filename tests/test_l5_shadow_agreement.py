@@ -25,7 +25,7 @@ class ShadowAgreementTests(unittest.TestCase):
         return {"schema": "L5_SHADOW_LABELS_V1", "records": rows}
 
     def test_three_days_exact_threshold_stays_uncertified(self):
-        rows = [sample(i, f"2026-10-{10 + i // 20:02}", match=i < 95)
+        rows = [sample(i, f"2026-10-{10 + i // 34:02}", match=i < 95)
                 for i in range(100)]
         value = evaluate(self.payload(rows))
         result = value["results"][REPO]
@@ -37,9 +37,21 @@ class ShadowAgreementTests(unittest.TestCase):
     def test_two_days_or_below_threshold_refuse_candidate(self):
         short = [sample(i, f"2026-10-{10 + i // 50:02}") for i in range(100)]
         self.assertFalse(evaluate(self.payload(short))["results"][REPO]["numerical_candidate"])
-        low = [sample(i, f"2026-10-{10 + i // 20:02}", match=i < 94)
+        low = [sample(i, f"2026-10-{10 + i // 34:02}", match=i < 94)
                for i in range(100)]
         self.assertFalse(evaluate(self.payload(low))["results"][REPO]["numerical_candidate"])
+
+    def test_four_days_never_count_as_three_day_window(self):
+        rows = [sample(i, f"2026-10-{10 + i // 25:02}") for i in range(100)]
+        result = evaluate(self.payload(rows))["results"][REPO]
+        self.assertEqual(result["distinct_days"], 4)
+        self.assertFalse(result["numerical_candidate"])
+
+    def test_run_identity_is_unique_across_repositories(self):
+        initial = sample(5, "2026-10-10")
+        copied = {**initial, "repository": "NTinkicht/veritas-atlas"}
+        with self.assertRaisesRegex(ValueError, "SHADOW_DUPLICATE_RUN_ID"):
+            evaluate(self.payload([initial, copied]))
 
     def test_duplicates_and_unknown_fields_fail_closed(self):
         row = sample(1, "2026-10-10")

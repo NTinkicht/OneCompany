@@ -696,6 +696,20 @@ def _safe_reference(value: str) -> bool:
     return any(pattern.fullmatch(candidate) for pattern in SAFE_REFERENCE_PATTERNS)
 
 
+def _safe_sensitive_assignment_value(key: str, value: str) -> bool:
+    """Permit one exact, nonsecret negative-assurance boolean in evidence data.
+
+    The field is a release verification flag, not a credential. Never
+    generalize to arbitrary credential-bearing names or string values.
+    """
+    if _safe_reference(value):
+        return True
+    return (
+        key == "h8_credential_rollback_e2e_verified"
+        and value.strip().rstrip(",;").strip() == "False"
+    )
+
+
 def _decode_structured_key(value: str) -> str:
     def replace_hex(match: re.Match[str]) -> str:
         return chr(int(match.group(1), 16))
@@ -775,13 +789,13 @@ def validate_diff(paths: list[str], diff: str) -> None:
             r'''["']((?:\\U[0-9A-Fa-f]{8}|\\u[0-9A-Fa-f]{4}|\\x[0-9A-Fa-f]{2}|\\["'\\/bfnrt]|[^"'\\])+?)["']\s*:\s*(.+?)(?:[,}]|$)''',
             line,
         ):
-            if _sensitive_key(match.group(1)) and not _safe_reference(match.group(2)):
+            if _sensitive_key(match.group(1)) and not _safe_sensitive_assignment_value(match.group(1), match.group(2)):
                 raise ValueError("EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED")
         for match in NESTED_ASSIGNMENT.finditer(line):
-            if _sensitive_key(match.group(1)) and not _safe_reference(match.group(2)):
+            if _sensitive_key(match.group(1)) and not _safe_sensitive_assignment_value(match.group(1), match.group(2)):
                 raise ValueError("EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED")
         for match in ASSIGNMENT.finditer(line):
-            if _sensitive_key(match.group(1)) and not _safe_reference(match.group(2)):
+            if _sensitive_key(match.group(1)) and not _safe_sensitive_assignment_value(match.group(1), match.group(2)):
                 raise ValueError("EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED")
         for match in BEARER_LITERAL.finditer(line):
             if not _safe_reference(match.group(1)):

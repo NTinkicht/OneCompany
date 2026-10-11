@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import calendar
+import importlib.util
 import json
 import os
 import re
@@ -13,7 +14,29 @@ from pathlib import Path
 import urllib.error
 import urllib.request
 
-import mistral_external_review as review_service
+def _load_review_service_from_sibling():
+    """Load the trusted checked-out sibling under python -I without sys.path edits."""
+    # -I deliberately omits the script directory from sys.path. Do not add
+    # the workspace or PYTHONPATH to imports; anchor to this source file.
+    source = Path(__file__).absolute().with_name("mistral_external_review.py")
+    if source.is_symlink() or not source.is_file():
+        raise ImportError("EXTERNAL_DISPATCH_REVIEW_SOURCE_INVALID")
+    spec = importlib.util.spec_from_file_location("mistral_external_review", source)
+    if spec is None or spec.loader is None:
+        raise ImportError("EXTERNAL_DISPATCH_REVIEW_LOADER_MISSING")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(spec.name, None)
+        raise
+    # The trusted wrapper intentionally replaces its module entry with the
+    # validated implementation. Keep that replacement, not the wrapper object.
+    return sys.modules[spec.name]
+
+
+review_service = _load_review_service_from_sibling()
 
 HOST_REPO = "NTinkicht/OneCompany"
 HOST_ISSUE = 130

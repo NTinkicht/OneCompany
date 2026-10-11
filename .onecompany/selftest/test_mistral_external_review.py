@@ -113,6 +113,42 @@ class ExternalMistralReviewTests(unittest.TestCase):
                 '+password="exampleThisIsARealPassword123"',
             )
 
+    def test_external_review_build_failures_are_exact_and_nonleaking(self):
+        allowed = (
+            "EXTERNAL_REVIEW_BUILD_TARGET_INVALID",
+            "EXTERNAL_REVIEW_CHECKOUT_STALE",
+            "EXTERNAL_REVIEW_DIVERGED_BASE_BLOCKED",
+            "EXTERNAL_REVIEW_DIFF_BOUND_BLOCKED",
+            "EXTERNAL_REVIEW_SENSITIVE_PATH_BLOCKED",
+            "EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED",
+            "EXTERNAL_REVIEW_NON_TEXT_CONTENT_BLOCKED",
+            "EXTERNAL_REVIEW_STRUCTURED_KEY_ESCAPE_UNSUPPORTED",
+            "EXTERNAL_REVIEW_DECLARED_AUTHORS_MISMATCH",
+        )
+        for code in allowed:
+            with self.subTest(denial=code):
+                self.assertEqual(m._safe_build_failure_status(ValueError(code)), code)
+        for error in (
+            ValueError("EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED: credential-example"),
+            ValueError("EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED", "token-example"),
+            ValueError("ghp_" + "x" * 25),
+            RuntimeError("Authorization: Bearer secret-example"),
+            KeyError("CREDENTIALS"),
+        ):
+            with self.subTest(error=type(error).__name__):
+                self.assertEqual(
+                    m._safe_build_failure_status(error),
+                    "EXTERNAL_REVIEW_EVIDENCE_BLOCKED",
+                )
+        class ForgedValueError(ValueError):
+            pass
+        self.assertEqual(
+            m._safe_build_failure_status(
+                ForgedValueError("EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED")
+            ),
+            "EXTERNAL_REVIEW_EVIDENCE_BLOCKED",
+        )
+
     def test_exact_false_h8_verification_flag_is_not_a_credential(self):
         # This is a negative assurance status, not credential material.
         m.validate_diff(

@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Executable BOOT-to-ACTION controller tests."""
 import sys
-import math
 import unittest
 from pathlib import Path
 
@@ -504,13 +503,13 @@ class TrustedClockValidationTests(unittest.TestCase):
         for value in (float("nan"), float("inf"), -float("inf"), True, False):
             with self.subTest(value=str(value)):
                 io = FakeIO(items=[])
-                io.clock = value
+                io.trusted_now = lambda value=value: value
                 with self.assertRaisesRegex(ValueError, "L5_TRUSTED_TIME_INVALID"):
                     l5_controller._trusted_now(io)
 
     def test_rejects_float_overflow_from_large_integer(self):
         io = FakeIO(items=[])
-        io.clock = 10 ** 1000
+        io.trusted_now = lambda: 10 ** 1000
         with self.assertRaisesRegex(ValueError, "L5_TRUSTED_TIME_INVALID"):
             l5_controller._trusted_now(io)
 

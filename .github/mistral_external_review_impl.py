@@ -811,6 +811,40 @@ def validate_diff(paths: list[str], diff: str) -> None:
                 raise ValueError("EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED")
 
 
+_SAFE_BUILD_DENIAL_CODES = frozenset({
+    "EXTERNAL_REVIEW_BUILD_TARGET_INVALID",
+    "EXTERNAL_REVIEW_CHECKOUT_STALE",
+    "EXTERNAL_REVIEW_MERGE_BASE_INVALID",
+    "EXTERNAL_REVIEW_DIVERGED_BASE_BLOCKED",
+    "EXTERNAL_REVIEW_DIFF_BOUND_BLOCKED",
+    "EXTERNAL_REVIEW_DIFF_BOUNDARY_COLLISION",
+    "EXTERNAL_REVIEW_PROMPT_BOUND_BLOCKED",
+    "EXTERNAL_REVIEW_BUILD_AUTHORS_INVALID",
+    "EXTERNAL_REVIEW_FILE_COUNT_BLOCKED",
+    "EXTERNAL_REVIEW_SENSITIVE_PATH_BLOCKED",
+    "EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED",
+    "EXTERNAL_REVIEW_NON_TEXT_CONTENT_BLOCKED",
+    "EXTERNAL_REVIEW_STRUCTURED_KEY_ESCAPE_UNSUPPORTED",
+    "EXTERNAL_REVIEW_AUTHOR_PROVENANCE_INCOMPLETE",
+    "EXTERNAL_REVIEW_COMMIT_PROVENANCE_STALE",
+    "EXTERNAL_REVIEW_DECLARED_AUTHORS_MISMATCH",
+    "EXTERNAL_REVIEW_COMMITS_UNAVAILABLE",
+    "EXTERNAL_REVIEW_COMMIT_SHA_INVALID",
+})
+
+
+def _safe_build_failure_status(error: Exception) -> str:
+    """Expose only reviewed denial literals; never publish exception details."""
+    if (
+        type(error) is ValueError
+        and len(error.args) == 1
+        and type(error.args[0]) is str
+        and error.args[0] in _SAFE_BUILD_DENIAL_CODES
+    ):
+        return error.args[0]
+    return "EXTERNAL_REVIEW_EVIDENCE_BLOCKED"
+
+
 def build_prompt() -> None:
     try:
         repo = os.environ["TARGET_REPO"]
@@ -876,8 +910,8 @@ def build_prompt() -> None:
             }, sort_keys=True) + "\n",
             encoding="utf-8",
         )
-    except Exception:
-        output(ready="false", status="EXTERNAL_REVIEW_EVIDENCE_BLOCKED")
+    except Exception as error:
+        output(ready="false", status=_safe_build_failure_status(error))
         return
     output(ready="true", status="OK")
 

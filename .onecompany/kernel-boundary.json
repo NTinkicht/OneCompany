@@ -19,7 +19,8 @@
     "simulate_assurance_legacy",
     "assurance_gate",
     "gate",
-    "merge"
+    "merge",
+    "merge_lane"
   ],
   "trusted_data": [
     ".onecompany/identity.json",
@@ -29,5 +30,11 @@
     ".onecompany/governance.json",
     ".onecompany/ledger.json"
   ],
-  "forbidden_repo_import_roots": ["company", "app", "src", "project", "product"]
+  "forbidden_repo_import_roots": [
+    "company",
+    "app",
+    "src",
+    "project",
+    "product"
+  ]
 }

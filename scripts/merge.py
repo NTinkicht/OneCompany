@@ -145,6 +145,7 @@ if str(_MERGE_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_MERGE_SCRIPT_DIR))
 
 from assurance_gate import validate_structure
+from merge_lane import classify_merge_lane
 from lease_lifecycle import append_coordination_event, coordination_view
 from github_controls import strict_merge_platform_enforcement
 from ledger_lib import ledger_enabled
@@ -755,16 +756,14 @@ def main() -> int:
             )
             return 2
         paths = []
-    protected_paths = sorted(
-        path
-        for path in paths
-        if path_matches_any(path, governance.get("protected_paths", []))
-    )
-    absolute_human = sorted(
-        path
-        for path in paths
-        if path_matches_any(path, governance.get("always_human_paths", []))
-    )
+    try:
+        lane = classify_merge_lane(paths, governance)
+    except ValueError as exc:
+        print(f"REFUSED: invalid base-trusted merge lane: {exc}")
+        return 2
+    protected_paths = lane["protected_paths"]
+    absolute_human = lane["owner_paths"]
+    print(f"MERGE_AUTHORITY_LANE={lane['lane']}")
 
     gate = view.get("current_gate")
     material_authors = set(view.get("material_authors", []))

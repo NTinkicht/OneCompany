@@ -43,7 +43,24 @@
       "scripts/supervision_validate.py",
       "scripts/simulate_supervision.py",
       "scripts/control_plane_bootstrap.py",
-      "scripts/l5_*.py"
+      "scripts/l5_*.py",
+      ".github/mistral_external_review_impl.py",
+      "scripts/mistral_external_dispatch.py",
+      "scripts/mistral_external_review.py",
+      "scripts/review_authorization.py",
+      "scripts/platform_identity.py",
+      "scripts/github_controls.py",
+      "scripts/trusted_assurance.py",
+      "scripts/required_checks.py",
+      "scripts/scope_guard.py",
+      "scripts/onecompany_lib.py",
+      "scripts/merge_lane.py",
+      ".onecompany/kernel-boundary.json",
+      ".onecompany/identity.json",
+      ".onecompany/actors.json",
+      ".onecompany/readiness.json",
+      ".onecompany/dispatch.json",
+      ".onecompany/budget.json"
     ]
   },
   "supply_chain": {

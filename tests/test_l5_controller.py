@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+import l5_controller
 from l5_controller import *
 from l5_kernel import *
 
@@ -493,6 +494,29 @@ class ControllerTests(unittest.TestCase):
         result = run_once("repo", io, MemoryCASStore())
         self.assertEqual(result.item_id, "9")
         self.assertEqual(result.action, "remediate_review")
+
+
+class TrustedClockValidationTests(unittest.TestCase):
+    """Reject untrusted time scalars before they reach CAS lease fencing."""
+
+    def test_rejects_nonfinite_and_boolean_trusted_clock(self):
+        for value in (float("nan"), float("inf"), -float("inf"), True, False):
+            with self.subTest(value=str(value)):
+                io = FakeIO(items=[])
+                io.trusted_now = lambda value=value: value
+                with self.assertRaisesRegex(ValueError, "L5_TRUSTED_TIME_INVALID"):
+                    l5_controller._trusted_now(io)
+
+    def test_rejects_float_overflow_from_large_integer(self):
+        io = FakeIO(items=[])
+        io.trusted_now = lambda: 10 ** 1000
+        with self.assertRaisesRegex(ValueError, "L5_TRUSTED_TIME_INVALID"):
+            l5_controller._trusted_now(io)
+
+    def test_accepts_finite_trusted_clock(self):
+        io = FakeIO(items=[])
+        io.clock = 1234.5
+        self.assertEqual(l5_controller._trusted_now(io), 1234.5)
 
 
 if __name__ == "__main__":

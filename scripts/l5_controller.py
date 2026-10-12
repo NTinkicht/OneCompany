@@ -82,6 +82,7 @@ try:
         entry for entry in sys.path
         if entry and os.path.abspath(entry) not in _blocked_paths
     ]
+    import math
     import stat
     import types
     from dataclasses import dataclass
@@ -184,9 +185,15 @@ def _item_id(item: Mapping[str, Any]) -> str:
 def _trusted_now(io: ControllerIO) -> float:
     """Read fresh trusted/server time and fail closed on malformed values."""
     value = io.trusted_now()
-    if not isinstance(value, (int, float)):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError("L5_TRUSTED_TIME_INVALID")
-    return float(value)
+    try:
+        converted = float(value)
+    except (OverflowError, ValueError) as exc:
+        raise ValueError("L5_TRUSTED_TIME_INVALID") from exc
+    if not math.isfinite(converted):
+        raise ValueError("L5_TRUSTED_TIME_INVALID")
+    return converted
 
 
 def _state_priority(state: ItemState) -> int:

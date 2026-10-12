@@ -55,7 +55,12 @@
       "scripts/scope_guard.py",
       "scripts/onecompany_lib.py",
       "scripts/merge_lane.py",
-      ".onecompany/kernel-boundary.json"
+      ".onecompany/kernel-boundary.json",
+      ".onecompany/identity.json",
+      ".onecompany/actors.json",
+      ".onecompany/readiness.json",
+      ".onecompany/dispatch.json",
+      ".onecompany/budget.json"
     ]
   },
   "supply_chain": {

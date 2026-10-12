@@ -37,6 +37,20 @@ class MergeLaneTests(unittest.TestCase):
                 self.assertTrue(result["requires_owner"])
                 self.assertIn(file, result["owner_paths"])
 
+    def test_identity_actor_and_budget_policies_can_never_be_routine(self):
+        for path in (
+            ".onecompany/identity.json",
+            ".onecompany/actors.json",
+            ".onecompany/readiness.json",
+            ".onecompany/dispatch.json",
+            ".onecompany/budget.json",
+        ):
+            with self.subTest(path=path):
+                lane = classify_merge_lane([path], POLICY)
+                self.assertEqual(lane["lane"], OWNER)
+                self.assertTrue(lane["requires_owner"])
+                self.assertIn(path, MINIMUM_OWNER_PATHS)
+
     def test_existing_l5_and_workflows_remain_owner_gated(self):
         for path in (
             ".l5/control-plane.json", ".github/workflows/test.yml",

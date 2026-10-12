@@ -11,7 +11,7 @@ import argparse
 import json
 import re
 from collections import defaultdict
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -101,15 +101,26 @@ def evaluate(payload: Any) -> dict:
         samples = per_repo[repo]
         total = len(samples)
         matches = sum(r["labeled_decision"] == r["shadow_decision"] for r in samples)
-        days = len({r["day"] for r in samples})
+        observed_dates = sorted({date.fromisoformat(r["day"]) for r in samples})
+        days = len(observed_dates)
+        # Three distinct dates must be a continuous three-calendar-day window:
+        # disjoint shadow snapshots cannot be combined into a Phase-2 candidate.
+        consecutive_three_day_window = (
+            days == 3
+            and all(
+                later - earlier == timedelta(days=1)
+                for earlier, later in zip(observed_dates, observed_dates[1:])
+            )
+        )
         # Exact integer comparison avoids float rounding over the 95% gate.
         score_pass = total > 0 and matches * 100 >= total * 95
         results[repo] = {
             "samples": total,
             "matching": matches,
             "distinct_days": days,
+            "consecutive_three_day_window": consecutive_three_day_window,
             "agreement_percent": round(matches * 100 / total, 3) if total else None,
-            "numerical_candidate": days == 3 and score_pass,
+            "numerical_candidate": consecutive_three_day_window and score_pass,
         }
     return {
         "schema": "L5_SHADOW_AGREEMENT_REPORT_V1",

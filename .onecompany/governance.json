@@ -54,7 +54,8 @@
       "scripts/required_checks.py",
       "scripts/scope_guard.py",
       "scripts/onecompany_lib.py",
-      "scripts/merge_lane.py"
+      "scripts/merge_lane.py",
+      ".onecompany/kernel-boundary.json"
     ]
   },
   "supply_chain": {

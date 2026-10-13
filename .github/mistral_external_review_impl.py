@@ -911,7 +911,11 @@ def build_prompt() -> None:
             encoding="utf-8",
         )
     except Exception as error:
-        output(ready="false", status=_safe_build_failure_status(error))
+        # Output only a constant from the trusted denial-code allowlist. The
+        # raw exception, target diff and provider response are never logged.
+        status = _safe_build_failure_status(error)
+        output(ready="false", status=status)
+        print(f"EXTERNAL_REVIEW_BUILD_DENIED={status}")
         return
     output(ready="true", status="OK")
 

@@ -29,11 +29,14 @@ class ShadowAgreementTests(unittest.TestCase):
         return {"schema": "L5_SHADOW_LABELS_V1", "records": rows}
 
     def test_three_days_exact_threshold_stays_uncertified(self):
-        rows = [sample(i, f"2026-10-{10 + i // 34:02}", match=i < 95)
-                for i in range(100)]
+        # 19/20 correct on EACH day, not merely 95% pooled.
+        rows = [sample(i, f"2026-10-{10 + i // 20:02}", match=i % 20 != 19)
+                for i in range(60)]
         value = evaluate(self.payload(rows))
         result = value["results"][REPO]
         self.assertEqual(result["agreement_percent"], 95.0)
+        self.assertTrue(result["consecutive_three_day_window"])
+        self.assertTrue(result["daily_threshold_met"])
         self.assertTrue(result["numerical_candidate"])
         self.assertFalse(value["production_l5_certified"])
         self.assertEqual(value["mutations"], 0)
@@ -44,6 +47,42 @@ class ShadowAgreementTests(unittest.TestCase):
         low = [sample(i, f"2026-10-{10 + i // 34:02}", match=i < 94)
                for i in range(100)]
         self.assertFalse(evaluate(self.payload(low))["results"][REPO]["numerical_candidate"])
+
+    def test_three_scattered_days_are_not_a_phase2_candidate(self):
+        rows = [
+            sample(1, "2026-10-01"),
+            sample(2, "2026-10-03"),
+            sample(3, "2026-10-12"),
+        ]
+        score = evaluate(self.payload(rows))["results"][REPO]
+        self.assertEqual(score["agreement_percent"], 100.0)
+        self.assertEqual(score["distinct_days"], 3)
+        self.assertFalse(score["consecutive_three_day_window"])
+        self.assertFalse(score["numerical_candidate"])
+
+    def test_three_consecutive_days_across_leap_boundary_are_candidate_only(self):
+        rows = [
+            sample(1, "2028-02-28"),
+            sample(2, "2028-02-29"),
+            sample(3, "2028-03-01"),
+        ]
+        score = evaluate(self.payload(rows))
+        self.assertTrue(score["results"][REPO]["consecutive_three_day_window"])
+        self.assertTrue(score["results"][REPO]["numerical_candidate"])
+        self.assertFalse(score["production_l5_certified"])
+
+    def test_three_days_are_evaluated_independently_by_repository(self):
+        rows = [
+            sample(1, "2026-10-10"),
+            sample(2, "2026-10-11"),
+            sample(3, "2026-10-12"),
+            {**sample(4, "2026-10-10"), "repository": "NTinkicht/Tabibi"},
+            {**sample(5, "2026-10-12"), "repository": "NTinkicht/Tabibi"},
+            {**sample(6, "2026-10-14"), "repository": "NTinkicht/Tabibi"},
+        ]
+        scores = evaluate(self.payload(rows))["results"]
+        self.assertTrue(scores[REPO]["numerical_candidate"])
+        self.assertFalse(scores["NTinkicht/Tabibi"]["numerical_candidate"])
 
     def test_four_days_never_count_as_three_day_window(self):
         rows = [sample(i, f"2026-10-{10 + i // 25:02}") for i in range(100)]

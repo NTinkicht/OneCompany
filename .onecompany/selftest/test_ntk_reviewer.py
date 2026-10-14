@@ -26,16 +26,16 @@ PASS = json.dumps({"verdict": "PASS", "summary": "Looks correct.", "findings": [
 
 class FakeGitHub:
     def __init__(self, *, files=("src/app.py",), ci="success", annotations=(), reviews=(),
-                 comments=(), head_after=HEAD, diff="diff --git a/src/app.py b/src/app.py\n+x\n",
+                 comments=(), moves_at=None, diff="diff --git a/src/app.py b/src/app.py\n+x\n",
                  changed_files=None, rules=None):
         self.files = [{"filename": f} for f in files]
         self.ci, self.annotations = ci, list(annotations)
         self.reviews, self.comments = list(reviews), list(comments)
-        self.head_after, self.diff = head_after, diff
+        self.moves_at, self.diff = moves_at, diff
         self.changed_files = len(files) if changed_files is None else changed_files
         self.rules = rules if rules is not None else [{"type": "required_status_checks", "parameters": {
             "required_status_checks": [{"context": "validate", "integration_id": 15368}]}}]
-        self.posted, self.patched = [], []
+        self.posted, self.patched, self.put_calls = [], [], []
         self.pr_reads = 0
 
     def pr(self, sha=HEAD):
@@ -52,7 +52,8 @@ class FakeGitHub:
             return self.annotations
         if path.endswith("/pulls/7"):
             self.pr_reads += 1
-            return self.pr(HEAD if self.pr_reads == 1 else self.head_after)
+            moved = self.moves_at is not None and self.pr_reads >= self.moves_at
+            return self.pr(NEW_HEAD if moved else HEAD)
         raise AssertionError(path)
 
     def get_diff(self, path):
@@ -81,6 +82,10 @@ class FakeGitHub:
 
     def patch(self, path, body):
         self.patched.append((path, body))
+        return {}
+
+    def put(self, path, body):
+        self.put_calls.append((path, body))
         return {}
 
 
@@ -234,9 +239,20 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(run(gh, Model(PASS)), "POSTED APPROVE PASS")
 
     def test_head_moved_before_posting_posts_nothing(self):
-        gh = FakeGitHub(head_after=NEW_HEAD)
+        gh = FakeGitHub(moves_at=2)
         self.assertEqual(run(gh, Model(PASS)), "SKIP head moved before posting")
         self.assertEqual(reviews_posted(gh), [])
+
+    def test_head_moved_while_posting_dismisses_the_verdict(self):
+        gh = FakeGitHub(moves_at=3)
+        self.assertEqual(run(gh, Model(PASS)), "DISMISSED head moved while posting")
+        (call,) = gh.put_calls
+        self.assertTrue(call[0].endswith("/reviews/99/dismissals"))
+
+    def test_shadow_comment_needs_no_dismissal(self):
+        gh = FakeGitHub(moves_at=3)
+        self.assertEqual(run(gh, Model(PASS), mode="comment"), "POSTED COMMENT PASS")
+        self.assertEqual(gh.put_calls, [])
 
     def test_oversize_diff_is_code_error_without_model_call(self):
         gh, model = FakeGitHub(diff="+" * (R.MAX_DIFF_BYTES + 1)), Model()

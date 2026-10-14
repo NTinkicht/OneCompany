@@ -119,6 +119,9 @@ class GitHub:
     def patch(self, path, body):
         return json.loads(self._call("PATCH", path, body) or b"{}")
 
+    def put(self, path, body):
+        return json.loads(self._call("PUT", path, body) or b"{}")
+
 
 # ---------- pure helpers ----------
 
@@ -381,10 +384,18 @@ def review_pr(gh, repo, pr, *, login, mode, run_model, calls, now, run_url):
     if latest.get("state") != "open" or latest["head"]["sha"] != head:
         return "SKIP head moved before posting"
     event = choose_event(mode, result["verdict"], bool(floor_paths))
-    gh.post(f"/repos/{OWNER}/{repo}/pulls/{number}/reviews", {
+    posted = gh.post(f"/repos/{OWNER}/{repo}/pulls/{number}/reviews", {
         "commit_id": head, "event": event,
         "body": review_body(head, mode, result, floor_paths, run_url, event),
     })
+    if event != "COMMENT":
+        # Close the race: a push between the recheck and the post must not leave
+        # a verdict for an older commit standing on the PR.
+        after = gh.get(f"/repos/{OWNER}/{repo}/pulls/{number}")
+        if after["head"]["sha"] != head and posted.get("id"):
+            gh.put(f"/repos/{OWNER}/{repo}/pulls/{number}/reviews/{posted['id']}/dismissals",
+                   {"message": f"Head moved from {head[:12]} while reviewing; this verdict is withdrawn."})
+            return "DISMISSED head moved while posting"
     if comment_id:
         record("REVIEWED", result["verdict"], f"reviewed `{head[:12]}`: {result['verdict']}.")
     return f"POSTED {event} {result['verdict']}"

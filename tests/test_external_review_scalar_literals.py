@@ -44,11 +44,18 @@ class ExternalReviewScalarLiteralTests(unittest.TestCase):
             ("GH_TOKEN", "$" + "{{ github.event.inputs.token }}"),
             ("GH_TOKEN", runtime + " # comment"),
             ("AUTH_TOKEN", runtime),
-            ("GH_TOKEN", "os.environ[\"GH_TOKEN\"]"),
+
         ):
             with self.subTest(key=key, value=value):
                 with self.assertRaisesRegex(ValueError, "EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED"):
                     review.validate_diff([".github/workflows/example.yml"], self._diff(key, value))
+    def test_existing_environment_token_reference_remains_allowed(self) -> None:
+        # The base scanner already treats references, not values, as safe.
+        review.validate_diff(
+            [".github/workflows/example.yml"],
+            self._diff("GH_TOKEN", 'os.environ["GH_TOKEN"]'),
+        )
+
     def test_numeric_literal_has_a_hard_bound(self) -> None:
         maximum = "1" * review.MAX_SAFE_NUMERIC_LITERAL_CHARS
         review.validate_diff(

@@ -29,6 +29,33 @@ class ExternalReviewScalarLiteralTests(unittest.TestCase):
                     self._diff("persist-credentials", value),
                 )
 
+    def test_github_runtime_expression_in_diff_context_is_safe(self) -> None:
+        runtime = "$" + "{{ github.token }}"
+        diff = self._diff("GH_TOKEN", runtime).replace(
+            "+          GH_TOKEN:", "           GH_TOKEN:"
+        )
+        review.validate_diff([".github/workflows/example.yml"], diff)
+
+    def test_github_runtime_reference_never_whitelists_credentials(self) -> None:
+        runtime = "$" + "{{ github.token }}"
+        for key, value in (
+            ("GH_TOKEN", "literal-credential-value-not-allowed"),
+            ("GH_TOKEN", "\"" + runtime + "\""),
+            ("GH_TOKEN", "$" + "{{ github.event.inputs.token }}"),
+            ("GH_TOKEN", runtime + " # comment"),
+            ("AUTH_TOKEN", runtime),
+
+        ):
+            with self.subTest(key=key, value=value):
+                with self.assertRaisesRegex(ValueError, "EXTERNAL_REVIEW_SECRET_CONTENT_BLOCKED"):
+                    review.validate_diff([".github/workflows/example.yml"], self._diff(key, value))
+    def test_existing_environment_token_reference_remains_allowed(self) -> None:
+        # The base scanner already treats references, not values, as safe.
+        review.validate_diff(
+            [".github/workflows/example.yml"],
+            self._diff("GH_TOKEN", 'os.environ["GH_TOKEN"]'),
+        )
+
     def test_numeric_literal_has_a_hard_bound(self) -> None:
         maximum = "1" * review.MAX_SAFE_NUMERIC_LITERAL_CHARS
         review.validate_diff(

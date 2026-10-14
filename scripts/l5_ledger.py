@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 from typing import Any, Mapping
 
 from l5_kernel import HUMAN_CLEAR_ONLY, RepoMode, SHA40
@@ -73,9 +74,11 @@ def validate_lease_record(row: Any) -> None:
         raise LedgerInvalid("LEASE_RECORD_HOLDER")
     if row.get("state") not in {"ACTIVE", "RELEASED"}:
         raise LedgerInvalid("LEASE_RECORD_STATE")
-    if not isinstance(row.get("acquired_at"), (int, float)):
+    acquired_at = row.get("acquired_at")
+    expires_at = row.get("expires_at")
+    if type(acquired_at) not in (int, float) or not math.isfinite(acquired_at):
         raise LedgerInvalid("LEASE_RECORD_ACQUIRED_AT")
-    if not isinstance(row.get("expires_at"), (int, float)):
+    if type(expires_at) not in (int, float) or not math.isfinite(expires_at):
         raise LedgerInvalid("LEASE_RECORD_EXPIRES_AT")
     _validate_observation(row.get("observed"))
     _validate_intent(row.get("intent"), row["epoch"])

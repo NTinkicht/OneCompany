@@ -85,6 +85,12 @@ _SAFE_DECIMAL = re.compile(r"[-+]?(?:0|[1-9][0-9]*)(?:\.[0-9]+)?(?:[eE][-+]?[0-9
 _PERSIST_CREDENTIALS = re.compile(
     r"^([+\- ])(?P<indent>[ \t]*)persist-credentials[ \t]*:[ \t]*(?P<value>\S+)[ \t]*$"
 )
+# GitHub runtime expression is a workflow reference, never a credential literal.
+# No other token names or dynamic expressions gain an exemption.
+_GITHUB_RUNTIME_GH_TOKEN = re.compile(
+    r"^([+ -])(?P<indent>[ \t]*)GH_TOKEN[ \t]*:[ \t]*" +
+    re.escape("$" + "{{ github.token }}") + r"[ \t]*$"
+)
 _ORIGINAL_VALIDATE_DIFF = _IMPL.validate_diff
 
 
@@ -104,9 +110,9 @@ def validate_diff(paths: list[str], diff: str) -> None:
 
     The trusted scanner still receives the complete diff. Before its generic
     sensitive-key assignment check, only an exact unquoted persist-credentials
-    key with a safe primitive scalar is renamed to a non-sensitive placeholder.
-    All path checks, credential signatures, bearer/basic auth checks, literal
-    secret checks and every other sensitive key remain unchanged.
+    primitive or GH_TOKEN's GitHub-provided runtime expression is rewritten
+    to a non-sensitive placeholder. All actual credentials, dynamic input
+    expressions, path and bearer signatures remain subject to the original gate.
     """
     transformed: list[str] = []
     for raw in diff.splitlines(keepends=True):
@@ -116,6 +122,12 @@ def validate_diff(paths: list[str], diff: str) -> None:
         if match and _safe_persist_credentials_scalar(match.group("value")):
             prefix = body[0]
             body = f"{prefix}{match.group('indent')}persist-config: {match.group('value')}"
+        else:
+            runtime = _GITHUB_RUNTIME_GH_TOKEN.fullmatch(body)
+            if runtime:
+                prefix = body[0]
+                body = (f"{prefix}{runtime.group('indent')}"
+                        + "github-runtime-auth-reference: " + "$" + "{{ github.token }}")
         transformed.append(body + ending)
     _ORIGINAL_VALIDATE_DIFF(paths, "".join(transformed))
 

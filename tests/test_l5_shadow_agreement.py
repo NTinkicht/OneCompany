@@ -29,12 +29,14 @@ class ShadowAgreementTests(unittest.TestCase):
         return {"schema": "L5_SHADOW_LABELS_V1", "records": rows}
 
     def test_three_days_exact_threshold_stays_uncertified(self):
-        rows = [sample(i, f"2026-10-{10 + i // 34:02}", match=i < 95)
-                for i in range(100)]
+        # 19/20 correct on EACH day, not merely 95% pooled.
+        rows = [sample(i, f"2026-10-{10 + i // 20:02}", match=i % 20 != 19)
+                for i in range(60)]
         value = evaluate(self.payload(rows))
         result = value["results"][REPO]
         self.assertEqual(result["agreement_percent"], 95.0)
         self.assertTrue(result["consecutive_three_day_window"])
+        self.assertTrue(result["daily_threshold_met"])
         self.assertTrue(result["numerical_candidate"])
         self.assertFalse(value["production_l5_certified"])
         self.assertEqual(value["mutations"], 0)

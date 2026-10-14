@@ -112,6 +112,30 @@ def evaluate(payload: Any) -> dict:
                 for earlier, later in zip(observed_dates, observed_dates[1:])
             )
         )
+        # One bounded linear scan. A pooled 95% score is insufficient:
+        # each of the three observed calendar days must independently pass.
+        # These rows are schema-validated by evaluate() before reaching here.
+        daily_counts = {day.isoformat(): [0, 0] for day in observed_dates}
+        for row in samples:
+            day_counts = daily_counts[row["day"]]
+            day_counts[0] += 1
+            if row["labeled_decision"] == row["shadow_decision"]:
+                day_counts[1] += 1
+        # Make the daily 95% decision auditable without exposing individual
+        # human labels. Preserve the V1 input contract and read-only output.
+        daily_agreement = {
+            day: {
+                "samples": counts[0],
+                "matching": counts[1],
+                "agreement_percent": round(counts[1] * 100 / counts[0], 3),
+                "threshold_met": counts[1] * 100 >= counts[0] * 95,
+            }
+            for day, counts in sorted(daily_counts.items())
+        }
+        daily_threshold_met = (
+            consecutive_three_day_window
+            and all(value["threshold_met"] for value in daily_agreement.values())
+        )
         # Exact integer comparison avoids float rounding over the 95% gate.
         score_pass = total > 0 and matches * 100 >= total * 95
         results[repo] = {
@@ -119,8 +143,10 @@ def evaluate(payload: Any) -> dict:
             "matching": matches,
             "distinct_days": days,
             "consecutive_three_day_window": consecutive_three_day_window,
+            "daily_threshold_met": daily_threshold_met,
+            "daily_agreement": daily_agreement,
             "agreement_percent": round(matches * 100 / total, 3) if total else None,
-            "numerical_candidate": consecutive_three_day_window and score_pass,
+            "numerical_candidate": consecutive_three_day_window and score_pass and daily_threshold_met,
         }
     return {
         "schema": "L5_SHADOW_AGREEMENT_REPORT_V1",

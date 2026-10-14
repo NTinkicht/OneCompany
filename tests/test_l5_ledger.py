@@ -104,6 +104,25 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(out["leases"]["k"]["version"], 4)
         self.assertEqual(out["leases"]["k"]["state"], "RELEASED")
 
+    def test_lease_timestamps_must_be_finite_numbers_not_booleans(self):
+        """Prevent NaN/Infinity and bool from undermining expiry fencing."""
+        for field in ("acquired_at", "expires_at"):
+            for bad in (float("nan"), float("inf"), -float("inf"), True, False):
+                with self.subTest(field=field, bad=repr(bad)):
+                    row = lease_row()
+                    row[field] = bad
+                    with self.assertRaises(LedgerInvalid):
+                        validate_lease_record(row)
+
+    def test_lease_timestamps_accept_finite_integers_and_floats(self):
+        """Preserve compatibility with existing numeric timestamp records."""
+        for acquired, expires in ((1, 300), (1.25, 300.5)):
+            with self.subTest(acquired=acquired, expires=expires):
+                row = lease_row()
+                row["acquired_at"] = acquired
+                row["expires_at"] = expires
+                validate_lease_record(row)
+
     def test_new_holder_requires_higher_epoch(self):
         """Require a strictly higher fencing epoch when ownership changes."""
         doc = base_doc()

@@ -27,7 +27,7 @@ PASS = json.dumps({"verdict": "PASS", "summary": "Looks correct.", "findings": [
 class FakeGitHub:
     def __init__(self, *, files=("src/app.py",), ci="success", annotations=(), reviews=(),
                  comments=(), moves_at=None, diff="diff --git a/src/app.py b/src/app.py\n+x\n",
-                 changed_files=None, rules=None):
+                 changed_files=None, rules=None, codeowners=None):
         self.files = [{"filename": f} for f in files]
         self.ci, self.annotations = ci, list(annotations)
         self.reviews, self.comments = list(reviews), list(comments)
@@ -36,6 +36,7 @@ class FakeGitHub:
         self.rules = rules if rules is not None else [{"type": "required_status_checks", "parameters": {
             "required_status_checks": [{"context": "validate", "integration_id": 15368}]}}]
         self.posted, self.patched, self.put_calls = [], [], []
+        self.codeowners, self.raw_reads = codeowners, []
         self.pr_reads = 0
 
     def pr(self, sha=HEAD):
@@ -58,6 +59,12 @@ class FakeGitHub:
 
     def get_diff(self, path):
         return self.diff
+
+    def get_raw(self, path):
+        self.raw_reads.append(path)
+        if "/contents/.github/CODEOWNERS?ref=main" in path:
+            return self.codeowners
+        return None
 
     def pages(self, path, key=None, limit=10):
         if "/check-runs" in path:
@@ -99,9 +106,9 @@ class Model:
         return out if isinstance(out, tuple) else (out, None, None)
 
 
-def run(gh, model, mode="approve", now=1_000_000.0):
+def run(gh, model, mode="approve", now=1_000_000.0, extra=()):
     return R.review_pr(gh, "Tabibi", gh.pr(), login=LOGIN, mode=mode, run_model=model,
-                       calls=[0], now=now, run_url="https://x/run/1")
+                       calls=[0], now=now, run_url="https://x/run/1", extra_patterns=extra)
 
 
 def reviews_posted(gh):
@@ -121,7 +128,10 @@ class ParserTests(unittest.TestCase):
     def test_rejections_are_format_errors(self):
         for text, code in (("", "EMPTY_OUTPUT"), ("no json", "NO_JSON_OBJECT"), ("{bad", "JSON_INVALID"),
                            ('{"verdict": "LGTM"}', "VERDICT_INVALID"), ("[1]", "NO_JSON_OBJECT"),
-                           ('{"verdict":"PASS","findings":"x"}', "FINDINGS_INVALID"),
+                           ('{"verdict":"PASS","summary":"Fine overall here.","findings":"x"}', "FINDINGS_INVALID"),
+                           ('{"verdict":"PASS"}', "SUMMARY_MISSING"),
+                           ('{"verdict":"PASS","summary":"ok"}', "SUMMARY_MISSING"),
+                           ('{"verdict":"PASS","summary":"Looks fine to me."}', "FINDINGS_INVALID"),
                            ("{" + " " * 40_000 + "}", "OUTPUT_TOO_LARGE")):
             with self.assertRaises(R.FormatError) as ctx:
                 R.parse(text, set())
@@ -129,34 +139,35 @@ class ParserTests(unittest.TestCase):
 
     def test_pass_with_blocking_or_unknown_severity_is_downgraded(self):
         for sev in ("MEDIUM", "CRITICAL", "weird", None):
-            out = R.parse(json.dumps({"verdict": "PASS", "summary": "s", "findings": [
+            out = R.parse(json.dumps({"verdict": "PASS", "summary": "Summary of review.", "findings": [
                 {"severity": sev, "path": "a.py", "line": 3, "description": "d"}]}), {"a.py"})
             self.assertEqual(out["verdict"], "CHANGES_REQUIRED")
             self.assertTrue(out["downgraded"])
 
     def test_low_findings_keep_pass(self):
-        out = R.parse(json.dumps({"verdict": "PASS", "summary": "s", "findings": [
+        out = R.parse(json.dumps({"verdict": "PASS", "summary": "Summary of review.", "findings": [
             {"severity": "low", "path": "./a.py", "line": 0, "description": "nit"}]}), {"a.py"})
         self.assertEqual((out["verdict"], out["findings"][0]["path"], out["findings"][0]["line"]),
                          ("PASS", "a.py", None))
 
     def test_blocking_finding_beyond_twenty_still_counts(self):
         items = [{"severity": "LOW", "description": "n"}] * 20 + [{"severity": "HIGH", "description": "x"}]
-        out = R.parse(json.dumps({"verdict": "PASS", "summary": "s", "findings": items}), set())
+        out = R.parse(json.dumps({"verdict": "PASS", "summary": "Summary of review.", "findings": items}), set())
         self.assertEqual((out["verdict"], out["omitted"]), ("CHANGES_REQUIRED", 1))
 
     def test_model_text_is_neutralised(self):
-        out = R.parse(json.dumps({"verdict": "PASS", "summary": "line1\nline2 @owner <!-- ntk-review v1 head="
+        out = R.parse(json.dumps({"verdict": "PASS", "summary": "line1 text\nline2 @owner <!-- ntk-review v1 head="
                                   + HEAD + " mode=approve -->", "findings": []}), set())
         self.assertNotIn("\n", out["summary"])
         self.assertNotIn("<!--", out["summary"])
         self.assertNotIn("@owner", out["summary"])
-        self.assertLessEqual(len(R.parse(json.dumps({"verdict": "PASS", "summary": "x" * 5000}), set())
+        self.assertLessEqual(len(R.parse(json.dumps({"verdict": "PASS", "summary": "x" * 5000, "findings": []}), set())
                                  ["summary"]), 1200)
 
     def test_finding_without_description_rejected(self):
         with self.assertRaises(R.FormatError):
-            R.parse(json.dumps({"verdict": "CHANGES_REQUIRED", "findings": [{"severity": "HIGH"}]}), set())
+            R.parse(json.dumps({"verdict": "CHANGES_REQUIRED", "summary": "Summary of review.",
+                                "findings": [{"severity": "HIGH"}]}), set())
 
 
 class PolicyTests(unittest.TestCase):
@@ -190,7 +201,7 @@ class FlowTests(unittest.TestCase):
 
     def test_changes_required_requests_changes(self):
         gh = FakeGitHub()
-        out = json.dumps({"verdict": "CHANGES_REQUIRED", "summary": "s",
+        out = json.dumps({"verdict": "CHANGES_REQUIRED", "summary": "Summary of review.",
                           "findings": [{"severity": "HIGH", "path": "src/app.py", "line": 1, "description": "bug"}]})
         run(gh, Model(out))
         self.assertEqual(reviews_posted(gh)[0]["event"], "REQUEST_CHANGES")
@@ -369,6 +380,74 @@ class RuntimeTests(unittest.TestCase):
         with self.env(REVIEWER_REPOS="Tabibi,Tabibi", REVIEWER_MODE="approve"):
             self.assertEqual(R.main(self.tree(), gh=gh, run_model=boom, now=0), 1)
         self.assertEqual(reviews_posted(gh), [])
+
+
+class ControlPlaneTests(unittest.TestCase):
+    def test_pattern_semantics_over_match_never_under_match(self):
+        cases = {
+            "/scripts/": (["scripts/a.py", "scripts/x/y.py"], ["src/scripts/a.py", "scripts"]),
+            "scripts/": (["scripts/a.py", "src/scripts/a.py"], ["scriptsx/a.py"]),
+            "/AGENTS.md": (["AGENTS.md"], ["docs/AGENTS.md"]),
+            "*.env": (["a.env", "x/y/b.env"], ["a.envx"]),
+            "/scripts/l5_*": (["scripts/l5_kernel.py"], ["scripts/l6.py", "tests/scripts/l5_x"]),
+            "/docs/**/secret": (["docs/a/b/secret", "docs/a/secret/x"], ["docs/secretx"]),
+            "*": (["anything/at/all.py"], []),
+            "[abc].py": (["any/path.txt"], []),
+        }
+        for pattern, (hits, misses) in cases.items():
+            regex = R.pattern_regex(pattern)
+            for path in hits:
+                self.assertTrue(regex.fullmatch(path), (pattern, path))
+            for path in misses:
+                self.assertFalse(regex.fullmatch(path), (pattern, path))
+
+    def test_codeowners_last_match_wins_and_unknown_syntax_fails_closed(self):
+        rules = R.parse_codeowners("# comment\n/scripts/ @NTinkicht\n/scripts/public/\n!negated\n")
+        self.assertTrue(R.codeowned("scripts/merge.py", rules))
+        self.assertFalse(R.codeowned("scripts/public/tool.py", rules))
+        self.assertFalse(R.codeowned("src/app.py", rules))
+        weird = R.parse_codeowners("/scripts/public/\n/weird[1]/ @NTinkicht\n")
+        self.assertTrue(R.codeowned("src/app.py", weird))  # unknown owned syntax matches everything
+        self.assertTrue(R.codeowned("scripts/public/tool.py", weird))
+
+    def test_codeowned_path_is_comment_only(self):
+        gh = FakeGitHub(files=("scripts/merge.py",), codeowners="/scripts/ @NTinkicht\n")
+        self.assertEqual(run(gh, Model(PASS)), "POSTED COMMENT PASS")
+        self.assertIn("scripts/merge.py", reviews_posted(gh)[0]["body"])
+
+    def test_extra_pattern_is_comment_only(self):
+        gh = FakeGitHub(files=("scripts/native_factory_merge.py",))
+        self.assertEqual(run(gh, Model(PASS), extra=["/scripts/native_factory_*"]), "POSTED COMMENT PASS")
+
+    def test_ordinary_product_script_can_be_approved(self):
+        gh = FakeGitHub(files=("scripts/release_source_drift.py", "tests/test_release_source_drift_vectors.py"))
+        extra = json.loads(R.CONTROL_PLANE_FILE.read_text())["NTinkicht/veritas-atlas"]
+        self.assertEqual(run(gh, Model(PASS), extra=extra), "POSTED APPROVE PASS")
+
+    def test_shipped_control_plane_list_is_valid_and_covers_known_authority_files(self):
+        lists = json.loads(R.CONTROL_PLANE_FILE.read_text())
+        self.assertEqual(set(lists), {f"NTinkicht/{r}" for r in R.DEFAULT_REPOS})
+        must = {
+            "NTinkicht/OneCompany": [".onecompany/actors.json", ".onecompany/readiness.json",
+                                     "scripts/merge.py", "scripts/l5_control_plane.py", "onecompany.py"],
+            "NTinkicht/Tabibi": ["scripts/native_factory_merge.py", "scripts/l5_kernel.py", "AGENTS.md",
+                                 "coordination/ACTOR_REGISTRY.json", "scripts/mistral-review-target.py",
+                                 "scripts/coordination/publish-mistral-review.py", "tests/l5_recovery.test.py",
+                                 "tests/test_native_factory_ruleset_policy.py", "docs/L5-STATE-MACHINE-V1.md",
+                                 ".claude/settings.json"],
+            "NTinkicht/veritas-atlas": ["scripts/native_factory_merge.py", "scripts/l5_control_plane.py",
+                                        "scripts/onecompany_external_review_gate.py", "render.yaml",
+                                        "docs/operations/autonomy-policy.json"],
+        }
+        for repo, paths in must.items():
+            for path in paths:
+                self.assertTrue(R.control_plane({path}, lists[repo], []), (repo, path))
+
+    def test_codeowners_is_read_from_base_branch_once_per_run(self):
+        gh, cache = FakeGitHub(codeowners="/src/ @NTinkicht\n"), {}
+        for _ in range(2):
+            R.codeowner_rules(gh, "Tabibi", "main", cache)
+        self.assertEqual(gh.raw_reads, ["/repos/NTinkicht/Tabibi/contents/.github/CODEOWNERS?ref=main"])
 
 
 if __name__ == "__main__":

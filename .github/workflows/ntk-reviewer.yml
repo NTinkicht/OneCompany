@@ -5,7 +5,9 @@ name: ntk-reviewer
 # branch policy: main), and does nothing until the owner sets the REPOSITORY
 # variable REVIEWER_ENABLED=true. REVIEWER_MODE=comment is shadow mode;
 # REVIEWER_MODE=approve lets it APPROVE / REQUEST_CHANGES ordinary PRs.
-# It never approves control-plane paths (.github/**, CODEOWNERS, stop/budget).
+# It never approves control-plane paths: .github/**, CODEOWNERS, stop/budget files,
+# the per-repo list in .github/ntk-reviewer/control-plane.json, and anything owned
+# in the target repo's CODEOWNERS (read from the base branch).
 # Code: .github/ntk-reviewer/review.py  Tests: .onecompany/selftest/test_ntk_reviewer.py
 
 on:
@@ -55,6 +57,7 @@ jobs:
           private-key: ${{ secrets.REVIEWER_APP_KEY }}
           owner: NTinkicht
           repositories: OneCompany,Tabibi,veritas-atlas
+          permission-contents: read
           permission-pull-requests: write
           permission-checks: read
           permission-statuses: read

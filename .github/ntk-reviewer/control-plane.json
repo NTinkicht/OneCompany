@@ -1,0 +1,48 @@
+{
+  "NTinkicht/OneCompany": [
+    "/.onecompany/",
+    "/.l5/",
+    "/scripts/",
+    "/agents/",
+    "/onecompany.py",
+    "/AGENTS.md",
+    "/CLAUDE.md",
+    "/GEMINI.md",
+    "/Makefile"
+  ],
+  "NTinkicht/Tabibi": [
+    "/.l5/",
+    "/.claude/",
+    "/.vibe/",
+    "/coordination/",
+    "/AGENTS.md",
+    "/CLAUDE.md",
+    "/GEMINI.md",
+    "/GROK.md",
+    "/VIBE.md",
+    "/scripts/l5_*",
+    "/scripts/native_factory_*",
+    "/scripts/coordination/",
+    "/scripts/mistral-*",
+    "/scripts/*-code-adapter.py",
+    "/tests/l5_*",
+    "/tests/test_l5_*",
+    "/tests/test_native_factory_*",
+    "/docs/L5-*",
+    "/docs/release/"
+  ],
+  "NTinkicht/veritas-atlas": [
+    "/.l5/",
+    "/coordination/",
+    "/render.yaml",
+    "/scripts/native_factory_*",
+    "/scripts/onecompany_external_review_gate.py",
+    "/scripts/l5_*",
+    "/tests/test_native_factory_*",
+    "/tests/test_onecompany_external_review_gate.py",
+    "/docs/operations/AUTONOMY_POLICY.md",
+    "/docs/operations/autonomy-policy.json",
+    "/docs/operations/onecompany-adoption/docs/VERITAS-H*",
+    "/docs/FIRST_RENDER_STAGING_DEPLOYMENT.md"
+  ]
+}

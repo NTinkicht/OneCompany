@@ -27,11 +27,18 @@ API = "https://api.github.com"
 OWNER = "NTinkicht"
 DEFAULT_REPOS = ("OneCompany", "Tabibi", "veritas-atlas")
 # Control plane: the reviewer may comment or request changes here, never approve.
+# A path is control plane if it matches this built-in floor, the per-repo list in
+# control-plane.json (next to this file), or ANY owned entry of the target repo's
+# CODEOWNERS on the base branch, so the reviewer and GitHub code-owner review
+# protect the same set. Unknown CODEOWNERS syntax counts as matching (fail closed).
 FLOOR_PREFIXES = (".github/",)
 FLOOR_EXACT = frozenset({
     "CODEOWNERS", "docs/CODEOWNERS",
     ".onecompany/config.json", ".onecompany/budget.json",
 })
+CONTROL_PLANE_FILE = Path(__file__).resolve().with_name("control-plane.json")
+CODEOWNERS_LOCATIONS = (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS")
+SAFE_PATTERN = re.compile(r"[A-Za-z0-9_.\-/*?]+")
 MAX_DIFF_BYTES = 120_000
 MAX_FILES = 300
 MAX_OUTPUT_BYTES = 30_000
@@ -91,6 +98,8 @@ class GitHub:
             with urllib.request.urlopen(request, timeout=30) as response:
                 return response.read()
         except urllib.error.HTTPError as error:
+            if error.code == 404 and accept == "application/vnd.github.raw":
+                return None
             if error.code in (401, 403, 404):
                 raise Stop(f"CONFIGURATION_ERROR: GitHub {error.code} on {method} {path.split('?')[0]}")
             raise
@@ -98,6 +107,11 @@ class GitHub:
     def get(self, path):
         raw = self._call("GET", path)
         return json.loads(raw) if raw else {}
+
+    def get_raw(self, path):
+        """File text, or None when the file does not exist (404)."""
+        raw = self._call("GET", path, accept="application/vnd.github.raw")
+        return None if raw is None else raw.decode("utf-8", "replace")
 
     def get_diff(self, path):
         return self._call("GET", path, accept="application/vnd.github.diff").decode("utf-8", "replace")
@@ -127,6 +141,60 @@ class GitHub:
 
 def is_floor(path: str) -> bool:
     return path.startswith(FLOOR_PREFIXES) or path in FLOOR_EXACT
+
+
+def pattern_regex(pattern: str) -> re.Pattern:
+    """CODEOWNERS/gitignore-style pattern; deliberately over-matches, never under-matches."""
+    if not SAFE_PATTERN.fullmatch(pattern):
+        return re.compile(r".*")  # unsupported syntax: treat as matching everything
+    anchored = pattern.startswith("/") or "/" in pattern.strip("/")
+    core = pattern.strip("/")
+    if not core:
+        return re.compile(r".*")
+    body = ""
+    i = 0
+    while i < len(core):
+        if core.startswith("**", i):
+            body += ".*"
+            i += 2
+        elif core[i] == "*":
+            body += "[^/]*"
+            i += 1
+        elif core[i] == "?":
+            body += "[^/]"
+            i += 1
+        else:
+            body += re.escape(core[i])
+            i += 1
+    tail = "/.*" if pattern.endswith("/") else "(?:/.*)?"
+    return re.compile(("^" if anchored else "^(?:.*/)?") + body + tail + "$")
+
+
+def parse_codeowners(text: str) -> list[tuple[re.Pattern, bool]]:
+    rules = []
+    for line in text.splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        pattern, *owners = line.split()
+        if not SAFE_PATTERN.fullmatch(pattern) and not owners:
+            continue  # an unparseable un-ownership line never removes protection
+        rules.append((pattern_regex(pattern), bool(owners)))
+    return rules
+
+
+def codeowned(path: str, rules) -> bool:
+    owned = False
+    for regex, has_owners in rules:  # last matching line wins, as on GitHub
+        if regex.fullmatch(path):
+            owned = has_owners
+    return owned
+
+
+def control_plane(paths, extra_patterns, codeowner_rules) -> set[str]:
+    extra = [pattern_regex(p) for p in extra_patterns]
+    return {p for p in paths if is_floor(p) or any(r.fullmatch(p) for r in extra)
+            or codeowned(p, codeowner_rules)}
 
 
 def clean(value, limit: int) -> str:
@@ -161,7 +229,10 @@ def parse(text: str, changed: set[str]) -> dict:
     verdict = value.get("verdict")
     if verdict not in ("PASS", "CHANGES_REQUIRED"):
         raise FormatError("VERDICT_INVALID")
-    items = value.get("findings", [])
+    summary = clean(value.get("summary"), 1200)
+    if len(summary) < 10:
+        raise FormatError("SUMMARY_MISSING")
+    items = value.get("findings")
     if not isinstance(items, list) or not all(isinstance(f, dict) for f in items):
         raise FormatError("FINDINGS_INVALID")
     # Unknown or missing severity counts as blocking: fail closed.
@@ -183,7 +254,7 @@ def parse(text: str, changed: set[str]) -> dict:
     downgraded = verdict == "PASS" and blocking
     return {
         "verdict": "CHANGES_REQUIRED" if downgraded else verdict,
-        "summary": clean(value.get("summary"), 1200) or "(no summary given)",
+        "summary": summary,
         "findings": findings,
         "omitted": max(0, len(items) - 20),
         "downgraded": downgraded,
@@ -284,6 +355,18 @@ def ci_state(gh, repo, head, required):
     return ("red", red) if red else ("green", "")
 
 
+def codeowner_rules(gh, repo, base, cache):
+    key = (repo, base)
+    if key not in cache:
+        cache[key] = []
+        for location in CODEOWNERS_LOCATIONS:  # GitHub uses the first one found
+            text = gh.get_raw(f"/repos/{OWNER}/{repo}/contents/{location}?ref={base}")
+            if text is not None:
+                cache[key] = parse_codeowners(text)
+                break
+    return cache[key]
+
+
 def read_status(gh, repo, number, login):
     for comment in gh.pages(f"/repos/{OWNER}/{repo}/issues/{number}/comments"):
         if (comment.get("user") or {}).get("login") == login:
@@ -305,7 +388,8 @@ def write_status(gh, repo, number, comment_id, old, new, message):
 
 # ---------- one PR ----------
 
-def review_pr(gh, repo, pr, *, login, mode, run_model, calls, now, run_url):
+def review_pr(gh, repo, pr, *, login, mode, run_model, calls, now, run_url,
+              extra_patterns=(), owners_cache=None):
     number = pr["number"]
     if pr.get("draft"):
         return "SKIP draft"
@@ -349,7 +433,9 @@ def review_pr(gh, repo, pr, *, login, mode, run_model, calls, now, run_url):
         return record("CODE_ERROR", "CHANGE_TOO_LARGE", f"{pr['changed_files']} files changed; split the PR.")
     changed = {f.get("filename") for f in files} | {f.get("previous_filename") for f in files}
     changed.discard(None)
-    floor_paths = {p for p in changed if is_floor(p)}
+    owners_cache = {} if owners_cache is None else owners_cache
+    floor_paths = control_plane(changed, extra_patterns,
+                                codeowner_rules(gh, repo, pr["base"]["ref"], owners_cache))
     if len(files) != pr.get("changed_files", len(files)):
         floor_paths.add("(file list incomplete)")  # fail closed: never approve
     allowed, why = may_call(status, head, now)
@@ -475,10 +561,17 @@ def main(root: Path = Path("."), gh=None, run_model=None, now=None) -> int:
     except Stop as stop:
         print(stop)
         return 0 if str(stop).startswith("EMERGENCY_STOP") else 1
+    try:
+        extras = json.loads(CONTROL_PLANE_FILE.read_text(encoding="utf-8"))
+        assert isinstance(extras, dict) and all(
+            isinstance(v, list) and all(isinstance(x, str) for x in v) for v in extras.values())
+    except (OSError, ValueError, AssertionError):
+        print("CONFIGURATION_ERROR: control-plane.json missing or invalid")
+        return 1
     gh = gh or GitHub(os.environ["REVIEWER_TOKEN"])
     run_model = run_model or vibe_runner(os.environ.get("MISTRAL_API_KEY", ""))
     now = time.time() if now is None else now
-    calls, code = [0], 0
+    calls, code, owners_cache = [0], 0, {}
     print(f"ntk-reviewer mode={mode} login={login} repos={repos}")
     for repo in repos:
         try:
@@ -486,7 +579,9 @@ def main(root: Path = Path("."), gh=None, run_model=None, now=None) -> int:
                 if only and only != f"{repo}#{pr['number']}":
                     continue
                 outcome = review_pr(gh, repo, pr, login=login, mode=mode, run_model=run_model,
-                                    calls=calls, now=now, run_url=run_url)
+                                    calls=calls, now=now, run_url=run_url,
+                                    extra_patterns=extras.get(f"{OWNER}/{repo}", []),
+                                    owners_cache=owners_cache)
                 print(f"{repo}#{pr['number']}: {outcome}")
         except Stop as stop:
             print(f"{repo}: {stop}")

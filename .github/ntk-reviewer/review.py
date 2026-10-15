@@ -4,7 +4,13 @@
 Runs only from OneCompany `main` inside the `reviewer` environment, with a
 GitHub App installation token. For each open same-repo PR whose required
 checks are green on the exact head, it asks Mistral Vibe for ONE verdict
-(single call, no tools) and posts ONE native GitHub review bound to that head.
+(single call, no tools) and posts ONE native GitHub review bound to that head
+and base; if either moves while it reviews, the verdict is skipped or dismissed.
+
+Its APPROVE counts only through GitHub's native ruleset (required approvals,
+strict up-to-date checks, stale-review dismissal). OneCompany's legacy
+scripts/gate.py does not recognise this App and fails closed; it is not the
+merge path under the simplified architecture.
 
 It never pushes, merges, edits settings, or APPROVES a control-plane path.
 Model output is untrusted data: only the verdict enum carries meaning, the
@@ -154,7 +160,10 @@ def pattern_regex(pattern: str) -> re.Pattern:
     body = ""
     i = 0
     while i < len(core):
-        if core.startswith("**", i):
+        if core.startswith("**/", i):
+            body += "(?:.*/)?"  # zero or more whole directories
+            i += 3
+        elif core.startswith("**", i):
             body += ".*"
             i += 2
         elif core[i] == "*":
@@ -277,10 +286,11 @@ def may_call(status: dict, head: str, now: float) -> tuple[bool, str]:
     return True, ""
 
 
-def review_body(head, mode, result, floor_paths, run_url, event):
+def review_body(head, base, mode, result, floor_paths, run_url, event):
     outcome = {"APPROVE": "Approved", "REQUEST_CHANGES": "Changes requested"}.get(event, "Advisory")
     lines = [f"**ntk-reviewer · {outcome}** — model verdict **{result['verdict']}**",
-             f"Exact head `{head}` · model mistral-vibe · [run]({run_url})", "", result["summary"], ""]
+             f"Exact head `{head}` · base `{base}` · model mistral-vibe · [run]({run_url})", "",
+             result["summary"], ""]
     for f in result["findings"]:
         where = f"`{f['path']}{':' + str(f['line']) if f['line'] else ''}` " if f["path"] else ""
         lines.append(f"- **{f['severity']}** {where}{f['description']}")
@@ -295,7 +305,8 @@ def review_body(head, mode, result, floor_paths, run_url, event):
     if mode == "comment":
         lines.append("\nShadow mode: advisory only, not a gate.")
     floor = 1 if floor_paths else 0
-    lines.append(f"\n<!-- ntk-review v1 head={head} mode={mode} verdict={result['verdict']} floor={floor} -->")
+    lines.append(f"\n<!-- ntk-review v1 head={head} mode={mode} base={base} "
+                 f"verdict={result['verdict']} floor={floor} -->")
     return "\n".join(lines)
 
 
@@ -398,7 +409,7 @@ def review_pr(gh, repo, pr, *, login, mode, run_model, calls, now, run_url,
     pr = gh.get(f"/repos/{OWNER}/{repo}/pulls/{number}")  # list items lack changed_files
     if pr.get("state") != "open" or pr.get("draft"):
         return "SKIP not open"
-    head = pr["head"]["sha"]
+    head, base = pr["head"]["sha"], pr["base"]["sha"]
     for review in gh.pages(f"/repos/{OWNER}/{repo}/pulls/{number}/reviews"):
         match = REVIEW_MARK.search(review.get("body") or "")
         if ((review.get("user") or {}).get("login") == login and review.get("commit_id") == head
@@ -435,7 +446,7 @@ def review_pr(gh, repo, pr, *, login, mode, run_model, calls, now, run_url,
     changed.discard(None)
     owners_cache = {} if owners_cache is None else owners_cache
     floor_paths = control_plane(changed, extra_patterns,
-                                codeowner_rules(gh, repo, pr["base"]["ref"], owners_cache))
+                                codeowner_rules(gh, repo, base, owners_cache))
     if len(files) != pr.get("changed_files", len(files)):
         floor_paths.add("(file list incomplete)")  # fail closed: never approve
     allowed, why = may_call(status, head, now)
@@ -469,19 +480,23 @@ def review_pr(gh, repo, pr, *, login, mode, run_model, calls, now, run_url,
     latest = gh.get(f"/repos/{OWNER}/{repo}/pulls/{number}")
     if latest.get("state") != "open" or latest["head"]["sha"] != head:
         return "SKIP head moved before posting"
+    if latest["base"]["sha"] != base:
+        return "SKIP base moved before posting"
     event = choose_event(mode, result["verdict"], bool(floor_paths))
     posted = gh.post(f"/repos/{OWNER}/{repo}/pulls/{number}/reviews", {
         "commit_id": head, "event": event,
-        "body": review_body(head, mode, result, floor_paths, run_url, event),
+        "body": review_body(head, base, mode, result, floor_paths, run_url, event),
     })
     if event != "COMMENT":
         # Close the race: a push between the recheck and the post must not leave
         # a verdict for an older commit standing on the PR.
         after = gh.get(f"/repos/{OWNER}/{repo}/pulls/{number}")
-        if after["head"]["sha"] != head and posted.get("id"):
+        moved = after["head"]["sha"] != head or after["base"]["sha"] != base
+        if moved and posted.get("id"):
             gh.put(f"/repos/{OWNER}/{repo}/pulls/{number}/reviews/{posted['id']}/dismissals",
-                   {"message": f"Head moved from {head[:12]} while reviewing; this verdict is withdrawn."})
-            return "DISMISSED head moved while posting"
+                   {"message": f"Head or base moved from {head[:12]}/{base[:12]} while reviewing; "
+                               "this verdict is withdrawn."})
+            return "DISMISSED head or base moved while posting"
     if comment_id:
         record("REVIEWED", result["verdict"], f"reviewed `{head[:12]}`: {result['verdict']}.")
     return f"POSTED {event} {result['verdict']}"

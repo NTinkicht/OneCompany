@@ -20,18 +20,20 @@ SPEC.loader.exec_module(R)
 
 HEAD = "a" * 40
 NEW_HEAD = "b" * 40
+BASE = "c" * 40
+NEW_BASE = "d" * 40
 LOGIN = "ntk-reviewer[bot]"
 PASS = json.dumps({"verdict": "PASS", "summary": "Looks correct.", "findings": []})
 
 
 class FakeGitHub:
     def __init__(self, *, files=("src/app.py",), ci="success", annotations=(), reviews=(),
-                 comments=(), moves_at=None, diff="diff --git a/src/app.py b/src/app.py\n+x\n",
+                 comments=(), moves_at=None, base_moves_at=None, diff="diff --git a/src/app.py b/src/app.py\n+x\n",
                  changed_files=None, rules=None, codeowners=None):
         self.files = [{"filename": f} for f in files]
         self.ci, self.annotations = ci, list(annotations)
         self.reviews, self.comments = list(reviews), list(comments)
-        self.moves_at, self.diff = moves_at, diff
+        self.moves_at, self.base_moves_at, self.diff = moves_at, base_moves_at, diff
         self.changed_files = len(files) if changed_files is None else changed_files
         self.rules = rules if rules is not None else [{"type": "required_status_checks", "parameters": {
             "required_status_checks": [{"context": "validate", "integration_id": 15368}]}}]
@@ -39,10 +41,10 @@ class FakeGitHub:
         self.codeowners, self.raw_reads = codeowners, []
         self.pr_reads = 0
 
-    def pr(self, sha=HEAD):
+    def pr(self, sha=HEAD, base=BASE):
         return {"number": 7, "state": "open", "draft": False, "title": "Add thing", "body": "Body",
                 "head": {"sha": sha, "repo": {"full_name": "NTinkicht/Tabibi"}},
-                "base": {"ref": "main"}, "changed_files": self.changed_files}
+                "base": {"ref": "main", "sha": base}, "changed_files": self.changed_files}
 
     def get(self, path):
         if path.endswith("/rules/branches/main"):
@@ -54,7 +56,8 @@ class FakeGitHub:
         if path.endswith("/pulls/7"):
             self.pr_reads += 1
             moved = self.moves_at is not None and self.pr_reads >= self.moves_at
-            return self.pr(NEW_HEAD if moved else HEAD)
+            base_moved = self.base_moves_at is not None and self.pr_reads >= self.base_moves_at
+            return self.pr(NEW_HEAD if moved else HEAD, NEW_BASE if base_moved else BASE)
         raise AssertionError(path)
 
     def get_diff(self, path):
@@ -62,7 +65,7 @@ class FakeGitHub:
 
     def get_raw(self, path):
         self.raw_reads.append(path)
-        if "/contents/.github/CODEOWNERS?ref=main" in path:
+        if f"/contents/.github/CODEOWNERS?ref={BASE}" in path:
             return self.codeowners
         return None
 
@@ -192,7 +195,7 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(run(gh, model), "POSTED APPROVE PASS")
         (review,) = reviews_posted(gh)
         self.assertEqual((review["commit_id"], review["event"]), (HEAD, "APPROVE"))
-        self.assertIn(f"head={HEAD} mode=approve", review["body"])
+        self.assertIn(f"head={HEAD} mode=approve base={BASE}", review["body"])
 
     def test_shadow_mode_only_comments(self):
         gh = FakeGitHub()
@@ -256,9 +259,19 @@ class FlowTests(unittest.TestCase):
 
     def test_head_moved_while_posting_dismisses_the_verdict(self):
         gh = FakeGitHub(moves_at=3)
-        self.assertEqual(run(gh, Model(PASS)), "DISMISSED head moved while posting")
+        self.assertEqual(run(gh, Model(PASS)), "DISMISSED head or base moved while posting")
         (call,) = gh.put_calls
         self.assertTrue(call[0].endswith("/reviews/99/dismissals"))
+
+    def test_base_moved_before_posting_posts_nothing(self):
+        gh = FakeGitHub(base_moves_at=2)
+        self.assertEqual(run(gh, Model(PASS)), "SKIP base moved before posting")
+        self.assertEqual(reviews_posted(gh), [])
+
+    def test_base_moved_while_posting_dismisses_the_verdict(self):
+        gh = FakeGitHub(base_moves_at=3)
+        self.assertEqual(run(gh, Model(PASS)), "DISMISSED head or base moved while posting")
+        self.assertEqual(len(gh.put_calls), 1)
 
     def test_shadow_comment_needs_no_dismissal(self):
         gh = FakeGitHub(moves_at=3)
@@ -390,7 +403,9 @@ class ControlPlaneTests(unittest.TestCase):
             "/AGENTS.md": (["AGENTS.md"], ["docs/AGENTS.md"]),
             "*.env": (["a.env", "x/y/b.env"], ["a.envx"]),
             "/scripts/l5_*": (["scripts/l5_kernel.py"], ["scripts/l6.py", "tests/scripts/l5_x"]),
-            "/docs/**/secret": (["docs/a/b/secret", "docs/a/secret/x"], ["docs/secretx"]),
+            "/docs/**/secret": (["docs/secret", "docs/a/b/secret", "docs/a/secret/x"], ["docs/secretx"]),
+            "**/logs": (["logs", "logs/a.txt", "x/y/logs/b"], ["mylogs", "logsx"]),
+            "/a/**": (["a/b", "a/b/c"], ["ab", "x/a/b"]),
             "*": (["anything/at/all.py"], []),
             "[abc].py": (["any/path.txt"], []),
         }
@@ -446,8 +461,8 @@ class ControlPlaneTests(unittest.TestCase):
     def test_codeowners_is_read_from_base_branch_once_per_run(self):
         gh, cache = FakeGitHub(codeowners="/src/ @NTinkicht\n"), {}
         for _ in range(2):
-            R.codeowner_rules(gh, "Tabibi", "main", cache)
-        self.assertEqual(gh.raw_reads, ["/repos/NTinkicht/Tabibi/contents/.github/CODEOWNERS?ref=main"])
+            R.codeowner_rules(gh, "Tabibi", BASE, cache)
+        self.assertEqual(gh.raw_reads, [f"/repos/NTinkicht/Tabibi/contents/.github/CODEOWNERS?ref={BASE}"])
 
 
 if __name__ == "__main__":

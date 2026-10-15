@@ -43,6 +43,14 @@ FLOOR_EXACT = frozenset({
     ".onecompany/config.json", ".onecompany/budget.json",
 })
 CONTROL_PLANE_FILE = Path(__file__).resolve().with_name("control-plane.json")
+# Old machinery the owner approved for removal. A PR that ONLY deletes files on
+# this per-repo list (no edits, renames or additions) may be approved even though
+# those files are control plane: deleting them cannot add behaviour. Core
+# guardrails below can never be retired this way.
+RETIREMENT_FILE = Path(__file__).resolve().with_name("retirement.json")
+NEVER_RETIRED = (".github/ntk-reviewer/", ".github/workflows/ntk-reviewer.yml",
+                 ".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS",
+                 ".onecompany/config.json", ".onecompany/budget.json")
 CODEOWNERS_LOCATIONS = (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS")
 SAFE_PATTERN = re.compile(r"[A-Za-z0-9_.\-/*?]+")
 MAX_DIFF_BYTES = 120_000
@@ -208,6 +216,20 @@ def codeowned(path: str, rules) -> bool:
     return owned
 
 
+def retirement_only(files, retire_patterns, complete: bool) -> bool:
+    """True only for a complete file list of pure deletions of listed old machinery."""
+    if not complete or not files or not retire_patterns:
+        return False
+    regexes = [pattern_regex(p) for p in retire_patterns]
+    for item in files:
+        path = item.get("filename") or ""
+        if (item.get("status") != "removed" or item.get("previous_filename")
+                or path.startswith(NEVER_RETIRED) or path in NEVER_RETIRED
+                or not any(r.fullmatch(path) for r in regexes)):
+            return False
+    return True
+
+
 def control_plane(paths, extra_patterns, codeowner_rules) -> set[str]:
     extra = [pattern_regex(p) for p in extra_patterns]
     return {p for p in paths if is_floor(p) or any(r.fullmatch(p) for r in extra)
@@ -294,7 +316,8 @@ def may_call(status: dict, head: str, now: float) -> tuple[bool, str]:
     return True, ""
 
 
-def review_body(head, base, mode, result, floor_paths, run_url, event, mistral_authored=False):
+def review_body(head, base, mode, result, floor_paths, run_url, event, mistral_authored=False,
+                retiring=False):
     outcome = {"APPROVE": "Approved", "REQUEST_CHANGES": "Changes requested"}.get(event, "Advisory")
     lines = [f"**ntk-reviewer · {outcome}** — model verdict **{result['verdict']}**",
              f"Exact head `{head}` · base `{base}` · model mistral-vibe · [run]({run_url})", "",
@@ -310,6 +333,9 @@ def review_body(head, base, mode, result, floor_paths, run_url, event, mistral_a
         shown = ", ".join(f"`{p}`" for p in sorted(floor_paths)[:5])
         lines.append(f"\nTouches control-plane paths ({shown}). This reviewer never approves those; "
                      "the owner's approval is required.")
+    if retiring:
+        lines.append("\nDeletion-only removal of old machinery listed in "
+                     "`.github/ntk-reviewer/retirement.json`; no file is added or edited.")
     if mistral_authored:
         lines.append("\nMistral materially authored part of this PR (or authorship could not be read), "
                      "so this Mistral-based reviewer cannot be its independent approver.")
@@ -420,7 +446,7 @@ def write_status(gh, repo, number, comment_id, old, new, message):
 # ---------- one PR ----------
 
 def review_pr(gh, repo, pr, *, login, mode, run_model, calls, now, run_url,
-              extra_patterns=(), owners_cache=None):
+              extra_patterns=(), owners_cache=None, retire_patterns=()):
     number = pr["number"]
     if pr.get("draft"):
         return "SKIP draft"
@@ -475,8 +501,12 @@ def review_pr(gh, repo, pr, *, login, mode, run_model, calls, now, run_url,
     owners_cache = {} if owners_cache is None else owners_cache
     floor_paths = control_plane(changed, extra_patterns,
                                 codeowner_rules(gh, repo, base, owners_cache))
-    if len(files) != pr.get("changed_files", len(files)):
+    complete = len(files) == pr.get("changed_files", len(files))
+    if not complete:
         floor_paths.add("(file list incomplete)")  # fail closed: never approve
+    retiring = bool(floor_paths) and retirement_only(files, retire_patterns, complete)
+    if retiring:
+        floor_paths = set()
     allowed, why = may_call(status, head, now)
     if not allowed:
         return why
@@ -514,7 +544,8 @@ def review_pr(gh, repo, pr, *, login, mode, run_model, calls, now, run_url,
     event = choose_event(mode, result["verdict"], bool(floor_paths) or self_authored)
     posted = gh.post(f"/repos/{OWNER}/{repo}/pulls/{number}/reviews", {
         "commit_id": head, "event": event,
-        "body": review_body(head, base, mode, result, floor_paths, run_url, event, self_authored),
+        "body": review_body(head, base, mode, result, floor_paths, run_url, event, self_authored,
+                            retiring),
     })
     if event != "COMMENT":
         # Close the race: a push between the recheck and the post must not leave
@@ -607,10 +638,12 @@ def main(root: Path = Path("."), gh=None, run_model=None, now=None) -> int:
         return 0 if str(stop).startswith("EMERGENCY_STOP") else 1
     try:
         extras = json.loads(CONTROL_PLANE_FILE.read_text(encoding="utf-8"))
-        assert isinstance(extras, dict) and all(
-            isinstance(v, list) and all(isinstance(x, str) for x in v) for v in extras.values())
+        retire = json.loads(RETIREMENT_FILE.read_text(encoding="utf-8"))
+        for table in (extras, retire):
+            assert isinstance(table, dict) and all(
+                isinstance(v, list) and all(isinstance(x, str) for x in v) for v in table.values())
     except (OSError, ValueError, AssertionError):
-        print("CONFIGURATION_ERROR: control-plane.json missing or invalid")
+        print("CONFIGURATION_ERROR: control-plane.json or retirement.json missing or invalid")
         return 1
     gh = gh or GitHub(os.environ["REVIEWER_TOKEN"])
     run_model = run_model or vibe_runner(os.environ.get("MISTRAL_API_KEY", ""))
@@ -625,7 +658,8 @@ def main(root: Path = Path("."), gh=None, run_model=None, now=None) -> int:
                 outcome = review_pr(gh, repo, pr, login=login, mode=mode, run_model=run_model,
                                     calls=calls, now=now, run_url=run_url,
                                     extra_patterns=extras.get(f"{OWNER}/{repo}", []),
-                                    owners_cache=owners_cache)
+                                    owners_cache=owners_cache,
+                                    retire_patterns=retire.get(f"{OWNER}/{repo}", []))
                 print(f"{repo}#{pr['number']}: {outcome}")
         except Stop as stop:
             print(f"{repo}: {stop}")

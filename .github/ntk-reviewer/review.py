@@ -76,6 +76,10 @@ Return ONLY one JSON object and nothing else:
  "findings": [{"severity": "INFO|LOW|MEDIUM|HIGH|CRITICAL",
                "path": "a changed file path", "line": 1,
                "description": "plain text, at most 600 characters"}]}
+You see only the diff. Files that do not appear in it exist unchanged on the base branch,
+and every required CI check (build, lint, unit and integration tests) already passed on
+this exact head, so referenced fixtures, helpers and tests exist and ran. Do not raise a
+finding only because a referenced file is not shown in the diff; judge the change itself.
 Use PASS only when there is no MEDIUM, HIGH or CRITICAL finding.
 If the diff is not enough to judge, return CHANGES_REQUIRED with one MEDIUM finding
 that says exactly what is missing."""

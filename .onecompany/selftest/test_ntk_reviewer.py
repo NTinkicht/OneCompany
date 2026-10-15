@@ -179,6 +179,14 @@ class ParserTests(unittest.TestCase):
                                 "findings": [{"severity": "HIGH"}]}), set())
 
 
+class PromptTests(unittest.TestCase):
+    def test_prompt_states_diff_only_context_and_green_ci(self):
+        prompt = R.build_prompt("Tabibi", {"number": 7, "title": "t", "body": "b"}, "diff --git")
+        self.assertIn("Files that do not appear in it exist unchanged", prompt)
+        self.assertIn("already passed on\nthis exact head", prompt)
+        self.assertLess(prompt.index("Files that do not appear"), prompt.index("-" * 60))
+
+
 class PolicyTests(unittest.TestCase):
     def test_floor_paths(self):
         for p in (".github/workflows/ci.yml", ".github/ntk-reviewer/review.py", "CODEOWNERS",

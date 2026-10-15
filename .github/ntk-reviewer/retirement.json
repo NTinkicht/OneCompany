@@ -1,0 +1,12 @@
+{
+  "NTinkicht/OneCompany": [],
+  "NTinkicht/Tabibi": [
+    "/.github/workflows/native-factory-merge-controller.yml",
+    "/.github/workflows/native-ruleset-attestation-ci.yml"
+  ],
+  "NTinkicht/veritas-atlas": [
+    "/.github/workflows/native-factory-merge-controller.yml",
+    "/.github/workflows/native-factory-supervision.yml",
+    "/.github/workflows/l5-external-review-gate-ci.yml"
+  ]
+}

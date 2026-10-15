@@ -506,5 +506,80 @@ class ControlPlaneTests(unittest.TestCase):
         self.assertEqual(gh.raw_reads, [f"/repos/NTinkicht/Tabibi/contents/.github/CODEOWNERS?ref={BASE}"])
 
 
+class RetirementTests(unittest.TestCase):
+    LIST = ["/.github/workflows/native-factory-merge-controller.yml"]
+
+    def removed(self, *paths):
+        return [{"filename": p, "status": "removed"} for p in paths]
+
+    def test_only_complete_pure_deletions_of_listed_files_qualify(self):
+        wf = ".github/workflows/native-factory-merge-controller.yml"
+        self.assertTrue(R.retirement_only(self.removed(wf), self.LIST, True))
+        self.assertFalse(R.retirement_only(self.removed(wf), self.LIST, False))
+        self.assertFalse(R.retirement_only(self.removed(wf), [], True))
+        self.assertFalse(R.retirement_only([{"filename": wf, "status": "modified"}], self.LIST, True))
+        self.assertFalse(R.retirement_only(
+            [{"filename": wf, "status": "removed", "previous_filename": "x"}], self.LIST, True))
+        self.assertFalse(R.retirement_only(self.removed(wf, ".github/workflows/ci.yml"), self.LIST, True))
+        self.assertFalse(R.retirement_only(
+            self.removed(wf) + [{"filename": "src/a.py", "status": "added"}], self.LIST, True))
+
+    def test_retirement_entries_are_literal_paths_not_patterns(self):
+        target = ".github/workflows/ci.yml"
+        for entry in ("/.github/workflows/*.yml", "/.github/workflows/c?.yml", "/.github/",
+                      "/.github/workflows/[c]i.yml", "**", "/.github/workflows/../workflows/ci.yml",
+                      "/.github/workflows/ci yml", ""):
+            self.assertFalse(R.retirement_only(self.removed(target), [entry], True), entry)
+        self.assertTrue(R.retirement_only(self.removed(target), ["/" + target], True))
+        self.assertTrue(R.retirement_only(self.removed(target), [target], True))
+
+    def test_invalid_retirement_entry_stops_the_run(self):
+        bad = {"NTinkicht/Tabibi": ["/.github/workflows/*.yml"]}
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = Path(tmp) / "retirement.json"
+            fake.write_text(json.dumps(bad))
+            with patch.object(R, "RETIREMENT_FILE", fake), \
+                    patch.dict(os.environ, {"PAYG_DISABLED_CONFIRMED": "true", "REVIEWER_REPOS": "Tabibi"}):
+                root = Path(tmp)
+                (root / ".onecompany").mkdir()
+                (root / ".onecompany/config.json").write_text(json.dumps({"safety": {"emergency_stop": False}}))
+                (root / ".onecompany/budget.json").write_text(json.dumps({"ai": {
+                    "additional_monthly_spend_cap": 0, "allow_paid_fallback": False, "allow_overage": False,
+                    "allow_auto_topup": False, "allow_new_paid_vendor": False}}))
+                gh = FakeGitHub()
+                self.assertEqual(R.main(root, gh=gh, run_model=Model(), now=0), 1)
+                self.assertEqual(gh.posted, [])
+
+    def test_core_guardrails_can_never_be_retired(self):
+        for core in (".github/ntk-reviewer/review.py", ".github/workflows/ntk-reviewer.yml",
+                     ".github/CODEOWNERS", ".onecompany/config.json"):
+            self.assertFalse(R.retirement_only(self.removed(core), ["/" + core, core], True), core)
+
+    def test_shipped_retirement_list_is_valid_and_excludes_core(self):
+        lists = json.loads(R.RETIREMENT_FILE.read_text())
+        self.assertEqual(set(lists), {f"NTinkicht/{r}" for r in R.DEFAULT_REPOS})
+        for patterns in lists.values():
+            for pattern in patterns:
+                self.assertNotIn("*", pattern)  # explicit files only
+                self.assertFalse(pattern.lstrip("/").startswith(R.NEVER_RETIRED), pattern)
+                # Required-check workflows are never retirable this way.
+                self.assertNotIn(pattern.rsplit("/", 1)[-1], {"ci.yml", "onecompany-validate.yml"})
+
+    def test_retirement_pr_is_approved_and_labelled(self):
+        wf = ".github/workflows/native-factory-merge-controller.yml"
+        gh = FakeGitHub(files=(wf,))
+        gh.files = self.removed(wf)
+        out = R.review_pr(gh, "Tabibi", gh.pr(), login=LOGIN, mode="approve", run_model=Model(PASS),
+                          calls=[0], now=0, run_url="", retire_patterns=self.LIST)
+        self.assertEqual(out, "POSTED APPROVE PASS")
+        self.assertIn("Deletion-only removal", reviews_posted(gh)[0]["body"])
+
+    def test_same_deletion_without_retirement_list_is_comment_only(self):
+        wf = ".github/workflows/native-factory-merge-controller.yml"
+        gh = FakeGitHub(files=(wf,))
+        gh.files = self.removed(wf)
+        self.assertEqual(run(gh, Model(PASS)), "POSTED COMMENT PASS")
+
+
 if __name__ == "__main__":
     unittest.main()

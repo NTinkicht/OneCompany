@@ -56,7 +56,11 @@ BUDGET = {
     "REVIEW_CAPACITY_ERROR": (3, (0, 3600, 14400)),
     "REVIEW_FORMAT_ERROR": (2, (0, 0)),
 }
-REVIEW_MARK = re.compile(r"<!-- ntk-review v1 head=([0-9a-f]{40}) mode=(comment|approve) ")
+REVIEW_MARK = re.compile(r"<!-- ntk-review v1 head=([0-9a-f]{40}) mode=(comment|approve) "
+                         r"(?:base=([0-9a-f]{40}) )?")
+# The reviewer's model is Mistral; it is never the independent approver of work
+# Mistral materially authored (commit trailer "Material-Author: mistral...").
+MISTRAL_AUTHOR = re.compile(r"(?im)^Material-Author:[ \t]*mistral[a-z0-9_-]*[ \t]*$")
 STATUS_MARK = re.compile(r"<!-- ntk-review-status v1 (\{[^<>]*\}) -->")
 BILLING = re.compile(r"recent account payments have failed|spending limit", re.I)
 ONLY = re.compile(r"[A-Za-z0-9_.-]+#[0-9]{1,7}")
@@ -286,7 +290,7 @@ def may_call(status: dict, head: str, now: float) -> tuple[bool, str]:
     return True, ""
 
 
-def review_body(head, base, mode, result, floor_paths, run_url, event):
+def review_body(head, base, mode, result, floor_paths, run_url, event, mistral_authored=False):
     outcome = {"APPROVE": "Approved", "REQUEST_CHANGES": "Changes requested"}.get(event, "Advisory")
     lines = [f"**ntk-reviewer · {outcome}** — model verdict **{result['verdict']}**",
              f"Exact head `{head}` · base `{base}` · model mistral-vibe · [run]({run_url})", "",
@@ -302,6 +306,9 @@ def review_body(head, base, mode, result, floor_paths, run_url, event):
         shown = ", ".join(f"`{p}`" for p in sorted(floor_paths)[:5])
         lines.append(f"\nTouches control-plane paths ({shown}). This reviewer never approves those; "
                      "the owner's approval is required.")
+    if mistral_authored:
+        lines.append("\nMistral materially authored part of this PR (or authorship could not be read), "
+                     "so this Mistral-based reviewer cannot be its independent approver.")
     if mode == "comment":
         lines.append("\nShadow mode: advisory only, not a gate.")
     floor = 1 if floor_paths else 0
@@ -310,12 +317,21 @@ def review_body(head, base, mode, result, floor_paths, run_url, event):
     return "\n".join(lines)
 
 
-def choose_event(mode: str, verdict: str, floor: bool) -> str:
+def choose_event(mode: str, verdict: str, no_approve: bool) -> str:
     if mode != "approve":
         return "COMMENT"
     if verdict == "CHANGES_REQUIRED":
         return "REQUEST_CHANGES"
-    return "COMMENT" if floor else "APPROVE"
+    return "COMMENT" if no_approve else "APPROVE"
+
+
+def mistral_authored(gh, repo, number, expected) -> bool:
+    """True if any commit carries a Mistral Material-Author trailer, or if the
+    commit list cannot be read completely (fail closed: no approval)."""
+    commits = gh.pages(f"/repos/{OWNER}/{repo}/pulls/{number}/commits", limit=3)
+    if type(expected) is not int or len(commits) != expected or expected > 250:
+        return True
+    return any(MISTRAL_AUTHOR.search((c.get("commit") or {}).get("message") or "") for c in commits)
 
 
 def build_prompt(repo, pr, diff, repair_code=""):
@@ -410,11 +426,19 @@ def review_pr(gh, repo, pr, *, login, mode, run_model, calls, now, run_url,
     if pr.get("state") != "open" or pr.get("draft"):
         return "SKIP not open"
     head, base = pr["head"]["sha"], pr["base"]["sha"]
+    mine = []
     for review in gh.pages(f"/repos/{OWNER}/{repo}/pulls/{number}/reviews"):
         match = REVIEW_MARK.search(review.get("body") or "")
         if ((review.get("user") or {}).get("login") == login and review.get("commit_id") == head
-                and match and match.group(1) == head and match.group(2) == mode):
-            return "DONE already reviewed at head"
+                and match and match.group(1) == head):
+            mine.append((review, match.group(2), match.group(3)))
+    # An approval recorded against an older base (or with no base) no longer stands.
+    for review, _, marked_base in mine:
+        if review.get("state") == "APPROVED" and marked_base != base and review.get("id"):
+            gh.put(f"/repos/{OWNER}/{repo}/pulls/{number}/reviews/{review['id']}/dismissals",
+                   {"message": f"Base moved to {base[:12]} since this review; withdrawn pending re-review."})
+    if any(m == mode and b == base for _, m, b in mine):
+        return "DONE already reviewed at head and base"
     required = required_checks(gh, repo, pr["base"]["ref"])
     if not required:
         raise Stop(f"CONFIGURATION_ERROR: {repo} has no required status checks on {pr['base']['ref']}")
@@ -482,10 +506,11 @@ def review_pr(gh, repo, pr, *, login, mode, run_model, calls, now, run_url,
         return "SKIP head moved before posting"
     if latest["base"]["sha"] != base:
         return "SKIP base moved before posting"
-    event = choose_event(mode, result["verdict"], bool(floor_paths))
+    self_authored = mistral_authored(gh, repo, number, pr.get("commits"))
+    event = choose_event(mode, result["verdict"], bool(floor_paths) or self_authored)
     posted = gh.post(f"/repos/{OWNER}/{repo}/pulls/{number}/reviews", {
         "commit_id": head, "event": event,
-        "body": review_body(head, base, mode, result, floor_paths, run_url, event),
+        "body": review_body(head, base, mode, result, floor_paths, run_url, event, self_authored),
     })
     if event != "COMMENT":
         # Close the race: a push between the recheck and the post must not leave

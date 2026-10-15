@@ -28,7 +28,7 @@ PASS = json.dumps({"verdict": "PASS", "summary": "Looks correct.", "findings": [
 
 class FakeGitHub:
     def __init__(self, *, files=("src/app.py",), ci="success", annotations=(), reviews=(),
-                 comments=(), moves_at=None, base_moves_at=None, diff="diff --git a/src/app.py b/src/app.py\n+x\n",
+                 comments=(), moves_at=None, base_moves_at=None, commits=None, commit_count=None, diff="diff --git a/src/app.py b/src/app.py\n+x\n",
                  changed_files=None, rules=None, codeowners=None):
         self.files = [{"filename": f} for f in files]
         self.ci, self.annotations = ci, list(annotations)
@@ -39,12 +39,16 @@ class FakeGitHub:
             "required_status_checks": [{"context": "validate", "integration_id": 15368}]}}]
         self.posted, self.patched, self.put_calls = [], [], []
         self.codeowners, self.raw_reads = codeowners, []
+        self.commits = commits if commits is not None else [
+            {"commit": {"message": "feat: thing\n\nMaterial-Author: chatgpt"}}]
+        self.commit_count = len(self.commits) if commit_count is None else commit_count
         self.pr_reads = 0
 
     def pr(self, sha=HEAD, base=BASE):
         return {"number": 7, "state": "open", "draft": False, "title": "Add thing", "body": "Body",
                 "head": {"sha": sha, "repo": {"full_name": "NTinkicht/Tabibi"}},
-                "base": {"ref": "main", "sha": base}, "changed_files": self.changed_files}
+                "base": {"ref": "main", "sha": base}, "changed_files": self.changed_files,
+                "commits": self.commit_count}
 
     def get(self, path):
         if path.endswith("/rules/branches/main"):
@@ -82,6 +86,8 @@ class FakeGitHub:
             return self.comments
         if path.endswith("/files"):
             return self.files
+        if path.endswith("/commits"):
+            return self.commits
         if "/pulls?state=open" in path:
             return [self.pr()]
         raise AssertionError(path)
@@ -236,11 +242,38 @@ class FlowTests(unittest.TestCase):
         self.assertTrue(run(gh, Model()).startswith("CI_INFRA_ERROR"))
 
     def test_already_reviewed_head_is_done(self):
-        prior = {"user": {"login": LOGIN}, "commit_id": HEAD,
-                 "body": f"x <!-- ntk-review v1 head={HEAD} mode=approve verdict=PASS floor=0 -->"}
+        prior = {"user": {"login": LOGIN}, "commit_id": HEAD, "state": "APPROVED", "id": 3,
+                 "body": f"x <!-- ntk-review v1 head={HEAD} mode=approve base={BASE} verdict=PASS floor=0 -->"}
         gh, model = FakeGitHub(reviews=[prior]), Model()
         self.assertTrue(run(gh, model).startswith("DONE"))
         self.assertEqual(model.prompts, [])
+
+    def test_review_against_older_base_is_dismissed_and_redone(self):
+        for marker in (f"base={NEW_BASE} ", ""):
+            prior = {"user": {"login": LOGIN}, "commit_id": HEAD, "state": "APPROVED", "id": 3,
+                     "body": f"<!-- ntk-review v1 head={HEAD} mode=approve {marker}verdict=PASS floor=0 -->"}
+            gh = FakeGitHub(reviews=[prior])
+            self.assertEqual(run(gh, Model(PASS)), "POSTED APPROVE PASS")
+            self.assertTrue(gh.put_calls[0][0].endswith("/reviews/3/dismissals"))
+
+    def test_older_base_changes_requested_is_not_dismissed(self):
+        prior = {"user": {"login": LOGIN}, "commit_id": HEAD, "state": "CHANGES_REQUESTED", "id": 3,
+                 "body": f"<!-- ntk-review v1 head={HEAD} mode=approve base={NEW_BASE} verdict=CHANGES_REQUIRED -->"}
+        gh = FakeGitHub(reviews=[prior])
+        run(gh, Model(PASS))
+        self.assertEqual(gh.put_calls, [])
+
+    def test_mistral_authored_pr_is_never_approved(self):
+        for commits, count in (([{"commit": {"message": "fix\n\nMaterial-Author: mistral-vibe"}}], None),
+                               ([{"commit": {"message": "x\nMaterial-Author: Mistral"}}], None),
+                               ([{"commit": {"message": "x"}}], 2)):
+            gh = FakeGitHub(commits=commits, commit_count=count)
+            self.assertEqual(run(gh, Model(PASS)), "POSTED COMMENT PASS")
+            self.assertIn("cannot be its independent approver", reviews_posted(gh)[0]["body"])
+        gh = FakeGitHub(commits=[{"commit": {"message": "Material-Author: mistral-vibe"}}])
+        out = json.dumps({"verdict": "CHANGES_REQUIRED", "summary": "Summary of review.",
+                          "findings": [{"severity": "HIGH", "description": "bug"}]})
+        self.assertEqual(run(gh, Model(out)), "POSTED REQUEST_CHANGES CHANGES_REQUIRED")
 
     def test_stale_or_foreign_review_is_not_reused(self):
         stale = {"user": {"login": LOGIN}, "commit_id": NEW_HEAD,

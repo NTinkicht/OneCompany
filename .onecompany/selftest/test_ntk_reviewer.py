@@ -524,10 +524,36 @@ class RetirementTests(unittest.TestCase):
         self.assertFalse(R.retirement_only(
             self.removed(wf) + [{"filename": "src/a.py", "status": "added"}], self.LIST, True))
 
+    def test_retirement_entries_are_literal_paths_not_patterns(self):
+        target = ".github/workflows/ci.yml"
+        for entry in ("/.github/workflows/*.yml", "/.github/workflows/c?.yml", "/.github/",
+                      "/.github/workflows/[c]i.yml", "**", "/.github/workflows/../workflows/ci.yml",
+                      "/.github/workflows/ci yml", ""):
+            self.assertFalse(R.retirement_only(self.removed(target), [entry], True), entry)
+        self.assertTrue(R.retirement_only(self.removed(target), ["/" + target], True))
+        self.assertTrue(R.retirement_only(self.removed(target), [target], True))
+
+    def test_invalid_retirement_entry_stops_the_run(self):
+        bad = {"NTinkicht/Tabibi": ["/.github/workflows/*.yml"]}
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = Path(tmp) / "retirement.json"
+            fake.write_text(json.dumps(bad))
+            with patch.object(R, "RETIREMENT_FILE", fake), \
+                    patch.dict(os.environ, {"PAYG_DISABLED_CONFIRMED": "true", "REVIEWER_REPOS": "Tabibi"}):
+                root = Path(tmp)
+                (root / ".onecompany").mkdir()
+                (root / ".onecompany/config.json").write_text(json.dumps({"safety": {"emergency_stop": False}}))
+                (root / ".onecompany/budget.json").write_text(json.dumps({"ai": {
+                    "additional_monthly_spend_cap": 0, "allow_paid_fallback": False, "allow_overage": False,
+                    "allow_auto_topup": False, "allow_new_paid_vendor": False}}))
+                gh = FakeGitHub()
+                self.assertEqual(R.main(root, gh=gh, run_model=Model(), now=0), 1)
+                self.assertEqual(gh.posted, [])
+
     def test_core_guardrails_can_never_be_retired(self):
         for core in (".github/ntk-reviewer/review.py", ".github/workflows/ntk-reviewer.yml",
                      ".github/CODEOWNERS", ".onecompany/config.json"):
-            self.assertFalse(R.retirement_only(self.removed(core), ["*", "/" + core], True), core)
+            self.assertFalse(R.retirement_only(self.removed(core), ["/" + core, core], True), core)
 
     def test_shipped_retirement_list_is_valid_and_excludes_core(self):
         lists = json.loads(R.RETIREMENT_FILE.read_text())

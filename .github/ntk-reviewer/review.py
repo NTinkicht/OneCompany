@@ -48,6 +48,7 @@ CONTROL_PLANE_FILE = Path(__file__).resolve().with_name("control-plane.json")
 # those files are control plane: deleting them cannot add behaviour. Core
 # guardrails below can never be retired this way.
 RETIREMENT_FILE = Path(__file__).resolve().with_name("retirement.json")
+EXPLICIT_PATH = re.compile(r"/?[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*")
 NEVER_RETIRED = (".github/ntk-reviewer/", ".github/workflows/ntk-reviewer.yml",
                  ".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS",
                  ".onecompany/config.json", ".onecompany/budget.json")
@@ -216,16 +217,27 @@ def codeowned(path: str, rules) -> bool:
     return owned
 
 
-def retirement_only(files, retire_patterns, complete: bool) -> bool:
+def explicit_retirement_paths(entries) -> set[str]:
+    """Retirement entries are literal file paths, never patterns. Anything else
+    (wildcards, directories, '..' segments) is dropped, so it matches nothing."""
+    paths = set()
+    for entry in entries:
+        if (isinstance(entry, str) and EXPLICIT_PATH.fullmatch(entry)
+                and ".." not in entry.split("/")):
+            paths.add(entry.lstrip("/"))
+    return paths
+
+
+def retirement_only(files, retire_entries, complete: bool) -> bool:
     """True only for a complete file list of pure deletions of listed old machinery."""
-    if not complete or not files or not retire_patterns:
+    allowed = explicit_retirement_paths(retire_entries)
+    if not complete or not files or not allowed:
         return False
-    regexes = [pattern_regex(p) for p in retire_patterns]
     for item in files:
         path = item.get("filename") or ""
         if (item.get("status") != "removed" or item.get("previous_filename")
                 or path.startswith(NEVER_RETIRED) or path in NEVER_RETIRED
-                or not any(r.fullmatch(path) for r in regexes)):
+                or path not in allowed):
             return False
     return True
 
@@ -642,6 +654,7 @@ def main(root: Path = Path("."), gh=None, run_model=None, now=None) -> int:
         for table in (extras, retire):
             assert isinstance(table, dict) and all(
                 isinstance(v, list) and all(isinstance(x, str) for x in v) for v in table.values())
+        assert all(len(explicit_retirement_paths(v)) == len(v) for v in retire.values())
     except (OSError, ValueError, AssertionError):
         print("CONFIGURATION_ERROR: control-plane.json or retirement.json missing or invalid")
         return 1

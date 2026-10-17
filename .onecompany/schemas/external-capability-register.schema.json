@@ -14,7 +14,8 @@
     "planning_rules",
     "group_workstreams",
     "candidates",
-    "protected_future_commitments"
+    "protected_future_commitments",
+    "phase1_reconciliation"
   ],
   "properties": {
     "$schema": {
@@ -139,7 +140,7 @@
           },
           "SPEC": {
             "epic": "EPIC-EVOL-DISC",
-            "wu": "WU-P1-DISCOVERY-001",
+            "wu": "WU-P1-BRIEF-APPROVAL-HANDOFF-001",
             "phase": "P1"
           },
           "PROD": {
@@ -708,7 +709,7 @@
             "candidate_assessment_task": "ASSESS-EXT-024",
             "proposed_epic": "EPIC-EVOL-DISC",
             "work_unit_mappings": [
-              "WU-P1-DISCOVERY-001"
+              "WU-P1-BRIEF-APPROVAL-HANDOFF-001"
             ]
           },
           "EXT-025": {
@@ -717,7 +718,7 @@
             "candidate_assessment_task": "ASSESS-EXT-025",
             "proposed_epic": "EPIC-EVOL-DISC",
             "work_unit_mappings": [
-              "WU-P1-DISCOVERY-001"
+              "WU-P1-BRIEF-APPROVAL-HANDOFF-001"
             ]
           },
           "EXT-026": {
@@ -726,7 +727,7 @@
             "candidate_assessment_task": "ASSESS-EXT-026",
             "proposed_epic": "EPIC-EVOL-DISC",
             "work_unit_mappings": [
-              "WU-P1-DISCOVERY-001"
+              "WU-P1-BRIEF-APPROVAL-HANDOFF-001"
             ]
           },
           "EXT-027": {
@@ -808,7 +809,7 @@
             "candidate_assessment_task": "ASSESS-EXT-035",
             "proposed_epic": "EPIC-EVOL-QUAL",
             "work_unit_mappings": [
-              "WU-P1-PLAYWRIGHT-001",
+              "WU-P1-POSTBIND-ASSURANCE-001",
               "WU-P2-UI-001"
             ]
           },
@@ -1072,6 +1073,69 @@
         }
       },
       "additionalProperties": false
+    },
+    "phase1_reconciliation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "as_of_date",
+        "source_of_truth",
+        "historically_completed_wus",
+        "proposed_not_admitted_followups",
+        "existing_open_not_admitted_integration",
+        "obsolete_phase1_proposal_aliases",
+        "admission_rule"
+      ],
+      "properties": {
+        "as_of_date": {
+          "type": "string"
+        },
+        "source_of_truth": {
+          "type": "string",
+          "minLength": 30
+        },
+        "historically_completed_wus": {
+          "type": "array",
+          "minItems": 10,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^WU-"
+          }
+        },
+        "proposed_not_admitted_followups": {
+          "type": "array",
+          "minItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^WU-"
+          }
+        },
+        "existing_open_not_admitted_integration": {
+          "const": "WU-P1-E2E-001"
+        },
+        "obsolete_phase1_proposal_aliases": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "WU-P1-VERTICAL-001",
+            "WU-P1-MISSION-001"
+          ],
+          "properties": {
+            "WU-P1-VERTICAL-001": {
+              "const": "WU-P1-E2E-001"
+            },
+            "WU-P1-MISSION-001": {
+              "const": "WU-P1-MISSION-TRUTH-001"
+            }
+          }
+        },
+        "admission_rule": {
+          "type": "string",
+          "minLength": 40
+        }
+      }
     }
   },
   "additionalProperties": false

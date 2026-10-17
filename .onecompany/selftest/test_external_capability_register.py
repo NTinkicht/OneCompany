@@ -191,5 +191,110 @@ class ExternalCapabilityRegisterTests(unittest.TestCase):
         self.assertTrue(self.check(changed))
 
 
+    def _assert_planning_dag_acyclic(self, document):
+        """Union the Phase-1 canonical, group-level and candidate-mapping edges.
+
+        An assessment mapped to a WU must not be executable before that WU's
+        prerequisites. Acyclicity therefore includes candidate dependencies,
+        not just the standalone group registry or product prose.
+        """
+        graph = {}
+
+        def add_edges(node, dependencies):
+            graph.setdefault(node, set()).update(dependencies)
+
+        for node, deps in document["phase1_reconciliation"]["proposed_dependency_dag"].items():
+            add_edges(node, deps)
+        for group in document["group_workstreams"]:
+            add_edges(group["wu"], group["deps"])
+        for candidate in document["candidates"]:
+            for work_unit in candidate["work_unit_mappings"]:
+                add_edges(work_unit, candidate["dependencies"])
+
+        visited, active = set(), set()
+
+        def visit(node, ancestry):
+            if node in active:
+                raise AssertionError("cycle: " + " -> ".join([*ancestry, node]))
+            if node in visited:
+                return
+            active.add(node)
+            for dependency in graph.get(node, ()):
+                visit(dependency, [*ancestry, node])
+            active.remove(node)
+            visited.add(node)
+
+        for node in graph:
+            visit(node, [])
+        return graph
+
+    def test_complete_planning_dependency_dag_has_no_cycles(self):
+        graph = self._assert_planning_dag_acyclic(REGISTER)
+        self.assertIn("WU-P1-POSTBIND-ASSURANCE-001", graph)
+        self.assertIn(
+            "WU-P1-POSTBIND-ASSURANCE-001",
+            graph["WU-P1-E2E-001"],
+        )
+        self.assertIn(
+            "WU-P1-RUNTIME-BINDING-001",
+            graph["WU-P1-POSTBIND-ASSURANCE-001"],
+        )
+        self.assertNotIn(
+            "WU-P1-E2E-001",
+            graph["WU-P1-POSTBIND-ASSURANCE-001"],
+        )
+
+    def test_playwright_candidate_does_not_wait_for_its_downstream_e2e(self):
+        candidate = next(
+            c for c in REGISTER["candidates"] if c["capability_id"] == "EXT-035"
+        )
+        self.assertEqual(["WU-P1-RUNTIME-BINDING-001"], candidate["dependencies"])
+        self.assertIn("WU-P1-POSTBIND-ASSURANCE-001", candidate["work_unit_mappings"])
+        self.assertIn("WU-P2-UI-001", candidate["work_unit_mappings"])
+        ui = next(g for g in REGISTER["group_workstreams"] if g["key"] == "UI")
+        self.assertIn("WU-P1-E2E-001", ui["deps"])
+        self.assertNotIn("WU-P1-E2E-001", candidate["dependencies"])
+
+    def test_cyclic_playwright_mapping_is_explicitly_rejected(self):
+        changed = copy.deepcopy(REGISTER)
+        candidate = next(c for c in changed["candidates"] if c["capability_id"] == "EXT-035")
+        candidate["dependencies"] = ["WU-P1-E2E-001"]
+        with self.assertRaisesRegex(AssertionError, "cycle"):
+            self._assert_planning_dag_acyclic(changed)
+        self.assertTrue(self.check(changed), "versioned schema must also pin this dependency")
+
+    def test_spec_candidate_dependency_exactly_matches_group_prerequisites(self):
+        spec = next(g for g in REGISTER["group_workstreams"] if g["key"] == "SPEC")
+        self.assertEqual("WU-P1-BRIEF-APPROVAL-HANDOFF-001", spec["wu"])
+        self.assertEqual(
+            {
+                "WU-P0-LIVE-RECONCILIATION-001",
+                "WU-P1-FOUNDATIONS-001",
+                "WU-P1-DISCOVERY-001",
+                "WU-P1-BRIEF-001",
+                "WU-P1-EXECUTION-002",
+            },
+            set(spec["deps"]),
+        )
+        for cid in ("EXT-024", "EXT-025", "EXT-026"):
+            candidate = next(c for c in REGISTER["candidates"] if c["capability_id"] == cid)
+            self.assertEqual([spec["wu"]], candidate["work_unit_mappings"])
+            self.assertEqual(spec["deps"], candidate["dependencies"], cid)
+            modified = copy.deepcopy(REGISTER)
+            victim = next(c for c in modified["candidates"] if c["capability_id"] == cid)
+            victim["dependencies"] = ["WU-P1-FOUNDATIONS-001"]
+            self.assertTrue(self.check(modified), f"schema must reject incomplete {cid} gate")
+
+    def test_mapped_candidate_prerequisites_are_frozen_to_versioned_schema(self):
+        expected = SCHEMA["properties"]["candidates"]["x-expectedRowsByKey"]["values"]
+        self.assertEqual(61, len(expected))
+        for candidate in REGISTER["candidates"]:
+            self.assertEqual(
+                candidate["dependencies"],
+                expected[candidate["capability_id"]]["dependencies"],
+                candidate["capability_id"],
+            )
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -107,7 +107,8 @@
       "wu": "WU-P2-UI-001",
       "deps": [
         "WU-P1-RUNTIME-BINDING-001",
-        "WU-P1-POSTBIND-ASSURANCE-001"
+        "WU-P1-POSTBIND-ASSURANCE-001",
+        "WU-P1-E2E-001"
       ],
       "status": "PROPOSED"
     },
@@ -1125,7 +1126,11 @@
       "proposed_integration_approach": "Assess and integrate only the smallest distinct SPEC capability; prefer adapter or architectural patterns to copying another orchestration system.",
       "required_provider_interface_contract": "ProductBrief, Specification, ArchitectureDecision and ChangeImpact mapping into ONE canonical requirements system",
       "dependencies": [
-        "WU-P1-FOUNDATIONS-001"
+        "WU-P0-LIVE-RECONCILIATION-001",
+        "WU-P1-FOUNDATIONS-001",
+        "WU-P1-DISCOVERY-001",
+        "WU-P1-BRIEF-001",
+        "WU-P1-EXECUTION-002"
       ],
       "target_implementation_phase": "P1",
       "user_visible_benefit": "Guided idea discovery and change-controlled specifications",
@@ -1166,7 +1171,11 @@
       "proposed_integration_approach": "Assess and integrate only the smallest distinct SPEC capability; prefer adapter or architectural patterns to copying another orchestration system.",
       "required_provider_interface_contract": "ProductBrief, Specification, ArchitectureDecision and ChangeImpact mapping into ONE canonical requirements system",
       "dependencies": [
-        "WU-P1-FOUNDATIONS-001"
+        "WU-P0-LIVE-RECONCILIATION-001",
+        "WU-P1-FOUNDATIONS-001",
+        "WU-P1-DISCOVERY-001",
+        "WU-P1-BRIEF-001",
+        "WU-P1-EXECUTION-002"
       ],
       "target_implementation_phase": "P1",
       "user_visible_benefit": "Guided idea discovery and change-controlled specifications",
@@ -1207,7 +1216,11 @@
       "proposed_integration_approach": "Assess and integrate only the smallest distinct SPEC capability; prefer adapter or architectural patterns to copying another orchestration system.",
       "required_provider_interface_contract": "ProductBrief, Specification, ArchitectureDecision and ChangeImpact mapping into ONE canonical requirements system",
       "dependencies": [
-        "WU-P1-FOUNDATIONS-001"
+        "WU-P0-LIVE-RECONCILIATION-001",
+        "WU-P1-FOUNDATIONS-001",
+        "WU-P1-DISCOVERY-001",
+        "WU-P1-BRIEF-001",
+        "WU-P1-EXECUTION-002"
       ],
       "target_implementation_phase": "P1",
       "user_visible_benefit": "Guided idea discovery and change-controlled specifications",
@@ -1587,7 +1600,7 @@
       "proposed_integration_approach": "Primary deterministic browser e2e smoke for vertical slice; expand to visual/trace evidence in Phase 2.",
       "required_provider_interface_contract": "AssuranceProvider with environment/build/head/base identity, AC links, artifact hash, severity and expiry",
       "dependencies": [
-        "WU-P1-E2E-001"
+        "WU-P1-RUNTIME-BINDING-001"
       ],
       "target_implementation_phase": "P1",
       "user_visible_benefit": "Requirement-traced comprehensive engineering assurance",
@@ -1612,7 +1625,7 @@
       "assessment_task_status": "PROPOSED_NOT_ADMITTED",
       "adoption_decision": "EXPERIMENT",
       "adoption_status": "PLANNED_NOT_INSTALLED",
-      "defer_trigger": "Phase dependencies are evidenced and planned proof-of-value, license and included-cost gates pass.",
+      "defer_trigger": "Phase-1 real Playwright assurance may run after verified runtime binding and approved browser availability, BEFORE E2E acceptance; Phase-2 UI capability follows its own group WU's E2E and postbinding gates. Never use E2E as a prerequisite for WU-P1-POSTBIND-ASSURANCE-001.",
       "reason_if_not_selected": "Decision pending measured overlap, licensing, security, runtime and cost assessment; no automatic runtime dependency."
     },
     {
@@ -2726,6 +2739,37 @@
       "WU-P1-VERTICAL-001": "WU-P1-E2E-001",
       "WU-P1-MISSION-001": "WU-P1-MISSION-TRUTH-001"
     },
-    "admission_rule": "Closed WUs retain original bounded evidence; do not re-run or expand them. Proposed follow-ups and the open #153 E2E issue require distinct approved scope, unique machine queue entry, live lease, CI and independent GitHub gate before execution. P2 adapters remain optional, budget additional USD 0."
+    "admission_rule": "Closed WUs retain original bounded evidence; do not re-run or expand them. Proposed follow-ups and the open #153 E2E issue require distinct approved scope, unique machine queue entry, live lease, CI and independent GitHub gate before execution. P2 adapters remain optional, budget additional USD 0.",
+    "proposed_dependency_dag": {
+      "WU-P0-LIVE-RECONCILIATION-001": [
+        "WU-P0-RECONCILE-001"
+      ],
+      "WU-P1-BRIEF-APPROVAL-HANDOFF-001": [
+        "WU-P0-LIVE-RECONCILIATION-001",
+        "WU-P1-FOUNDATIONS-001",
+        "WU-P1-DISCOVERY-001",
+        "WU-P1-BRIEF-001",
+        "WU-P1-EXECUTION-002"
+      ],
+      "WU-P1-RUNTIME-BINDING-001": [
+        "WU-P1-BRIEF-APPROVAL-HANDOFF-001",
+        "WU-P1-RUNTIME-001",
+        "WU-P1-FOUNDATIONS-001"
+      ],
+      "WU-P1-POSTBIND-ASSURANCE-001": [
+        "WU-P1-RUNTIME-BINDING-001",
+        "WU-P1-QUALITY-001",
+        "WU-P1-PLAYWRIGHT-001"
+      ],
+      "WU-P1-E2E-001": [
+        "WU-P1-BRIEF-APPROVAL-HANDOFF-001",
+        "WU-P1-RUNTIME-BINDING-001",
+        "WU-P1-POSTBIND-ASSURANCE-001"
+      ],
+      "WU-P1-MISSION-TRUTH-001": [
+        "WU-P1-E2E-001",
+        "WU-P1-MISSION-EVIDENCE-001"
+      ]
+    }
   }
 }

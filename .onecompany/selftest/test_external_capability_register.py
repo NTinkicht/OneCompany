@@ -285,6 +285,60 @@ class ExternalCapabilityRegisterTests(unittest.TestCase):
             victim["dependencies"] = ["WU-P1-FOUNDATIONS-001"]
             self.assertTrue(self.check(modified), f"schema must reject incomplete {cid} gate")
 
+    def test_runtime_binding_requires_completed_preview_evidence(self):
+        dag = REGISTER["phase1_reconciliation"]["proposed_dependency_dag"]
+        binding = dag["WU-P1-RUNTIME-BINDING-001"]
+        self.assertEqual(
+            [
+                "WU-P1-BRIEF-APPROVAL-HANDOFF-001",
+                "WU-P1-RUNTIME-001",
+                "WU-P1-PREVIEW-001",
+                "WU-P1-FOUNDATIONS-001",
+            ],
+            binding,
+        )
+        self.assertIn(
+            "WU-P1-PREVIEW-001",
+            REGISTER["phase1_reconciliation"]["historically_completed_wus"],
+        )
+        self._assert_planning_dag_acyclic(REGISTER)
+
+    def test_versioned_schema_pins_every_group_dependency_array(self):
+        expected = SCHEMA["properties"]["group_workstreams"]["x-expectedRowsByKey"]["values"]
+        self.assertEqual(11, len(expected))
+        for group in REGISTER["group_workstreams"]:
+            self.assertEqual(group["deps"], expected[group["key"]]["deps"])
+            mutated = copy.deepcopy(REGISTER)
+            changed = next(g for g in mutated["group_workstreams"] if g["key"] == group["key"])
+            changed["deps"] = []
+            self.assertTrue(
+                self.check(mutated),
+                f"{group['key']}: empty dependencies must fail schema validation",
+            )
+        self.assertGreater(len(expected["MEM"]["deps"]), 0)
+
+    def test_versioned_schema_pins_each_canonical_phase1_dependency_list(self):
+        from_schema = SCHEMA["properties"]["phase1_reconciliation"]["properties"]["proposed_dependency_dag"]["properties"]
+        dag = REGISTER["phase1_reconciliation"]["proposed_dependency_dag"]
+        self.assertEqual(set(dag), set(from_schema))
+        for name, deps in dag.items():
+            self.assertEqual(deps, from_schema[name]["const"], name)
+            self.assertGreater(len(deps), 0, name)
+            tampered = copy.deepcopy(REGISTER)
+            tampered["phase1_reconciliation"]["proposed_dependency_dag"][name] = []
+            self.assertTrue(
+                self.check(tampered),
+                f"{name}: dropped edges must be rejected even with no new cycle",
+            )
+            tampered = copy.deepcopy(REGISTER)
+            tampered["phase1_reconciliation"]["proposed_dependency_dag"][name] = deps[:-1]
+            self.assertTrue(
+                self.check(tampered),
+                f"{name}: removed edge must be rejected",
+            )
+        self.assertIn("WU-P1-PREVIEW-001", dag["WU-P1-RUNTIME-BINDING-001"])
+        self.assertIn("WU-P0-LIVE-RECONCILIATION-001", dag["WU-P1-BRIEF-APPROVAL-HANDOFF-001"])
+
     def test_mapped_candidate_prerequisites_are_frozen_to_versioned_schema(self):
         expected = SCHEMA["properties"]["candidates"]["x-expectedRowsByKey"]["values"]
         self.assertEqual(61, len(expected))

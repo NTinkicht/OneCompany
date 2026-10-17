@@ -101,5 +101,95 @@ class ExternalCapabilityRegisterTests(unittest.TestCase):
         self.assertTrue(any("missing required capability_id" in e for e in errors), errors)
 
 
+    def test_phase1_reconciliation_preserves_completed_work_and_new_ids(self):
+        ledger = REGISTER["phase1_reconciliation"]
+        self.assertEqual("2026-10-18", ledger["as_of_date"])
+        self.assertEqual(61, len(REGISTER["candidates"]))
+        self.assertEqual(11, len(REGISTER["group_workstreams"]))
+        closed = set(ledger["historically_completed_wus"])
+        proposed = set(ledger["proposed_not_admitted_followups"])
+        self.assertEqual(
+            {
+                "WU-P0-RECONCILE-001",
+                "WU-P1-FOUNDATIONS-001",
+                "WU-P1-DISCOVERY-001",
+                "WU-P1-EXECUTION-002",
+                "WU-P1-PREVIEW-001",
+                "WU-P1-BRIEF-001",
+                "WU-P1-RUNTIME-001",
+                "WU-P1-QUALITY-001",
+                "WU-P1-PLAYWRIGHT-001",
+                "WU-P1-MISSION-EVIDENCE-001",
+            },
+            closed,
+        )
+        self.assertEqual(
+            {
+                "WU-P0-LIVE-RECONCILIATION-001",
+                "WU-P1-BRIEF-APPROVAL-HANDOFF-001",
+                "WU-P1-RUNTIME-BINDING-001",
+                "WU-P1-POSTBIND-ASSURANCE-001",
+                "WU-P1-MISSION-TRUTH-001",
+            },
+            proposed,
+        )
+        self.assertFalse(closed & proposed)
+        self.assertEqual("WU-P1-E2E-001", ledger["existing_open_not_admitted_integration"])
+        self.assertIn("never admits", ledger["source_of_truth"])
+
+    def test_no_obsolete_phase1_aliases_or_closed_runtime_reused_in_plans(self):
+        ledger = REGISTER["phase1_reconciliation"]
+        self.assertEqual(
+            {
+                "WU-P1-VERTICAL-001": "WU-P1-E2E-001",
+                "WU-P1-MISSION-001": "WU-P1-MISSION-TRUTH-001",
+            },
+            ledger["obsolete_phase1_proposal_aliases"],
+        )
+        group_mappings = [
+            wu
+            for group in REGISTER["group_workstreams"]
+            for wu in [group["wu"], *group["deps"]]
+        ]
+        candidate_mappings = [
+            wu
+            for candidate in REGISTER["candidates"]
+            for wu in [*candidate["dependencies"], *candidate["work_unit_mappings"]]
+        ]
+        all_planned_mappings = group_mappings + candidate_mappings
+        for obsolete in (
+            "WU-P1-VERTICAL-001",
+            "WU-P1-MISSION-001",
+            "WU-P1-RUNTIME-001",
+            "WU-P1-QUALITY-001",
+            "WU-P1-PLAYWRIGHT-001",
+        ):
+            self.assertNotIn(obsolete, all_planned_mappings)
+        spec = next(g for g in REGISTER["group_workstreams"] if g["key"] == "SPEC")
+        self.assertEqual("WU-P1-BRIEF-APPROVAL-HANDOFF-001", spec["wu"])
+        self.assertIn("WU-P1-DISCOVERY-001", spec["deps"])
+        self.assertIn("WU-P1-RUNTIME-BINDING-001", all_planned_mappings)
+        self.assertIn("WU-P1-POSTBIND-ASSURANCE-001", all_planned_mappings)
+        self.assertIn("WU-P1-E2E-001", all_planned_mappings)
+        self.assertIn("WU-P1-MISSION-TRUTH-001", all_planned_mappings)
+
+    def test_schema_rejects_restoring_completed_discovery_as_proposed_group(self):
+        changed = copy.deepcopy(REGISTER)
+        spec = next(g for g in changed["group_workstreams"] if g["key"] == "SPEC")
+        spec["wu"] = "WU-P1-DISCOVERY-001"
+        self.assertTrue(self.check(changed))
+
+    def test_schema_rejects_old_candidate_mapping_or_missing_ledger(self):
+        changed = copy.deepcopy(REGISTER)
+        spec_candidate = next(
+            c for c in changed["candidates"] if c["capability_id"] == "EXT-024"
+        )
+        spec_candidate["work_unit_mappings"] = ["WU-P1-DISCOVERY-001"]
+        self.assertTrue(self.check(changed))
+        changed = copy.deepcopy(REGISTER)
+        del changed["phase1_reconciliation"]
+        self.assertTrue(self.check(changed))
+
+
 if __name__ == "__main__":
     unittest.main()

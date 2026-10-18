@@ -120,6 +120,7 @@ class ExternalCapabilityRegisterTests(unittest.TestCase):
                 "WU-P1-QUALITY-001",
                 "WU-P1-PLAYWRIGHT-001",
                 "WU-P1-MISSION-EVIDENCE-001",
+                "WU-P1-JOURNEY-001",
             },
             closed,
         )
@@ -273,6 +274,7 @@ class ExternalCapabilityRegisterTests(unittest.TestCase):
                 "WU-P1-DISCOVERY-001",
                 "WU-P1-BRIEF-001",
                 "WU-P1-EXECUTION-002",
+                "WU-P1-JOURNEY-001",
             },
             set(spec["deps"]),
         )
@@ -338,6 +340,51 @@ class ExternalCapabilityRegisterTests(unittest.TestCase):
             )
         self.assertIn("WU-P1-PREVIEW-001", dag["WU-P1-RUNTIME-BINDING-001"])
         self.assertIn("WU-P0-LIVE-RECONCILIATION-001", dag["WU-P1-BRIEF-APPROVAL-HANDOFF-001"])
+
+    def test_completed_first_run_journey_is_not_reopened_or_skipped(self):
+        ledger = REGISTER["phase1_reconciliation"]
+        self.assertIn("WU-P1-JOURNEY-001", ledger["historically_completed_wus"])
+        self.assertNotIn("WU-P1-JOURNEY-001", ledger["proposed_not_admitted_followups"])
+        handoff = ledger["proposed_dependency_dag"]["WU-P1-BRIEF-APPROVAL-HANDOFF-001"]
+        self.assertIn("WU-P1-JOURNEY-001", handoff)
+        spec = next(g for g in REGISTER["group_workstreams"] if g["key"] == "SPEC")
+        self.assertEqual(handoff, spec["deps"])
+        for cid in ("EXT-024", "EXT-025", "EXT-026"):
+            candidate = next(c for c in REGISTER["candidates"] if c["capability_id"] == cid)
+            self.assertEqual(handoff, candidate["dependencies"], cid)
+        changed = copy.deepcopy(REGISTER)
+        changed["phase1_reconciliation"]["proposed_dependency_dag"][
+            "WU-P1-BRIEF-APPROVAL-HANDOFF-001"
+        ].remove("WU-P1-JOURNEY-001")
+        self.assertTrue(self.check(changed), "new handoff must preserve #178 evidence")
+
+    def test_direct_ui_candidate_dependencies_are_all_required(self):
+        ui = next(g for g in REGISTER["group_workstreams"] if g["key"] == "UI")
+        self.assertIn("WU-P1-E2E-001", ui["deps"])
+        for cid in ("EXT-048", "EXT-049", "EXT-050"):
+            c = next(c for c in REGISTER["candidates"] if c["capability_id"] == cid)
+            self.assertEqual(["WU-P2-UI-001"], c["work_unit_mappings"])
+            self.assertEqual(ui["deps"], c["dependencies"], cid)
+            bad = copy.deepcopy(REGISTER)
+            victim = next(x for x in bad["candidates"] if x["capability_id"] == cid)
+            victim["dependencies"].remove("WU-P1-E2E-001")
+            self.assertTrue(self.check(bad), cid)
+        # The dual-mapped Playwright candidate must retain its Phase-1
+        # noncircular runtime gate. Phase-2 UI is governed by the UI group.
+        play = next(c for c in REGISTER["candidates"] if c["capability_id"] == "EXT-035")
+        self.assertEqual(["WU-P1-RUNTIME-BINDING-001"], play["dependencies"])
+        self.assertIn("WU-P2-UI-001", play["work_unit_mappings"])
+        self._assert_planning_dag_acyclic(REGISTER)
+
+    def test_direct_ops_candidate_observability_prerequisite_is_not_dropped(self):
+        ops = next(g for g in REGISTER["group_workstreams"] if g["key"] == "OPS")
+        c = next(x for x in REGISTER["candidates"] if x["capability_id"] == "EXT-018")
+        self.assertIn("WU-P2-OBS-001", ops["deps"])
+        self.assertTrue(set(ops["deps"]).issubset(set(c["dependencies"])))
+        bad = copy.deepcopy(REGISTER)
+        victim = next(x for x in bad["candidates"] if x["capability_id"] == "EXT-018")
+        victim["dependencies"].remove("WU-P2-OBS-001")
+        self.assertTrue(self.check(bad))
 
     def test_mapped_candidate_prerequisites_are_frozen_to_versioned_schema(self):
         expected = SCHEMA["properties"]["candidates"]["x-expectedRowsByKey"]["values"]

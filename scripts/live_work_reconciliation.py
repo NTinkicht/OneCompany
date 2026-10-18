@@ -36,7 +36,8 @@ def inconsistencies(snapshot: WorkSnapshot) -> tuple[str, ...]:
     if any(issue not in known for issue in snapshot.active_lease_issue_ids):
         problems.add("ORPHAN_LEASE")
     bound = [issue for _, issue in snapshot.pr_issue_bindings]
-    if len(bound) != len(set(bound)):
+    pr_numbers = [pr for pr, _ in snapshot.pr_issue_bindings]
+    if len(bound) != len(set(bound)) or len(pr_numbers) != len(set(pr_numbers)):
         problems.add("DUPLICATE_PR_BINDING")
     if len(snapshot.active_lease_issue_ids) != len(set(snapshot.active_lease_issue_ids)):
         problems.add("DUPLICATE_LEASE")

@@ -41,6 +41,9 @@ def inconsistencies(snapshot: WorkSnapshot) -> tuple[str, ...]:
         problems.add("DUPLICATE_PR_BINDING")
     if len(snapshot.active_lease_issue_ids) != len(set(snapshot.active_lease_issue_ids)):
         problems.add("DUPLICATE_LEASE")
+    active = set(snapshot.active_lease_issue_ids).union(bound)
+    if active.intersection(snapshot.next_ids):
+        problems.add("ACTIVE_WORK_IN_NEXT")
     retired = set(snapshot.retired_pilot_issue_ids)
     if retired.intersection(snapshot.next_ids) or retired.intersection(snapshot.active_lease_issue_ids):
         problems.add("RETIRED_PILOT_REACTIVATED")

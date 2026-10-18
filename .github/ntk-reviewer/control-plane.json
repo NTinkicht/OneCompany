@@ -1,15 +1,12 @@
 {
   "NTinkicht/OneCompany": [
-    "/.onecompany/",
     "/.l5/",
-    "/scripts/",
-    "/agents/",
-    "/onecompany.py",
+    "/coordination/",
     "/AGENTS.md",
     "/CLAUDE.md",
     "/GEMINI.md",
-    "/Makefile",
-    "/PRODUCT.md"
+    "/PRODUCT.md",
+    "/.onecompany/selftest/test_ntk_reviewer.py"
   ],
   "NTinkicht/Tabibi": [
     "/.l5/",

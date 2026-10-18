@@ -53,6 +53,13 @@ NEVER_RETIRED = (".github/ntk-reviewer/", ".github/workflows/ntk-reviewer.yml",
                  ".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS",
                  ".onecompany/config.json", ".onecompany/budget.json")
 CODEOWNERS_LOCATIONS = (".github/CODEOWNERS", "CODEOWNERS", "docs/CODEOWNERS")
+# OneCompany's CODEOWNERS is CompanyOS *template* content: bootstrap copies it
+# into adopting repositories, where those paths are the installed kernel. In
+# OneCompany itself they are product code, so its trust root is the explicit
+# list in control-plane.json plus the built-in floor (which still covers
+# .github/** and every CODEOWNERS file). Every other repository keeps CODEOWNERS
+# as authority.
+CODEOWNERS_TEMPLATE_REPOS = ("OneCompany",)
 SAFE_PATTERN = re.compile(r"[A-Za-z0-9_.\-/*?]+")
 MAX_DIFF_BYTES = 120_000
 MAX_FILES = 300
@@ -426,6 +433,8 @@ def ci_state(gh, repo, head, required):
 
 def codeowner_rules(gh, repo, base, cache):
     key = (repo, base)
+    if repo in CODEOWNERS_TEMPLATE_REPOS:
+        return []
     if key not in cache:
         cache[key] = []
         for location in CODEOWNERS_LOCATIONS:  # GitHub uses the first one found

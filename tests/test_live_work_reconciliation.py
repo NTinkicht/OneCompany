@@ -4,7 +4,12 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 
-from live_work_reconciliation import WorkSnapshot, inconsistencies
+from live_work_reconciliation import (
+    PullRequestObservation,
+    WorkSnapshot,
+    inconsistencies,
+    pr_inconsistencies,
+)
 
 SHA = "a" * 40
 
@@ -94,6 +99,126 @@ class ReconciliationTests(unittest.TestCase):
         bad = snap(observed_main_sha="b" * 40, next_ids=(2, 2))
         self.assertEqual(inconsistencies(bad), ("DUPLICATE_NEXT", "STALE_MAIN"))
         self.assertEqual(inconsistencies(bad), inconsistencies(bad))
+
+
+HEAD = "c" * 40
+OLD_HEAD = "d" * 40
+OLD_BASE = "f" * 40
+
+
+def pr(**overrides):
+    """Consistent, merge-ready PR #9 bound to issue 1 on the live head."""
+    fields = dict(
+        pr=9,
+        issue=1,
+        recorded_head_sha=HEAD,
+        observed_head_sha=HEAD,
+        base_sha=SHA,
+        approved_head_sha=HEAD,
+        approved_base_sha=SHA,
+        ci_head_sha=HEAD,
+        ci_base_sha=SHA,
+        ci_conclusion="success",
+        merge_ready_claimed=True,
+    )
+    fields.update(overrides)
+    return PullRequestObservation(**fields)
+
+
+class PullRequestReconciliationTests(unittest.TestCase):
+    def findings(self, *observations, snapshot=None):
+        return pr_inconsistencies(snapshot or snap(), observations)
+
+    def assertOnly(self, observation, finding):
+        self.assertEqual(self.findings(observation), ((observation.pr, finding),))
+
+    def test_consistent_merge_ready_pr(self):
+        self.assertEqual(self.findings(pr()), ())
+
+    def test_pending_review_and_ci_without_claim_is_consistent(self):
+        self.assertEqual(self.findings(pr(approved_head_sha=None, approved_base_sha=None, ci_head_sha=None,
+                                          ci_base_sha=None, ci_conclusion=None,
+                                          merge_ready_claimed=False)), ())
+
+    def test_no_observations(self):
+        self.assertEqual(self.findings(), ())
+
+    def test_stale_recorded_head(self):
+        self.assertOnly(pr(recorded_head_sha=OLD_HEAD, merge_ready_claimed=False), "STALE_PR_HEAD")
+
+    def test_base_behind_main(self):
+        self.assertOnly(pr(base_sha="e" * 40, merge_ready_claimed=False), "BASE_BEHIND_MAIN")
+
+    def test_approval_on_older_head(self):
+        self.assertOnly(pr(approved_head_sha=OLD_HEAD, merge_ready_claimed=False), "STALE_APPROVAL")
+
+    def test_ci_on_older_head(self):
+        self.assertOnly(pr(ci_head_sha=OLD_HEAD, merge_ready_claimed=False), "STALE_CI")
+
+    def test_failed_ci_on_head(self):
+        self.assertOnly(pr(ci_conclusion="failure", merge_ready_claimed=False), "CI_NOT_GREEN")
+
+    def test_pending_ci_on_head(self):
+        self.assertOnly(pr(ci_conclusion=None, merge_ready_claimed=False), "CI_NOT_GREEN")
+
+    def test_approval_on_older_base(self):
+        self.assertOnly(pr(approved_base_sha=OLD_BASE, merge_ready_claimed=False), "STALE_APPROVAL")
+
+    def test_ci_on_older_base(self):
+        self.assertOnly(pr(ci_base_sha=OLD_BASE, merge_ready_claimed=False), "STALE_CI")
+
+    def test_base_advance_with_unchanged_head_invalidates_evidence(self):
+        # Head unchanged and base refreshed to live main, but approval and CI
+        # were produced against the previous base: the claim is unsupported.
+        self.assertEqual(self.findings(pr(approved_base_sha=OLD_BASE, ci_base_sha=OLD_BASE)),
+                         ((9, "STALE_APPROVAL"), (9, "STALE_CI"), (9, "UNSUPPORTED_MERGE_READY")))
+
+    def test_approval_without_base_is_not_evidence(self):
+        self.assertEqual(self.findings(pr(approved_base_sha=None)),
+                         ((9, "STALE_APPROVAL"), (9, "UNSUPPORTED_MERGE_READY")))
+
+    def test_merge_ready_claim_without_approval(self):
+        self.assertOnly(pr(approved_head_sha=None, approved_base_sha=None), "UNSUPPORTED_MERGE_READY")
+
+    def test_merge_ready_claim_without_ci(self):
+        self.assertOnly(pr(ci_head_sha=None, ci_base_sha=None, ci_conclusion=None), "UNSUPPORTED_MERGE_READY")
+
+    def test_merge_ready_claim_with_stale_approval(self):
+        self.assertEqual(self.findings(pr(approved_head_sha=OLD_HEAD)),
+                         ((9, "STALE_APPROVAL"), (9, "UNSUPPORTED_MERGE_READY")))
+
+    def test_pr_bound_to_other_issue(self):
+        self.assertOnly(pr(issue=3), "PR_BINDING_MISMATCH")
+
+    def test_unbound_pr(self):
+        self.assertOnly(pr(pr=11), "PR_BINDING_MISMATCH")
+
+    def test_duplicate_observation(self):
+        self.assertEqual(self.findings(pr(), pr()), ((9, "DUPLICATE_PR_OBSERVATION"),))
+
+    def test_malformed_shas_never_match_and_fail_closed(self):
+        for bad in ("", "C" * 40, "c" * 39, "g" * 40, " " + "c" * 39):
+            with self.subTest(sha=bad):
+                found = set(self.findings(pr(recorded_head_sha=bad, observed_head_sha=bad,
+                                              approved_head_sha=bad, ci_head_sha=bad)))
+                self.assertTrue({(9, "INVALID_SHA"), (9, "STALE_PR_HEAD"), (9, "STALE_APPROVAL"),
+                                 (9, "STALE_CI"), (9, "UNSUPPORTED_MERGE_READY")} <= found)
+
+    def test_invalid_live_main_fails_base_check(self):
+        snapshot = snap(main_sha="", observed_main_sha="")
+        self.assertEqual(self.findings(pr(base_sha=""), snapshot=snapshot),
+                         ((9, "BASE_BEHIND_MAIN"), (9, "INVALID_SHA"), (9, "STALE_APPROVAL"),
+                          (9, "STALE_CI"), (9, "UNSUPPORTED_MERGE_READY")))
+
+    def test_findings_sorted_by_pr_then_code(self):
+        snapshot = snap(pr_issue_bindings=((9, 1), (10, 3)))
+        result = self.findings(pr(pr=10, issue=3, ci_conclusion="failure", merge_ready_claimed=False),
+                               pr(base_sha="e" * 40), snapshot=snapshot)
+        self.assertEqual(result, ((9, "BASE_BEHIND_MAIN"), (9, "UNSUPPORTED_MERGE_READY"),
+                                  (10, "CI_NOT_GREEN")))
+        self.assertEqual(result, self.findings(pr(base_sha="e" * 40),
+                                               pr(pr=10, issue=3, ci_conclusion="failure",
+                                                  merge_ready_claimed=False), snapshot=snapshot))
 
 
 if __name__ == "__main__":

@@ -72,7 +72,8 @@
         "WU-P1-FOUNDATIONS-001",
         "WU-P1-DISCOVERY-001",
         "WU-P1-BRIEF-001",
-        "WU-P1-EXECUTION-002"
+        "WU-P1-EXECUTION-002",
+        "WU-P1-JOURNEY-001"
       ],
       "status": "PROPOSED"
     },
@@ -879,7 +880,8 @@
       "required_provider_interface_contract": "Existing AgentRuntimeAdapter extension; RunKey; explicit argv; bounded time/context; environment allowlist; isolated workspace; recovery evidence",
       "dependencies": [
         "WU-P1-FOUNDATIONS-001",
-        "WU-P1-E2E-001"
+        "WU-P1-E2E-001",
+        "WU-P2-OBS-001"
       ],
       "target_implementation_phase": "P2",
       "user_visible_benefit": "Reliable bounded agent harness and isolated execution",
@@ -1130,7 +1132,8 @@
         "WU-P1-FOUNDATIONS-001",
         "WU-P1-DISCOVERY-001",
         "WU-P1-BRIEF-001",
-        "WU-P1-EXECUTION-002"
+        "WU-P1-EXECUTION-002",
+        "WU-P1-JOURNEY-001"
       ],
       "target_implementation_phase": "P1",
       "user_visible_benefit": "Guided idea discovery and change-controlled specifications",
@@ -1175,7 +1178,8 @@
         "WU-P1-FOUNDATIONS-001",
         "WU-P1-DISCOVERY-001",
         "WU-P1-BRIEF-001",
-        "WU-P1-EXECUTION-002"
+        "WU-P1-EXECUTION-002",
+        "WU-P1-JOURNEY-001"
       ],
       "target_implementation_phase": "P1",
       "user_visible_benefit": "Guided idea discovery and change-controlled specifications",
@@ -1220,7 +1224,8 @@
         "WU-P1-FOUNDATIONS-001",
         "WU-P1-DISCOVERY-001",
         "WU-P1-BRIEF-001",
-        "WU-P1-EXECUTION-002"
+        "WU-P1-EXECUTION-002",
+        "WU-P1-JOURNEY-001"
       ],
       "target_implementation_phase": "P1",
       "user_visible_benefit": "Guided idea discovery and change-controlled specifications",
@@ -2136,7 +2141,8 @@
       "required_provider_interface_contract": "Build ID + RunKey + exclusive device lock + privacy-safe screenshots,traces and stale-evidence rejection",
       "dependencies": [
         "WU-P1-RUNTIME-BINDING-001",
-        "WU-P1-POSTBIND-ASSURANCE-001"
+        "WU-P1-POSTBIND-ASSURANCE-001",
+        "WU-P1-E2E-001"
       ],
       "target_implementation_phase": "P2",
       "user_visible_benefit": "Deterministic real browser and mobile runtime validation",
@@ -2178,7 +2184,8 @@
       "required_provider_interface_contract": "Build ID + RunKey + exclusive device lock + privacy-safe screenshots,traces and stale-evidence rejection",
       "dependencies": [
         "WU-P1-RUNTIME-BINDING-001",
-        "WU-P1-POSTBIND-ASSURANCE-001"
+        "WU-P1-POSTBIND-ASSURANCE-001",
+        "WU-P1-E2E-001"
       ],
       "target_implementation_phase": "P2",
       "user_visible_benefit": "Deterministic real browser and mobile runtime validation",
@@ -2220,7 +2227,8 @@
       "required_provider_interface_contract": "Build ID + RunKey + exclusive device lock + privacy-safe screenshots,traces and stale-evidence rejection",
       "dependencies": [
         "WU-P1-RUNTIME-BINDING-001",
-        "WU-P1-POSTBIND-ASSURANCE-001"
+        "WU-P1-POSTBIND-ASSURANCE-001",
+        "WU-P1-E2E-001"
       ],
       "target_implementation_phase": "P2",
       "user_visible_benefit": "Deterministic real browser and mobile runtime validation",
@@ -2725,7 +2733,8 @@
       "WU-P1-RUNTIME-001",
       "WU-P1-QUALITY-001",
       "WU-P1-PLAYWRIGHT-001",
-      "WU-P1-MISSION-EVIDENCE-001"
+      "WU-P1-MISSION-EVIDENCE-001",
+      "WU-P1-JOURNEY-001"
     ],
     "proposed_not_admitted_followups": [
       "WU-P0-LIVE-RECONCILIATION-001",
@@ -2749,7 +2758,8 @@
         "WU-P1-FOUNDATIONS-001",
         "WU-P1-DISCOVERY-001",
         "WU-P1-BRIEF-001",
-        "WU-P1-EXECUTION-002"
+        "WU-P1-EXECUTION-002",
+        "WU-P1-JOURNEY-001"
       ],
       "WU-P1-RUNTIME-BINDING-001": [
         "WU-P1-BRIEF-APPROVAL-HANDOFF-001",

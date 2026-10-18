@@ -13,7 +13,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from concurrent.futures import ThreadPoolExecutor
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -25,6 +25,22 @@ CLI = ROOT / "scripts" / "execution.py"
 WU = "WU-OC-P0-04"
 RUN_ID = "run-competing"
 WRITERS = 120
+ENV = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+
+
+def holds_open(pid: int, path: Path) -> bool:
+    """Whether a live process has ``path`` open (Linux /proc)."""
+    try:
+        fds = list(Path(f"/proc/{pid}/fd").iterdir())
+    except OSError:
+        return False
+    for fd in fds:
+        try:
+            if Path(os.readlink(fd)) == path:
+                return True
+        except OSError:
+            continue
+    return False
 
 
 class CompetingExecutionWritersTest(unittest.TestCase):
@@ -49,26 +65,29 @@ class CompetingExecutionWritersTest(unittest.TestCase):
     def tearDown(self) -> None:
         self._tmp.cleanup()
 
+    def command(self, subcommand: str, *args: str) -> list[str]:
+        return [
+            sys.executable,
+            str(CLI),
+            "--runtime-root",
+            str(self.root),
+            subcommand,
+            *args,
+        ]
+
     def run_cli(self, subcommand: str, *args: str) -> subprocess.CompletedProcess[str]:
-        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
         return subprocess.run(
-            [
-                sys.executable,
-                str(CLI),
-                "--runtime-root",
-                str(self.root),
-                subcommand,
-                *args,
-            ],
+            self.command(subcommand, *args),
             capture_output=True,
             text=True,
             timeout=120,
-            env=env,
+            env=ENV,
             check=False,
         )
 
-    def fenced(self, subcommand: str, generation: int, *args: str) -> subprocess.CompletedProcess[str]:
-        return self.run_cli(
+    @staticmethod
+    def fenced_args(subcommand: str, generation: int, *args: str) -> tuple[str, ...]:
+        return (
             subcommand,
             "--wu",
             WU,
@@ -79,9 +98,54 @@ class CompetingExecutionWritersTest(unittest.TestCase):
             *args,
         )
 
+    def fenced(self, subcommand: str, generation: int, *args: str) -> subprocess.CompletedProcess[str]:
+        return self.run_cli(*self.fenced_args(subcommand, generation, *args))
+
     def compete(self, make_args) -> list[subprocess.CompletedProcess[str]]:
-        with ThreadPoolExecutor(max_workers=WRITERS) as pool:
-            return list(pool.map(make_args, range(WRITERS)))
+        """Start every writer while the test holds the WU lock, then release.
+
+        On Linux the gate also waits until every child has opened the lock
+        file, i.e. is queued on the same lock, so the race always has real
+        overlap even on a slow or single-core runner.
+        """
+        store = ExecutionStore(self.root)
+        lock_path = store.lock_path(WU).resolve()
+        with store.lock(WU):
+            children = [
+                subprocess.Popen(
+                    self.command(*make_args(index)),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    env=ENV,
+                )
+                for index in range(WRITERS)
+            ]
+            if Path("/proc/self/fd").is_dir():
+                deadline = time.monotonic() + 90
+                waiting = {child.pid for child in children}
+                while waiting and time.monotonic() < deadline:
+                    waiting = {
+                        pid for pid in waiting if not holds_open(pid, lock_path)
+                    }
+                    if waiting:
+                        time.sleep(0.05)
+                self.assertEqual(
+                    waiting, set(), "writers never queued on the WU lock"
+                )
+                self.assertTrue(
+                    all(child.poll() is None for child in children),
+                    "a writer finished while the WU lock was held",
+                )
+        results = []
+        for child in children:
+            stdout, stderr = child.communicate(timeout=120)
+            results.append(
+                subprocess.CompletedProcess(
+                    child.args, child.returncode, stdout, stderr
+                )
+            )
+        return results
 
     def journal(self) -> list[dict]:
         store = ExecutionStore(self.root)
@@ -100,7 +164,7 @@ class CompetingExecutionWritersTest(unittest.TestCase):
 
     def test_exactly_one_of_many_generation_rotations_wins(self) -> None:
         results = self.compete(
-            lambda index: self.fenced(
+            lambda index: self.fenced_args(
                 "edit", 1, "--objective", f"Revision from writer {index}"
             )
         )
@@ -122,7 +186,7 @@ class CompetingExecutionWritersTest(unittest.TestCase):
 
     def test_many_same_generation_writes_are_serialized_without_loss(self) -> None:
         results = self.compete(
-            lambda index: self.fenced(
+            lambda index: self.fenced_args(
                 "task-add",
                 1,
                 "--task-id",
@@ -156,8 +220,12 @@ class CompetingExecutionWritersTest(unittest.TestCase):
         # A fresh store (process restart) reconstructs the same fenced state.
         reloaded = ExecutionStore(self.root).load(WU)
         self.assertEqual(reloaded.key.generation, 2)
+        store = ExecutionStore(self.root)
         before_state = self.state()
-        before_journal = self.journal()
+        before_bytes = (
+            store.state_path(WU).read_bytes(),
+            store.journal_path(WU).read_bytes(),
+        )
 
         for replay in (
             self.fenced("task-add", 1, "--task-id", "late", "--description", "late"),
@@ -166,7 +234,13 @@ class CompetingExecutionWritersTest(unittest.TestCase):
             self.assert_stale_rejection(replay)
 
         self.assertEqual(self.state(), before_state)
-        self.assertEqual(self.journal(), before_journal)
+        self.assertEqual(
+            (
+                store.state_path(WU).read_bytes(),
+                store.journal_path(WU).read_bytes(),
+            ),
+            before_bytes,
+        )
 
 
 if __name__ == "__main__":

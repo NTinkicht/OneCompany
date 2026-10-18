@@ -103,6 +103,7 @@ class ReconciliationTests(unittest.TestCase):
 
 HEAD = "c" * 40
 OLD_HEAD = "d" * 40
+OLD_BASE = "f" * 40
 
 
 def pr(**overrides):
@@ -114,7 +115,9 @@ def pr(**overrides):
         observed_head_sha=HEAD,
         base_sha=SHA,
         approved_head_sha=HEAD,
+        approved_base_sha=SHA,
         ci_head_sha=HEAD,
+        ci_base_sha=SHA,
         ci_conclusion="success",
         merge_ready_claimed=True,
     )
@@ -133,8 +136,9 @@ class PullRequestReconciliationTests(unittest.TestCase):
         self.assertEqual(self.findings(pr()), ())
 
     def test_pending_review_and_ci_without_claim_is_consistent(self):
-        self.assertEqual(self.findings(pr(approved_head_sha=None, ci_head_sha=None,
-                                          ci_conclusion=None, merge_ready_claimed=False)), ())
+        self.assertEqual(self.findings(pr(approved_head_sha=None, approved_base_sha=None, ci_head_sha=None,
+                                          ci_base_sha=None, ci_conclusion=None,
+                                          merge_ready_claimed=False)), ())
 
     def test_no_observations(self):
         self.assertEqual(self.findings(), ())
@@ -157,11 +161,27 @@ class PullRequestReconciliationTests(unittest.TestCase):
     def test_pending_ci_on_head(self):
         self.assertOnly(pr(ci_conclusion=None, merge_ready_claimed=False), "CI_NOT_GREEN")
 
+    def test_approval_on_older_base(self):
+        self.assertOnly(pr(approved_base_sha=OLD_BASE, merge_ready_claimed=False), "STALE_APPROVAL")
+
+    def test_ci_on_older_base(self):
+        self.assertOnly(pr(ci_base_sha=OLD_BASE, merge_ready_claimed=False), "STALE_CI")
+
+    def test_base_advance_with_unchanged_head_invalidates_evidence(self):
+        # Head unchanged and base refreshed to live main, but approval and CI
+        # were produced against the previous base: the claim is unsupported.
+        self.assertEqual(self.findings(pr(approved_base_sha=OLD_BASE, ci_base_sha=OLD_BASE)),
+                         ((9, "STALE_APPROVAL"), (9, "STALE_CI"), (9, "UNSUPPORTED_MERGE_READY")))
+
+    def test_approval_without_base_is_not_evidence(self):
+        self.assertEqual(self.findings(pr(approved_base_sha=None)),
+                         ((9, "STALE_APPROVAL"), (9, "UNSUPPORTED_MERGE_READY")))
+
     def test_merge_ready_claim_without_approval(self):
-        self.assertOnly(pr(approved_head_sha=None), "UNSUPPORTED_MERGE_READY")
+        self.assertOnly(pr(approved_head_sha=None, approved_base_sha=None), "UNSUPPORTED_MERGE_READY")
 
     def test_merge_ready_claim_without_ci(self):
-        self.assertOnly(pr(ci_head_sha=None, ci_conclusion=None), "UNSUPPORTED_MERGE_READY")
+        self.assertOnly(pr(ci_head_sha=None, ci_base_sha=None, ci_conclusion=None), "UNSUPPORTED_MERGE_READY")
 
     def test_merge_ready_claim_with_stale_approval(self):
         self.assertEqual(self.findings(pr(approved_head_sha=OLD_HEAD)),
@@ -187,7 +207,8 @@ class PullRequestReconciliationTests(unittest.TestCase):
     def test_invalid_live_main_fails_base_check(self):
         snapshot = snap(main_sha="", observed_main_sha="")
         self.assertEqual(self.findings(pr(base_sha=""), snapshot=snapshot),
-                         ((9, "BASE_BEHIND_MAIN"), (9, "INVALID_SHA"), (9, "UNSUPPORTED_MERGE_READY")))
+                         ((9, "BASE_BEHIND_MAIN"), (9, "INVALID_SHA"), (9, "STALE_APPROVAL"),
+                          (9, "STALE_CI"), (9, "UNSUPPORTED_MERGE_READY")))
 
     def test_findings_sorted_by_pr_then_code(self):
         snapshot = snap(pr_issue_bindings=((9, 1), (10, 3)))

@@ -58,7 +58,10 @@ class PullRequestObservation:
     """Live read-only facts about one open PR, as fetched by a trusted caller.
 
     ``recorded_head_sha`` is the head the writer/ledger last recorded; the
-    ``*_head_sha`` review/CI fields are the heads those results were produced on.
+    ``*_head_sha`` / ``*_base_sha`` review/CI fields are the exact head and
+    base those results were produced on. Evidence counts only when both match
+    the live head and live main, so a base advance invalidates it even when
+    the head is unchanged.
     """
     pr: int
     issue: int
@@ -66,7 +69,9 @@ class PullRequestObservation:
     observed_head_sha: str
     base_sha: str
     approved_head_sha: str | None = None
+    approved_base_sha: str | None = None
     ci_head_sha: str | None = None
+    ci_base_sha: str | None = None
     ci_conclusion: str | None = None
     merge_ready_claimed: bool = False
 
@@ -103,14 +108,15 @@ def pr_inconsistencies(
         head_current = _same_sha(obs.recorded_head_sha, head)
         if not head_current:
             problems.add((obs.pr, "STALE_PR_HEAD"))
-        base_current = _same_sha(obs.base_sha, snapshot.observed_main_sha)
+        live_main = snapshot.observed_main_sha
+        base_current = _same_sha(obs.base_sha, live_main)
         if not base_current:
             problems.add((obs.pr, "BASE_BEHIND_MAIN"))
-        approved = _same_sha(obs.approved_head_sha, head)
-        if obs.approved_head_sha is not None and not approved:
+        approved = _same_sha(obs.approved_head_sha, head) and _same_sha(obs.approved_base_sha, live_main)
+        if (obs.approved_head_sha is not None or obs.approved_base_sha is not None) and not approved:
             problems.add((obs.pr, "STALE_APPROVAL"))
-        ci_on_head = _same_sha(obs.ci_head_sha, head)
-        if obs.ci_head_sha is not None and not ci_on_head:
+        ci_on_head = _same_sha(obs.ci_head_sha, head) and _same_sha(obs.ci_base_sha, live_main)
+        if (obs.ci_head_sha is not None or obs.ci_base_sha is not None) and not ci_on_head:
             problems.add((obs.pr, "STALE_CI"))
         ci_green = ci_on_head and obs.ci_conclusion == "success"
         if ci_on_head and not ci_green:

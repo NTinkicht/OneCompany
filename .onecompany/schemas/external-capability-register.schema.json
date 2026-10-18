@@ -162,7 +162,8 @@
               "WU-P1-FOUNDATIONS-001",
               "WU-P1-DISCOVERY-001",
               "WU-P1-BRIEF-001",
-              "WU-P1-EXECUTION-002"
+              "WU-P1-EXECUTION-002",
+              "WU-P1-JOURNEY-001"
             ]
           },
           "PROD": {
@@ -772,7 +773,8 @@
             ],
             "dependencies": [
               "WU-P1-FOUNDATIONS-001",
-              "WU-P1-E2E-001"
+              "WU-P1-E2E-001",
+              "WU-P2-OBS-001"
             ]
           },
           "EXT-019": {
@@ -848,7 +850,8 @@
               "WU-P1-FOUNDATIONS-001",
               "WU-P1-DISCOVERY-001",
               "WU-P1-BRIEF-001",
-              "WU-P1-EXECUTION-002"
+              "WU-P1-EXECUTION-002",
+              "WU-P1-JOURNEY-001"
             ]
           },
           "EXT-025": {
@@ -864,7 +867,8 @@
               "WU-P1-FOUNDATIONS-001",
               "WU-P1-DISCOVERY-001",
               "WU-P1-BRIEF-001",
-              "WU-P1-EXECUTION-002"
+              "WU-P1-EXECUTION-002",
+              "WU-P1-JOURNEY-001"
             ]
           },
           "EXT-026": {
@@ -880,7 +884,8 @@
               "WU-P1-FOUNDATIONS-001",
               "WU-P1-DISCOVERY-001",
               "WU-P1-BRIEF-001",
-              "WU-P1-EXECUTION-002"
+              "WU-P1-EXECUTION-002",
+              "WU-P1-JOURNEY-001"
             ]
           },
           "EXT-027": {
@@ -1156,7 +1161,8 @@
             ],
             "dependencies": [
               "WU-P1-RUNTIME-BINDING-001",
-              "WU-P1-POSTBIND-ASSURANCE-001"
+              "WU-P1-POSTBIND-ASSURANCE-001",
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-049": {
@@ -1169,7 +1175,8 @@
             ],
             "dependencies": [
               "WU-P1-RUNTIME-BINDING-001",
-              "WU-P1-POSTBIND-ASSURANCE-001"
+              "WU-P1-POSTBIND-ASSURANCE-001",
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-050": {
@@ -1182,7 +1189,8 @@
             ],
             "dependencies": [
               "WU-P1-RUNTIME-BINDING-001",
-              "WU-P1-POSTBIND-ASSURANCE-001"
+              "WU-P1-POSTBIND-ASSURANCE-001",
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-051": {
@@ -1374,7 +1382,7 @@
         },
         "historically_completed_wus": {
           "type": "array",
-          "minItems": 10,
+          "minItems": 11,
           "uniqueItems": true,
           "items": {
             "type": "string",
@@ -1450,7 +1458,8 @@
                 "WU-P1-FOUNDATIONS-001",
                 "WU-P1-DISCOVERY-001",
                 "WU-P1-BRIEF-001",
-                "WU-P1-EXECUTION-002"
+                "WU-P1-EXECUTION-002",
+                "WU-P1-JOURNEY-001"
               ]
             },
             "WU-P1-RUNTIME-BINDING-001": {

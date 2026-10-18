@@ -5,7 +5,10 @@ This module never claims a lease, merges, or modifies the queue.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
+
+_SHA = re.compile(r"[0-9a-f]{40}")
 
 
 @dataclass(frozen=True)
@@ -47,4 +50,71 @@ def inconsistencies(snapshot: WorkSnapshot) -> tuple[str, ...]:
     retired = set(snapshot.retired_pilot_issue_ids)
     if retired.intersection(snapshot.next_ids) or retired.intersection(active):
         problems.add("RETIRED_PILOT_REACTIVATED")
+    return tuple(sorted(problems))
+
+
+@dataclass(frozen=True)
+class PullRequestObservation:
+    """Live read-only facts about one open PR, as fetched by a trusted caller.
+
+    ``recorded_head_sha`` is the head the writer/ledger last recorded; the
+    ``*_head_sha`` review/CI fields are the heads those results were produced on.
+    """
+    pr: int
+    issue: int
+    recorded_head_sha: str
+    observed_head_sha: str
+    base_sha: str
+    approved_head_sha: str | None = None
+    ci_head_sha: str | None = None
+    ci_conclusion: str | None = None
+    merge_ready_claimed: bool = False
+
+
+def _valid_sha(value: str | None) -> bool:
+    return isinstance(value, str) and _SHA.fullmatch(value) is not None
+
+
+def _same_sha(left: str | None, right: str | None) -> bool:
+    """Malformed or empty SHAs never compare equal (fail closed)."""
+    return _valid_sha(left) and _valid_sha(right) and left == right
+
+
+def pr_inconsistencies(
+    snapshot: WorkSnapshot, observations: tuple[PullRequestObservation, ...]
+) -> tuple[tuple[int, str], ...]:
+    """Return stable sorted ``(pr, FINDING)`` pairs for exact-head PR truth.
+
+    Approval and CI only count for the live head; nothing here grants
+    merge, review or lease authority.
+    """
+    problems: set[tuple[int, str]] = set()
+    bindings = set(snapshot.pr_issue_bindings)
+    seen: set[int] = set()
+    for obs in observations:
+        if obs.pr in seen:
+            problems.add((obs.pr, "DUPLICATE_PR_OBSERVATION"))
+        seen.add(obs.pr)
+        if (obs.pr, obs.issue) not in bindings:
+            problems.add((obs.pr, "PR_BINDING_MISMATCH"))
+        if not all(_valid_sha(v) for v in (obs.recorded_head_sha, obs.observed_head_sha, obs.base_sha)):
+            problems.add((obs.pr, "INVALID_SHA"))
+        head = obs.observed_head_sha
+        head_current = _same_sha(obs.recorded_head_sha, head)
+        if not head_current:
+            problems.add((obs.pr, "STALE_PR_HEAD"))
+        base_current = _same_sha(obs.base_sha, snapshot.observed_main_sha)
+        if not base_current:
+            problems.add((obs.pr, "BASE_BEHIND_MAIN"))
+        approved = _same_sha(obs.approved_head_sha, head)
+        if obs.approved_head_sha is not None and not approved:
+            problems.add((obs.pr, "STALE_APPROVAL"))
+        ci_on_head = _same_sha(obs.ci_head_sha, head)
+        if obs.ci_head_sha is not None and not ci_on_head:
+            problems.add((obs.pr, "STALE_CI"))
+        ci_green = ci_on_head and obs.ci_conclusion == "success"
+        if ci_on_head and not ci_green:
+            problems.add((obs.pr, "CI_NOT_GREEN"))
+        if obs.merge_ready_claimed and not (head_current and base_current and approved and ci_green):
+            problems.add((obs.pr, "UNSUPPORTED_MERGE_READY"))
     return tuple(sorted(problems))

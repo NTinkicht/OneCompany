@@ -104,11 +104,15 @@ def validate_documents() -> tuple[list[str], list[str]]:
             acceptance = risk.get("acceptance")
             if risk.get("treatment") == "accept" and (not isinstance(acceptance, dict) or acceptance.get("human") is not True or not acceptance.get("approved_by")):
                 errors.append(f"{risk_id}: critical residual-risk acceptance requires explicit human approval")
+    requirement_graph: dict[str, list[str]] = {}
     for req_id, req in requirement_map.items():
         for risk_id in req.get("risk_ids", []):
             if risk_id not in risk_map: errors.append(f"{req_id}: references unknown planning risk {risk_id}")
+        requirement_graph[req_id] = []
         for dep in req.get("depends_on", []):
             if dep not in requirement_map: errors.append(f"{req_id}: depends_on unknown requirement {dep}")
+            elif dep != req_id: requirement_graph[req_id].append(dep)
+    errors.extend(_cycle_errors(requirement_graph, "requirement dependency"))
 
     work = queue.get("work_units", []); execution_types = set(planning.get("work_model", {}).get("execution_item_types", []))
     for item in work:

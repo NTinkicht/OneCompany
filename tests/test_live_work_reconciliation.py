@@ -74,6 +74,10 @@ class ReconciliationTests(unittest.TestCase):
         self.assertOnly(snap(issue_ids=(1, 2, 3), active_lease_issue_ids=(1, 3), retired_pilot_issue_ids=(3,)),
                         "RETIRED_PILOT_REACTIVATED")
 
+    def test_retired_pilot_with_pr_binding(self):
+        self.assertOnly(snap(pr_issue_bindings=((9, 1), (10, 3)), retired_pilot_issue_ids=(3,)),
+                        "RETIRED_PILOT_REACTIVATED")
+
     def test_retired_pilot_not_active_is_consistent(self):
         self.assertEqual(inconsistencies(snap(retired_pilot_issue_ids=(3,))), ())
 

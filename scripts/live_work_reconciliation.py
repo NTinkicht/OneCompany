@@ -45,6 +45,6 @@ def inconsistencies(snapshot: WorkSnapshot) -> tuple[str, ...]:
     if active.intersection(snapshot.next_ids):
         problems.add("ACTIVE_WORK_IN_NEXT")
     retired = set(snapshot.retired_pilot_issue_ids)
-    if retired.intersection(snapshot.next_ids) or retired.intersection(snapshot.active_lease_issue_ids):
+    if retired.intersection(snapshot.next_ids) or retired.intersection(active):
         problems.add("RETIRED_PILOT_REACTIVATED")
     return tuple(sorted(problems))

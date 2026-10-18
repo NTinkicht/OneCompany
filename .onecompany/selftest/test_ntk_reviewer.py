@@ -484,8 +484,15 @@ class ControlPlaneTests(unittest.TestCase):
         lists = json.loads(R.CONTROL_PLANE_FILE.read_text())
         self.assertEqual(set(lists), {f"NTinkicht/{r}" for r in R.DEFAULT_REPOS})
         must = {
-            "NTinkicht/OneCompany": [".onecompany/actors.json", ".onecompany/readiness.json",
-                                     "scripts/merge.py", "scripts/l5_control_plane.py", "onecompany.py"],
+            # OneCompany's trust root: the reviewer and workflows (.github floor),
+            # the stop/budget switches, agent instructions, the owner's spec,
+            # and the reviewer's own tests. The CompanyOS template code below
+            # it (scripts/, agents/, onecompany.py, template configs) is the
+            # product and is reviewed like any other code.
+            "NTinkicht/OneCompany": [".onecompany/config.json", ".onecompany/budget.json",
+                                     ".github/workflows/ntk-reviewer.yml", ".github/ntk-reviewer/review.py",
+                                     "PRODUCT.md", "AGENTS.md", "CLAUDE.md",
+                                     ".onecompany/selftest/test_ntk_reviewer.py", "coordination/STATE.json"],
             "NTinkicht/Tabibi": ["scripts/native_factory_merge.py", "scripts/l5_kernel.py", "AGENTS.md",
                                  "coordination/ACTOR_REGISTRY.json", "scripts/mistral-review-target.py",
                                  "scripts/coordination/publish-mistral-review.py", "tests/l5_recovery.test.py",
@@ -498,6 +505,12 @@ class ControlPlaneTests(unittest.TestCase):
         for repo, paths in must.items():
             for path in paths:
                 self.assertTrue(R.control_plane({path}, lists[repo], []), (repo, path))
+        # OneCompany product (template) code must stay reviewable, or the
+        # CompanyOS itself can never be developed autonomously.
+        for path in ["scripts/doctor.py", "onecompany.py", "agents/claude.md",
+                     ".onecompany/routing.json", ".onecompany/selftest/test_doctor.py",
+                     "templates/README.md", "docs/ONBOARDING.md"]:
+            self.assertFalse(R.control_plane({path}, lists["NTinkicht/OneCompany"], []), path)
 
     def test_codeowners_is_read_from_base_branch_once_per_run(self):
         gh, cache = FakeGitHub(codeowners="/src/ @NTinkicht\n"), {}

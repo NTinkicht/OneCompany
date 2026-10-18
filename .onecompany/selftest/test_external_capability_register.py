@@ -141,19 +141,18 @@ class ExternalCapabilityRegisterTests(unittest.TestCase):
         self.assertEqual("2026-10-18", ledger["as_of_date"])
         self.assertEqual(61, len(REGISTER["candidates"]))
         self.assertEqual(11, len(REGISTER["group_workstreams"]))
-        self.assertEqual({
-            "WU-P0-RECONCILE-001", "WU-P1-FOUNDATIONS-001",
-            "WU-P1-DISCOVERY-001", "WU-P1-EXECUTION-002",
-            "WU-P1-PREVIEW-001", "WU-P1-BRIEF-001",
-            "WU-P1-RUNTIME-001", "WU-P1-QUALITY-001",
-            "WU-P1-PLAYWRIGHT-001", "WU-P1-MISSION-EVIDENCE-001",
-            "WU-P1-JOURNEY-001",
-        }, historical)
-        self.assertEqual({
-            "WU-P0-LIVE-RECONCILIATION-001", "WU-P1-BRIEF-APPROVAL-HANDOFF-001",
-            "WU-P1-RUNTIME-BINDING-001", "WU-P1-POSTBIND-ASSURANCE-001",
-            "WU-P1-MISSION-TRUTH-001",
-        }, proposed)
+        self.assertEqual(set((
+            "WU-P0-RECONCILE-001 WU-P1-FOUNDATIONS-001 "
+            "WU-P1-DISCOVERY-001 WU-P1-EXECUTION-002 WU-P1-PREVIEW-001 "
+            "WU-P1-BRIEF-001 WU-P1-RUNTIME-001 WU-P1-QUALITY-001 "
+            "WU-P1-PLAYWRIGHT-001 WU-P1-MISSION-EVIDENCE-001 "
+            "WU-P1-JOURNEY-001"
+        ).split()), historical)
+        self.assertEqual(set((
+            "WU-P0-LIVE-RECONCILIATION-001 WU-P1-BRIEF-APPROVAL-HANDOFF-001 "
+            "WU-P1-RUNTIME-BINDING-001 WU-P1-POSTBIND-ASSURANCE-001 "
+            "WU-P1-MISSION-TRUTH-001"
+        ).split()), proposed)
         self.assertFalse(historical & proposed)
         self.assertEqual("WU-P1-E2E-001", ledger["existing_open_not_admitted_integration"])
         self.assertIn("never admits", ledger["source_of_truth"])
@@ -206,37 +205,37 @@ class ExternalCapabilityRegisterTests(unittest.TestCase):
         groups = {g["key"]: g for g in REGISTER["group_workstreams"]}
         candidates = {c["capability_id"]: c for c in REGISTER["candidates"]}
         spec = groups["SPEC"]
-        handoff = spec["deps"]
+        dag = REGISTER["phase1_reconciliation"]["proposed_dependency_dag"]
         self.assertEqual("WU-P1-BRIEF-APPROVAL-HANDOFF-001", spec["wu"])
-        self.assertEqual(
-            handoff, REGISTER["phase1_reconciliation"]["proposed_dependency_dag"][spec["wu"]]
-        )
+        self.assertEqual(spec["deps"], dag[spec["wu"]])
         for cid in ("EXT-024", "EXT-025", "EXT-026"):
             self.assertEqual([spec["wu"]], candidates[cid]["work_unit_mappings"])
-            self.assertEqual(handoff, candidates[cid]["dependencies"])
-        self.assert_invalid(lambda x: next(
-            c for c in x["candidates"] if c["capability_id"] == "EXT-024"
-        ).update(dependencies=["WU-P1-FOUNDATIONS-001"]))
-        self.assert_invalid(lambda x: x["phase1_reconciliation"][
-            "proposed_dependency_dag"
-        ][spec["wu"]].remove("WU-P1-JOURNEY-001"))
-        self.assertIn("WU-P1-E2E-001", groups["UI"]["deps"])
+            self.assertEqual(spec["deps"], candidates[cid]["dependencies"])
         for cid in ("EXT-048", "EXT-049", "EXT-050"):
             self.assertEqual(["WU-P2-UI-001"], candidates[cid]["work_unit_mappings"])
             self.assertEqual(groups["UI"]["deps"], candidates[cid]["dependencies"])
-        self.assert_invalid(lambda x: next(
-            c for c in x["candidates"] if c["capability_id"] == "EXT-048"
-        )["dependencies"].remove("WU-P1-E2E-001"))
+        self.assertIn("WU-P1-E2E-001", groups["UI"]["deps"])
         self.assertTrue(set(groups["OPS"]["deps"]).issubset(
             candidates["EXT-018"]["dependencies"]
         ))
-        self.assert_invalid(lambda x: next(
-            c for c in x["candidates"] if c["capability_id"] == "EXT-018"
-        )["dependencies"].remove("WU-P2-OBS-001"))
-        playwright = candidates["EXT-035"]
-        self.assertEqual(["WU-P1-RUNTIME-BINDING-001"], playwright["dependencies"])
-        self.assertIn("WU-P1-POSTBIND-ASSURANCE-001", playwright["work_unit_mappings"])
-        self.assertIn("WU-P2-UI-001", playwright["work_unit_mappings"])
+        self.assertEqual(
+            ["WU-P1-RUNTIME-BINDING-001"], candidates["EXT-035"]["dependencies"]
+        )
+        self.assertEqual(
+            {"WU-P1-POSTBIND-ASSURANCE-001", "WU-P2-UI-001"},
+            set(candidates["EXT-035"]["work_unit_mappings"]),
+        )
+        for cid, dep in (
+            ("EXT-024", "WU-P1-JOURNEY-001"),
+            ("EXT-048", "WU-P1-E2E-001"),
+            ("EXT-018", "WU-P2-OBS-001"),
+        ):
+            self.assert_invalid(lambda x, cid=cid, dep=dep: next(
+                c for c in x["candidates"] if c["capability_id"] == cid
+            )["dependencies"].remove(dep))
+        self.assert_invalid(lambda x: x["phase1_reconciliation"][
+            "proposed_dependency_dag"
+        ][spec["wu"]].remove("WU-P1-JOURNEY-001"))
 
     def test_schema_pins_all_61_candidates_11_groups_and_six_dag_nodes(self):
         props = SCHEMA["properties"]

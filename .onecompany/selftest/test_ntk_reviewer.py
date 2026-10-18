@@ -506,11 +506,40 @@ class ControlPlaneTests(unittest.TestCase):
             for path in paths:
                 self.assertTrue(R.control_plane({path}, lists[repo], []), (repo, path))
         # OneCompany product (template) code must stay reviewable, or the
-        # CompanyOS itself can never be developed autonomously.
+        # CompanyOS itself can never be developed autonomously. Use the real
+        # shipped CODEOWNERS exactly as the production path reads it.
+        real_codeowners = (ROOT / ".github" / "CODEOWNERS").read_text(encoding="utf-8")
+        rules = R.codeowner_rules(FakeGitHub(codeowners=real_codeowners), "OneCompany", BASE, {})
         for path in ["scripts/doctor.py", "onecompany.py", "agents/claude.md",
                      ".onecompany/routing.json", ".onecompany/selftest/test_doctor.py",
-                     "templates/README.md", "docs/ONBOARDING.md"]:
-            self.assertFalse(R.control_plane({path}, lists["NTinkicht/OneCompany"], []), path)
+                     "templates/README.md", "docs/ONBOARDING.md", "Makefile"]:
+            self.assertFalse(R.control_plane({path}, lists["NTinkicht/OneCompany"], rules), path)
+
+    def test_onecompany_template_codeowners_does_not_gate_product_code_end_to_end(self):
+        real_codeowners = (ROOT / ".github" / "CODEOWNERS").read_text(encoding="utf-8")
+        extra = json.loads(R.CONTROL_PLANE_FILE.read_text())["NTinkicht/OneCompany"]
+
+        def review(path):
+            gh = FakeGitHub(files=(path,), codeowners=real_codeowners,
+                            diff=f"diff --git a/{path} b/{path}\n+x\n")
+            pr = gh.pr()
+            pr["head"]["repo"]["full_name"] = "NTinkicht/OneCompany"
+            return R.review_pr(gh, "OneCompany", pr, login=LOGIN, mode="approve",
+                               run_model=Model(PASS), calls=[0], now=1_000_000.0,
+                               run_url="https://x/run/1", extra_patterns=extra)
+
+        for path in ("scripts/doctor.py", "onecompany.py", ".onecompany/routing.json"):
+            self.assertEqual(review(path), "POSTED APPROVE PASS", path)
+        for path in (".github/workflows/ci.yml", ".github/CODEOWNERS", ".github/ntk-reviewer/review.py",
+                     ".onecompany/config.json", ".onecompany/budget.json", "AGENTS.md",
+                     "PRODUCT.md", ".onecompany/selftest/test_ntk_reviewer.py"):
+            self.assertEqual(review(path), "POSTED COMMENT PASS", path)
+
+    def test_other_repos_still_treat_codeowners_as_authority(self):
+        gh = FakeGitHub(codeowners="/src/ @NTinkicht\n")
+        self.assertTrue(R.codeowner_rules(gh, "Tabibi", BASE, {}))
+        self.assertTrue(R.codeowner_rules(gh, "veritas-atlas", BASE, {}))
+        self.assertEqual(R.codeowner_rules(gh, "OneCompany", BASE, {}), [])
 
     def test_codeowners_is_read_from_base_branch_once_per_run(self):
         gh, cache = FakeGitHub(codeowners="/src/ @NTinkicht\n"), {}

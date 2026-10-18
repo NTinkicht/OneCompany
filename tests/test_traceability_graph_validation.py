@@ -158,5 +158,30 @@ class PlanningGraphVectors(GraphFixture):
         self.assertPlanningRejects("portfolio link has unknown target 'FEAT-999'")
 
 
+
+class CycleDetectionDepthTests(unittest.TestCase):
+    """Deep but valid catalogs must validate; Python's recursion limit is no excuse to fail."""
+
+    DEPTH = 5000
+
+    def chain(self):
+        return {f"FR-{i:05d}": [f"FR-{i + 1:05d}"] if i + 1 < self.DEPTH else [] for i in range(self.DEPTH)}
+
+    def test_deep_acyclic_chain_is_accepted(self):
+        self.assertGreater(self.DEPTH, sys.getrecursionlimit())
+        self.assertEqual(planning_validate._cycle_errors(self.chain(), "requirement dependency"), [])
+
+    def test_deep_cycle_is_reported_once_with_full_path(self):
+        graph = self.chain()
+        graph[f"FR-{self.DEPTH - 1:05d}"] = ["FR-00000"]
+        errors = planning_validate._cycle_errors(graph, "requirement dependency")
+        self.assertEqual(len(errors), 1, errors[:1])
+        self.assertTrue(errors[0].startswith("requirement dependency cycle: FR-00000 -> FR-00001 -> "))
+        self.assertTrue(errors[0].endswith(f"-> FR-{self.DEPTH - 1:05d} -> FR-00000"))
+
+    def test_shared_descendant_is_not_a_cycle(self):
+        graph = {"A": ["B", "C"], "B": ["D"], "C": ["D"], "D": []}
+        self.assertEqual(planning_validate._cycle_errors(graph, "x"), [])
+
 if __name__ == "__main__":
     unittest.main()

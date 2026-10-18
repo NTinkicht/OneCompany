@@ -21,16 +21,23 @@ REQUIREMENT_TO_WU_RELATIONS = {"implements", "realizes", "satisfies", "delivers"
 PLANNING_TO_REQUIREMENT_RELATIONS = {"traces_to", "targets", "contains", "decomposes_to"}
 
 
+_END = object()
+
+
 def _cycle_errors(graph: dict[str, list[str]], label: str) -> list[str]:
-    errors: list[str] = []; visiting: set[str] = set(); visited: set[str] = set(); stack: list[str] = []
-    def visit(node: str) -> None:
-        if node in visited: return
-        if node in visiting:
-            start = stack.index(node) if node in stack else 0; errors.append(f"{label} cycle: " + " -> ".join(stack[start:] + [node])); return
-        visiting.add(node); stack.append(node)
-        for nxt in graph.get(node, []): visit(nxt)
-        stack.pop(); visiting.discard(node); visited.add(node)
-    for node in sorted(graph): visit(node)
+    """Report each back edge as a cycle path; iterative so deep graphs cannot exhaust the recursion limit."""
+    errors: list[str] = []; visiting: set[str] = set(); visited: set[str] = set(); path: list[str] = []
+    for root in sorted(graph):
+        if root in visited: continue
+        visiting.add(root); path.append(root); frames = [iter(graph.get(root, []))]
+        while frames:
+            nxt = next(frames[-1], _END)
+            if nxt is _END:
+                done = path.pop(); visiting.discard(done); visited.add(done); frames.pop(); continue
+            if nxt in visited: continue
+            if nxt in visiting:
+                errors.append(f"{label} cycle: " + " -> ".join(path[path.index(nxt):] + [nxt])); continue
+            visiting.add(nxt); path.append(nxt); frames.append(iter(graph.get(nxt, [])))
     return errors
 
 

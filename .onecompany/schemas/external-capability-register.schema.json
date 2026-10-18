@@ -14,7 +14,8 @@
     "planning_rules",
     "group_workstreams",
     "candidates",
-    "protected_future_commitments"
+    "protected_future_commitments",
+    "phase1_reconciliation"
   ],
   "properties": {
     "$schema": {
@@ -120,57 +121,103 @@
           "MEM": {
             "epic": "EPIC-EVOL-MEM",
             "wu": "WU-P2-MEM-001",
-            "phase": "P2"
+            "phase": "P2",
+            "deps": [
+              "WU-P1-FOUNDATIONS-001",
+              "WU-P1-E2E-001"
+            ]
           },
           "INF": {
             "epic": "EPIC-EVOL-INF",
             "wu": "WU-P2-INF-001",
-            "phase": "P2"
+            "phase": "P2",
+            "deps": [
+              "WU-P1-FOUNDATIONS-001",
+              "WU-P1-E2E-001"
+            ]
           },
           "HAR": {
             "epic": "EPIC-EVOL-HAR",
             "wu": "WU-P2-HAR-001",
-            "phase": "P2"
+            "phase": "P2",
+            "deps": [
+              "WU-P1-FOUNDATIONS-001",
+              "WU-P1-E2E-001"
+            ]
           },
           "COM": {
             "epic": "EPIC-EVOL-COM",
             "wu": "WU-P2-COM-001",
-            "phase": "P2"
+            "phase": "P2",
+            "deps": [
+              "WU-P1-FOUNDATIONS-001"
+            ]
           },
           "SPEC": {
             "epic": "EPIC-EVOL-DISC",
-            "wu": "WU-P1-DISCOVERY-001",
-            "phase": "P1"
+            "wu": "WU-P1-BRIEF-APPROVAL-HANDOFF-001",
+            "phase": "P1",
+            "deps": [
+              "WU-P0-LIVE-RECONCILIATION-001",
+              "WU-P1-FOUNDATIONS-001",
+              "WU-P1-DISCOVERY-001",
+              "WU-P1-BRIEF-001",
+              "WU-P1-EXECUTION-002",
+              "WU-P1-JOURNEY-001"
+            ]
           },
           "PROD": {
             "epic": "EPIC-EVOL-PROD",
             "wu": "WU-P2-PRODUCT-001",
-            "phase": "P2"
+            "phase": "P2",
+            "deps": [
+              "WU-P1-BRIEF-APPROVAL-HANDOFF-001",
+              "WU-P1-MISSION-TRUTH-001"
+            ]
           },
           "QUAL": {
             "epic": "EPIC-EVOL-QUAL",
             "wu": "WU-P2-QUALITY-001",
-            "phase": "P2"
+            "phase": "P2",
+            "deps": [
+              "WU-P1-E2E-001"
+            ]
           },
           "UI": {
             "epic": "EPIC-EVOL-UI",
             "wu": "WU-P2-UI-001",
-            "phase": "P2"
+            "phase": "P2",
+            "deps": [
+              "WU-P1-RUNTIME-BINDING-001",
+              "WU-P1-POSTBIND-ASSURANCE-001",
+              "WU-P1-E2E-001"
+            ]
           },
           "DES": {
             "epic": "EPIC-EVOL-DES",
             "wu": "WU-P2-DESIGN-001",
-            "phase": "P2"
+            "phase": "P2",
+            "deps": [
+              "WU-P1-BRIEF-APPROVAL-HANDOFF-001",
+              "WU-P1-RUNTIME-BINDING-001"
+            ]
           },
           "OBS": {
             "epic": "EPIC-EVOL-OBS",
             "wu": "WU-P2-OBS-001",
-            "phase": "P2"
+            "phase": "P2",
+            "deps": [
+              "WU-P1-MISSION-TRUTH-001"
+            ]
           },
           "OPS": {
             "epic": "EPIC-EVOL-OPS",
             "wu": "WU-P3-OPS-001",
-            "phase": "P3"
+            "phase": "P3",
+            "deps": [
+              "WU-P1-E2E-001",
+              "WU-P2-OBS-001"
+            ]
           }
         }
       }
@@ -501,6 +548,10 @@
             "proposed_epic": "EPIC-EVOL-MEM",
             "work_unit_mappings": [
               "WU-P2-SUPERMEMORY-001"
+            ],
+            "dependencies": [
+              "WU-P1-FOUNDATIONS-001",
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-002": {
@@ -510,6 +561,10 @@
             "proposed_epic": "EPIC-EVOL-MEM",
             "work_unit_mappings": [
               "WU-P2-OPENVIKING-001"
+            ],
+            "dependencies": [
+              "WU-P1-FOUNDATIONS-001",
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-003": {
@@ -519,6 +574,10 @@
             "proposed_epic": "EPIC-EVOL-INF",
             "work_unit_mappings": [
               "WU-P2-KSERVE-001"
+            ],
+            "dependencies": [
+              "WU-P1-FOUNDATIONS-001",
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-004": {
@@ -528,6 +587,10 @@
             "proposed_epic": "EPIC-EVOL-INF",
             "work_unit_mappings": [
               "WU-P2-LITELLM-001"
+            ],
+            "dependencies": [
+              "WU-P1-FOUNDATIONS-001",
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-005": {
@@ -537,6 +600,10 @@
             "proposed_epic": "EPIC-EVOL-INF",
             "work_unit_mappings": [
               "WU-P2-INF-001"
+            ],
+            "dependencies": [
+              "WU-P1-FOUNDATIONS-001",
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-006": {
@@ -546,6 +613,10 @@
             "proposed_epic": "EPIC-EVOL-INF",
             "work_unit_mappings": [
               "WU-P2-INF-001"
+            ],
+            "dependencies": [
+              "WU-P1-FOUNDATIONS-001",
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-007": {
@@ -555,6 +626,10 @@
             "proposed_epic": "EPIC-EVOL-INF",
             "work_unit_mappings": [
               "WU-P2-INF-001"
+            ],
+            "dependencies": [
+              "WU-P1-FOUNDATIONS-001",
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-008": {
@@ -564,6 +639,10 @@
             "proposed_epic": "EPIC-EVOL-HAR",
             "work_unit_mappings": [
               "WU-P2-HAR-001"
+            ],
+            "dependencies": [
+              "WU-P1-FOUNDATIONS-001",
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-009": {
@@ -573,6 +652,10 @@
             "proposed_epic": "EPIC-EVOL-HAR",
             "work_unit_mappings": [
               "WU-P2-HAR-001"
+            ],
+            "dependencies": [
+              "WU-P1-FOUNDATIONS-001",
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-010": {
@@ -582,6 +665,10 @@
             "proposed_epic": "EPIC-EVOL-HAR",
             "work_unit_mappings": [
               "WU-P2-HAR-001"
+            ],
+            "dependencies": [
+              "WU-P1-FOUNDATIONS-001",
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-011": {
@@ -591,6 +678,10 @@
             "proposed_epic": "EPIC-EVOL-HAR",
             "work_unit_mappings": [
               "WU-P2-HAR-001"
+            ],
+            "dependencies": [
+              "WU-P1-FOUNDATIONS-001",
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-012": {
@@ -600,6 +691,10 @@
             "proposed_epic": "EPIC-EVOL-HAR",
             "work_unit_mappings": [
               "WU-P2-HAR-001"
+            ],
+            "dependencies": [
+              "WU-P1-FOUNDATIONS-001",
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-013": {
@@ -609,6 +704,10 @@
             "proposed_epic": "EPIC-EVOL-HAR",
             "work_unit_mappings": [
               "WU-P2-HAR-001"
+            ],
+            "dependencies": [
+              "WU-P1-FOUNDATIONS-001",
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-014": {
@@ -618,6 +717,10 @@
             "proposed_epic": "EPIC-EVOL-HAR",
             "work_unit_mappings": [
               "WU-P2-HAR-001"
+            ],
+            "dependencies": [
+              "WU-P1-FOUNDATIONS-001",
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-015": {
@@ -627,6 +730,10 @@
             "proposed_epic": "EPIC-EVOL-HAR",
             "work_unit_mappings": [
               "WU-P2-HAR-001"
+            ],
+            "dependencies": [
+              "WU-P1-FOUNDATIONS-001",
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-016": {
@@ -636,6 +743,10 @@
             "proposed_epic": "EPIC-EVOL-HAR",
             "work_unit_mappings": [
               "WU-P2-HAR-001"
+            ],
+            "dependencies": [
+              "WU-P1-FOUNDATIONS-001",
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-017": {
@@ -645,6 +756,10 @@
             "proposed_epic": "EPIC-EVOL-HAR",
             "work_unit_mappings": [
               "WU-P2-HAR-001"
+            ],
+            "dependencies": [
+              "WU-P1-FOUNDATIONS-001",
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-018": {
@@ -655,6 +770,11 @@
             "work_unit_mappings": [
               "WU-P2-HAR-001",
               "WU-P3-OPS-001"
+            ],
+            "dependencies": [
+              "WU-P1-FOUNDATIONS-001",
+              "WU-P1-E2E-001",
+              "WU-P2-OBS-001"
             ]
           },
           "EXT-019": {
@@ -664,6 +784,9 @@
             "proposed_epic": "EPIC-EVOL-COM",
             "work_unit_mappings": [
               "WU-P2-COM-001"
+            ],
+            "dependencies": [
+              "WU-P1-FOUNDATIONS-001"
             ]
           },
           "EXT-020": {
@@ -673,6 +796,9 @@
             "proposed_epic": "EPIC-EVOL-COM",
             "work_unit_mappings": [
               "WU-P2-COM-001"
+            ],
+            "dependencies": [
+              "WU-P1-FOUNDATIONS-001"
             ]
           },
           "EXT-021": {
@@ -682,6 +808,9 @@
             "proposed_epic": "EPIC-EVOL-COM",
             "work_unit_mappings": [
               "WU-P2-COM-001"
+            ],
+            "dependencies": [
+              "WU-P1-FOUNDATIONS-001"
             ]
           },
           "EXT-022": {
@@ -691,6 +820,9 @@
             "proposed_epic": "EPIC-EVOL-COM",
             "work_unit_mappings": [
               "WU-P2-COM-001"
+            ],
+            "dependencies": [
+              "WU-P1-FOUNDATIONS-001"
             ]
           },
           "EXT-023": {
@@ -700,6 +832,9 @@
             "proposed_epic": "EPIC-EVOL-COM",
             "work_unit_mappings": [
               "WU-P2-COM-001"
+            ],
+            "dependencies": [
+              "WU-P1-FOUNDATIONS-001"
             ]
           },
           "EXT-024": {
@@ -708,7 +843,15 @@
             "candidate_assessment_task": "ASSESS-EXT-024",
             "proposed_epic": "EPIC-EVOL-DISC",
             "work_unit_mappings": [
-              "WU-P1-DISCOVERY-001"
+              "WU-P1-BRIEF-APPROVAL-HANDOFF-001"
+            ],
+            "dependencies": [
+              "WU-P0-LIVE-RECONCILIATION-001",
+              "WU-P1-FOUNDATIONS-001",
+              "WU-P1-DISCOVERY-001",
+              "WU-P1-BRIEF-001",
+              "WU-P1-EXECUTION-002",
+              "WU-P1-JOURNEY-001"
             ]
           },
           "EXT-025": {
@@ -717,7 +860,15 @@
             "candidate_assessment_task": "ASSESS-EXT-025",
             "proposed_epic": "EPIC-EVOL-DISC",
             "work_unit_mappings": [
-              "WU-P1-DISCOVERY-001"
+              "WU-P1-BRIEF-APPROVAL-HANDOFF-001"
+            ],
+            "dependencies": [
+              "WU-P0-LIVE-RECONCILIATION-001",
+              "WU-P1-FOUNDATIONS-001",
+              "WU-P1-DISCOVERY-001",
+              "WU-P1-BRIEF-001",
+              "WU-P1-EXECUTION-002",
+              "WU-P1-JOURNEY-001"
             ]
           },
           "EXT-026": {
@@ -726,7 +877,15 @@
             "candidate_assessment_task": "ASSESS-EXT-026",
             "proposed_epic": "EPIC-EVOL-DISC",
             "work_unit_mappings": [
-              "WU-P1-DISCOVERY-001"
+              "WU-P1-BRIEF-APPROVAL-HANDOFF-001"
+            ],
+            "dependencies": [
+              "WU-P0-LIVE-RECONCILIATION-001",
+              "WU-P1-FOUNDATIONS-001",
+              "WU-P1-DISCOVERY-001",
+              "WU-P1-BRIEF-001",
+              "WU-P1-EXECUTION-002",
+              "WU-P1-JOURNEY-001"
             ]
           },
           "EXT-027": {
@@ -736,6 +895,10 @@
             "proposed_epic": "EPIC-EVOL-PROD",
             "work_unit_mappings": [
               "WU-P2-PRODUCT-001"
+            ],
+            "dependencies": [
+              "WU-P1-BRIEF-APPROVAL-HANDOFF-001",
+              "WU-P1-MISSION-TRUTH-001"
             ]
           },
           "EXT-028": {
@@ -745,6 +908,10 @@
             "proposed_epic": "EPIC-EVOL-PROD",
             "work_unit_mappings": [
               "WU-P2-PRODUCT-001"
+            ],
+            "dependencies": [
+              "WU-P1-BRIEF-APPROVAL-HANDOFF-001",
+              "WU-P1-MISSION-TRUTH-001"
             ]
           },
           "EXT-029": {
@@ -754,6 +921,10 @@
             "proposed_epic": "EPIC-EVOL-PROD",
             "work_unit_mappings": [
               "WU-P2-PRODUCT-001"
+            ],
+            "dependencies": [
+              "WU-P1-BRIEF-APPROVAL-HANDOFF-001",
+              "WU-P1-MISSION-TRUTH-001"
             ]
           },
           "EXT-030": {
@@ -763,6 +934,10 @@
             "proposed_epic": "EPIC-EVOL-PROD",
             "work_unit_mappings": [
               "WU-P2-PRODUCT-001"
+            ],
+            "dependencies": [
+              "WU-P1-BRIEF-APPROVAL-HANDOFF-001",
+              "WU-P1-MISSION-TRUTH-001"
             ]
           },
           "EXT-031": {
@@ -772,6 +947,10 @@
             "proposed_epic": "EPIC-EVOL-PROD",
             "work_unit_mappings": [
               "WU-P2-PRODUCT-001"
+            ],
+            "dependencies": [
+              "WU-P1-BRIEF-APPROVAL-HANDOFF-001",
+              "WU-P1-MISSION-TRUTH-001"
             ]
           },
           "EXT-032": {
@@ -782,6 +961,10 @@
             "work_unit_mappings": [
               "WU-P2-PRODUCT-001",
               "WU-P2-OBS-001"
+            ],
+            "dependencies": [
+              "WU-P1-BRIEF-APPROVAL-HANDOFF-001",
+              "WU-P1-MISSION-TRUTH-001"
             ]
           },
           "EXT-033": {
@@ -791,6 +974,10 @@
             "proposed_epic": "EPIC-EVOL-PROD",
             "work_unit_mappings": [
               "WU-P2-PRODUCT-001"
+            ],
+            "dependencies": [
+              "WU-P1-BRIEF-APPROVAL-HANDOFF-001",
+              "WU-P1-MISSION-TRUTH-001"
             ]
           },
           "EXT-034": {
@@ -800,6 +987,10 @@
             "proposed_epic": "EPIC-EVOL-PROD",
             "work_unit_mappings": [
               "WU-P2-PRODUCT-001"
+            ],
+            "dependencies": [
+              "WU-P1-BRIEF-APPROVAL-HANDOFF-001",
+              "WU-P1-MISSION-TRUTH-001"
             ]
           },
           "EXT-035": {
@@ -808,8 +999,11 @@
             "candidate_assessment_task": "ASSESS-EXT-035",
             "proposed_epic": "EPIC-EVOL-QUAL",
             "work_unit_mappings": [
-              "WU-P1-PLAYWRIGHT-001",
+              "WU-P1-POSTBIND-ASSURANCE-001",
               "WU-P2-UI-001"
+            ],
+            "dependencies": [
+              "WU-P1-RUNTIME-BINDING-001"
             ]
           },
           "EXT-036": {
@@ -819,6 +1013,9 @@
             "proposed_epic": "EPIC-EVOL-QUAL",
             "work_unit_mappings": [
               "WU-P2-QUALITY-001"
+            ],
+            "dependencies": [
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-037": {
@@ -828,6 +1025,9 @@
             "proposed_epic": "EPIC-EVOL-QUAL",
             "work_unit_mappings": [
               "WU-P2-QUALITY-001"
+            ],
+            "dependencies": [
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-038": {
@@ -837,6 +1037,9 @@
             "proposed_epic": "EPIC-EVOL-QUAL",
             "work_unit_mappings": [
               "WU-P2-QUALITY-001"
+            ],
+            "dependencies": [
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-039": {
@@ -846,6 +1049,9 @@
             "proposed_epic": "EPIC-EVOL-QUAL",
             "work_unit_mappings": [
               "WU-P2-QUALITY-001"
+            ],
+            "dependencies": [
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-040": {
@@ -855,6 +1061,9 @@
             "proposed_epic": "EPIC-EVOL-QUAL",
             "work_unit_mappings": [
               "WU-P2-QUALITY-001"
+            ],
+            "dependencies": [
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-041": {
@@ -864,6 +1073,9 @@
             "proposed_epic": "EPIC-EVOL-QUAL",
             "work_unit_mappings": [
               "WU-P2-QUALITY-001"
+            ],
+            "dependencies": [
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-042": {
@@ -873,6 +1085,9 @@
             "proposed_epic": "EPIC-EVOL-QUAL",
             "work_unit_mappings": [
               "WU-P2-QUALITY-001"
+            ],
+            "dependencies": [
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-043": {
@@ -882,6 +1097,9 @@
             "proposed_epic": "EPIC-EVOL-QUAL",
             "work_unit_mappings": [
               "WU-P2-QUALITY-001"
+            ],
+            "dependencies": [
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-044": {
@@ -891,6 +1109,9 @@
             "proposed_epic": "EPIC-EVOL-QUAL",
             "work_unit_mappings": [
               "WU-P2-QUALITY-001"
+            ],
+            "dependencies": [
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-045": {
@@ -900,6 +1121,9 @@
             "proposed_epic": "EPIC-EVOL-QUAL",
             "work_unit_mappings": [
               "WU-P2-QUALITY-001"
+            ],
+            "dependencies": [
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-046": {
@@ -909,6 +1133,9 @@
             "proposed_epic": "EPIC-EVOL-QUAL",
             "work_unit_mappings": [
               "WU-P2-QUALITY-001"
+            ],
+            "dependencies": [
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-047": {
@@ -918,6 +1145,10 @@
             "proposed_epic": "EPIC-EVOL-UI",
             "work_unit_mappings": [
               "WU-P2-ARTEMIS-001"
+            ],
+            "dependencies": [
+              "WU-P1-RUNTIME-BINDING-001",
+              "WU-P1-POSTBIND-ASSURANCE-001"
             ]
           },
           "EXT-048": {
@@ -927,6 +1158,11 @@
             "proposed_epic": "EPIC-EVOL-UI",
             "work_unit_mappings": [
               "WU-P2-UI-001"
+            ],
+            "dependencies": [
+              "WU-P1-RUNTIME-BINDING-001",
+              "WU-P1-POSTBIND-ASSURANCE-001",
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-049": {
@@ -936,6 +1172,11 @@
             "proposed_epic": "EPIC-EVOL-UI",
             "work_unit_mappings": [
               "WU-P2-UI-001"
+            ],
+            "dependencies": [
+              "WU-P1-RUNTIME-BINDING-001",
+              "WU-P1-POSTBIND-ASSURANCE-001",
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-050": {
@@ -945,6 +1186,11 @@
             "proposed_epic": "EPIC-EVOL-UI",
             "work_unit_mappings": [
               "WU-P2-UI-001"
+            ],
+            "dependencies": [
+              "WU-P1-RUNTIME-BINDING-001",
+              "WU-P1-POSTBIND-ASSURANCE-001",
+              "WU-P1-E2E-001"
             ]
           },
           "EXT-051": {
@@ -954,6 +1200,10 @@
             "proposed_epic": "EPIC-EVOL-DES",
             "work_unit_mappings": [
               "WU-P2-DESIGN-001"
+            ],
+            "dependencies": [
+              "WU-P1-BRIEF-APPROVAL-HANDOFF-001",
+              "WU-P1-RUNTIME-BINDING-001"
             ]
           },
           "EXT-052": {
@@ -963,6 +1213,10 @@
             "proposed_epic": "EPIC-EVOL-DES",
             "work_unit_mappings": [
               "WU-P2-DESIGN-001"
+            ],
+            "dependencies": [
+              "WU-P1-BRIEF-APPROVAL-HANDOFF-001",
+              "WU-P1-RUNTIME-BINDING-001"
             ]
           },
           "EXT-053": {
@@ -972,6 +1226,10 @@
             "proposed_epic": "EPIC-EVOL-DES",
             "work_unit_mappings": [
               "WU-P2-DESIGN-001"
+            ],
+            "dependencies": [
+              "WU-P1-BRIEF-APPROVAL-HANDOFF-001",
+              "WU-P1-RUNTIME-BINDING-001"
             ]
           },
           "EXT-054": {
@@ -981,6 +1239,9 @@
             "proposed_epic": "EPIC-EVOL-OBS",
             "work_unit_mappings": [
               "WU-P2-OBS-001"
+            ],
+            "dependencies": [
+              "WU-P1-MISSION-TRUTH-001"
             ]
           },
           "EXT-055": {
@@ -990,6 +1251,9 @@
             "proposed_epic": "EPIC-EVOL-OBS",
             "work_unit_mappings": [
               "WU-P2-OBS-001"
+            ],
+            "dependencies": [
+              "WU-P1-MISSION-TRUTH-001"
             ]
           },
           "EXT-056": {
@@ -999,6 +1263,9 @@
             "proposed_epic": "EPIC-EVOL-OBS",
             "work_unit_mappings": [
               "WU-P2-OBS-001"
+            ],
+            "dependencies": [
+              "WU-P1-MISSION-TRUTH-001"
             ]
           },
           "EXT-057": {
@@ -1008,6 +1275,9 @@
             "proposed_epic": "EPIC-EVOL-OBS",
             "work_unit_mappings": [
               "WU-P2-OBS-001"
+            ],
+            "dependencies": [
+              "WU-P1-MISSION-TRUTH-001"
             ]
           },
           "EXT-058": {
@@ -1017,6 +1287,10 @@
             "proposed_epic": "EPIC-EVOL-OPS",
             "work_unit_mappings": [
               "WU-P3-OPS-001"
+            ],
+            "dependencies": [
+              "WU-P1-E2E-001",
+              "WU-P2-OBS-001"
             ]
           },
           "EXT-059": {
@@ -1026,6 +1300,10 @@
             "proposed_epic": "EPIC-EVOL-OPS",
             "work_unit_mappings": [
               "WU-P3-OPS-001"
+            ],
+            "dependencies": [
+              "WU-P1-E2E-001",
+              "WU-P2-OBS-001"
             ]
           },
           "EXT-060": {
@@ -1035,6 +1313,10 @@
             "proposed_epic": "EPIC-EVOL-OPS",
             "work_unit_mappings": [
               "WU-P3-OPS-001"
+            ],
+            "dependencies": [
+              "WU-P1-E2E-001",
+              "WU-P2-OBS-001"
             ]
           },
           "EXT-061": {
@@ -1044,6 +1326,10 @@
             "proposed_epic": "EPIC-EVOL-OPS",
             "work_unit_mappings": [
               "WU-P3-OPS-001"
+            ],
+            "dependencies": [
+              "WU-P1-E2E-001",
+              "WU-P2-OBS-001"
             ]
           }
         }
@@ -1072,6 +1358,169 @@
         }
       },
       "additionalProperties": false
+    },
+    "phase1_reconciliation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "as_of_date",
+        "source_of_truth",
+        "historically_completed_wus",
+        "proposed_not_admitted_followups",
+        "existing_open_not_admitted_integration",
+        "obsolete_phase1_proposal_aliases",
+        "admission_rule",
+        "proposed_dependency_dag"
+      ],
+      "properties": {
+        "as_of_date": {
+          "type": "string"
+        },
+        "source_of_truth": {
+          "type": "string",
+          "minLength": 30
+        },
+        "historically_completed_wus": {
+          "type": "array",
+          "minItems": 11,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^WU-"
+          }
+        },
+        "proposed_not_admitted_followups": {
+          "type": "array",
+          "minItems": 5,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "pattern": "^WU-"
+          }
+        },
+        "existing_open_not_admitted_integration": {
+          "const": "WU-P1-E2E-001"
+        },
+        "obsolete_phase1_proposal_aliases": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "WU-P1-VERTICAL-001",
+            "WU-P1-MISSION-001"
+          ],
+          "properties": {
+            "WU-P1-VERTICAL-001": {
+              "const": "WU-P1-E2E-001"
+            },
+            "WU-P1-MISSION-001": {
+              "const": "WU-P1-MISSION-TRUTH-001"
+            }
+          }
+        },
+        "admission_rule": {
+          "type": "string",
+          "minLength": 40
+        },
+        "proposed_dependency_dag": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "WU-P0-LIVE-RECONCILIATION-001",
+            "WU-P1-BRIEF-APPROVAL-HANDOFF-001",
+            "WU-P1-RUNTIME-BINDING-001",
+            "WU-P1-POSTBIND-ASSURANCE-001",
+            "WU-P1-E2E-001",
+            "WU-P1-MISSION-TRUTH-001"
+          ],
+          "properties": {
+            "WU-P0-LIVE-RECONCILIATION-001": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^WU-"
+              },
+              "const": [
+                "WU-P0-RECONCILE-001"
+              ]
+            },
+            "WU-P1-BRIEF-APPROVAL-HANDOFF-001": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^WU-"
+              },
+              "const": [
+                "WU-P0-LIVE-RECONCILIATION-001",
+                "WU-P1-FOUNDATIONS-001",
+                "WU-P1-DISCOVERY-001",
+                "WU-P1-BRIEF-001",
+                "WU-P1-EXECUTION-002",
+                "WU-P1-JOURNEY-001"
+              ]
+            },
+            "WU-P1-RUNTIME-BINDING-001": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^WU-"
+              },
+              "const": [
+                "WU-P1-BRIEF-APPROVAL-HANDOFF-001",
+                "WU-P1-RUNTIME-001",
+                "WU-P1-PREVIEW-001",
+                "WU-P1-FOUNDATIONS-001"
+              ]
+            },
+            "WU-P1-POSTBIND-ASSURANCE-001": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^WU-"
+              },
+              "const": [
+                "WU-P1-RUNTIME-BINDING-001",
+                "WU-P1-QUALITY-001",
+                "WU-P1-PLAYWRIGHT-001"
+              ]
+            },
+            "WU-P1-E2E-001": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^WU-"
+              },
+              "const": [
+                "WU-P1-BRIEF-APPROVAL-HANDOFF-001",
+                "WU-P1-RUNTIME-BINDING-001",
+                "WU-P1-POSTBIND-ASSURANCE-001"
+              ]
+            },
+            "WU-P1-MISSION-TRUTH-001": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^WU-"
+              },
+              "const": [
+                "WU-P1-E2E-001",
+                "WU-P1-MISSION-EVIDENCE-001"
+              ]
+            }
+          }
+        }
+      }
     }
   },
   "additionalProperties": false

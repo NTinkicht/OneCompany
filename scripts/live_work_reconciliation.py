@@ -114,9 +114,12 @@ def pr_inconsistencies(
             problems.add((pr_ref, "INVALID_PR_ID"))
         if not _valid_work_id(obs.issue):
             problems.add((pr_ref, "INVALID_ISSUE_ID"))
-        if obs.pr in seen:
-            problems.add((pr_ref, "DUPLICATE_PR_OBSERVATION"))
-        seen.add(obs.pr)
+        # Invalid identities must not enter duplicate tracking: True == 1
+        # and 9.0 == 9 in Python, but neither is a valid PR identifier.
+        if _valid_work_id(obs.pr):
+            if obs.pr in seen:
+                problems.add((pr_ref, "DUPLICATE_PR_OBSERVATION"))
+            seen.add(obs.pr)
         if (obs.pr, obs.issue) not in bindings:
             problems.add((pr_ref, "PR_BINDING_MISMATCH"))
         if not all(_valid_sha(v) for v in (obs.recorded_head_sha, obs.observed_head_sha, obs.base_sha)):

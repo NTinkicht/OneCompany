@@ -287,6 +287,13 @@ class InvalidNumericIdentityTests(unittest.TestCase):
                     pr_inconsistencies(snap(), (pr(issue=bad),)),
                 )
 
+    def test_invalid_pr_alias_is_not_duplicate(self):
+        observations = (pr(pr=True), pr(pr=1))
+        snapshot = snap(pr_issue_bindings=((1, 1),))
+        findings = pr_inconsistencies(snapshot, observations)
+        self.assertIn((0, "INVALID_PR_ID"), findings)
+        self.assertNotIn((1, "DUPLICATE_PR_OBSERVATION"), findings)
+
     def test_other_valid_positive_ids(self):
         snapshot = snap(
             issue_ids=(1, 2, 3, 4), next_ids=(2, 4),

@@ -18,6 +18,10 @@ DEFAULT_PRIORITY_WEIGHTS = {
 }
 
 
+class DependencyCycleError(ValueError):
+    """The work-unit dependency graph contains a cycle, so no schedule is valid."""
+
+
 def by_id(work: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return {str(item.get("id")): item for item in work if isinstance(item.get("id"), str) and item.get("id")}
 
@@ -312,7 +316,7 @@ def critical_path(work: list[dict[str, Any]]) -> dict[str, Any]:
         if node in memo:
             return memo[node]
         if node in visiting:
-            raise ValueError(f"dependency cycle involving {node}")
+            raise DependencyCycleError(f"dependency cycle involving {node}")
         visiting.add(node)
         item = work_map[node]
         best_len, best_path = 0.0, []
@@ -367,7 +371,23 @@ def select_parallel_set(
     statuses = {"READY"} | ({"PROPOSED"} if include_proposed else set())
     candidates = [item for item in work if item.get("status") in statuses and item.get("id") not in durable_done]
     candidate_ids = {item.get("id") for item in candidates}
-    ranked = [item for item in rank_work(work, planning) if item.get("id") in candidate_ids]
+    try:
+        ranked_all = rank_work(work, planning)
+    except DependencyCycleError as exc:
+        # A cyclic graph has no valid order: fail closed and start nothing.
+        return {
+            "limit": limit,
+            "active_count": len(active_items),
+            "available_slots": available,
+            "selected": [],
+            "blocked": [
+                {"id": item_id, "reasons": ["dependency_cycle"]}
+                for item_id in sorted(str(item.get("id", "")) for item in candidates)
+            ],
+            "ranked": [],
+            "dependency_cycle": str(exc),
+        }
+    ranked = [item for item in ranked_all if item.get("id") in candidate_ids]
     selected: list[dict[str, Any]] = []
     blocked: list[dict[str, Any]] = []
     for item in ranked:

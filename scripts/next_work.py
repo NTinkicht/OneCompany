@@ -32,6 +32,14 @@ def main() -> int:
     durable_done = set(view.get("verified_merged_work_units", view.get("merged_work_units", [])))
 
     result = select_parallel_set(work, planning, active, durable_done, args.include_proposed)
+    if result.get("dependency_cycle"):
+        print(json.dumps({
+            "status": "BLOCKED_DEPENDENCY_CYCLE",
+            "candidates": [],
+            "blocked": result["blocked"],
+            "error": result["dependency_cycle"],
+        }, indent=2))
+        return 2
     selected = result["ranked"] if args.all else result["selected"]
     status = "READY"
     if not selected:

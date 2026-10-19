@@ -221,5 +221,97 @@ class PullRequestReconciliationTests(unittest.TestCase):
                                                   merge_ready_claimed=False), snapshot=snapshot))
 
 
+
+class InvalidNumericIdentityTests(unittest.TestCase):
+    """OC-P0-01: work identities must be genuine positive integers."""
+
+    def test_valid_baselines_are_unchanged(self):
+        self.assertEqual(inconsistencies(snap()), ())
+        self.assertEqual(pr_inconsistencies(snap(), (pr(),)), ())
+
+    def test_invalid_issue_catalog_ids(self):
+        for bad in (0, -1, False, True, 1.2, "4"):
+            with self.subTest(value=bad):
+                self.assertIn(
+                    "INVALID_ISSUE_ID",
+                    inconsistencies(snap(issue_ids=(1, 2, 3, bad))),
+                )
+
+    def test_invalid_next_ids(self):
+        for bad in (0, -1, True, "2"):
+            with self.subTest(value=bad):
+                self.assertIn(
+                    "INVALID_ISSUE_ID", inconsistencies(snap(next_ids=(2, bad)))
+                )
+
+    def test_invalid_pr_bound_issue_ids(self):
+        for bad in (0, -1, True, "1"):
+            with self.subTest(value=bad):
+                self.assertIn(
+                    "INVALID_ISSUE_ID",
+                    inconsistencies(snap(pr_issue_bindings=((9, bad),))),
+                )
+
+    def test_invalid_lease_issue_id(self):
+        self.assertIn(
+            "INVALID_ISSUE_ID",
+            inconsistencies(snap(active_lease_issue_ids=(1, False))),
+        )
+
+    def test_invalid_retired_issue_id(self):
+        self.assertIn(
+            "INVALID_ISSUE_ID",
+            inconsistencies(snap(retired_pilot_issue_ids=(-7,))),
+        )
+
+    def test_invalid_bound_pr_ids(self):
+        for bad in (0, -1, True, 2.5, "9"):
+            with self.subTest(value=bad):
+                self.assertIn(
+                    "INVALID_PR_ID",
+                    inconsistencies(snap(pr_issue_bindings=((bad, 1),))),
+                )
+
+    def test_invalid_observed_pr_ids_have_stable_numeric_finding_key(self):
+        for bad in (0, -1, True, 2.5, "9"):
+            with self.subTest(value=bad):
+                findings = pr_inconsistencies(snap(), (pr(pr=bad),))
+                self.assertIn((0, "INVALID_PR_ID"), findings)
+                self.assertTrue(all(isinstance(key, int) for key, _ in findings))
+
+    def test_invalid_observed_issue_ids(self):
+        for bad in (0, -1, True, 2.5, "1"):
+            with self.subTest(value=bad):
+                self.assertIn(
+                    (9, "INVALID_ISSUE_ID"),
+                    pr_inconsistencies(snap(), (pr(issue=bad),)),
+                )
+
+    def test_other_valid_positive_ids(self):
+        snapshot = snap(
+            issue_ids=(1, 2, 3, 4), next_ids=(2, 4),
+            pr_issue_bindings=((9, 1), (10, 3)),
+            active_lease_issue_ids=(1, 3),
+        )
+        self.assertEqual(inconsistencies(snapshot), ())
+
+    def test_invalid_pr_identity_never_passes_as_clean_merge_ready(self):
+        self.assertIn(
+            (0, "INVALID_PR_ID"),
+            pr_inconsistencies(snap(), (pr(pr=0, merge_ready_claimed=True),)),
+        )
+
+    def test_invalid_findings_are_stable_sorted(self):
+        snapshot = snap(
+            issue_ids=(1, 2, 3, 0), pr_issue_bindings=((0, 1),)
+        )
+        result = inconsistencies(snapshot)
+        self.assertIn("INVALID_ISSUE_ID", result)
+        self.assertIn("INVALID_PR_ID", result)
+        self.assertEqual(result, tuple(sorted(result)))
+        self.assertEqual(result, inconsistencies(snapshot))
+
+
+
 if __name__ == "__main__":
     unittest.main()

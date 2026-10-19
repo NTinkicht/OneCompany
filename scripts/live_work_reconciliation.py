@@ -22,9 +22,21 @@ class WorkSnapshot:
     retired_pilot_issue_ids: tuple[int, ...] = ()
 
 
+def _valid_work_id(value: object) -> bool:
+    """Reject Python bool aliases and non-positive/non-integer work IDs."""
+    return type(value) is int and value > 0
+
+
 def inconsistencies(snapshot: WorkSnapshot) -> tuple[str, ...]:
     """Return stable fail-closed findings, with no inferred permissions."""
     problems: set[str] = set()
+    issue_ids = (*snapshot.issue_ids, *snapshot.next_ids,
+                 *(issue for _, issue in snapshot.pr_issue_bindings),
+                 *snapshot.active_lease_issue_ids, *snapshot.retired_pilot_issue_ids)
+    if any(not _valid_work_id(issue) for issue in issue_ids):
+        problems.add("INVALID_ISSUE_ID")
+    if any(not _valid_work_id(pr) for pr, _ in snapshot.pr_issue_bindings):
+        problems.add("INVALID_PR_ID")
     if not snapshot.main_sha or snapshot.main_sha != snapshot.observed_main_sha:
         problems.add("STALE_MAIN")
     if len(snapshot.issue_ids) != len(set(snapshot.issue_ids)):
@@ -97,30 +109,38 @@ def pr_inconsistencies(
     bindings = set(snapshot.pr_issue_bindings)
     seen: set[int] = set()
     for obs in observations:
-        if obs.pr in seen:
-            problems.add((obs.pr, "DUPLICATE_PR_OBSERVATION"))
-        seen.add(obs.pr)
+        pr_ref = obs.pr if _valid_work_id(obs.pr) else 0
+        if not _valid_work_id(obs.pr):
+            problems.add((pr_ref, "INVALID_PR_ID"))
+        if not _valid_work_id(obs.issue):
+            problems.add((pr_ref, "INVALID_ISSUE_ID"))
+        # Invalid identities must not enter duplicate tracking: True == 1
+        # and 9.0 == 9 in Python, but neither is a valid PR identifier.
+        if _valid_work_id(obs.pr):
+            if obs.pr in seen:
+                problems.add((pr_ref, "DUPLICATE_PR_OBSERVATION"))
+            seen.add(obs.pr)
         if (obs.pr, obs.issue) not in bindings:
-            problems.add((obs.pr, "PR_BINDING_MISMATCH"))
+            problems.add((pr_ref, "PR_BINDING_MISMATCH"))
         if not all(_valid_sha(v) for v in (obs.recorded_head_sha, obs.observed_head_sha, obs.base_sha)):
-            problems.add((obs.pr, "INVALID_SHA"))
+            problems.add((pr_ref, "INVALID_SHA"))
         head = obs.observed_head_sha
         head_current = _same_sha(obs.recorded_head_sha, head)
         if not head_current:
-            problems.add((obs.pr, "STALE_PR_HEAD"))
+            problems.add((pr_ref, "STALE_PR_HEAD"))
         live_main = snapshot.observed_main_sha
         base_current = _same_sha(obs.base_sha, live_main)
         if not base_current:
-            problems.add((obs.pr, "BASE_BEHIND_MAIN"))
+            problems.add((pr_ref, "BASE_BEHIND_MAIN"))
         approved = _same_sha(obs.approved_head_sha, head) and _same_sha(obs.approved_base_sha, live_main)
         if (obs.approved_head_sha is not None or obs.approved_base_sha is not None) and not approved:
-            problems.add((obs.pr, "STALE_APPROVAL"))
+            problems.add((pr_ref, "STALE_APPROVAL"))
         ci_on_head = _same_sha(obs.ci_head_sha, head) and _same_sha(obs.ci_base_sha, live_main)
         if (obs.ci_head_sha is not None or obs.ci_base_sha is not None) and not ci_on_head:
-            problems.add((obs.pr, "STALE_CI"))
+            problems.add((pr_ref, "STALE_CI"))
         ci_green = ci_on_head and obs.ci_conclusion == "success"
         if ci_on_head and not ci_green:
-            problems.add((obs.pr, "CI_NOT_GREEN"))
+            problems.add((pr_ref, "CI_NOT_GREEN"))
         if obs.merge_ready_claimed and not (head_current and base_current and approved and ci_green):
-            problems.add((obs.pr, "UNSUPPORTED_MERGE_READY"))
+            problems.add((pr_ref, "UNSUPPORTED_MERGE_READY"))
     return tuple(sorted(problems))

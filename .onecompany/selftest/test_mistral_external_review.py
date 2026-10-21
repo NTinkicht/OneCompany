@@ -12,6 +12,115 @@ import mistral_external_review as m
 
 
 class ExternalMistralReviewTests(unittest.TestCase):
+    # TheraBridge one-shot is reviewed only under an exact immutable provenance
+    # tuple; it cannot grant broader external-review repository access.
+    def _therabridge_dispatch(self, **overrides):
+        repo, number, head, base, authors = m.PINNED_REVIEW
+        values = {
+            "repo": repo, "pr": number, "head_sha": head,
+            "base_sha": base, "material_authors": ",".join(authors),
+        }
+        values.update(overrides)
+        return (
+            "MISTRAL_EXTERNAL_REVIEW_V1\n"
+            + "".join(f"{key}: {values[key]}\n" for key in (
+                "repo", "pr", "head_sha", "base_sha", "material_authors"
+            ))
+        )
+
+    def _therabridge_commits(self):
+        return [{
+            "sha": sha,
+            "author": {"login": "NTinkicht"},
+            "committer": {"login": "NTinkicht"},
+            "commit": {
+                "message": f"owner-connector committed work {i}",
+                "author": {"name": "NTinkicht", "email": "noreply@users.github.com"},
+                "committer": {"name": "NTinkicht", "email": "noreply@users.github.com"},
+            },
+        } for i, sha in enumerate(m.PINNED_COMMIT_SHAS)]
+
+    def test_therabridge_exact_pinned_owner_dispatch_only(self):
+        repo, pr, head, base, authors = m.PINNED_REVIEW
+        self.assertEqual(m.parse_dispatch(self._therabridge_dispatch()), m.PINNED_REVIEW)
+        for override in (
+            {"repo": "NTinkicht/TheraBridge"},
+            {"repo": "NTinkicht/TheraBridge-Emergent-other"},
+            {"pr": 54}, {"pr": 52},
+            {"head_sha": "a" * 40}, {"base_sha": "b" * 40},
+            {"material_authors": "ntinkicht"}, {"material_authors": "mistral-vibe"},
+        ):
+            with self.subTest(override=override), self.assertRaises(ValueError):
+                m.parse_dispatch(self._therabridge_dispatch(**override))
+        self.assertNotIn(repo, m.ALLOWED_TARGETS)
+        self.assertEqual(authors, ("chatgpt",))
+
+    def test_therabridge_feature_branch_matches_only_pinned_target(self):
+        repo, number, head, base, authors = m.PINNED_REVIEW
+        pr = {
+            "state": "open", "number": number,
+            "head": {"sha": head, "repo": {"full_name": repo}},
+            "base": {"sha": base, "ref": m.PINNED_BASE_REF,
+                     "repo": {"full_name": repo}},
+        }
+        def api(path):
+            if path == f"repos/{repo}":
+                return {"private": False, "visibility": "public", "full_name": repo}
+            if path == f"repos/{repo}/pulls/{number}":
+                return pr
+            raise AssertionError(f"unexpected API path: {path}")
+        with mock.patch.object(m, "public_api", side_effect=api):
+            self.assertEqual(m.current_pr(repo, number, head, base), pr)
+            for replacement in (
+                {"state": "closed"},
+                {"head": {"sha": "a" * 40, "repo": {"full_name": repo}}},
+                {"base": {"sha": base, "ref": "main",
+                          "repo": {"full_name": repo}}},
+                {"base": {"sha": "b" * 40, "ref": m.PINNED_BASE_REF,
+                          "repo": {"full_name": repo}}},
+            ):
+                with self.subTest(change=replacement):
+                    original = {key: pr[key] for key in replacement}
+                    pr.update(replacement)
+                    try:
+                        with self.assertRaisesRegex(ValueError, "EXTERNAL_REVIEW_TARGET_STALE"):
+                            m.current_pr(repo, number, head, base)
+                    finally:
+                        pr.update(original)
+            with mock.patch.object(m, "public_api", side_effect=lambda path:
+                                   {"private": True, "visibility": "private", "full_name": repo}
+                                   if path == f"repos/{repo}" else pr):
+                with self.assertRaisesRegex(ValueError, "EXTERNAL_REVIEW_TARGET_NOT_PUBLIC"):
+                    m.current_pr(repo, number, head, base)
+
+    def test_therabridge_exact_commit_attestation_not_global_trailer_bypass(self):
+        repo, number, head, base, authors = m.PINNED_REVIEW
+        commits = self._therabridge_commits()
+        with mock.patch.object(m, "public_api", return_value=commits):
+            m.verify_material_authors(repo, number, head, authors)
+        cases = [
+            commits[::-1],
+            commits[:1],
+            [commits[0], {**commits[1], "sha": "a" * 40}],
+            [commits[0], {**commits[1], "author": {"login": "stranger"}}],
+            [commits[0], {**commits[1], "committer": {"login": "mistral-vibe"}}],
+            [commits[0], {**commits[1],
+                         "commit": {**commits[1]["commit"],
+                                    "message": "change\n\nMaterial-Author: chatgpt"}}],
+        ]
+        for altered in cases:
+            with self.subTest(shas=[item["sha"] for item in altered]):
+                with mock.patch.object(m, "public_api", return_value=altered):
+                    with self.assertRaises(ValueError):
+                        m.verify_material_authors(repo, number, head, authors)
+        with mock.patch.object(m, "public_api", return_value=commits):
+            with self.assertRaises(ValueError):
+                m.verify_material_authors(repo, number, head, ("another",))
+        # The existing Tabibi/veritas verifier retains its strict author trailer.
+        with mock.patch.object(m, "public_api", return_value=[commits[-1]]):
+            with self.assertRaisesRegex(ValueError, "EXTERNAL_REVIEW_AUTHOR_PROVENANCE_INCOMPLETE"):
+                m.verify_material_authors("NTinkicht/Tabibi", 53, head, ("chatgpt",))
+
     def test_dispatch_is_bounded_and_allowlisted(self):
         body = (
             "MISTRAL_EXTERNAL_REVIEW_V1\n"

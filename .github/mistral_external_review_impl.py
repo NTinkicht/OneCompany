@@ -26,6 +26,27 @@ from pathlib import Path
 WAKE_REPO = "NTinkicht/OneCompany"
 WAKE_ISSUE = 130
 ALLOWED_TARGETS = frozenset({"NTinkicht/Tabibi", "NTinkicht/veritas-atlas"})
+
+# Owner-authorized one-shot review only. Never add TheraBridge to the general
+# allowlist or the scheduled dispatcher: the PR is feature-branch based and its
+# two GitHub-connector commits predate Material-Author trailers.
+# These immutable identities are a narrower, independently auditable exception.
+PINNED_REVIEW = (
+    "NTinkicht/TheraBridge-Emergent", 53,
+    "cd5f721d9e4d68f756baa4109628c44f217c706a",
+    "b275f1b0e201d622bce1336a67d2d74f511fb2d4",
+    ("chatgpt",),
+)
+PINNED_BASE_REF = "freebuff-tb-em-011-governance"
+PINNED_COMMIT_SHAS = (
+    "b25453d17b002ca0d8c90ba21f3dd8a478750868",
+    "cd5f721d9e4d68f756baa4109628c44f217c706a",
+)
+
+
+def pinned_review(repo: str, number: int, head: str, base: str,
+                  authors: tuple[str, ...]) -> bool:
+    return (repo, number, head, base, authors) == PINNED_REVIEW
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 PR_NUMBER = re.compile(r"[1-9][0-9]{0,5}\Z")
 REPO = re.compile(r"NTinkicht/[A-Za-z0-9_.-]+\Z")
@@ -197,7 +218,7 @@ def parse_dispatch(body: str) -> tuple[str, int, str, str, tuple[str, ...]]:
     if set(fields) != {"repo", "pr", "head_sha", "base_sha", "material_authors"}:
         raise ValueError("EXTERNAL_REVIEW_FIELD_SET_INVALID")
     repo = fields["repo"]
-    if not REPO.fullmatch(repo) or repo not in ALLOWED_TARGETS:
+    if not REPO.fullmatch(repo):
         raise ValueError("EXTERNAL_REVIEW_REPO_NOT_ALLOWED")
     if not PR_NUMBER.fullmatch(fields["pr"]):
         raise ValueError("EXTERNAL_REVIEW_PR_INVALID")
@@ -209,6 +230,8 @@ def parse_dispatch(body: str) -> tuple[str, int, str, str, tuple[str, ...]]:
         raise ValueError("EXTERNAL_REVIEW_AUTHORS_INVALID")
     if any(_mistral_identity(actor) for actor in authors):
         raise ValueError("MISTRAL_SELF_REVIEW_BLOCKED")
+    if repo not in ALLOWED_TARGETS and not pinned_review(repo, int(fields["pr"]), head, base, authors):
+        raise ValueError("EXTERNAL_REVIEW_REPO_NOT_ALLOWED")
     return repo, int(fields["pr"]), head, base, authors
 
 
@@ -226,7 +249,10 @@ def current_pr(repo: str, number: int, head: str, base: str) -> dict:
         or pr.get("number") != number
         or (pr.get("head") or {}).get("sha") != head
         or (pr.get("base") or {}).get("sha") != base
-        or (pr.get("base") or {}).get("ref") != "main"
+        or (pr.get("base") or {}).get("ref") != (
+            PINNED_BASE_REF if pinned_review(repo, number, head, base, ("chatgpt",))
+            else "main"
+        )
         or (pr.get("head") or {}).get("repo", {}).get("full_name") != repo
         or (pr.get("base") or {}).get("repo", {}).get("full_name") != repo
     ):
@@ -253,6 +279,8 @@ def _mistral_identity(value: object) -> bool:
 
 def verify_material_authors(repo: str, number: int, head: str, declared: tuple[str, ...]) -> None:
     observed: set[str] = set()
+    pinned = pinned_review(repo, number, head, base=PINNED_REVIEW[3], authors=declared)
+    pinned_shas: list[str] = []
     count = 0
     last_sha = None
     for page in range(1, 6):
@@ -280,21 +308,34 @@ def verify_material_authors(repo: str, number: int, head: str, declared: tuple[s
             if any(_mistral_identity(value) for value in identities):
                 raise ValueError("MISTRAL_SELF_REVIEW_BLOCKED")
             message = commit_meta.get("message", "")
-            tags = MATERIAL_AUTHOR.findall(message)
-            if len(tags) != 1:
-                raise ValueError("EXTERNAL_REVIEW_AUTHOR_PROVENANCE_INCOMPLETE")
-            observed.update(tag.lower() for tag in tags)
-            if any(_mistral_identity(tag) for tag in tags):
-                raise ValueError("MISTRAL_SELF_REVIEW_BLOCKED")
             for coauthor in CO_AUTHOR.findall(message):
                 parts = [part.strip() for part in re.split(r"[<>]", coauthor) if part.strip()]
                 if any(_mistral_identity(part) for part in parts):
+                    raise ValueError("MISTRAL_SELF_REVIEW_BLOCKED")
+            if pinned:
+                # SHA-pinned owner attestation replaces missing historical trailers
+                # for precisely these two connector-authored commits, not for any
+                # future changes. GitHub's verified account and SHA must both match.
+                if account != "ntinkicht" or committer != "ntinkicht":
+                    raise ValueError("EXTERNAL_REVIEW_AUTHOR_PROVENANCE_INCOMPLETE")
+                if MATERIAL_AUTHOR.findall(message):
+                    raise ValueError("EXTERNAL_REVIEW_AUTHOR_PROVENANCE_INCOMPLETE")
+                pinned_shas.append(last_sha)
+                observed.add("chatgpt")
+            else:
+                tags = MATERIAL_AUTHOR.findall(message)
+                if len(tags) != 1:
+                    raise ValueError("EXTERNAL_REVIEW_AUTHOR_PROVENANCE_INCOMPLETE")
+                observed.update(tag.lower() for tag in tags)
+                if any(_mistral_identity(tag) for tag in tags):
                     raise ValueError("MISTRAL_SELF_REVIEW_BLOCKED")
         if len(commits) < 100:
             break
     else:
         raise ValueError("EXTERNAL_REVIEW_COMMITS_OVER_LIMIT")
     if count == 0 or last_sha != head:
+        raise ValueError("EXTERNAL_REVIEW_COMMIT_PROVENANCE_STALE")
+    if pinned and tuple(pinned_shas) != PINNED_COMMIT_SHAS:
         raise ValueError("EXTERNAL_REVIEW_COMMIT_PROVENANCE_STALE")
     if observed != set(declared):
         raise ValueError("EXTERNAL_REVIEW_DECLARED_AUTHORS_MISMATCH")
@@ -851,7 +892,8 @@ def build_prompt() -> None:
         number = int(os.environ["TARGET_PR"])
         head, base = os.environ["TARGET_HEAD"], os.environ["TARGET_BASE"]
         root = Path(os.environ["TARGET_DIR"]).resolve()
-        if repo not in ALLOWED_TARGETS or not root.is_dir() or root.is_symlink():
+        if (repo not in ALLOWED_TARGETS and
+            not pinned_review(repo, number, head, base, ("chatgpt",))) or not root.is_dir() or root.is_symlink():
             raise ValueError("EXTERNAL_REVIEW_BUILD_TARGET_INVALID")
         current_pr(repo, number, head, base)
         actual = subprocess.check_output(

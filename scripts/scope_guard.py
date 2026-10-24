@@ -9,19 +9,36 @@ from typing import Any
 from onecompany_lib import run
 
 
-def _normalize(value: str) -> str:
-    return value.replace("\\", "/").strip().lstrip("./").rstrip("/")
+def _normalize(value: str) -> str | None:
+    """Normalize a repository-relative path or scope, or return None if unsafe.
+
+    Only a literal leading ``./`` or ``/`` anchor is removed; dotfile names such as
+    ``.github`` are preserved (``str.lstrip("./")`` would alias ``.github`` to
+    ``github``). Parent (``..``), current-directory and empty segments and NUL
+    bytes are rejected so the caller fails closed.
+    """
+    text = value.replace("\\", "/").strip()
+    if "\x00" in text:
+        return None
+    while text.startswith("./"):
+        text = text[2:]
+    text = text.lstrip("/").rstrip("/")
+    if not text:
+        return None
+    if any(segment in {"", ".", ".."} for segment in text.split("/")):
+        return None
+    return text
 
 
 def scope_covers_path(pattern: str, path: str) -> bool:
     """Return True when a declared write scope covers a changed repository path.
 
     Non-glob scopes are treated as either an exact file or a directory prefix. This
-    intentionally fails closed for empty patterns/paths.
+    intentionally fails closed for empty or unsafe patterns/paths.
     """
     scope = _normalize(pattern)
     candidate = _normalize(path)
-    if not scope or not candidate:
+    if scope is None or candidate is None:
         return False
     if scope in {"*", "**", "**/*"}:
         return True

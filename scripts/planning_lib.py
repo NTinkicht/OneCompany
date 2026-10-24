@@ -301,7 +301,21 @@ def dependency_ready(item: dict[str, Any], work_map: dict[str, dict[str, Any]], 
 
 
 def active_work_items(active_leases: list[dict[str, Any]], work_map: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-    return [work_item_for_lease(lease, work_map) for lease in active_leases if isinstance(lease.get("work_unit"), str)]
+    """Every active implementation lease occupies a writer slot (one writer per WU).
+
+    A lease whose WU id is missing, empty or not a string cannot be matched to
+    its work, so it must not be dropped (that would free its slot and let a
+    second writer start). It resolves to the fail-closed placeholder instead
+    (serial, lock ``*``, CRITICAL), ignoring any snapshot it carries.
+    """
+    items: list[dict[str, Any]] = []
+    for lease in active_leases:
+        work_unit = lease.get("work_unit") if isinstance(lease, dict) else None
+        if isinstance(work_unit, str) and work_unit:
+            items.append(work_item_for_lease(lease, work_map))
+        else:
+            items.append(work_item_for_lease({}, work_map))
+    return items
 
 
 def critical_path(work: list[dict[str, Any]]) -> dict[str, Any]:

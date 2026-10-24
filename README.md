@@ -302,10 +302,14 @@ Higher autonomy never lowers quality, evidence, budget or governance requirement
 
 Complete [`docs/RELEASE-CHECKLIST.md`](docs/RELEASE-CHECKLIST.md). Two repository-owner items are intentionally not decided by autonomous workers:
 
-1. choose the repository license before public open-source release;
+1. choose the repository license before public open-source release (decided: Apache-2.0, see [`LICENSE`](LICENSE) and #2);
 2. configure/verify default-branch protection and required checks in GitHub administration.
 
 Those are tracked as human decisions rather than being silently guessed.
+
+## License
+
+OneCompany is licensed under the [Apache License, Version 2.0](LICENSE).
 
 ## Contributing
 

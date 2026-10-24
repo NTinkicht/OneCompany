@@ -3,7 +3,7 @@
 Use this before treating a OneCompany installation as production-grade or publishing OneCompany itself as a reusable CompanyOS starter.
 
 ## Repository owner controls
-- [ ] Software license chosen and committed
+- [x] Software license chosen and committed (Apache-2.0, `LICENSE`, #2)
 - [ ] Default branch protected
 - [ ] Required product + OneCompany checks configured
 - [ ] Force-push/deletion policy reviewed

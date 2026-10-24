@@ -91,6 +91,9 @@ def github_repo_from_remote() -> str | None:
     return None
 
 
+_EMERGENCY_STOP_CLEAR_WORDS = frozenset({"0", "false", "no", "off"})
+
+
 def emergency_stop_active(config: dict[str, Any] | None = None) -> bool:
     """Return true if either repository or out-of-band containment is asserted.
 
@@ -101,7 +104,9 @@ def emergency_stop_active(config: dict[str, Any] | None = None) -> bool:
     Repository code cannot override an asserted external stop.
     """
     external = str(os.environ.get("ONECOMPANY_EMERGENCY_STOP", "")).strip().casefold()
-    if external in {"1", "true", "yes", "on", "stop", "stopped"}:
+    # Fail closed on ambiguity (OC-P0-10, #343): only an empty value or an
+    # explicit clear word is clear; any other non-empty value asserts STOP.
+    if external and external not in _EMERGENCY_STOP_CLEAR_WORDS:
         return True
     sentinel = str(os.environ.get("ONECOMPANY_EMERGENCY_STOP_FILE", "")).strip()
     if sentinel:
@@ -110,8 +115,19 @@ def emergency_stop_active(config: dict[str, Any] | None = None) -> bool:
                 return True
         except OSError:
             return True
-    document = config if config is not None else load_json(CONTROL / "config.json")
-    return document.get("safety", {}).get("emergency_stop") is True
+    if config is None:
+        try:
+            config = load_json(CONTROL / "config.json")
+        except (OSError, ValueError):
+            return True  # unreadable or malformed configuration: stop
+    if not isinstance(config, dict):
+        return True
+    safety = config.get("safety", {})
+    if not isinstance(safety, dict):
+        return True
+    if "emergency_stop" not in safety:
+        return False
+    return safety["emergency_stop"] is not False
 
 
 def governance_config() -> dict[str, Any]:

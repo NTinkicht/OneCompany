@@ -169,8 +169,12 @@ def main() -> int:
         }, indent=2))
         return 2
 
+    # Any route that asks for a review capability is an independent gate, with or
+    # without --for-independent-gate: a material author must never be proposed
+    # as the reviewer of its own stream (OC-P0-08, #341).
+    independent_gate = bool(args.for_independent_gate or required & REVIEW_CAPS)
     excluded = set(args.exclude_author)
-    if args.for_independent_gate:
+    if independent_gate:
         if args.pr is not None:
             try:
                 excluded.update(coordination_view(args.pr).get("material_authors", []))
@@ -228,7 +232,7 @@ def main() -> int:
                 reasons.append("repository_read_not_verified")
             if required & WRITE_CAPS and not access.get("write"):
                 reasons.append("repository_write_not_verified")
-            if (args.for_independent_gate or required & REVIEW_CAPS) and not access.get("review"):
+            if independent_gate and not access.get("review"):
                 reasons.append("review_publish_not_verified")
             if required & MERGE_CAPS and not access.get("merge"):
                 reasons.append("merge_not_verified")
@@ -272,9 +276,9 @@ def main() -> int:
             if source_lease is not None and actor_id == source_lease.get("actor"):
                 reasons.append("failover_source_actor")
 
-        if args.for_independent_gate and actor_id in excluded:
+        if independent_gate and actor_id in excluded:
             reasons.append("material_author_conflict")
-        if args.for_independent_gate and actor.get("may_independently_gate_own_material_authorship"):
+        if independent_gate and actor.get("may_independently_gate_own_material_authorship"):
             reasons.append("self_gate_policy_conflict")
 
         reasons = sorted(set(reasons))
@@ -319,7 +323,8 @@ def main() -> int:
         "unattended_required": args.unattended,
         "execution_role": args.execution_role,
         "complexity": args.complexity,
-        "material_authors_excluded": sorted(excluded) if args.for_independent_gate else [],
+        "independent_gate": independent_gate,
+        "material_authors_excluded": sorted(excluded) if independent_gate else [],
         "proposed_actor": eligible[0]["actor"] if eligible else None,
         "eligible": eligible,
         "rejected": rejected,

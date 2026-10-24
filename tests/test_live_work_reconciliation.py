@@ -42,6 +42,24 @@ class ReconciliationTests(unittest.TestCase):
     def test_empty_main_sha_fails_closed(self):
         self.assertOnly(snap(main_sha="", observed_main_sha=""), "STALE_MAIN")
 
+    def test_malformed_equal_main_shas_fail_closed(self):
+        for bad in ("x", "A" * 40, "a" * 39, "a" * 41, " " + "a" * 39, "a" * 40 + "\n", "g" * 40):
+            with self.subTest(sha=bad):
+                self.assertOnly(snap(main_sha=bad, observed_main_sha=bad), "STALE_MAIN")
+
+    def test_malformed_main_sha_on_either_side_fails_closed(self):
+        for bad in ("x", "A" * 40, "a" * 39, None, 0):
+            with self.subTest(sha=bad):
+                self.assertOnly(snap(main_sha=bad), "STALE_MAIN")
+                self.assertOnly(snap(observed_main_sha=bad), "STALE_MAIN")
+
+    def test_uppercase_spelling_of_live_main_is_not_fresh(self):
+        self.assertOnly(snap(main_sha=SHA.upper(), observed_main_sha=SHA), "STALE_MAIN")
+
+    def test_other_valid_main_sha_is_consistent(self):
+        valid = "0123456789abcdef" * 2 + "01234567"
+        self.assertEqual(inconsistencies(snap(main_sha=valid, observed_main_sha=valid)), ())
+
     def test_duplicate_issue(self):
         self.assertOnly(snap(issue_ids=(1, 2, 3, 3)), "DUPLICATE_ISSUE")
 

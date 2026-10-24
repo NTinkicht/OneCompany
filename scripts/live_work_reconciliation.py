@@ -37,7 +37,9 @@ def inconsistencies(snapshot: WorkSnapshot) -> tuple[str, ...]:
         problems.add("INVALID_ISSUE_ID")
     if any(not _valid_work_id(pr) for pr, _ in snapshot.pr_issue_bindings):
         problems.add("INVALID_PR_ID")
-    if not snapshot.main_sha or snapshot.main_sha != snapshot.observed_main_sha:
+    # Same rule as the PR checks: only two equal well-formed lowercase
+    # 40-hex SHAs prove a fresh main; anything malformed fails closed.
+    if not _same_sha(snapshot.main_sha, snapshot.observed_main_sha):
         problems.add("STALE_MAIN")
     if len(snapshot.issue_ids) != len(set(snapshot.issue_ids)):
         problems.add("DUPLICATE_ISSUE")

@@ -1211,6 +1211,9 @@ class ExecutionStore:
             return
         wu_id = context.key.wu_id
         self._recover_pending_locked(wu_id)
+        # Refuse before touching the marker or state: on a corrupt journal the
+        # write must leave no artifact that a later repair could commit.
+        ExecutionJournal.verify(self.journal_path(wu_id))
         operation_id = uuid.uuid4().hex
         recorded_at = time.time()
         pending = {

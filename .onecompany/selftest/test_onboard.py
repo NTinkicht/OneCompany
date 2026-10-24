@@ -106,6 +106,59 @@ class OnboardTests(unittest.TestCase):
             self.assertFalse(journey["write_lease_granted"])
             self.assertEqual((target / "AGENTS.md").read_text(), "product-owned")
 
+    def test_symlinked_or_non_directory_framework_paths_block_apply(self):
+        """Assessment must refuse exactly what bootstrap preflight refuses."""
+        def dangling_file(target: Path, outside: Path) -> None:
+            (target / "AGENTS.md").symlink_to(target / "missing-agents.md")
+
+        def directory_link_outside(target: Path, outside: Path) -> None:
+            (target / "scripts").symlink_to(outside, target_is_directory=True)
+
+        def directory_link_inside(target: Path, outside: Path) -> None:
+            (target / "src").mkdir()
+            (target / "docs").symlink_to(target / "src", target_is_directory=True)
+
+        def dangling_directory_link(target: Path, outside: Path) -> None:
+            (target / "agents").symlink_to(target / "missing-agents-dir", target_is_directory=True)
+
+        def file_in_place_of_directory(target: Path, outside: Path) -> None:
+            (target / "docs").write_text("product notes, not a directory\n", encoding="utf-8")
+
+        cases = (
+            ("dangling_file", dangling_file, "AGENTS.md"),
+            ("directory_link_outside", directory_link_outside, "scripts"),
+            ("directory_link_inside", directory_link_inside, "docs"),
+            ("dangling_directory_link", dangling_directory_link, "agents"),
+            ("file_in_place_of_directory", file_in_place_of_directory, "docs"),
+        )
+        for name, setup, expected in cases:
+            with self.subTest(case=name), tempfile.TemporaryDirectory() as temp:
+                outside = Path(temp) / "outside"; outside.mkdir()
+                target = Path(temp) / "app"; target.mkdir()
+                (target / "README.md").write_text("product\n", encoding="utf-8")
+                setup(target, outside)
+                before = sorted((p.relative_to(Path(temp)).as_posix(), p.is_symlink()) for p in Path(temp).rglob("*"))
+                report = onboard.analyze(target, repository="example/app")
+                self.assertEqual(report["mode"], "ADOPT_EXISTING")
+                self.assertIn(expected, report["collisions"])
+                self.assertFalse(report["can_apply"])
+                self.assertIn("Existing files collide with OneCompany framework paths; resolve them before --apply", report["blockers"])
+                self.assertTrue(report["journey"]["safety_blockers"])
+                self.assertFalse(report["journey"]["write_lease_granted"])
+                after = sorted((p.relative_to(Path(temp)).as_posix(), p.is_symlink()) for p in Path(temp).rglob("*"))
+                self.assertEqual(before, after, "assessment must not mutate the target or the link destination")
+                self.assertEqual(list(outside.iterdir()), [])
+
+    def test_unrelated_symlink_does_not_block_clean_target(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target = Path(temp) / "app"; target.mkdir()
+            (target / "README.md").write_text("product\n", encoding="utf-8")
+            (target / "lib").mkdir()
+            (target / "current").symlink_to(target / "lib", target_is_directory=True)
+            report = onboard.analyze(target, repository="example/app")
+            self.assertEqual(report["collisions"], [])
+            self.assertTrue(report["can_apply"])
+
 
 if __name__ == "__main__":
     unittest.main()

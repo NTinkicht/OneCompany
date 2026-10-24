@@ -125,18 +125,44 @@ def detect_mode(target: Path) -> tuple[str, str | None]:
     return ("ADOPT_EXISTING" if meaningful else "NEW_PROJECT"), None
 
 
+def _leaf_collision(target: Path, destination: Path) -> str | None:
+    """Mirror bootstrap preflight: never plan a write the installer refuses.
+
+    A destination that exists or is a symlink (even dangling) collides. Walking
+    up to the target root, the first symlinked parent or existing non-directory
+    parent collides too, so nothing is planned through a link or over a file.
+    """
+    if destination.exists() or destination.is_symlink():
+        return destination.relative_to(target).as_posix()
+    for parent in destination.parents:
+        if parent == target:
+            break
+        if parent.is_symlink() or (parent.exists() and not parent.is_dir()):
+            return parent.relative_to(target).as_posix()
+    return None
+
+
 def collision_paths(target: Path) -> list[str]:
-    collisions: list[str] = []
+    collisions: set[str] = set()
+    if not target.is_dir():
+        return []
     for relative in FRAMEWORK_PATHS:
-        source = ROOT / relative; destination = target / relative
-        if not source.exists() or not destination.exists(): continue
-        if source.is_file():
-            collisions.append(relative); continue
-        for child in source.rglob("*"):
-            if child.is_file():
-                proposed = destination / child.relative_to(source)
-                if proposed.exists(): collisions.append(str(proposed.relative_to(target)).replace("\\", "/"))
-    return sorted(set(collisions))
+        source = ROOT / relative
+        if not source.exists():
+            continue
+        top = target / relative
+        if not top.exists() and not top.is_symlink():
+            # Nothing exists below a missing top path; only its parents matter.
+            hit = _leaf_collision(target, top)
+            if hit is not None:
+                collisions.add(hit)
+            continue
+        leaves = [child for child in source.rglob("*") if not child.is_dir()] if source.is_dir() else [source]
+        for leaf in leaves:
+            hit = _leaf_collision(target, target / leaf.relative_to(ROOT))
+            if hit is not None:
+                collisions.add(hit)
+    return sorted(collisions)
 
 
 def contracts(target: Path) -> dict[str, bool]:

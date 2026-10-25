@@ -287,3 +287,103 @@ def branch_inconsistencies(
             if len(names) > 1:
                 problems.add((name, "DUPLICATE_STREAM"))
     return tuple(sorted(problems))
+
+
+@dataclass(frozen=True)
+class WriteAttempt:
+    """One recorded external write (commit, comment, PR, dispatch) (#361).
+
+    ``outcome`` is what the writer recorded; ``readback`` is the trusted
+    caller's authoritative live check of the side effect (``None`` when no
+    readback was done). ``retries`` counts retries performed or proposed;
+    ``pre_retry_readback`` is the readback observed *before* the retry (it
+    stays the retry's safety evidence after a completed retry makes the
+    current ``readback`` ``present``; when ``None`` the current ``readback``
+    is the evidence, i.e. a proposed retry). ``safety_rejected`` is True only
+    for an explicit deterministic safety rejection. ``expected_head_sha`` is the head the operation was built on
+    and ``observed_head_sha`` the live head now.
+    """
+    operation_id: str
+    issue: int
+    outcome: str
+    readback: str | None = None
+    retries: int = 0
+    safety_rejected: bool = False
+    expected_head_sha: str | None = None
+    observed_head_sha: str | None = None
+    pre_retry_readback: str | None = None
+
+
+_OUTCOMES = frozenset({"success", "failure", "unknown"})
+_READBACKS = frozenset({"present", "absent"})
+
+
+def replay_inconsistencies(
+    snapshot: WorkSnapshot, attempts: tuple[WriteAttempt, ...]
+) -> tuple[tuple[str, str], ...]:
+    """Return stable sorted ``(operation_id, FINDING)`` pairs for replays.
+
+    A timeout or lost response is not proof of failure: without a readback
+    the effect is ambiguous and writes pause; an effect that exists is a
+    success that must not repeat. A retry is safe only after readback shows
+    no effect and an explicit safety rejection, at most once, on the head it
+    was built for. Nothing here retries, records or mutates anything.
+    """
+    if isinstance(attempts, (str, bytes)) or not isinstance(attempts, (tuple, list)):
+        raise TypeError("attempts must be a tuple of WriteAttempt")
+    problems: set[tuple[str, str]] = set()
+    seen: set[str] = set()
+    known = {i for i in snapshot.issue_ids if _valid_work_id(i)}
+    retired = {i for i in snapshot.retired_pilot_issue_ids if _valid_work_id(i)}
+    for att in attempts:
+        op_valid = isinstance(att.operation_id, str) and bool(att.operation_id.strip())
+        ref = att.operation_id if op_valid else ""
+        if not op_valid:
+            problems.add((ref, "INVALID_OPERATION_ID"))
+        elif att.operation_id in seen:
+            problems.add((ref, "DUPLICATE_OPERATION"))
+        else:
+            seen.add(att.operation_id)
+        if not _valid_work_id(att.issue):
+            problems.add((ref, "INVALID_ISSUE_ID"))
+        else:
+            if att.issue not in known:
+                problems.add((ref, "ORPHAN_REPLAY"))
+            if att.issue in retired:
+                problems.add((ref, "RETIRED_PILOT_REACTIVATED"))
+        outcome_valid = isinstance(att.outcome, str) and att.outcome in _OUTCOMES
+        if not outcome_valid:
+            problems.add((ref, "INVALID_OUTCOME"))
+        readback_valid = att.readback is None or (
+            isinstance(att.readback, str) and att.readback in _READBACKS)
+        pre_valid = att.pre_retry_readback is None or (
+            isinstance(att.pre_retry_readback, str)
+            and att.pre_retry_readback in _READBACKS)
+        if not readback_valid or not pre_valid:
+            problems.add((ref, "INVALID_READBACK"))
+        if outcome_valid and readback_valid:
+            if att.outcome != "success" and att.readback is None:
+                problems.add((ref, "UNVERIFIED_OUTCOME"))
+            if att.outcome == "success" and att.readback == "absent":
+                problems.add((ref, "UNVERIFIED_OUTCOME"))
+            if att.outcome != "success" and att.readback == "present":
+                problems.add((ref, "RETRY_WOULD_DUPLICATE"))
+        retries = att.retries
+        if type(retries) is not int or retries < 0:
+            problems.add((ref, "INVALID_RETRY_COUNT"))
+            continue
+        if retries == 0:
+            continue
+        # Safety evidence is the readback before the retry; without a recorded
+        # pre-retry readback the current one is used (a proposed retry), so a
+        # completed retry with no pre-retry evidence still fails closed.
+        evidence = att.pre_retry_readback if att.pre_retry_readback is not None else att.readback
+        # ``is True`` so a truthy non-bool (e.g. "no") is never a rejection.
+        if not (readback_valid and pre_valid and evidence == "absent"
+                and att.safety_rejected is True):
+            problems.add((ref, "UNSAFE_RETRY"))
+        if retries > 1:
+            problems.add((ref, "RETRY_LIMIT_EXCEEDED"))
+        if not _same_sha(att.expected_head_sha, att.observed_head_sha):
+            problems.add((ref, "STALE_REPLAY"))
+    return tuple(sorted(problems))

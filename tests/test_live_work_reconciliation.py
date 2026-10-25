@@ -1,3 +1,4 @@
+import datetime as dt
 import unittest
 import sys
 from pathlib import Path
@@ -9,6 +10,7 @@ from live_work_reconciliation import (
     WorkSnapshot,
     inconsistencies,
     pr_inconsistencies,
+    snapshot_freshness,
 )
 
 SHA = "a" * 40
@@ -389,3 +391,77 @@ class InvalidNumericIdentityTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+NOW = dt.datetime(2026, 10, 25, 4, 30, tzinfo=dt.timezone.utc)
+
+
+class SnapshotFreshnessTests(unittest.TestCase):
+    """#353: a snapshot is live only if it was observed recently, not later."""
+
+    def fresh(self, observed_at, now=NOW, max_age=300):
+        return snapshot_freshness(observed_at, now, max_age)
+
+    def test_recent_snapshot_is_fresh(self):
+        self.assertEqual(self.fresh(NOW - dt.timedelta(seconds=30)), ())
+
+    def test_snapshot_observed_now_is_fresh(self):
+        self.assertEqual(self.fresh(NOW), ())
+
+    def test_age_equal_to_limit_is_fresh(self):
+        self.assertEqual(self.fresh(NOW - dt.timedelta(seconds=300)), ())
+
+    def test_one_second_over_limit_is_stale(self):
+        self.assertEqual(self.fresh(NOW - dt.timedelta(seconds=301)), ("STALE_SNAPSHOT",))
+
+    def test_hours_old_cache_is_stale(self):
+        self.assertEqual(self.fresh(NOW - dt.timedelta(hours=6)), ("STALE_SNAPSHOT",))
+
+    def test_future_snapshot_fails_closed(self):
+        self.assertEqual(self.fresh(NOW + dt.timedelta(seconds=1)), ("FUTURE_SNAPSHOT",))
+
+    def test_far_future_snapshot_is_not_reported_stale(self):
+        self.assertEqual(self.fresh(NOW + dt.timedelta(days=2)), ("FUTURE_SNAPSHOT",))
+
+    def test_same_instant_in_other_offset_is_age_zero(self):
+        plus4 = dt.timezone(dt.timedelta(hours=4))
+        self.assertEqual(self.fresh(NOW.astimezone(plus4)), ())
+        self.assertEqual(self.fresh((NOW - dt.timedelta(seconds=301)).astimezone(plus4)),
+                         ("STALE_SNAPSHOT",))
+
+    def test_dst_fold_in_shared_zone_uses_real_elapsed_time(self):
+        # Codex P2 on #354: 01:30 fold=0 (EDT) and 01:30 fold=1 (EST) in one
+        # ZoneInfo are an hour apart but subtract by wall clock to zero.
+        from zoneinfo import ZoneInfo
+        ny = ZoneInfo("America/New_York")
+        first = dt.datetime(2026, 11, 1, 1, 30, fold=0, tzinfo=ny)
+        second = dt.datetime(2026, 11, 1, 1, 30, fold=1, tzinfo=ny)
+        self.assertEqual(snapshot_freshness(first, second, 300), ("STALE_SNAPSHOT",))
+        self.assertEqual(snapshot_freshness(second, first, 300), ("FUTURE_SNAPSHOT",))
+        self.assertEqual(snapshot_freshness(first, second, 3600), ())
+
+    def test_naive_observed_at_is_invalid(self):
+        self.assertEqual(self.fresh(NOW.replace(tzinfo=None)), ("INVALID_TIMESTAMP",))
+
+    def test_naive_now_is_invalid(self):
+        self.assertEqual(self.fresh(NOW, now=NOW.replace(tzinfo=None)), ("INVALID_TIMESTAMP",))
+
+    def test_non_datetime_timestamps_are_invalid(self):
+        for value in (None, "", "2026-10-25T04:30:00Z", 1793075400, NOW.date()):
+            with self.subTest(value=value):
+                self.assertEqual(self.fresh(value), ("INVALID_TIMESTAMP",))
+                self.assertEqual(self.fresh(NOW, now=value), ("INVALID_TIMESTAMP",))
+
+    def test_invalid_max_age_fails_closed(self):
+        for max_age in (0, -1, True, 300.0, "300", None):
+            with self.subTest(max_age=max_age):
+                self.assertEqual(self.fresh(NOW, max_age=max_age), ("INVALID_MAX_AGE",))
+
+    def test_invalid_max_age_still_reports_future_snapshot(self):
+        self.assertEqual(self.fresh(NOW + dt.timedelta(seconds=5), max_age=0),
+                         ("FUTURE_SNAPSHOT", "INVALID_MAX_AGE"))
+
+    def test_findings_are_sorted_and_stable(self):
+        result = snapshot_freshness(None, None, False)
+        self.assertEqual(result, ("INVALID_MAX_AGE", "INVALID_TIMESTAMP"))
+        self.assertEqual(result, snapshot_freshness(None, None, False))

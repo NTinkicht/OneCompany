@@ -107,18 +107,37 @@ class ReconciliationTests(unittest.TestCase):
     def test_retired_pilot_not_active_is_consistent(self):
         self.assertEqual(inconsistencies(snap(retired_pilot_issue_ids=(3,))), ())
 
+    def test_ineligible_issue_in_next(self):
+        # Blocked, parked or owner-gated issue admitted as NEXT (#355).
+        self.assertOnly(snap(ineligible_issue_ids=(2,)), "INELIGIBLE_NEXT")
+        self.assertOnly(snap(next_ids=(2, 3), ineligible_issue_ids=(3,)), "INELIGIBLE_NEXT")
+
+    def test_ineligible_issue_not_in_next_is_consistent(self):
+        self.assertEqual(inconsistencies(snap(ineligible_issue_ids=(1, 3))), ())
+        self.assertEqual(inconsistencies(snap(ineligible_issue_ids=(77,))), ())
+
+    def test_default_has_no_ineligible_issues(self):
+        self.assertEqual(snap().ineligible_issue_ids, ())
+
+    def test_invalid_ineligible_issue_ids_fail_closed(self):
+        for bad in (True, False, 0, -2, 2.0, "2", None):
+            with self.subTest(issue=bad):
+                self.assertOnly(snap(ineligible_issue_ids=(bad,)), "INVALID_ISSUE_ID")
+
     def test_combined_adversarial_snapshot(self):
-        bad = WorkSnapshot("a" * 40, "b" * 40, (1, 1), (2, 2), ((9, 3), (10, 3)), (4, 4), (2, 4))
+        bad = WorkSnapshot("a" * 40, "b" * 40, (1, 1), (2, 2), ((9, 3), (10, 3)), (4, 4), (2, 4), (2,))
         self.assertEqual(set(inconsistencies(bad)), {
             "STALE_MAIN", "DUPLICATE_ISSUE", "DUPLICATE_NEXT",
             "ORPHAN_NEXT", "ORPHAN_PR", "ORPHAN_LEASE",
             "DUPLICATE_PR_BINDING", "DUPLICATE_LEASE",
-            "RETIRED_PILOT_REACTIVATED",
+            "RETIRED_PILOT_REACTIVATED", "INELIGIBLE_NEXT",
         })
 
     def test_findings_are_sorted_and_stable(self):
         bad = snap(observed_main_sha="b" * 40, next_ids=(2, 2))
         self.assertEqual(inconsistencies(bad), ("DUPLICATE_NEXT", "STALE_MAIN"))
+        worse = snap(observed_main_sha="b" * 40, next_ids=(2, 2), ineligible_issue_ids=(2,))
+        self.assertEqual(inconsistencies(worse), ("DUPLICATE_NEXT", "INELIGIBLE_NEXT", "STALE_MAIN"))
         self.assertEqual(inconsistencies(bad), inconsistencies(bad))
 
 

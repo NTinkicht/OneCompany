@@ -21,6 +21,9 @@ class WorkSnapshot:
     pr_issue_bindings: tuple[tuple[int, int], ...]
     active_lease_issue_ids: tuple[int, ...]
     retired_pilot_issue_ids: tuple[int, ...] = ()
+    # Issues the trusted caller observed as blocked, parked or awaiting an
+    # owner decision: never a correct NEXT (#355).
+    ineligible_issue_ids: tuple[int, ...] = ()
 
 
 def _valid_work_id(value: object) -> bool:
@@ -33,7 +36,8 @@ def inconsistencies(snapshot: WorkSnapshot) -> tuple[str, ...]:
     problems: set[str] = set()
     issue_ids = (*snapshot.issue_ids, *snapshot.next_ids,
                  *(issue for _, issue in snapshot.pr_issue_bindings),
-                 *snapshot.active_lease_issue_ids, *snapshot.retired_pilot_issue_ids)
+                 *snapshot.active_lease_issue_ids, *snapshot.retired_pilot_issue_ids,
+                 *snapshot.ineligible_issue_ids)
     if any(not _valid_work_id(issue) for issue in issue_ids):
         problems.add("INVALID_ISSUE_ID")
     if any(not _valid_work_id(pr) for pr, _ in snapshot.pr_issue_bindings):
@@ -65,6 +69,13 @@ def inconsistencies(snapshot: WorkSnapshot) -> tuple[str, ...]:
     retired = set(snapshot.retired_pilot_issue_ids)
     if retired.intersection(snapshot.next_ids) or retired.intersection(active):
         problems.add("RETIRED_PILOT_REACTIVATED")
+    # Incorrect NEXT: judged for NEXT only; an ineligible issue elsewhere
+    # (e.g. parked with an open PR) is not inferred to be wrong here. Invalid
+    # IDs are INVALID_ISSUE_ID only: 2.0 == 2 and True == 1 in Python, but
+    # neither identifies an issue.
+    ineligible = {i for i in snapshot.ineligible_issue_ids if _valid_work_id(i)}
+    if ineligible.intersection(snapshot.next_ids):
+        problems.add("INELIGIBLE_NEXT")
     return tuple(sorted(problems))
 
 

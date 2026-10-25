@@ -158,8 +158,37 @@ class PullRequestReconciliationTests(unittest.TestCase):
                                           ci_base_sha=None, ci_conclusion=None,
                                           merge_ready_claimed=False)), ())
 
-    def test_no_observations(self):
-        self.assertEqual(self.findings(), ())
+    def test_no_observations_without_bindings(self):
+        self.assertEqual(self.findings(snapshot=snap(pr_issue_bindings=(), active_lease_issue_ids=())), ())
+
+    def test_no_observations_reports_every_recorded_binding(self):
+        # A recorded PR binding that no live observation reconciles (closed,
+        # merged elsewhere, deleted, or dropped by a stale fetch) fails closed.
+        self.assertEqual(self.findings(), ((9, "UNOBSERVED_PR_BINDING"),))
+        snapshot = snap(pr_issue_bindings=((10, 3), (9, 1)))
+        self.assertEqual(self.findings(snapshot=snapshot),
+                         ((9, "UNOBSERVED_PR_BINDING"), (10, "UNOBSERVED_PR_BINDING")))
+
+    def test_only_the_unobserved_binding_is_reported(self):
+        snapshot = snap(pr_issue_bindings=((9, 1), (10, 3)))
+        self.assertEqual(self.findings(pr(), snapshot=snapshot), ((10, "UNOBSERVED_PR_BINDING"),))
+
+    def test_binding_observed_under_another_issue_is_observed(self):
+        self.assertEqual(self.findings(pr(issue=3)), ((9, "PR_BINDING_MISMATCH"),))
+
+    def test_invalid_pr_aliases_never_observe_a_binding(self):
+        for alias in (True, 1.0):
+            with self.subTest(alias=alias):
+                snapshot = snap(pr_issue_bindings=((1, 1),))
+                findings = pr_inconsistencies(snapshot, (pr(pr=alias),))
+                self.assertIn((0, "INVALID_PR_ID"), findings)
+                self.assertIn((1, "UNOBSERVED_PR_BINDING"), findings)
+
+    def test_invalid_bound_pr_ids_are_not_double_counted(self):
+        for bad in (0, -1, True, 2.5, "9"):
+            with self.subTest(value=bad):
+                findings = pr_inconsistencies(snap(pr_issue_bindings=((bad, 1),)), ())
+                self.assertEqual(findings, ())
 
     def test_stale_recorded_head(self):
         self.assertOnly(pr(recorded_head_sha=OLD_HEAD, merge_ready_claimed=False), "STALE_PR_HEAD")
@@ -209,7 +238,11 @@ class PullRequestReconciliationTests(unittest.TestCase):
         self.assertOnly(pr(issue=3), "PR_BINDING_MISMATCH")
 
     def test_unbound_pr(self):
-        self.assertOnly(pr(pr=11), "PR_BINDING_MISMATCH")
+        # The live PR is unbound, and the recorded binding (9) is unobserved.
+        self.assertEqual(self.findings(pr(pr=11)),
+                         ((9, "UNOBSERVED_PR_BINDING"), (11, "PR_BINDING_MISMATCH")))
+        snapshot = snap(pr_issue_bindings=((9, 1), (11, 2)))
+        self.assertEqual(self.findings(pr(), pr(pr=11), snapshot=snapshot), ((11, "PR_BINDING_MISMATCH"),))
 
     def test_duplicate_observation(self):
         self.assertEqual(self.findings(pr(), pr()), ((9, "DUPLICATE_PR_OBSERVATION"),))

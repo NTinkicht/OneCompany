@@ -429,6 +429,17 @@ class SnapshotFreshnessTests(unittest.TestCase):
         self.assertEqual(self.fresh((NOW - dt.timedelta(seconds=301)).astimezone(plus4)),
                          ("STALE_SNAPSHOT",))
 
+    def test_dst_fold_in_shared_zone_uses_real_elapsed_time(self):
+        # Codex P2 on #354: 01:30 fold=0 (EDT) and 01:30 fold=1 (EST) in one
+        # ZoneInfo are an hour apart but subtract by wall clock to zero.
+        from zoneinfo import ZoneInfo
+        ny = ZoneInfo("America/New_York")
+        first = dt.datetime(2026, 11, 1, 1, 30, fold=0, tzinfo=ny)
+        second = dt.datetime(2026, 11, 1, 1, 30, fold=1, tzinfo=ny)
+        self.assertEqual(snapshot_freshness(first, second, 300), ("STALE_SNAPSHOT",))
+        self.assertEqual(snapshot_freshness(second, first, 300), ("FUTURE_SNAPSHOT",))
+        self.assertEqual(snapshot_freshness(first, second, 3600), ())
+
     def test_naive_observed_at_is_invalid(self):
         self.assertEqual(self.fresh(NOW.replace(tzinfo=None)), ("INVALID_TIMESTAMP",))
 

@@ -181,7 +181,11 @@ def snapshot_freshness(observed_at: object, now: object,
     if type(max_age_seconds) is not int or max_age_seconds <= 0:
         problems.add("INVALID_MAX_AGE")
     if "INVALID_TIMESTAMP" not in problems:
-        age = now - observed_at  # type: ignore[operator]
+        # Normalize to UTC first: two datetimes sharing one tzinfo subtract by
+        # wall clock, so a DST fold (same local time, offsets an hour apart)
+        # would otherwise read as age zero.
+        age = (now.astimezone(dt.timezone.utc)  # type: ignore[union-attr]
+               - observed_at.astimezone(dt.timezone.utc))  # type: ignore[union-attr]
         if age < dt.timedelta(0):
             problems.add("FUTURE_SNAPSHOT")
         elif ("INVALID_MAX_AGE" not in problems

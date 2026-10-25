@@ -6,6 +6,10 @@ branches, recorded external writes) with the observation timestamp. This
 module strictly loads that JSON, runs every read-only check in
 ``live_work_reconciliation`` and returns one deterministic verdict.
 
+Schema 2 (#367): each pull request's CI is never taken from the caller. It is
+derived from the exact-head required check runs the caller fetched, through
+``required_check_reconciliation.aggregate_required_checks``.
+
 ``CONSISTENT`` only when every check is empty and the snapshot is fresh; any
 finding is ``INCONSISTENT``; malformed input is refused (never coerced).
 Nothing here fetches, claims a lease, mutates the queue or retries a write.
@@ -31,13 +35,18 @@ from live_work_reconciliation import (  # noqa: E402
     replay_inconsistencies,
     snapshot_freshness,
 )
+from required_check_reconciliation import (  # noqa: E402
+    CheckRunObservation,
+    RequiredCheck,
+    aggregate_required_checks,
+)
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 DEFAULT_MAX_AGE_SECONDS = 900
 EXIT_CONSISTENT, EXIT_INCONSISTENT, EXIT_INVALID = 0, 1, 2
 
 _TOP_KEYS = {"schema_version", "observed_at", "snapshot", "pull_requests",
-             "branches", "write_attempts", "trusted_reviewers"}
+             "branches", "write_attempts", "trusted_reviewers", "required_checks"}
 _INT, _STR, _BOOL, _OPT_STR = "int", "str", "bool", "str|null"
 _SNAPSHOT_FIELDS = {
     "main_sha": (_STR, True), "observed_main_sha": (_STR, True),
@@ -49,9 +58,15 @@ _PR_FIELDS = {
     "pr": (_INT, True), "issue": (_INT, True), "recorded_head_sha": (_STR, True),
     "observed_head_sha": (_STR, True), "base_sha": (_STR, True),
     "approved_head_sha": (_OPT_STR, False), "approved_base_sha": (_OPT_STR, False),
-    "ci_head_sha": (_OPT_STR, False), "ci_base_sha": (_OPT_STR, False),
-    "ci_conclusion": (_OPT_STR, False), "merge_ready_claimed": (_BOOL, False),
+    # ci_head_sha / ci_conclusion are derived from check_runs, never accepted.
+    "ci_base_sha": (_OPT_STR, False), "check_runs": ("records", True),
+    "merge_ready_claimed": (_BOOL, False),
     "approved_by": (_OPT_STR, False), "material_authors": ("strs", False),
+}
+_REQUIRED_CHECK_FIELDS = {"name": (_STR, True), "app": (_STR, True)}
+_CHECK_RUN_FIELDS = {
+    "id": (_INT, True), "name": (_STR, True), "app": (_STR, True),
+    "head_sha": (_STR, True), "status": (_STR, True), "conclusion": (_OPT_STR, True),
 }
 _ATTEMPT_FIELDS = {
     "operation_id": (_STR, True), "issue": (_INT, True), "outcome": (_STR, True),
@@ -101,7 +116,11 @@ def _record(obj: object, fields: dict[str, tuple[str, bool]], path: str) -> dict
             if required:
                 raise InvalidSnapshot(f"missing {path}.{name}")
             continue
-        out[name] = _check(kind, obj[name], f"{path}.{name}")
+        if kind == "records":  # only check_runs uses nested records
+            out[name] = tuple(CheckRunObservation(**r) for r in
+                              _records(obj[name], _CHECK_RUN_FIELDS, f"{path}.{name}"))
+        else:
+            out[name] = _check(kind, obj[name], f"{path}.{name}")
     return out
 
 
@@ -134,8 +153,10 @@ def load_snapshot(data: object) -> dict[str, Any]:
     return {
         "observed_at": _timestamp(data["observed_at"], "observed_at"),
         "snapshot": WorkSnapshot(**_record(data["snapshot"], _SNAPSHOT_FIELDS, "snapshot")),
-        "pull_requests": tuple(PullRequestObservation(**r) for r in
-                               _records(data["pull_requests"], _PR_FIELDS, "pull_requests")),
+        "pull_requests": tuple(_records(data["pull_requests"], _PR_FIELDS, "pull_requests")),
+        "required_checks": tuple(RequiredCheck(**r) for r in
+                                 _records(data["required_checks"], _REQUIRED_CHECK_FIELDS,
+                                          "required_checks")),
         "branches": _check("strs", data["branches"], "branches"),
         "write_attempts": tuple(WriteAttempt(**r) for r in
                                 _records(data["write_attempts"], _ATTEMPT_FIELDS, "write_attempts")),
@@ -148,11 +169,21 @@ def build_report(data: object, now: dt.datetime,
     """Run every check over one snapshot and return a deterministic verdict."""
     loaded = load_snapshot(data)
     snapshot: WorkSnapshot = loaded["snapshot"]
+    observations, check_findings = [], []
+    for record in loaded["pull_requests"]:
+        fields = dict(record)
+        runs = fields.pop("check_runs")
+        ci = aggregate_required_checks(loaded["required_checks"], runs,
+                                       fields["observed_head_sha"])
+        observations.append(PullRequestObservation(
+            **fields, ci_head_sha=ci.ci_head_sha, ci_conclusion=ci.ci_conclusion))
+        check_findings.extend([fields["pr"], name, finding] for name, finding in ci.findings)
     findings = {
         "snapshot": list(inconsistencies(snapshot)),
         "freshness": list(snapshot_freshness(loaded["observed_at"], now, max_age_seconds)),
         "pull_requests": [list(f) for f in pr_inconsistencies(
-            snapshot, loaded["pull_requests"], trusted_reviewers=loaded["trusted_reviewers"])],
+            snapshot, tuple(observations), trusted_reviewers=loaded["trusted_reviewers"])],
+        "required_checks": sorted(check_findings),
         "branches": [list(f) for f in branch_inconsistencies(snapshot, loaded["branches"])],
         "write_attempts": [list(f) for f in replay_inconsistencies(snapshot, loaded["write_attempts"])],
     }

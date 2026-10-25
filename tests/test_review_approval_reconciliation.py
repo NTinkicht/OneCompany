@@ -88,6 +88,12 @@ class ApprovalAttributionTests(unittest.TestCase):
                                   "INVALID_APPROVAL_MARKER"),
             "truncated": ("<!-- ntk-review v1 head=" + HEAD[:20], "INVALID_APPROVAL_MARKER"),
             "head mismatch": (marker(head=OLD_HEAD), "MARKER_HEAD_MISMATCH"),
+            "truncated after base": (f"<!-- ntk-review v1 head={HEAD} mode=approve base={MAIN} ",
+                                     "INVALID_APPROVAL_MARKER"),
+            "no closing delimiter": (marker()[:-4], "INVALID_APPROVAL_MARKER"),
+            "unknown verdict": (marker(verdict="MAYBE"), "INVALID_APPROVAL_MARKER"),
+            "bad floor": (marker().replace("floor=0", "floor=2"), "INVALID_APPROVAL_MARKER"),
+            "changes-required verdict": (marker(verdict="CHANGES_REQUIRED"), "MARKER_VERDICT_NOT_PASS"),
             "comment mode": (marker(mode="comment"), "MARKER_NOT_APPROVE_MODE"),
             "no base": (marker(base=None), "APPROVAL_WITHOUT_BASE"),
         }

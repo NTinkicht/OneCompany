@@ -20,10 +20,11 @@ import re
 from dataclasses import dataclass
 
 _SHA = re.compile(r"[0-9a-f]{40}")
-# Same shape as REVIEW_MARK in .github/ntk-reviewer/review.py.
+# The complete marker emitted by review_body() in .github/ntk-reviewer/review.py
+# (base is optional only so that its absence is a distinct finding).
 _MARKER_PREFIX = "<!-- ntk-review v1 "
 _MARKER = re.compile(r"<!-- ntk-review v1 head=([0-9a-f]{40}) mode=(comment|approve) "
-                     r"(?:base=([0-9a-f]{40}) )?")
+                     r"(?:base=([0-9a-f]{40}) )?verdict=(PASS|CHANGES_REQUIRED) floor=[01] -->")
 _STATES = frozenset({"APPROVED", "CHANGES_REQUESTED", "COMMENTED", "DISMISSED"})
 _DECISIVE = frozenset({"APPROVED", "CHANGES_REQUESTED"})
 
@@ -67,18 +68,24 @@ def _valid_review(review: object) -> bool:
 
 
 def _marker_finding(review: ReviewObservation, head_sha: str) -> tuple[str | None, str | None]:
-    """Return ``(base, None)`` for a valid approval marker, else ``(None, FINDING)``."""
+    """Return ``(base, None)`` for a valid approval marker, else ``(None, FINDING)``.
+
+    The whole marker must parse, through ``verdict``, ``floor`` and the
+    closing ``-->``: a fragment truncated after ``base=`` is not evidence.
+    """
     if review.body.count(_MARKER_PREFIX) != 1:
         # Zero, or a second (e.g. echoed in a model summary): ambiguous.
         return None, "INVALID_APPROVAL_MARKER"
     match = _MARKER.search(review.body)
     if match is None:
         return None, "INVALID_APPROVAL_MARKER"
-    marked_head, mode, marked_base = match.groups()
+    marked_head, mode, marked_base, verdict = match.groups()
     if marked_head != review.commit_id or marked_head != head_sha:
         return None, "MARKER_HEAD_MISMATCH"
     if mode != "approve":
         return None, "MARKER_NOT_APPROVE_MODE"
+    if verdict != "PASS":
+        return None, "MARKER_VERDICT_NOT_PASS"
     if marked_base is None:
         return None, "APPROVAL_WITHOUT_BASE"
     return marked_base, None

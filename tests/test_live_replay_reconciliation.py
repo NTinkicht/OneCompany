@@ -133,6 +133,34 @@ class ReplayReconciliationTests(unittest.TestCase):
         self.assertEqual(check(safe_retry(readback="ABSENT")),
                          (("op-1", "INVALID_READBACK"), ("op-1", "UNSAFE_RETRY")))
 
+    def test_completed_retry_is_judged_on_pre_retry_readback(self):
+        # Codex P2 on #362: a permitted retry that succeeded now reads back
+        # ``present``; its safety evidence is the readback before the retry.
+        done = safe_retry(outcome="success", readback="present", pre_retry_readback="absent")
+        self.assertEqual(check(done), ())
+        # Without pre-retry evidence a present effect plus a retry stays unsafe.
+        self.assertEqual(check(safe_retry(outcome="success", readback="present")),
+                         (("op-1", "UNSAFE_RETRY"),))
+        # Pre-retry evidence that the effect existed never permits the retry.
+        self.assertEqual(
+            check(safe_retry(outcome="success", readback="present", pre_retry_readback="present")),
+            (("op-1", "UNSAFE_RETRY"),))
+        # The safety rejection, limit and head rules still apply to it.
+        self.assertIn(("op-1", "UNSAFE_RETRY"),
+                      check(safe_retry(outcome="success", readback="present",
+                                       pre_retry_readback="absent", safety_rejected=False)))
+        self.assertIn(("op-1", "RETRY_LIMIT_EXCEEDED"),
+                      check(safe_retry(readback="present", outcome="success",
+                                       pre_retry_readback="absent", retries=2)))
+        self.assertIn(("op-1", "STALE_REPLAY"),
+                      check(safe_retry(readback="present", outcome="success",
+                                       pre_retry_readback="absent", observed_head_sha=OTHER)))
+
+    def test_invalid_pre_retry_readback_never_permits_a_retry(self):
+        self.assertEqual(
+            check(safe_retry(pre_retry_readback="gone")),
+            (("op-1", "INVALID_READBACK"), ("op-1", "UNSAFE_RETRY")))
+
     def test_findings_are_sorted_and_stable(self):
         attempts = (att(operation_id="z", issue=42, outcome="unknown", readback=None),
                     att(operation_id="a", outcome="failure", readback="present"))

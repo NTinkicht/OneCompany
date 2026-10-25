@@ -296,8 +296,11 @@ class WriteAttempt:
     ``outcome`` is what the writer recorded; ``readback`` is the trusted
     caller's authoritative live check of the side effect (``None`` when no
     readback was done). ``retries`` counts retries performed or proposed;
-    ``safety_rejected`` is True only for an explicit deterministic safety
-    rejection. ``expected_head_sha`` is the head the operation was built on
+    ``pre_retry_readback`` is the readback observed *before* the retry (it
+    stays the retry's safety evidence after a completed retry makes the
+    current ``readback`` ``present``; when ``None`` the current ``readback``
+    is the evidence, i.e. a proposed retry). ``safety_rejected`` is True only
+    for an explicit deterministic safety rejection. ``expected_head_sha`` is the head the operation was built on
     and ``observed_head_sha`` the live head now.
     """
     operation_id: str
@@ -308,6 +311,7 @@ class WriteAttempt:
     safety_rejected: bool = False
     expected_head_sha: str | None = None
     observed_head_sha: str | None = None
+    pre_retry_readback: str | None = None
 
 
 _OUTCOMES = frozenset({"success", "failure", "unknown"})
@@ -352,7 +356,10 @@ def replay_inconsistencies(
             problems.add((ref, "INVALID_OUTCOME"))
         readback_valid = att.readback is None or (
             isinstance(att.readback, str) and att.readback in _READBACKS)
-        if not readback_valid:
+        pre_valid = att.pre_retry_readback is None or (
+            isinstance(att.pre_retry_readback, str)
+            and att.pre_retry_readback in _READBACKS)
+        if not readback_valid or not pre_valid:
             problems.add((ref, "INVALID_READBACK"))
         if outcome_valid and readback_valid:
             if att.outcome != "success" and att.readback is None:
@@ -367,8 +374,13 @@ def replay_inconsistencies(
             continue
         if retries == 0:
             continue
+        # Safety evidence is the readback before the retry; without a recorded
+        # pre-retry readback the current one is used (a proposed retry), so a
+        # completed retry with no pre-retry evidence still fails closed.
+        evidence = att.pre_retry_readback if att.pre_retry_readback is not None else att.readback
         # ``is True`` so a truthy non-bool (e.g. "no") is never a rejection.
-        if not (readback_valid and att.readback == "absent" and att.safety_rejected is True):
+        if not (readback_valid and pre_valid and evidence == "absent"
+                and att.safety_rejected is True):
             problems.add((ref, "UNSAFE_RETRY"))
         if retries > 1:
             problems.add((ref, "RETRY_LIMIT_EXCEEDED"))

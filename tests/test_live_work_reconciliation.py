@@ -1,5 +1,6 @@
 import datetime as dt
 import unittest
+from dataclasses import replace
 import sys
 from pathlib import Path
 
@@ -124,6 +125,8 @@ class ReconciliationTests(unittest.TestCase):
 HEAD = "c" * 40
 OLD_HEAD = "d" * 40
 OLD_BASE = "f" * 40
+REVIEWER = "ntk-reviewer[bot]"
+TRUSTED = (REVIEWER,)
 
 
 def pr(**overrides):
@@ -140,6 +143,8 @@ def pr(**overrides):
         ci_base_sha=SHA,
         ci_conclusion="success",
         merge_ready_claimed=True,
+        approved_by=REVIEWER,
+        material_authors=("NTinkicht",),
     )
     fields.update(overrides)
     return PullRequestObservation(**fields)
@@ -147,7 +152,7 @@ def pr(**overrides):
 
 class PullRequestReconciliationTests(unittest.TestCase):
     def findings(self, *observations, snapshot=None):
-        return pr_inconsistencies(snapshot or snap(), observations)
+        return pr_inconsistencies(snapshot or snap(), observations, trusted_reviewers=TRUSTED)
 
     def assertOnly(self, observation, finding):
         self.assertEqual(self.findings(observation), ((observation.pr, finding),))
@@ -156,7 +161,8 @@ class PullRequestReconciliationTests(unittest.TestCase):
         self.assertEqual(self.findings(pr()), ())
 
     def test_pending_review_and_ci_without_claim_is_consistent(self):
-        self.assertEqual(self.findings(pr(approved_head_sha=None, approved_base_sha=None, ci_head_sha=None,
+        self.assertEqual(self.findings(pr(approved_head_sha=None, approved_base_sha=None, approved_by=None,
+                                          ci_head_sha=None,
                                           ci_base_sha=None, ci_conclusion=None,
                                           merge_ready_claimed=False)), ())
 
@@ -243,7 +249,8 @@ class PullRequestReconciliationTests(unittest.TestCase):
                          ((9, "STALE_APPROVAL"), (9, "UNSUPPORTED_MERGE_READY")))
 
     def test_merge_ready_claim_without_approval(self):
-        self.assertOnly(pr(approved_head_sha=None, approved_base_sha=None), "UNSUPPORTED_MERGE_READY")
+        self.assertOnly(pr(approved_head_sha=None, approved_base_sha=None, approved_by=None),
+                        "UNSUPPORTED_MERGE_READY")
 
     def test_merge_ready_claim_without_ci(self):
         self.assertOnly(pr(ci_head_sha=None, ci_base_sha=None, ci_conclusion=None), "UNSUPPORTED_MERGE_READY")
@@ -291,12 +298,73 @@ class PullRequestReconciliationTests(unittest.TestCase):
 
 
 
+class ApprovalIdentityTests(unittest.TestCase):
+    """OC-P0-01/05 (#357): an approval counts only from a declared trusted
+    reviewer who did not materially author the live head; fail closed."""
+
+    def findings(self, observation, trusted=TRUSTED):
+        return pr_inconsistencies(snap(), (observation,), trusted_reviewers=trusted)
+
+    def assertUntrusted(self, observation, trusted=TRUSTED):
+        self.assertEqual(self.findings(observation, trusted),
+                         ((9, "UNSUPPORTED_MERGE_READY"), (9, "UNTRUSTED_APPROVAL")))
+        self.assertEqual(self.findings(replace(observation, merge_ready_claimed=False), trusted),
+                         ((9, "UNTRUSTED_APPROVAL"),))
+
+    def test_trusted_non_author_approval_is_evidence(self):
+        self.assertEqual(self.findings(pr()), ())
+
+    def test_approval_by_an_untrusted_login(self):
+        self.assertUntrusted(pr(approved_by="drive-by-contributor"))
+
+    def test_approval_without_an_approver_identity(self):
+        self.assertUntrusted(pr(approved_by=None))
+
+    def test_blank_or_non_string_approver(self):
+        for bad in ("", "   ", 7, (REVIEWER,)):
+            with self.subTest(approver=bad):
+                self.assertUntrusted(pr(approved_by=bad))
+
+    def test_case_variant_of_the_trusted_login_is_not_trusted(self):
+        self.assertUntrusted(pr(approved_by="NTK-Reviewer[bot]"))
+
+    def test_material_author_cannot_approve_its_own_head(self):
+        self.assertUntrusted(pr(material_authors=("NTinkicht", REVIEWER)))
+        self.assertUntrusted(pr(material_authors=("ntk-REVIEWER[bot]",)))
+        self.assertUntrusted(pr(approved_by="NTinkicht"), trusted=(REVIEWER, "NTinkicht"))
+
+    def test_no_trusted_reviewer_declared_fails_closed(self):
+        self.assertUntrusted(pr(), trusted=())
+        self.assertEqual(pr_inconsistencies(snap(), (pr(merge_ready_claimed=False),)),
+                         ((9, "UNTRUSTED_APPROVAL"),))
+
+    def test_invalid_trust_list_entries_are_ignored(self):
+        self.assertUntrusted(pr(approved_by=" "), trusted=(" ", REVIEWER))
+        self.assertEqual(self.findings(pr(), trusted=(None, "", 3, REVIEWER)), ())
+
+    def test_no_approval_reported_adds_no_identity_finding(self):
+        pending = pr(approved_head_sha=None, approved_base_sha=None, approved_by=None,
+                     merge_ready_claimed=False)
+        self.assertEqual(self.findings(pending), ())
+        self.assertEqual(self.findings(pending, trusted=()), ())
+
+    def test_approver_without_a_revision_is_stale(self):
+        self.assertEqual(self.findings(pr(approved_head_sha=None, approved_base_sha=None,
+                                          merge_ready_claimed=False)),
+                         ((9, "STALE_APPROVAL"),))
+
+    def test_untrusted_and_stale_approval_are_both_reported_sorted(self):
+        result = self.findings(pr(approved_by="someone", approved_head_sha=OLD_HEAD))
+        self.assertEqual(result, ((9, "STALE_APPROVAL"), (9, "UNSUPPORTED_MERGE_READY"),
+                                  (9, "UNTRUSTED_APPROVAL")))
+
+
 class InvalidNumericIdentityTests(unittest.TestCase):
     """OC-P0-01: work identities must be genuine positive integers."""
 
     def test_valid_baselines_are_unchanged(self):
         self.assertEqual(inconsistencies(snap()), ())
-        self.assertEqual(pr_inconsistencies(snap(), (pr(),)), ())
+        self.assertEqual(pr_inconsistencies(snap(), (pr(),), trusted_reviewers=TRUSTED), ())
 
     def test_invalid_issue_catalog_ids(self):
         for bad in (0, -1, False, True, 1.2, "4"):

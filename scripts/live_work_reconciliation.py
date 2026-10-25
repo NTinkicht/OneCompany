@@ -76,7 +76,9 @@ class PullRequestObservation:
     ``*_head_sha`` / ``*_base_sha`` review/CI fields are the exact head and
     base those results were produced on. Evidence counts only when both match
     the live head and live main, so a base advance invalidates it even when
-    the head is unchanged.
+    the head is unchanged. ``approved_by`` is the login behind that approval
+    and ``material_authors`` the logins that materially authored the live
+    head: an approval also needs a trusted, non-author identity.
     """
     pr: int
     issue: int
@@ -89,6 +91,8 @@ class PullRequestObservation:
     ci_base_sha: str | None = None
     ci_conclusion: str | None = None
     merge_ready_claimed: bool = False
+    approved_by: str | None = None
+    material_authors: tuple[str, ...] = ()
 
 
 def _valid_sha(value: str | None) -> bool:
@@ -100,15 +104,33 @@ def _same_sha(left: str | None, right: str | None) -> bool:
     return _valid_sha(left) and _valid_sha(right) and left == right
 
 
+def _trusted_approver(obs: PullRequestObservation, trusted: frozenset[str]) -> bool:
+    """Exact match against a declared reviewer and never a material author.
+
+    Trust is an exact login match (a case variant is not the declared
+    identity); author exclusion is case-insensitive because GitHub logins
+    are, so a case variant of the author cannot approve its own work.
+    """
+    approver = obs.approved_by
+    if not isinstance(approver, str) or not approver.strip() or approver not in trusted:
+        return False
+    authors = obs.material_authors if isinstance(obs.material_authors, tuple) else ()
+    return all(not isinstance(a, str) or a.casefold() != approver.casefold() for a in authors)
+
+
 def pr_inconsistencies(
-    snapshot: WorkSnapshot, observations: tuple[PullRequestObservation, ...]
+    snapshot: WorkSnapshot, observations: tuple[PullRequestObservation, ...],
+    *, trusted_reviewers: tuple[str, ...] = (),
 ) -> tuple[tuple[int, str], ...]:
     """Return stable sorted ``(pr, FINDING)`` pairs for exact-head PR truth.
 
-    Approval and CI only count for the live head; a recorded binding with no
-    observation is ``UNOBSERVED_PR_BINDING``. Nothing here grants merge,
-    review or lease authority.
+    Approval and CI only count for the live head; an approval also counts
+    only from a declared trusted reviewer who did not author the head
+    (``UNTRUSTED_APPROVAL``; none is trusted by default). A recorded binding
+    with no observation is ``UNOBSERVED_PR_BINDING``. Nothing here grants
+    merge, review or lease authority.
     """
+    trusted = frozenset(r for r in trusted_reviewers if isinstance(r, str) and r.strip())
     problems: set[tuple[int, str]] = set()
     bindings = set(snapshot.pr_issue_bindings)
     seen: set[int] = set()
@@ -136,9 +158,15 @@ def pr_inconsistencies(
         base_current = _same_sha(obs.base_sha, live_main)
         if not base_current:
             problems.add((pr_ref, "BASE_BEHIND_MAIN"))
-        approved = _same_sha(obs.approved_head_sha, head) and _same_sha(obs.approved_base_sha, live_main)
-        if (obs.approved_head_sha is not None or obs.approved_base_sha is not None) and not approved:
+        approval_on_head = _same_sha(obs.approved_head_sha, head) and _same_sha(obs.approved_base_sha, live_main)
+        approval_reported = (obs.approved_head_sha is not None or obs.approved_base_sha is not None
+                             or obs.approved_by is not None)
+        if approval_reported and not approval_on_head:
             problems.add((pr_ref, "STALE_APPROVAL"))
+        approver_trusted = _trusted_approver(obs, trusted)
+        if approval_reported and not approver_trusted:
+            problems.add((pr_ref, "UNTRUSTED_APPROVAL"))
+        approved = approval_on_head and approver_trusted
         ci_on_head = _same_sha(obs.ci_head_sha, head) and _same_sha(obs.ci_base_sha, live_main)
         # A conclusion with no exact head/base (e.g. a cached status read
         # without its commit) cannot be attributed to any revision: stale.

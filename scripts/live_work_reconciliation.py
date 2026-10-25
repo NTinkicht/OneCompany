@@ -139,7 +139,11 @@ def pr_inconsistencies(
         if (obs.approved_head_sha is not None or obs.approved_base_sha is not None) and not approved:
             problems.add((pr_ref, "STALE_APPROVAL"))
         ci_on_head = _same_sha(obs.ci_head_sha, head) and _same_sha(obs.ci_base_sha, live_main)
-        if (obs.ci_head_sha is not None or obs.ci_base_sha is not None) and not ci_on_head:
+        # A conclusion with no exact head/base (e.g. a cached status read
+        # without its commit) cannot be attributed to any revision: stale.
+        ci_reported = (obs.ci_head_sha is not None or obs.ci_base_sha is not None
+                       or obs.ci_conclusion is not None)
+        if ci_reported and not ci_on_head:
             problems.add((pr_ref, "STALE_CI"))
         ci_green = ci_on_head and obs.ci_conclusion == "success"
         if ci_on_head and not ci_green:

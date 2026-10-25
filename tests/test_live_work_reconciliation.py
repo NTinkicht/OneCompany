@@ -208,6 +208,22 @@ class PullRequestReconciliationTests(unittest.TestCase):
     def test_pending_ci_on_head(self):
         self.assertOnly(pr(ci_conclusion=None, merge_ready_claimed=False), "CI_NOT_GREEN")
 
+    def test_unattributed_ci_conclusion_is_stale(self):
+        # A conclusion without the exact head/base it ran on is not evidence.
+        for conclusion in ("success", "failure"):
+            with self.subTest(conclusion=conclusion):
+                self.assertOnly(pr(ci_head_sha=None, ci_base_sha=None, ci_conclusion=conclusion,
+                                   merge_ready_claimed=False), "STALE_CI")
+
+    def test_unattributed_ci_success_does_not_support_merge_ready(self):
+        self.assertEqual(self.findings(pr(ci_head_sha=None, ci_base_sha=None)),
+                         ((9, "STALE_CI"), (9, "UNSUPPORTED_MERGE_READY")))
+
+    def test_ci_conclusion_with_only_one_sha_is_stale(self):
+        for fields in (dict(ci_head_sha=None), dict(ci_base_sha=None)):
+            with self.subTest(**{k: "None" for k in fields}):
+                self.assertOnly(pr(merge_ready_claimed=False, **fields), "STALE_CI")
+
     def test_approval_on_older_base(self):
         self.assertOnly(pr(approved_base_sha=OLD_BASE, merge_ready_claimed=False), "STALE_APPROVAL")
 

@@ -104,8 +104,9 @@ def pr_inconsistencies(
 ) -> tuple[tuple[int, str], ...]:
     """Return stable sorted ``(pr, FINDING)`` pairs for exact-head PR truth.
 
-    Approval and CI only count for the live head; nothing here grants
-    merge, review or lease authority.
+    Approval and CI only count for the live head; a recorded binding with no
+    observation is ``UNOBSERVED_PR_BINDING``. Nothing here grants merge,
+    review or lease authority.
     """
     problems: set[tuple[int, str]] = set()
     bindings = set(snapshot.pr_issue_bindings)
@@ -145,4 +146,11 @@ def pr_inconsistencies(
             problems.add((pr_ref, "CI_NOT_GREEN"))
         if obs.merge_ready_claimed and not (head_current and base_current and approved and ci_green):
             problems.add((pr_ref, "UNSUPPORTED_MERGE_READY"))
+    # Orphan binding: the ledger still records a PR that no live observation
+    # reconciles (closed, merged elsewhere, deleted, or dropped by a stale
+    # fetch). Report it fail-closed; never infer a close or merge here.
+    # Invalid PR ids are already INVALID_PR_ID in ``inconsistencies``.
+    for bound_pr, _ in snapshot.pr_issue_bindings:
+        if _valid_work_id(bound_pr) and bound_pr not in seen:
+            problems.add((bound_pr, "UNOBSERVED_PR_BINDING"))
     return tuple(sorted(problems))

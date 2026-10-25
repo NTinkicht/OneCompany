@@ -237,3 +237,53 @@ def snapshot_freshness(observed_at: object, now: object,
               and age > dt.timedelta(seconds=max_age_seconds)):  # type: ignore[arg-type]
             problems.add("STALE_SNAPSHOT")
     return tuple(sorted(problems))
+
+
+# One pipeline stream per work unit: ``ai/<issue>-<slug>`` (#359). No leading
+# zero, so ``ai/07-x`` can never alias issue 7.
+_PIPELINE_PREFIX = "ai/"
+_PIPELINE_BRANCH = re.compile(r"ai/([1-9][0-9]*)-([0-9A-Za-z][0-9A-Za-z._-]*)")
+
+
+def branch_inconsistencies(
+    snapshot: WorkSnapshot, branches: tuple[str, ...]
+) -> tuple[tuple[str, str], ...]:
+    """Return stable sorted ``(branch, FINDING)`` pairs for live pipeline streams.
+
+    Only names starting ``ai/`` are judged; ``main`` and personal branches are
+    ignored. A malformed ``ai/`` name never identifies an issue. Nothing is
+    fetched, deleted or renamed.
+    """
+    if isinstance(branches, (str, bytes)):
+        raise TypeError("branches must be a collection of names, not one name")
+    problems: set[tuple[str, str]] = set()
+    seen: set[str] = set()
+    streams: dict[int, set[str]] = {}
+    for name in branches:
+        if not isinstance(name, str):
+            problems.add(("", "INVALID_BRANCH_NAME"))
+            continue
+        if not name.startswith(_PIPELINE_PREFIX):
+            continue
+        if name in seen:
+            problems.add((name, "DUPLICATE_BRANCH_OBSERVATION"))
+            continue
+        seen.add(name)
+        match = _PIPELINE_BRANCH.fullmatch(name)
+        if match is None:
+            problems.add((name, "INVALID_BRANCH_NAME"))
+            continue
+        streams.setdefault(int(match.group(1)), set()).add(name)
+    # Same identity rule as everywhere else: True == 1 and 1.0 == 1 in
+    # Python, but neither identifies an issue.
+    known = {i for i in snapshot.issue_ids if _valid_work_id(i)}
+    retired = {i for i in snapshot.retired_pilot_issue_ids if _valid_work_id(i)}
+    for issue, names in streams.items():
+        for name in names:
+            if issue not in known:
+                problems.add((name, "ORPHAN_BRANCH"))
+            if issue in retired:
+                problems.add((name, "RETIRED_PILOT_REACTIVATED"))
+            if len(names) > 1:
+                problems.add((name, "DUPLICATE_STREAM"))
+    return tuple(sorted(problems))

@@ -5,6 +5,7 @@ This module never claims a lease, merges, or modifies the queue.
 """
 from __future__ import annotations
 
+import datetime as dt
 import re
 from dataclasses import dataclass
 
@@ -157,4 +158,33 @@ def pr_inconsistencies(
     for bound_pr, _ in snapshot.pr_issue_bindings:
         if _valid_work_id(bound_pr) and bound_pr not in seen:
             problems.add((bound_pr, "UNOBSERVED_PR_BINDING"))
+    return tuple(sorted(problems))
+
+
+def _aware(value: object) -> bool:
+    return (isinstance(value, dt.datetime) and value.tzinfo is not None
+            and value.utcoffset() is not None)
+
+
+def snapshot_freshness(observed_at: object, now: object,
+                       max_age_seconds: object) -> tuple[str, ...]:
+    """Return stable fail-closed findings about when a snapshot was observed.
+
+    Matching SHAs do not prove a snapshot is live: a cached read can be
+    internally consistent yet hours old, or stamped in the future by clock
+    skew or forgery. Only timezone-aware datetimes are compared; an age equal
+    to ``max_age_seconds`` is still fresh. Nothing is fetched or mutated.
+    """
+    problems: set[str] = set()
+    if not (_aware(observed_at) and _aware(now)):
+        problems.add("INVALID_TIMESTAMP")
+    if type(max_age_seconds) is not int or max_age_seconds <= 0:
+        problems.add("INVALID_MAX_AGE")
+    if "INVALID_TIMESTAMP" not in problems:
+        age = now - observed_at  # type: ignore[operator]
+        if age < dt.timedelta(0):
+            problems.add("FUTURE_SNAPSHOT")
+        elif ("INVALID_MAX_AGE" not in problems
+              and age > dt.timedelta(seconds=max_age_seconds)):  # type: ignore[arg-type]
+            problems.add("STALE_SNAPSHOT")
     return tuple(sorted(problems))

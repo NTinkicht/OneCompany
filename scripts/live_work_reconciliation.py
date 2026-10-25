@@ -121,12 +121,18 @@ def _trusted_approver(obs: PullRequestObservation, trusted: frozenset[str]) -> b
     Trust is an exact login match (a case variant is not the declared
     identity); author exclusion is case-insensitive because GitHub logins
     are, so a case variant of the author cannot approve its own work.
+    Independence needs authorship evidence: missing, empty or malformed
+    ``material_authors`` (every head has an author) is never proof that the
+    approver did not write it.
     """
     approver = obs.approved_by
     if not isinstance(approver, str) or not approver.strip() or approver not in trusted:
         return False
-    authors = obs.material_authors if isinstance(obs.material_authors, tuple) else ()
-    return all(not isinstance(a, str) or a.casefold() != approver.casefold() for a in authors)
+    authors = obs.material_authors
+    if (not isinstance(authors, tuple) or not authors
+            or any(not isinstance(a, str) or not a.strip() for a in authors)):
+        return False
+    return all(a.casefold() != approver.casefold() for a in authors)
 
 
 def pr_inconsistencies(

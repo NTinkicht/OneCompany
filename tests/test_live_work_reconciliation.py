@@ -352,6 +352,12 @@ class ApprovalIdentityTests(unittest.TestCase):
         self.assertUntrusted(pr(material_authors=("ntk-REVIEWER[bot]",)))
         self.assertUntrusted(pr(approved_by="NTinkicht"), trusted=(REVIEWER, "NTinkicht"))
 
+    def test_missing_empty_or_malformed_authorship_fails_closed(self):
+        for authors in ((), None, ["NTinkicht"], [REVIEWER], ("NTinkicht", ""), ("NTinkicht", " "),
+                        ("NTinkicht", None), "NTinkicht"):
+            with self.subTest(material_authors=authors):
+                self.assertUntrusted(pr(material_authors=authors))
+
     def test_no_trusted_reviewer_declared_fails_closed(self):
         self.assertUntrusted(pr(), trusted=())
         self.assertEqual(pr_inconsistencies(snap(), (pr(merge_ready_claimed=False),)),

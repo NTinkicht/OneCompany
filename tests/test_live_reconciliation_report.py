@@ -1,4 +1,4 @@
-"""OC-P0-01 (#363, #367, #371, #375): one fail-closed reconciliation report over a live snapshot."""
+"""OC-P0-01 (#363, #367, #371, #375, #377): one fail-closed reconciliation report over a live snapshot."""
 import copy
 import contextlib
 import datetime as dt
@@ -47,13 +47,17 @@ def commit(sha=HEAD, author="claude", committer="web-flow", message="Change\n\nM
     return {"sha": sha, "author_login": author, "committer_login": committer, "message": message}
 
 
+def thread(thread_id="PRRT_1", resolved=True, outdated=False):
+    return {"id": thread_id, "is_resolved": resolved, "is_outdated": outdated}
+
+
 NOW = dt.datetime(2026, 10, 25, 14, 0, tzinfo=dt.timezone.utc)
 
 
 def doc():
     """A fully consistent, fresh snapshot."""
     return {
-        "schema_version": 4,
+        "schema_version": 5,
         "observed_at": "2026-10-25T13:55:00+00:00",
         "snapshot": {
             "main_sha": MAIN, "observed_main_sha": MAIN,
@@ -65,7 +69,9 @@ def doc():
             "pr": 9, "issue": 1, "recorded_head_sha": HEAD, "observed_head_sha": HEAD,
             "base_sha": MAIN, "ci_base_sha": MAIN,
             "check_runs": [run(11), run(12, name="lint")], "reviews": [review(21)],
-            "commits": [commit(PARENT), commit()], "merge_ready_claimed": True,
+            "commits": [commit(PARENT), commit()],
+            "review_threads": [thread(), thread("PRRT_2", outdated=True)],
+            "review_threads_complete": True, "merge_ready_claimed": True,
         }],
         "branches": ["main", "ai/1-feature"],
         "write_attempts": [{"operation_id": "op-1", "issue": 1, "outcome": "success",
@@ -93,6 +99,8 @@ class ReportTests(unittest.TestCase):
                               [9, "UNTRUSTED_APPROVAL"]),
             "reviews": (lambda d: d["pull_requests"][0].update(reviews=[review(21, commit=OLD_HEAD)]),
                         [9, "", "STALE_HEAD_APPROVAL"]),
+            "review_threads": (lambda d: d["pull_requests"][0].update(review_threads=[thread(resolved=False)]),
+                               [9, "PRRT_1", "UNRESOLVED_REVIEW_THREAD"]),
             "branches": (lambda d: d["branches"].append("ai/1-other"), ["ai/1-other", "DUPLICATE_STREAM"]),
             "write_attempts": (lambda d: d["write_attempts"][0].update(outcome="unknown", readback=None),
                                ["op-1", "UNVERIFIED_OUTCOME"]),
@@ -300,6 +308,56 @@ class MaterialAuthorshipTests(unittest.TestCase):
                          report["findings"]["commits"])
 
 
+class ReviewThreadTests(unittest.TestCase):
+    """#377: merge-ready needs every review conversation resolved, from raw threads."""
+
+    def report_with(self, threads, complete=True, merge_ready=True):
+        data = doc()
+        data["pull_requests"][0].update(review_threads=threads, review_threads_complete=complete,
+                                        merge_ready_claimed=merge_ready)
+        return build_report(data, NOW)
+
+    def test_resolved_or_absent_threads_are_consistent(self):
+        for threads in ([], [thread()], [thread(), thread("PRRT_2", outdated=True)]):
+            with self.subTest(threads=threads):
+                report = self.report_with(threads)
+                self.assertEqual("CONSISTENT", report["status"])
+                self.assertEqual([], report["findings"]["review_threads"])
+
+    def test_unsettled_conversations_refuse_merge_ready(self):
+        cases = {
+            "unresolved": ([thread(), thread("PRRT_2", resolved=False)], True,
+                           [9, "PRRT_2", "UNRESOLVED_REVIEW_THREAD"]),
+            "unresolved outdated": ([thread("PRRT_3", resolved=False, outdated=True)], True,
+                                    [9, "PRRT_3", "UNRESOLVED_REVIEW_THREAD"]),
+            "incomplete list": ([thread()], False, [9, "", "REVIEW_THREADS_INCOMPLETE"]),
+            "incomplete empty list": ([], False, [9, "", "REVIEW_THREADS_INCOMPLETE"]),
+            "duplicate": ([thread(), thread()], True, [9, "PRRT_1", "DUPLICATE_REVIEW_THREAD"]),
+            "blank id": ([thread(" ")], True, [9, "", "INVALID_REVIEW_THREAD"]),
+            "padded id": ([thread(" PRRT_1")], True, [9, "", "INVALID_REVIEW_THREAD"]),
+        }
+        for label, (threads, complete, finding) in cases.items():
+            with self.subTest(case=label):
+                report = self.report_with(threads, complete)
+                self.assertEqual("INCONSISTENT", report["status"])
+                self.assertIn(finding, report["findings"]["review_threads"])
+                self.assertIn([9, "UNSUPPORTED_MERGE_READY"], report["findings"]["pull_requests"])
+
+    def test_unresolved_thread_without_merge_ready_claim_is_still_inconsistent(self):
+        report = self.report_with([thread(resolved=False)], merge_ready=False)
+        self.assertEqual("INCONSISTENT", report["status"])
+        self.assertEqual([[9, "PRRT_1", "UNRESOLVED_REVIEW_THREAD"]], report["findings"]["review_threads"])
+        self.assertEqual([], report["findings"]["pull_requests"])
+
+    def test_merge_ready_finding_is_not_duplicated(self):
+        data = doc()
+        data["pull_requests"][0].update(review_threads=[thread(resolved=False)],
+                                        commits=[commit(author=BOT)])
+        findings = build_report(data, NOW)["findings"]["pull_requests"]
+        self.assertEqual(1, findings.count([9, "UNSUPPORTED_MERGE_READY"]))
+        self.assertEqual(sorted(findings), findings)
+
+
 class LoaderTests(unittest.TestCase):
     def test_strict_loader_refuses_malformed_input(self):
         mutations = [
@@ -307,7 +365,8 @@ class LoaderTests(unittest.TestCase):
             lambda d: d.update(extra=1),
             lambda d: d.update(schema_version=2),
             lambda d: d.update(schema_version=3),
-            lambda d: d.update(schema_version=5),
+            lambda d: d.update(schema_version=4),
+            lambda d: d.update(schema_version=6),
             lambda d: d.update(schema_version=True),
             lambda d: d.update(observed_at="2026-10-25T13:55:00"),  # naive
             lambda d: d.update(observed_at="yesterday"),
@@ -329,6 +388,19 @@ class LoaderTests(unittest.TestCase):
             lambda d: d["pull_requests"][0]["commits"][0].update(message=None),
             lambda d: d["pull_requests"][0]["commits"][0].update(extra=1),
             lambda d: d["pull_requests"][0].pop("base_sha"),
+            # #377: review threads are required raw evidence, never a caller claim.
+            lambda d: d["pull_requests"][0].pop("review_threads"),
+            lambda d: d["pull_requests"][0].pop("review_threads_complete"),
+            lambda d: d["pull_requests"][0].update(review_threads_complete="true"),
+            lambda d: d["pull_requests"][0].update(review_threads_complete=1),
+            lambda d: d["pull_requests"][0].update(review_threads={}),
+            lambda d: d["pull_requests"][0].update(conversations_resolved=True),
+            lambda d: d["pull_requests"][0]["review_threads"][0].update(is_resolved=1),
+            lambda d: d["pull_requests"][0]["review_threads"][0].update(is_resolved="true"),
+            lambda d: d["pull_requests"][0]["review_threads"][0].update(is_outdated=None),
+            lambda d: d["pull_requests"][0]["review_threads"][0].update(id=7),
+            lambda d: d["pull_requests"][0]["review_threads"][0].pop("is_outdated"),
+            lambda d: d["pull_requests"][0]["review_threads"][0].update(extra=1),
             lambda d: d.update(pull_requests={}),
             lambda d: d["write_attempts"][0].update(retries=False),
             lambda d: d["write_attempts"][0].update(safety_rejected=1),
@@ -404,7 +476,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(EXIT_INCONSISTENT, code)
         self.assertEqual(EXIT_CONSISTENT, self.run_cli(json.dumps(stale), "--max-age-seconds", "3600")[0])
 
-        for text in ["{not json", "[]", json.dumps({**doc(), "schema_version": 3})]:
+        for text in ["{not json", "[]", json.dumps({**doc(), "schema_version": 4})]:
             code, out, err = self.run_cli(text)
             self.assertEqual((EXIT_INVALID, ""), (code, out))
             self.assertTrue(err.startswith("invalid snapshot:"))

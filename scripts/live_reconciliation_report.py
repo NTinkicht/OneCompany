@@ -20,6 +20,12 @@ the caller. They are derived from the exact-head commit list the caller
 fetched, through ``material_authorship_reconciliation.derive_material_authors``;
 any ambiguity withholds them, so ``pr_inconsistencies`` refuses the approval.
 
+Schema 5 (#377): each pull request carries the raw review threads the caller
+fetched and whether it paged to the end. Any unresolved (including outdated),
+duplicate or malformed thread, or an incomplete list, is reported through
+``review_thread_reconciliation.review_thread_findings``; a merge-ready claim
+on such a PR is ``UNSUPPORTED_MERGE_READY``.
+
 ``CONSISTENT`` only when every check is empty and the snapshot is fresh; any
 finding is ``INCONSISTENT``; malformed input is refused (never coerced).
 Nothing here fetches, claims a lease, mutates the queue or retries a write.
@@ -49,6 +55,10 @@ from material_authorship_reconciliation import (  # noqa: E402
     CommitObservation,
     derive_material_authors,
 )
+from review_thread_reconciliation import (  # noqa: E402
+    ReviewThreadObservation,
+    review_thread_findings,
+)
 from review_approval_reconciliation import (  # noqa: E402
     ReviewObservation,
     attribute_approval,
@@ -59,7 +69,7 @@ from required_check_reconciliation import (  # noqa: E402
     aggregate_required_checks,
 )
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 DEFAULT_MAX_AGE_SECONDS = 900
 EXIT_CONSISTENT, EXIT_INCONSISTENT, EXIT_INVALID = 0, 1, 2
 
@@ -81,11 +91,15 @@ _PR_FIELDS = {
     # caller.
     "ci_base_sha": (_OPT_STR, False), "check_runs": ("records", True),
     "reviews": ("records", True), "commits": ("records", True),
+    "review_threads": ("records", True), "review_threads_complete": (_BOOL, True),
     "merge_ready_claimed": (_BOOL, False),
 }
 _COMMIT_FIELDS = {
     "sha": (_STR, True), "author_login": (_OPT_STR, True),
     "committer_login": (_OPT_STR, True), "message": (_STR, True),
+}
+_REVIEW_THREAD_FIELDS = {
+    "id": (_STR, True), "is_resolved": (_BOOL, True), "is_outdated": (_BOOL, True),
 }
 _REVIEW_FIELDS = {
     "id": (_INT, True), "reviewer": (_STR, True), "state": (_STR, True),
@@ -108,6 +122,7 @@ _NESTED = {
     "check_runs": (_CHECK_RUN_FIELDS, CheckRunObservation),
     "reviews": (_REVIEW_FIELDS, ReviewObservation),
     "commits": (_COMMIT_FIELDS, CommitObservation),
+    "review_threads": (_REVIEW_THREAD_FIELDS, ReviewThreadObservation),
 }
 
 
@@ -151,7 +166,7 @@ def _record(obj: object, fields: dict[str, tuple[str, bool]], path: str) -> dict
             if required:
                 raise InvalidSnapshot(f"missing {path}.{name}")
             continue
-        if kind == "records":  # nested records: check_runs, reviews and commits only
+        if kind == "records":  # nested records: check_runs, reviews, commits, review_threads only
             nested, factory = _NESTED[name]
             out[name] = tuple(factory(**r) for r in
                               _records(obj[name], nested, f"{path}.{name}"))
@@ -206,11 +221,15 @@ def build_report(data: object, now: dt.datetime,
     loaded = load_snapshot(data)
     snapshot: WorkSnapshot = loaded["snapshot"]
     observations, check_findings, review_findings, commit_findings = [], [], [], []
+    thread_findings: list[list[Any]] = []
+    unsettled_merge_ready: set[tuple[int, str]] = set()
     for record in loaded["pull_requests"]:
         fields = dict(record)
         runs = fields.pop("check_runs")
         reviews = fields.pop("reviews")
         commits = fields.pop("commits")
+        threads = review_thread_findings(fields.pop("review_threads"),
+                                         fields.pop("review_threads_complete"))
         ci = aggregate_required_checks(loaded["required_checks"], runs,
                                        fields["observed_head_sha"])
         approval = attribute_approval(reviews, fields["observed_head_sha"],
@@ -225,14 +244,19 @@ def build_report(data: object, now: dt.datetime,
         check_findings.extend([fields["pr"], name, finding] for name, finding in ci.findings)
         review_findings.extend([fields["pr"], ref, finding] for ref, finding in approval.findings)
         commit_findings.extend([fields["pr"], ref, finding] for ref, finding in authorship.findings)
+        thread_findings.extend([fields["pr"], ref, finding] for ref, finding in threads)
+        if threads and fields.get("merge_ready_claimed", False):
+            unsettled_merge_ready.add((fields["pr"], "UNSUPPORTED_MERGE_READY"))
     findings = {
         "snapshot": list(inconsistencies(snapshot)),
         "freshness": list(snapshot_freshness(loaded["observed_at"], now, max_age_seconds)),
-        "pull_requests": [list(f) for f in pr_inconsistencies(
-            snapshot, tuple(observations), trusted_reviewers=loaded["trusted_reviewers"])],
+        "pull_requests": [list(f) for f in sorted(set(pr_inconsistencies(
+            snapshot, tuple(observations), trusted_reviewers=loaded["trusted_reviewers"]))
+            | unsettled_merge_ready)],
         "required_checks": sorted(check_findings),
         "reviews": sorted(review_findings),
         "commits": sorted(commit_findings),
+        "review_threads": sorted(thread_findings),
         "branches": [list(f) for f in branch_inconsistencies(snapshot, loaded["branches"])],
         "write_attempts": [list(f) for f in replay_inconsistencies(snapshot, loaded["write_attempts"])],
     }

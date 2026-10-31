@@ -10,6 +10,11 @@ Schema 2 (#367): each pull request's CI is never taken from the caller. It is
 derived from the exact-head required check runs the caller fetched, through
 ``required_check_reconciliation.aggregate_required_checks``.
 
+Schema 3 (#371): each pull request's approval (head, base, reviewer) is never
+taken from the caller either. It is derived from the raw reviews the caller
+fetched, through ``review_approval_reconciliation.attribute_approval``;
+``pr_inconsistencies`` still judges base freshness and author independence.
+
 ``CONSISTENT`` only when every check is empty and the snapshot is fresh; any
 finding is ``INCONSISTENT``; malformed input is refused (never coerced).
 Nothing here fetches, claims a lease, mutates the queue or retries a write.
@@ -35,13 +40,17 @@ from live_work_reconciliation import (  # noqa: E402
     replay_inconsistencies,
     snapshot_freshness,
 )
+from review_approval_reconciliation import (  # noqa: E402
+    ReviewObservation,
+    attribute_approval,
+)
 from required_check_reconciliation import (  # noqa: E402
     CheckRunObservation,
     RequiredCheck,
     aggregate_required_checks,
 )
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 DEFAULT_MAX_AGE_SECONDS = 900
 EXIT_CONSISTENT, EXIT_INCONSISTENT, EXIT_INVALID = 0, 1, 2
 
@@ -57,11 +66,16 @@ _SNAPSHOT_FIELDS = {
 _PR_FIELDS = {
     "pr": (_INT, True), "issue": (_INT, True), "recorded_head_sha": (_STR, True),
     "observed_head_sha": (_STR, True), "base_sha": (_STR, True),
-    "approved_head_sha": (_OPT_STR, False), "approved_base_sha": (_OPT_STR, False),
-    # ci_head_sha / ci_conclusion are derived from check_runs, never accepted.
+    # ci_head_sha / ci_conclusion are derived from check_runs, and
+    # approved_head_sha / approved_base_sha / approved_by from reviews;
+    # none of them is accepted from the caller.
     "ci_base_sha": (_OPT_STR, False), "check_runs": ("records", True),
-    "merge_ready_claimed": (_BOOL, False),
-    "approved_by": (_OPT_STR, False), "material_authors": ("strs", False),
+    "reviews": ("records", True),
+    "merge_ready_claimed": (_BOOL, False), "material_authors": ("strs", False),
+}
+_REVIEW_FIELDS = {
+    "id": (_INT, True), "reviewer": (_STR, True), "state": (_STR, True),
+    "commit_id": (_STR, True), "body": (_STR, True),
 }
 _REQUIRED_CHECK_FIELDS = {"name": (_STR, True), "app": (_STR, True)}
 _CHECK_RUN_FIELDS = {
@@ -73,6 +87,12 @@ _ATTEMPT_FIELDS = {
     "readback": (_OPT_STR, False), "retries": (_INT, False),
     "safety_rejected": (_BOOL, False), "expected_head_sha": (_OPT_STR, False),
     "observed_head_sha": (_OPT_STR, False), "pre_retry_readback": (_OPT_STR, False),
+}
+
+
+_NESTED = {
+    "check_runs": (_CHECK_RUN_FIELDS, CheckRunObservation),
+    "reviews": (_REVIEW_FIELDS, ReviewObservation),
 }
 
 
@@ -116,9 +136,10 @@ def _record(obj: object, fields: dict[str, tuple[str, bool]], path: str) -> dict
             if required:
                 raise InvalidSnapshot(f"missing {path}.{name}")
             continue
-        if kind == "records":  # only check_runs uses nested records
-            out[name] = tuple(CheckRunObservation(**r) for r in
-                              _records(obj[name], _CHECK_RUN_FIELDS, f"{path}.{name}"))
+        if kind == "records":  # nested records: check_runs and reviews only
+            nested, factory = _NESTED[name]
+            out[name] = tuple(factory(**r) for r in
+                              _records(obj[name], nested, f"{path}.{name}"))
         else:
             out[name] = _check(kind, obj[name], f"{path}.{name}")
     return out
@@ -169,21 +190,29 @@ def build_report(data: object, now: dt.datetime,
     """Run every check over one snapshot and return a deterministic verdict."""
     loaded = load_snapshot(data)
     snapshot: WorkSnapshot = loaded["snapshot"]
-    observations, check_findings = [], []
+    observations, check_findings, review_findings = [], [], []
     for record in loaded["pull_requests"]:
         fields = dict(record)
         runs = fields.pop("check_runs")
+        reviews = fields.pop("reviews")
         ci = aggregate_required_checks(loaded["required_checks"], runs,
                                        fields["observed_head_sha"])
+        approval = attribute_approval(reviews, fields["observed_head_sha"],
+                                      loaded["trusted_reviewers"])
         observations.append(PullRequestObservation(
-            **fields, ci_head_sha=ci.ci_head_sha, ci_conclusion=ci.ci_conclusion))
+            **fields, ci_head_sha=ci.ci_head_sha, ci_conclusion=ci.ci_conclusion,
+            approved_head_sha=approval.approved_head_sha,
+            approved_base_sha=approval.approved_base_sha,
+            approved_by=approval.approved_by))
         check_findings.extend([fields["pr"], name, finding] for name, finding in ci.findings)
+        review_findings.extend([fields["pr"], ref, finding] for ref, finding in approval.findings)
     findings = {
         "snapshot": list(inconsistencies(snapshot)),
         "freshness": list(snapshot_freshness(loaded["observed_at"], now, max_age_seconds)),
         "pull_requests": [list(f) for f in pr_inconsistencies(
             snapshot, tuple(observations), trusted_reviewers=loaded["trusted_reviewers"])],
         "required_checks": sorted(check_findings),
+        "reviews": sorted(review_findings),
         "branches": [list(f) for f in branch_inconsistencies(snapshot, loaded["branches"])],
         "write_attempts": [list(f) for f in replay_inconsistencies(snapshot, loaded["write_attempts"])],
     }

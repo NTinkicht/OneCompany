@@ -1,4 +1,4 @@
-"""OC-P0-01 (#363, #367): one fail-closed reconciliation report over a live snapshot."""
+"""OC-P0-01 (#363, #367, #371): one fail-closed reconciliation report over a live snapshot."""
 import copy
 import contextlib
 import datetime as dt
@@ -25,13 +25,28 @@ APP = "github-actions"
 def run(run_id, name="validate", app=APP, head=HEAD, status="completed", conclusion="success"):
     return {"id": run_id, "name": name, "app": app, "head_sha": head,
             "status": status, "conclusion": conclusion}
+
+
+BOT = "ntk-reviewer[bot]"
+
+
+def marker(head=HEAD, mode="approve", base=MAIN, verdict="PASS"):
+    base_part = f"base={base} " if base else ""
+    return f"<!-- ntk-review v1 head={head} mode={mode} {base_part}verdict={verdict} floor=0 -->"
+
+
+def review(review_id, reviewer=BOT, state="APPROVED", commit=HEAD, body=None):
+    return {"id": review_id, "reviewer": reviewer, "state": state, "commit_id": commit,
+            "body": f"PASS\n\n{marker()}" if body is None else body}
+
+
 NOW = dt.datetime(2026, 10, 25, 14, 0, tzinfo=dt.timezone.utc)
 
 
 def doc():
     """A fully consistent, fresh snapshot."""
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "observed_at": "2026-10-25T13:55:00+00:00",
         "snapshot": {
             "main_sha": MAIN, "observed_main_sha": MAIN,
@@ -41,10 +56,9 @@ def doc():
         },
         "pull_requests": [{
             "pr": 9, "issue": 1, "recorded_head_sha": HEAD, "observed_head_sha": HEAD,
-            "base_sha": MAIN, "approved_head_sha": HEAD, "approved_base_sha": MAIN,
-            "ci_base_sha": MAIN, "check_runs": [run(11), run(12, name="lint")],
-            "merge_ready_claimed": True, "approved_by": "ntk-reviewer[bot]",
-            "material_authors": ["claude"],
+            "base_sha": MAIN, "ci_base_sha": MAIN,
+            "check_runs": [run(11), run(12, name="lint")], "reviews": [review(21)],
+            "merge_ready_claimed": True, "material_authors": ["claude"],
         }],
         "branches": ["main", "ai/1-feature"],
         "write_attempts": [{"operation_id": "op-1", "issue": 1, "outcome": "success",
@@ -68,7 +82,10 @@ class ReportTests(unittest.TestCase):
         cases = {
             "snapshot": (lambda d: d["snapshot"].update(next_ids=[1]), "ACTIVE_WORK_IN_NEXT"),
             "freshness": (lambda d: d.update(observed_at="2026-10-25T13:00:00+00:00"), "STALE_SNAPSHOT"),
-            "pull_requests": (lambda d: d["pull_requests"][0].update(approved_by="claude"), [9, "UNTRUSTED_APPROVAL"]),
+            "pull_requests": (lambda d: d["pull_requests"][0].update(material_authors=[BOT]),
+                              [9, "UNTRUSTED_APPROVAL"]),
+            "reviews": (lambda d: d["pull_requests"][0].update(reviews=[review(21, commit=OLD_HEAD)]),
+                        [9, "", "STALE_HEAD_APPROVAL"]),
             "branches": (lambda d: d["branches"].append("ai/1-other"), ["ai/1-other", "DUPLICATE_STREAM"]),
             "write_attempts": (lambda d: d["write_attempts"][0].update(outcome="unknown", readback=None),
                                ["op-1", "UNVERIFIED_OUTCOME"]),
@@ -150,13 +167,81 @@ class RequiredCheckTests(unittest.TestCase):
         self.assertEqual("INCONSISTENT", report["status"])
 
 
+class ReviewAttributionTests(unittest.TestCase):
+    """#371: each PR's approval comes only from exact-head trusted reviews."""
+
+    def report_with(self, reviews, **pr_updates):
+        data = doc()
+        data["pull_requests"][0]["reviews"] = reviews
+        data["pull_requests"][0].update(pr_updates)
+        return build_report(data, NOW)
+
+    def test_marker_bearing_exact_head_approval_is_consistent(self):
+        report = build_report(doc(), NOW)
+        self.assertEqual("CONSISTENT", report["status"])
+        self.assertEqual([], report["findings"]["reviews"])
+
+    def test_unproven_approval_is_inconsistent_with_both_findings(self):
+        cases = {
+            "no reviews": ([], None),
+            "stale head": ([review(21, commit=OLD_HEAD)], [9, "", "STALE_HEAD_APPROVAL"]),
+            "changes requested latest": ([review(21), review(22, state="CHANGES_REQUESTED", body="")],
+                                         [9, "22", "CHANGES_REQUESTED"]),
+            "dismissed only": ([review(21, state="DISMISSED")], None),
+            "commented only": ([review(21, state="COMMENTED")], None),
+            "markerless": ([review(21, body="LGTM")], [9, "21", "INVALID_APPROVAL_MARKER"]),
+            "echoed marker": ([review(21, body=marker() + marker())], [9, "21", "INVALID_APPROVAL_MARKER"]),
+            "comment mode": ([review(21, body=marker(mode="comment"))], [9, "21", "MARKER_NOT_APPROVE_MODE"]),
+            "not pass": ([review(21, body=marker(verdict="CHANGES_REQUIRED"))],
+                         [9, "21", "MARKER_VERDICT_NOT_PASS"]),
+            "no base": ([review(21, body=marker(base=None))], [9, "21", "APPROVAL_WITHOUT_BASE"]),
+            "marker for other head": ([review(21, body=marker(head=OLD_HEAD))],
+                                      [9, "21", "MARKER_HEAD_MISMATCH"]),
+            "untrusted reviewer": ([review(21, reviewer="someone")], [9, "21", "UNTRUSTED_REVIEWER_APPROVAL"]),
+            "trusted login case variant": ([review(21, reviewer="NTK-reviewer[bot]")],
+                                           [9, "21", "UNTRUSTED_REVIEWER_APPROVAL"]),
+            "duplicate review id": ([review(21), review(21)], [9, "21", "INVALID_REVIEW"]),
+            "unknown state": ([review(21, state="PENDING")], [9, "21", "INVALID_REVIEW"]),
+        }
+        for label, (reviews, finding) in cases.items():
+            with self.subTest(case=label):
+                report = self.report_with(reviews)
+                self.assertEqual("INCONSISTENT", report["status"])
+                if finding is not None:
+                    self.assertIn(finding, report["findings"]["reviews"])
+                self.assertIn([9, "UNSUPPORTED_MERGE_READY"], report["findings"]["pull_requests"])
+
+    def test_later_approval_supersedes_changes_requested(self):
+        reviews = [review(20, state="CHANGES_REQUESTED", body=""), review(21)]
+        self.assertEqual("CONSISTENT", self.report_with(reviews)["status"])
+
+    def test_empty_trusted_reviewer_list_never_attributes_an_approval(self):
+        data = doc()
+        data["trusted_reviewers"] = []
+        report = build_report(data, NOW)
+        self.assertEqual("INCONSISTENT", report["status"])
+        self.assertIn([9, "", "INVALID_TRUSTED_REVIEWERS"], report["findings"]["reviews"])
+        self.assertIn([9, "UNSUPPORTED_MERGE_READY"], report["findings"]["pull_requests"])
+
+    def test_derived_approval_still_needs_independence_and_a_fresh_base(self):
+        self_approved = self.report_with([review(21)], material_authors=[BOT])
+        self.assertIn([9, "UNTRUSTED_APPROVAL"], self_approved["findings"]["pull_requests"])
+        self.assertEqual([], self_approved["findings"]["reviews"])
+        old_base = "d" * 40
+        stale_base = self.report_with([review(21, body=marker(base=old_base))])
+        self.assertEqual("INCONSISTENT", stale_base["status"])
+        self.assertEqual([], stale_base["findings"]["reviews"])
+        self.assertEqual([[9, "STALE_APPROVAL"], [9, "UNSUPPORTED_MERGE_READY"]],
+                         stale_base["findings"]["pull_requests"])
+
+
 class LoaderTests(unittest.TestCase):
     def test_strict_loader_refuses_malformed_input(self):
         mutations = [
             lambda d: d.pop("branches"),
             lambda d: d.update(extra=1),
-            lambda d: d.update(schema_version=1),
-            lambda d: d.update(schema_version=3),
+            lambda d: d.update(schema_version=2),
+            lambda d: d.update(schema_version=4),
             lambda d: d.update(schema_version=True),
             lambda d: d.update(observed_at="2026-10-25T13:55:00"),  # naive
             lambda d: d.update(observed_at="yesterday"),
@@ -189,6 +274,18 @@ class LoaderTests(unittest.TestCase):
             lambda d: d.update(required_checks=[{"name": "validate"}]),
             lambda d: d.update(required_checks=[{"name": "validate", "app": APP, "x": 1}]),
             lambda d: d.update(required_checks=[["validate", APP]]),
+            # #371: the approval is derived from reviews, never caller-asserted.
+            lambda d: d["pull_requests"][0].update(approved_by=BOT),
+            lambda d: d["pull_requests"][0].update(approved_head_sha=HEAD),
+            lambda d: d["pull_requests"][0].update(approved_base_sha=MAIN),
+            lambda d: d["pull_requests"][0].pop("reviews"),
+            lambda d: d["pull_requests"][0].update(reviews={}),
+            lambda d: d["pull_requests"][0]["reviews"][0].update(id=True),
+            lambda d: d["pull_requests"][0]["reviews"][0].update(id="21"),
+            lambda d: d["pull_requests"][0]["reviews"][0].pop("body"),
+            lambda d: d["pull_requests"][0]["reviews"][0].update(body=None),
+            lambda d: d["pull_requests"][0]["reviews"][0].update(commit_id=None),
+            lambda d: d["pull_requests"][0]["reviews"][0].update(extra=1),
         ]
         for i, mutate in enumerate(mutations):
             with self.subTest(case=i):
@@ -233,7 +330,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(EXIT_INCONSISTENT, code)
         self.assertEqual(EXIT_CONSISTENT, self.run_cli(json.dumps(stale), "--max-age-seconds", "3600")[0])
 
-        for text in ["{not json", "[]", json.dumps({**doc(), "schema_version": 1})]:
+        for text in ["{not json", "[]", json.dumps({**doc(), "schema_version": 2})]:
             code, out, err = self.run_cli(text)
             self.assertEqual((EXIT_INVALID, ""), (code, out))
             self.assertTrue(err.startswith("invalid snapshot:"))

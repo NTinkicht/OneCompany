@@ -1,4 +1,4 @@
-"""OC-P0-01 (#363, #367, #371): one fail-closed reconciliation report over a live snapshot."""
+"""OC-P0-01 (#363, #367, #371, #375): one fail-closed reconciliation report over a live snapshot."""
 import copy
 import contextlib
 import datetime as dt
@@ -40,13 +40,20 @@ def review(review_id, reviewer=BOT, state="APPROVED", commit=HEAD, body=None):
             "body": f"PASS\n\n{marker()}" if body is None else body}
 
 
+PARENT = "e" * 40
+
+
+def commit(sha=HEAD, author="claude", committer="web-flow", message="Change\n\nMaterial-Author: claude"):
+    return {"sha": sha, "author_login": author, "committer_login": committer, "message": message}
+
+
 NOW = dt.datetime(2026, 10, 25, 14, 0, tzinfo=dt.timezone.utc)
 
 
 def doc():
     """A fully consistent, fresh snapshot."""
     return {
-        "schema_version": 3,
+        "schema_version": 4,
         "observed_at": "2026-10-25T13:55:00+00:00",
         "snapshot": {
             "main_sha": MAIN, "observed_main_sha": MAIN,
@@ -58,7 +65,7 @@ def doc():
             "pr": 9, "issue": 1, "recorded_head_sha": HEAD, "observed_head_sha": HEAD,
             "base_sha": MAIN, "ci_base_sha": MAIN,
             "check_runs": [run(11), run(12, name="lint")], "reviews": [review(21)],
-            "merge_ready_claimed": True, "material_authors": ["claude"],
+            "commits": [commit(PARENT), commit()], "merge_ready_claimed": True,
         }],
         "branches": ["main", "ai/1-feature"],
         "write_attempts": [{"operation_id": "op-1", "issue": 1, "outcome": "success",
@@ -82,7 +89,7 @@ class ReportTests(unittest.TestCase):
         cases = {
             "snapshot": (lambda d: d["snapshot"].update(next_ids=[1]), "ACTIVE_WORK_IN_NEXT"),
             "freshness": (lambda d: d.update(observed_at="2026-10-25T13:00:00+00:00"), "STALE_SNAPSHOT"),
-            "pull_requests": (lambda d: d["pull_requests"][0].update(material_authors=[BOT]),
+            "pull_requests": (lambda d: d["pull_requests"][0].update(commits=[commit(author=BOT)]),
                               [9, "UNTRUSTED_APPROVAL"]),
             "reviews": (lambda d: d["pull_requests"][0].update(reviews=[review(21, commit=OLD_HEAD)]),
                         [9, "", "STALE_HEAD_APPROVAL"]),
@@ -224,7 +231,7 @@ class ReviewAttributionTests(unittest.TestCase):
         self.assertIn([9, "UNSUPPORTED_MERGE_READY"], report["findings"]["pull_requests"])
 
     def test_derived_approval_still_needs_independence_and_a_fresh_base(self):
-        self_approved = self.report_with([review(21)], material_authors=[BOT])
+        self_approved = self.report_with([review(21)], commits=[commit(author=BOT)])
         self.assertIn([9, "UNTRUSTED_APPROVAL"], self_approved["findings"]["pull_requests"])
         self.assertEqual([], self_approved["findings"]["reviews"])
         old_base = "d" * 40
@@ -235,13 +242,72 @@ class ReviewAttributionTests(unittest.TestCase):
                          stale_base["findings"]["pull_requests"])
 
 
+class MaterialAuthorshipTests(unittest.TestCase):
+    """#375: each PR's material authors come only from its exact-head commit list."""
+
+    def report_with(self, commits):
+        data = doc()
+        data["pull_requests"][0]["commits"] = commits
+        return build_report(data, NOW)
+
+    def test_independent_commit_list_is_consistent(self):
+        report = build_report(doc(), NOW)
+        self.assertEqual("CONSISTENT", report["status"])
+        self.assertEqual([], report["findings"]["commits"])
+
+    def test_approver_in_any_authorship_role_is_untrusted(self):
+        cases = {
+            "head author": [commit(PARENT), commit(author=BOT)],
+            "earlier author": [commit(PARENT, author=BOT), commit()],
+            "committer": [commit(PARENT), commit(committer=BOT)],
+            "trailer": [commit(PARENT), commit(message=f"Fix\n\nMaterial-Author: {BOT}")],
+            "case variant": [commit(PARENT), commit(author="NTK-Reviewer[bot]")],
+        }
+        for label, commits in cases.items():
+            with self.subTest(case=label):
+                report = self.report_with(commits)
+                self.assertEqual("INCONSISTENT", report["status"])
+                self.assertEqual([], report["findings"]["commits"])
+                self.assertIn([9, "UNTRUSTED_APPROVAL"], report["findings"]["pull_requests"])
+
+    def test_ambiguous_authorship_is_withheld_and_never_independence(self):
+        many = [commit(f"{i:040x}") for i in range(1, 250)] + [commit()]
+        cases = {
+            "no commits": ([], [9, "", "NO_COMMITS"]),
+            "head not last": ([commit(), commit(PARENT)], [9, "", "HEAD_NOT_LAST_COMMIT"]),
+            "stale head only": ([commit(OLD_HEAD)], [9, "", "HEAD_NOT_LAST_COMMIT"]),
+            "unlinked author": ([commit(PARENT, author=None), commit()],
+                                [9, PARENT, "UNATTRIBUTED_COMMIT"]),
+            "blank committer": ([commit(committer=" ")], [9, HEAD, "UNATTRIBUTED_COMMIT"]),
+            "empty trailer": ([commit(message="x\n\nMaterial-Author:   ")],
+                              [9, HEAD, "INVALID_MATERIAL_AUTHOR_TRAILER"]),
+            "duplicate": ([commit(PARENT), commit(PARENT), commit()], [9, PARENT, "DUPLICATE_COMMIT"]),
+            "malformed sha": ([commit("not-a-sha"), commit()], [9, "", "INVALID_COMMIT"]),
+            "truncated": (many, [9, "", "COMMIT_LIST_TRUNCATED"]),
+        }
+        for label, (commits, finding) in cases.items():
+            with self.subTest(case=label):
+                report = self.report_with(commits)
+                self.assertEqual("INCONSISTENT", report["status"])
+                self.assertIn(finding, report["findings"]["commits"])
+                self.assertIn([9, "UNTRUSTED_APPROVAL"], report["findings"]["pull_requests"])
+                self.assertIn([9, "UNSUPPORTED_MERGE_READY"], report["findings"]["pull_requests"])
+
+    def test_commit_findings_are_sorted_and_deterministic(self):
+        commits = [commit(PARENT, author=None), commit(MAIN, committer=None), commit()]
+        report = self.report_with(commits)
+        self.assertEqual([[9, MAIN, "UNATTRIBUTED_COMMIT"], [9, PARENT, "UNATTRIBUTED_COMMIT"]],
+                         report["findings"]["commits"])
+
+
 class LoaderTests(unittest.TestCase):
     def test_strict_loader_refuses_malformed_input(self):
         mutations = [
             lambda d: d.pop("branches"),
             lambda d: d.update(extra=1),
             lambda d: d.update(schema_version=2),
-            lambda d: d.update(schema_version=4),
+            lambda d: d.update(schema_version=3),
+            lambda d: d.update(schema_version=5),
             lambda d: d.update(schema_version=True),
             lambda d: d.update(observed_at="2026-10-25T13:55:00"),  # naive
             lambda d: d.update(observed_at="yesterday"),
@@ -253,7 +319,15 @@ class LoaderTests(unittest.TestCase):
             lambda d: d["snapshot"].pop("main_sha"),
             lambda d: d["pull_requests"][0].update(pr="9"),
             lambda d: d["pull_requests"][0].update(merge_ready_claimed="yes"),
-            lambda d: d["pull_requests"][0].update(material_authors="claude"),
+            # #375: material authorship is derived from commits, never caller-asserted.
+            lambda d: d["pull_requests"][0].update(material_authors=["claude"]),
+            lambda d: d["pull_requests"][0].pop("commits"),
+            lambda d: d["pull_requests"][0].update(commits={}),
+            lambda d: d["pull_requests"][0]["commits"][0].pop("author_login"),
+            lambda d: d["pull_requests"][0]["commits"][0].update(author_login=7),
+            lambda d: d["pull_requests"][0]["commits"][0].update(sha=None),
+            lambda d: d["pull_requests"][0]["commits"][0].update(message=None),
+            lambda d: d["pull_requests"][0]["commits"][0].update(extra=1),
             lambda d: d["pull_requests"][0].pop("base_sha"),
             lambda d: d.update(pull_requests={}),
             lambda d: d["write_attempts"][0].update(retries=False),
@@ -330,7 +404,7 @@ class CliTests(unittest.TestCase):
         self.assertEqual(EXIT_INCONSISTENT, code)
         self.assertEqual(EXIT_CONSISTENT, self.run_cli(json.dumps(stale), "--max-age-seconds", "3600")[0])
 
-        for text in ["{not json", "[]", json.dumps({**doc(), "schema_version": 2})]:
+        for text in ["{not json", "[]", json.dumps({**doc(), "schema_version": 3})]:
             code, out, err = self.run_cli(text)
             self.assertEqual((EXIT_INVALID, ""), (code, out))
             self.assertTrue(err.startswith("invalid snapshot:"))

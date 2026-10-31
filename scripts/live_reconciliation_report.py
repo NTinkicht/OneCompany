@@ -15,6 +15,11 @@ taken from the caller either. It is derived from the raw reviews the caller
 fetched, through ``review_approval_reconciliation.attribute_approval``;
 ``pr_inconsistencies`` still judges base freshness and author independence.
 
+Schema 4 (#375): each pull request's material authors are never taken from
+the caller. They are derived from the exact-head commit list the caller
+fetched, through ``material_authorship_reconciliation.derive_material_authors``;
+any ambiguity withholds them, so ``pr_inconsistencies`` refuses the approval.
+
 ``CONSISTENT`` only when every check is empty and the snapshot is fresh; any
 finding is ``INCONSISTENT``; malformed input is refused (never coerced).
 Nothing here fetches, claims a lease, mutates the queue or retries a write.
@@ -40,6 +45,10 @@ from live_work_reconciliation import (  # noqa: E402
     replay_inconsistencies,
     snapshot_freshness,
 )
+from material_authorship_reconciliation import (  # noqa: E402
+    CommitObservation,
+    derive_material_authors,
+)
 from review_approval_reconciliation import (  # noqa: E402
     ReviewObservation,
     attribute_approval,
@@ -50,7 +59,7 @@ from required_check_reconciliation import (  # noqa: E402
     aggregate_required_checks,
 )
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 DEFAULT_MAX_AGE_SECONDS = 900
 EXIT_CONSISTENT, EXIT_INCONSISTENT, EXIT_INVALID = 0, 1, 2
 
@@ -67,11 +76,16 @@ _PR_FIELDS = {
     "pr": (_INT, True), "issue": (_INT, True), "recorded_head_sha": (_STR, True),
     "observed_head_sha": (_STR, True), "base_sha": (_STR, True),
     # ci_head_sha / ci_conclusion are derived from check_runs, and
-    # approved_head_sha / approved_base_sha / approved_by from reviews;
-    # none of them is accepted from the caller.
+    # approved_head_sha / approved_base_sha / approved_by from reviews,
+    # and material_authors from commits; none of them is accepted from the
+    # caller.
     "ci_base_sha": (_OPT_STR, False), "check_runs": ("records", True),
-    "reviews": ("records", True),
-    "merge_ready_claimed": (_BOOL, False), "material_authors": ("strs", False),
+    "reviews": ("records", True), "commits": ("records", True),
+    "merge_ready_claimed": (_BOOL, False),
+}
+_COMMIT_FIELDS = {
+    "sha": (_STR, True), "author_login": (_OPT_STR, True),
+    "committer_login": (_OPT_STR, True), "message": (_STR, True),
 }
 _REVIEW_FIELDS = {
     "id": (_INT, True), "reviewer": (_STR, True), "state": (_STR, True),
@@ -93,6 +107,7 @@ _ATTEMPT_FIELDS = {
 _NESTED = {
     "check_runs": (_CHECK_RUN_FIELDS, CheckRunObservation),
     "reviews": (_REVIEW_FIELDS, ReviewObservation),
+    "commits": (_COMMIT_FIELDS, CommitObservation),
 }
 
 
@@ -136,7 +151,7 @@ def _record(obj: object, fields: dict[str, tuple[str, bool]], path: str) -> dict
             if required:
                 raise InvalidSnapshot(f"missing {path}.{name}")
             continue
-        if kind == "records":  # nested records: check_runs and reviews only
+        if kind == "records":  # nested records: check_runs, reviews and commits only
             nested, factory = _NESTED[name]
             out[name] = tuple(factory(**r) for r in
                               _records(obj[name], nested, f"{path}.{name}"))
@@ -190,22 +205,26 @@ def build_report(data: object, now: dt.datetime,
     """Run every check over one snapshot and return a deterministic verdict."""
     loaded = load_snapshot(data)
     snapshot: WorkSnapshot = loaded["snapshot"]
-    observations, check_findings, review_findings = [], [], []
+    observations, check_findings, review_findings, commit_findings = [], [], [], []
     for record in loaded["pull_requests"]:
         fields = dict(record)
         runs = fields.pop("check_runs")
         reviews = fields.pop("reviews")
+        commits = fields.pop("commits")
         ci = aggregate_required_checks(loaded["required_checks"], runs,
                                        fields["observed_head_sha"])
         approval = attribute_approval(reviews, fields["observed_head_sha"],
                                       loaded["trusted_reviewers"])
+        authorship = derive_material_authors(commits, fields["observed_head_sha"])
         observations.append(PullRequestObservation(
             **fields, ci_head_sha=ci.ci_head_sha, ci_conclusion=ci.ci_conclusion,
             approved_head_sha=approval.approved_head_sha,
             approved_base_sha=approval.approved_base_sha,
-            approved_by=approval.approved_by))
+            approved_by=approval.approved_by,
+            material_authors=authorship.authors))
         check_findings.extend([fields["pr"], name, finding] for name, finding in ci.findings)
         review_findings.extend([fields["pr"], ref, finding] for ref, finding in approval.findings)
+        commit_findings.extend([fields["pr"], ref, finding] for ref, finding in authorship.findings)
     findings = {
         "snapshot": list(inconsistencies(snapshot)),
         "freshness": list(snapshot_freshness(loaded["observed_at"], now, max_age_seconds)),
@@ -213,6 +232,7 @@ def build_report(data: object, now: dt.datetime,
             snapshot, tuple(observations), trusted_reviewers=loaded["trusted_reviewers"])],
         "required_checks": sorted(check_findings),
         "reviews": sorted(review_findings),
+        "commits": sorted(commit_findings),
         "branches": [list(f) for f in branch_inconsistencies(snapshot, loaded["branches"])],
         "write_attempts": [list(f) for f in replay_inconsistencies(snapshot, loaded["write_attempts"])],
     }

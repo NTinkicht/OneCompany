@@ -95,7 +95,8 @@ class RefusalTests(unittest.TestCase):
             self.assertEqual("invalid observed_at", self.refused(lambda b, v=bad: b.update(observed_at=v)))
 
     def test_app_slugs_keys_must_be_positive_decimal_strings(self):
-        for bad in ({15368: "github-actions"}, {"abc": "x"}, {"-1": "x"}, {"0": "x"}, {"１５": "x"}, []):
+        for bad in ({15368: "github-actions"}, {"abc": "x"}, {"-1": "x"}, {"0": "x"}, {"１５": "x"}, [],
+                    {"15368": 1}, {"15368": ""}, {"15368": None}, {"15368": ["x"]}):
             self.assertEqual("invalid app_slugs", self.refused(lambda b, v=bad: b.update(app_slugs=v)))
 
     def test_completeness_flags_must_be_real_booleans(self):

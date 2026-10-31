@@ -86,6 +86,8 @@ def _app_slugs(value: object) -> dict[int, str]:
     for key, slug in value.items():
         if type(key) is not str or not key.isascii() or not key.isdecimal() or int(key) <= 0:
             raise InvalidBundle("invalid app_slugs")
+        if type(slug) is not str or not slug:
+            raise InvalidBundle("invalid app_slugs")
         mapped[int(key)] = slug
     return mapped
 

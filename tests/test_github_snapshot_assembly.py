@@ -109,6 +109,12 @@ class RefusalTests(unittest.TestCase):
         self.refused(main_sha=None)
         self.refused(trusted_reviewers=[1])
 
+    def test_bare_strings_are_never_sequences(self):
+        for key in ("trusted_reviewers", "required_checks", "write_attempts"):
+            with self.subTest(key):
+                self.assertEqual(f"invalid {key}", self.refused(**{key: "ntk-reviewer"}))
+        self.assertEqual("invalid active_lease_issue_ids", self.refused(active_lease_issue_ids="1"))
+
     def test_errors_never_echo_values(self):
         secret = "SECRET-VALUE-123"
         for over in ({"trusted_reviewers": [secret, 1]}, {"required_checks": [{"name": secret}]},

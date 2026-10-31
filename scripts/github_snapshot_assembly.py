@@ -42,6 +42,13 @@ def _ints(value: object, path: str) -> list[int]:
     return list(value)
 
 
+def _list(value: object, path: str, item: type) -> list[Any]:
+    """A real list/tuple of ``item`` (a bare string is never a sequence)."""
+    if type(value) not in (list, tuple) or not all(type(v) is item for v in value):
+        raise InvalidAssembly(f"invalid {path}")
+    return list(value)
+
+
 def _work(work: object) -> dict[str, Any]:
     if type(work) is not dict or set(work) != _WORK_KEYS:
         raise InvalidAssembly("invalid work")
@@ -96,11 +103,10 @@ def assemble_snapshot(
                                           "work.ineligible_issue_ids"),
         },
         "pull_requests": [dict(r) for r in pull_requests],
-        "branches": list(mapped["branches"]) if type(mapped["branches"]) is list
-        else None,
-        "write_attempts": [dict(a) for a in write_attempts],
-        "trusted_reviewers": list(trusted_reviewers),
-        "required_checks": [dict(c) for c in required_checks],
+        "branches": _list(mapped["branches"], "work.branches", str),
+        "write_attempts": [dict(a) for a in _list(write_attempts, "write_attempts", dict)],
+        "trusted_reviewers": _list(trusted_reviewers, "trusted_reviewers", str),
+        "required_checks": [dict(c) for c in _list(required_checks, "required_checks", dict)],
     }
     try:
         load_snapshot(document)

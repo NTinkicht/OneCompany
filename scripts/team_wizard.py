@@ -19,6 +19,7 @@ from product_brief import save_exclusive  # noqa: E402  (anchored, exclusive, 06
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = ROOT / ".onecompany"
 HUMAN = "human-owner"
+BLOCKED = "BLOCKED-NO-DISTINCT-REVIEWER"
 INCLUDED = "INCLUDED_SUBSCRIPTION"
 ALIASES = {"copilot": "github-copilot", "gemini": "gemini-cli", "mistral": "mistral-vibe",
            "grok": "grok-4-6-interactive"}
@@ -82,14 +83,18 @@ def build_plan(declared: list[str]) -> dict[str, Any]:
             banned = {assignment[r] for r in AUTHOR_ROLES if r in assignment}
         actor = None if (solo and (role_id in INDEPENDENT_ROLES or role_id == "merge_executor")) \
             else pick(caps, pool, routing, actors, banned)
-        if actor is None:
+        if actor is None and role_id in INDEPENDENT_ROLES and HUMAN in banned:
+            actor = BLOCKED
+            notes[role_id] = ("the human owner already holds an author role; independent review stays blocked "
+                              "until a distinct reviewer is declared")
+        elif actor is None:
             actor = HUMAN
             notes[role_id] = ("fewer than two distinct included-subscription actors; the human owner takes this role"
                               if solo and (role_id in INDEPENDENT_ROLES or role_id == "merge_executor")
                               else "no declared eligible actor; the human owner takes this role")
         assignment[role_id] = actor
     for role_id in INDEPENDENT_ROLES:
-        if role_id in assignment and assignment[role_id] != HUMAN:
+        if role_id in assignment and assignment[role_id] != BLOCKED:
             if assignment[role_id] in {assignment[r] for r in AUTHOR_ROLES if r in assignment}:
                 raise ValueError("internal independence violation")
     rows = []
@@ -99,6 +104,9 @@ def build_plan(declared: list[str]) -> dict[str, Any]:
         rows.append({"role": role_id, "actor": actor, "status": "UNQUALIFIED", "note": notes.get(role_id, ""),
                      "qualification": "python onecompany.py qualify-worker --json; docs/agent-setup/" + page})
     warnings = []
+    if BLOCKED in assignment.values():
+        warnings.append("The human owner holds an author role, so independent review is BLOCKED: declare at "
+                        "least one more included-subscription actor that can implement.")
     if solo:
         warnings.append("Fewer than two distinct included-subscription actors declared: independent review "
                         "and merge fall back to the human owner. One LLM can never review its own work.")

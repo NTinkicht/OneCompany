@@ -54,8 +54,7 @@ class TeamWizardTests(unittest.TestCase):
                 r = roles(plan(",".join(subset)))
                 authors = {r["implementer"], r["ci_remediator"]}
                 for reviewer in ("independent_reviewer", "security_reviewer"):
-                    if r[reviewer] != "human-owner":
-                        self.assertNotIn(r[reviewer], authors, subset)
+                    self.assertNotIn(r[reviewer], authors, subset)
 
     def test_single_llm_gets_human_reviewer_and_warning(self):
         p = plan("claude")
@@ -65,9 +64,23 @@ class TeamWizardTests(unittest.TestCase):
             self.assertEqual(r[role], "human-owner")
         self.assertTrue(p["warnings"])
 
+    def test_human_author_never_reviews_own_work(self):
+        for declared in ("mistral", "gemini", "mistral,grok"):
+            r = roles(plan(declared))
+            if r["implementer"] == "human-owner":
+                for reviewer in ("independent_reviewer", "security_reviewer"):
+                    self.assertEqual(r[reviewer], tw.BLOCKED, declared)
+        r = roles(plan("mistral"))
+        self.assertEqual(r["implementer"], "human-owner")
+        self.assertEqual(r["independent_reviewer"], tw.BLOCKED)
+
     def test_only_included_subscription_considered(self):
         p = plan("gemini")
-        self.assertEqual(set(roles(p).values()), {"human-owner"})
+        r = roles(p)
+        self.assertNotIn("gemini-cli", r.values())
+        self.assertEqual(r["implementer"], "human-owner")
+        self.assertEqual(r["independent_reviewer"], tw.BLOCKED)
+        self.assertEqual(r["security_reviewer"], tw.BLOCKED)
         self.assertEqual(p["excluded"][0]["actor"], "gemini-cli")
         p = plan("claude,gemini")
         self.assertNotIn("gemini-cli", roles(p).values())

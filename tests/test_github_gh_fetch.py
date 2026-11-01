@@ -85,11 +85,17 @@ class RefusalTests(unittest.TestCase):
     def test_bad_paths_never_reach_the_runner(self):
         for path in ("https://api.github.com" + BASE + "/issues", "/user", "repos/a/b/issues",
                      f"{BASE}/../x", f"{BASE}//issues", f"{BASE}/issues#frag", f"{BASE}/issues\n",
-                     f"{BASE}/is sues", "/repos/a/b/../../user", f"{BASE}/issues?x=$(id)", "", None):
+                     f"{BASE}/is sues", "/repos/a/b/%2e%2e/%2e%2e/user", "/repos/a/b/%2E%2E/x", "/repos/a/b/%252e%252e/x",
+                     "/repos/a/b/.%2e/x", "/repos/a/b/%2e/x", "/repos/a/b/x%2fy", "/repos/a/b/x%5cy", "/repos/a/b/x%00y",
+                     "/repos/a/b/%25252e%25252e/x", "/repos/a/b/../../user", f"{BASE}/issues?x=$(id)", "", None):
             fetch, runner = fetch_with()
             with self.assertRaises(CaptureError):
                 fetch(path)
             self.assertEqual([], runner.calls)
+
+    def test_legitimate_percent_encoding_is_still_served(self):
+        fetch, _ = fetch_with((0, reply()))
+        self.assertEqual(200, fetch(f"{BASE}/contents/a%20b.txt?ref=main").status)
 
     def test_runner_exceptions_become_a_fixed_refusal(self):
         for exc in (OSError(SECRET), TimeoutError(SECRET), ValueError(SECRET),

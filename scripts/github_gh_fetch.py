@@ -9,7 +9,7 @@ Rules, all fail closed:
 
 * GET only: the argv is one fixed ``gh api -i -X GET`` command plus the validated path;
 * the path must be an absolute ``/repos/<owner>/<repo>/...`` API path with no scheme,
-  host, fragment, ``.``/``..`` segment, empty segment or character outside a small
+  host, fragment, ``.``/``..`` segment (also percent-encoded, even double-encoded), empty segment or character outside a small
   allow-list, so a caller cannot point a credentialed ``gh`` elsewhere;
 * output is bounded by ``max_bytes``; a runner exception, oversize output, a malformed
   header block, a duplicate ``Link`` header, a non-zero exit with a 200 status or a 200
@@ -27,6 +27,7 @@ import json
 import re
 import subprocess
 from typing import Callable
+from urllib.parse import unquote
 
 from github_page_capture import CaptureError, Fetch, Response
 
@@ -45,7 +46,20 @@ _ARGV = ["gh", "api", "-i", "-X", "GET", "-H", "Accept: application/vnd.github+j
 def _checked_path(path: object) -> str:
     if type(path) is not str or not _PATH.fullmatch(path):
         raise CaptureError("invalid path")
-    segments = path.split("?", 1)[0].split("/")[1:]
+    raw = path.split("?", 1)[0].split("/")[1:]
+    # Percent-decode to a fixed point (bounded) so %2e%2e, %252e%252e and %2f cannot
+    # smuggle a dot segment or extra separator past the allow-list.
+    decoded = path.split("?", 1)[0]
+    for _ in range(4):
+        step = unquote(decoded)
+        if step == decoded:
+            break
+        decoded = step
+    else:
+        raise CaptureError("invalid path")
+    segments = decoded.split("/")[1:]
+    if len(segments) != len(raw) or "\\" in decoded or any(ord(c) < 32 or ord(c) == 127 for c in decoded):
+        raise CaptureError("invalid path")
     if any(segment in ("", ".", "..") for segment in segments):
         raise CaptureError("invalid path")
     return path

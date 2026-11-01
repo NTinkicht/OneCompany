@@ -290,7 +290,7 @@ class CopilotActionsAdapterTests(unittest.TestCase):
         self.assertIn("copilot-requests: write", text)
         self.assertNotIn("contents: write", text)
         self.assertIn("actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1", text)
-        self.assertIn("actions/setup-node@820762786026740c76f36085b0efc47a31fe5020", text)
+        self.assertIn("actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1", text)
         self.assertIn("COPILOT_SCOPE: '@github'", text)
         self.assertIn("COPILOT_PACKAGE: copilot", text)
         self.assertIn("COPILOT_VERSION: '1.0.83'", text)

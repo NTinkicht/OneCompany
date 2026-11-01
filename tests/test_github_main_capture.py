@@ -59,12 +59,21 @@ class MainCaptureTests(unittest.TestCase):
         server = Server()
         result = capture_main(server, REPO)
         self.assertEqual(server.ref_calls, 2)
-        self.assertEqual(result["main_sha"], bundle()["main_ref"]["object"]["sha"])
+        self.assertNotIn("main_sha", result)
         full = bundle()
         full.update(result)
         snapshot_from_bundle(full)
         for flag in ("issues_complete", "branches_complete", "rules_complete"):
             self.assertIs(result[flag], True)
+
+    def test_recorded_main_sha_is_preserved_so_stale_main_is_detected(self):
+        full = bundle()
+        full["main_sha"] = "e" * 40
+        full.update(capture_main(Server(), REPO))
+        self.assertEqual(full["main_sha"], "e" * 40)
+        snap = snapshot_from_bundle(full)["snapshot"]
+        self.assertEqual(snap["main_sha"], "e" * 40)
+        self.assertEqual(snap["observed_main_sha"], bundle()["main_ref"]["object"]["sha"])
 
     def test_main_movement_is_refused(self):
         original = bundle()["main_ref"]

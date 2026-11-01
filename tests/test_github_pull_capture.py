@@ -116,6 +116,7 @@ class PullCaptureTests(unittest.TestCase):
         server.routes[f"{BASE}/pulls/9/reviews"] = server.routes[f"{BASE}/pulls/9/reviews"] * 3
         record = call(server, max_pages=1)
         self.assertEqual(len(record["review_pages"]), 1)
+        self.assertIs(record["reviews_complete"], False)
 
 
 if __name__ == "__main__":

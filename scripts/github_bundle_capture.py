@@ -42,7 +42,7 @@ def capture_bundle(
 ) -> dict[str, Any]:
     """Return one ``github_bundle_snapshot`` bundle, or raise CaptureError."""
     repo = _repo(repo)
-    if type(pulls) not in (list, tuple) or len(pulls) > MAX_PULLS:
+    if type(pulls) is not list or len(pulls) > MAX_PULLS:
         raise CaptureError("invalid pull specs")
     specs = [_spec(spec) for spec in pulls]
     numbers = [spec["number"] for spec in specs]

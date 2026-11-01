@@ -104,7 +104,7 @@ class BundleCaptureTests(unittest.TestCase):
     def test_invalid_pull_lists_and_specs_are_refused(self):
         too_many = [pull_spec(number=n) for n in range(1, MAX_PULLS + 2)]
         bad = [
-            "x", {"number": 9}, too_many, [pull_spec(), pull_spec()], [pull_spec(extra=1)],
+            "x", (), (pull_spec(),), {"number": 9}, too_many, [pull_spec(), pull_spec()], [pull_spec(extra=1)],
             [{"issue": 1, "recorded_head_sha": HEAD}], [pull_spec(number=True)], [pull_spec(number=0)],
             [pull_spec(), [pull_spec(number=10)]], [object()],
         ]

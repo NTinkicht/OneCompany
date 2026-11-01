@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from github_bundle_snapshot import snapshot_from_bundle  # noqa: E402
 from github_live_reconcile import LiveReconciliationRefused, reconcile_live  # noqa: E402
-from github_page_capture import Response  # noqa: E402
+from github_page_capture import CaptureError, Response  # noqa: E402
 from live_reconciliation_report import build_report  # noqa: E402
 from test_github_bundle_capture import REPO, SECRET, Server, caller_fields, pull_spec  # noqa: E402
 from test_github_bundle_snapshot import bundle  # noqa: E402
@@ -43,7 +43,7 @@ class LiveReconcileTests(unittest.TestCase):
         moved["object"]["sha"] = "f" * 40
         with self.assertRaises(LiveReconciliationRefused) as ctx:
             run(Server(refs=[bundle()["main_ref"], moved]))
-        self.assertIn("main moved", str(ctx.exception))
+        self.assertEqual("capture refused", str(ctx.exception))
 
     def test_malformed_baseline_is_refused_by_step(self):
         with self.assertRaises(LiveReconciliationRefused) as ctx:
@@ -54,6 +54,20 @@ class LiveReconcileTests(unittest.TestCase):
         with self.assertRaises(LiveReconciliationRefused) as ctx:
             run(pulls="x")
         self.assertIn("capture refused", str(ctx.exception))
+
+    def test_malformed_baseline_containers_are_refused(self):
+        for key in ("active_lease_issue_ids", "retired_pilot_issue_ids", "write_attempts",
+                    "trusted_reviewers", "app_slugs"):
+            with self.subTest(key=key), self.assertRaises(LiveReconciliationRefused):
+                run(**{key: None})
+
+    def test_raising_fetchers_are_normalized_without_leaking_text(self):
+        for exc in (CaptureError(SECRET), OSError(SECRET), TimeoutError(SECRET)):
+            def raising(path, exc=exc):
+                raise exc
+            with self.subTest(exc=type(exc).__name__), self.assertRaises(LiveReconciliationRefused) as ctx:
+                run(raising)
+            self.assertEqual("capture refused", str(ctx.exception))
 
     def test_naive_or_non_datetime_now_is_refused(self):
         for bad in (dt.datetime(2026, 10, 25, 14, 0), "2026-10-25T14:00:00+00:00", None):

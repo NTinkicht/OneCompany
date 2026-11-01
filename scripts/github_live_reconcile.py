@@ -43,8 +43,9 @@ def reconcile_live(
             active_lease_issue_ids=active_lease_issue_ids,
             retired_pilot_issue_ids=retired_pilot_issue_ids, write_attempts=write_attempts,
             trusted_reviewers=trusted_reviewers, app_slugs=app_slugs, max_pages=max_pages)
-    except CaptureError as exc:
-        raise LiveReconciliationRefused(f"capture refused: {exc}") from None
+    except (CaptureError, OSError, TimeoutError, TypeError, ValueError, KeyError, AttributeError):
+        # Fixed message: never interpolate exception text, which may carry response content.
+        raise LiveReconciliationRefused("capture refused") from None
     try:
         snapshot = snapshot_from_bundle(bundle)
     except InvalidBundle as exc:

@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 from typing import Callable
 
 from github_page_capture import CaptureError, Fetch, Response
@@ -60,7 +61,7 @@ def make_gh_fetch(runner: Runner, *, max_bytes: int = DEFAULT_MAX_BYTES) -> Fetc
         try:
             result = runner(argv)
             code, out = result
-        except (OSError, TimeoutError, TypeError, ValueError):
+        except (OSError, TimeoutError, subprocess.SubprocessError, TypeError, ValueError):
             raise CaptureError("transport failed") from None
         if type(code) is not int or type(out) is not str:
             raise CaptureError("transport failed")

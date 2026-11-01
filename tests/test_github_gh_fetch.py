@@ -1,5 +1,6 @@
 """OC-P0-01 (#402): the gh-api Fetch adapter is GET-only and fails closed."""
 import json
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -91,7 +92,8 @@ class RefusalTests(unittest.TestCase):
             self.assertEqual([], runner.calls)
 
     def test_runner_exceptions_become_a_fixed_refusal(self):
-        for exc in (OSError(SECRET), TimeoutError(SECRET), ValueError(SECRET)):
+        for exc in (OSError(SECRET), TimeoutError(SECRET), ValueError(SECRET),
+                    subprocess.TimeoutExpired("gh", 30), subprocess.CalledProcessError(1, "gh")):
             self.assertEqual("transport failed", self.refused(exc))
 
     def test_bad_runner_result_shapes_are_refused(self):

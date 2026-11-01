@@ -43,7 +43,7 @@ jobs:
             --output gemma-l4-result.md
           test "$(git rev-parse HEAD)" = "$HEAD_BEFORE"
           git diff --exit-code -- . ':!gemma-l4-result.md'
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: gemma-l4-result
           path: gemma-l4-result.md

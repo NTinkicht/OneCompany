@@ -17,6 +17,7 @@ COMMANDS = {
     "brief-status": ["brief_status.py"],
     "brief-validate": ["brief_validate.py"],
     "brief-handoff": ["brief_handoff_proposal.py"],
+    "team": ["team_wizard.py"],
     "journey": ["first_run_journey.py"],
     "demo": ["phase1_vertical_smoke.py"],
     "preview-local": ["../examples/vertical-slice/app.py"],
@@ -49,6 +50,7 @@ def usage() -> int:
     print("  brief-status      inspect saved-draft readiness; read-only")
     print("  brief-validate    validate saved-draft structure; read-only")
     print("  brief-handoff     preview a read-only planning handoff from a saved owner brief")
+    print("  team              propose role-to-LLM assignments from declared subscriptions; read-only")
     print("  journey           guided Create/Adopt next steps; read-only, never approval")
     print("  demo              run real disposable local CRUD proof from owner draft (source checkout)")
     print("  preview-local     interact with disposable checklist UI at localhost (source checkout)")
@@ -56,7 +58,7 @@ def usage() -> int:
     print("  shadow-migration  analyze an external migration snapshot without target mutation")
     print("  cutover-readiness prove quiescent C2b readiness without target mutation")
     print("\nCommands:")
-    featured = {"start", "onboard", "brief", "brief-resume", "brief-diff", "brief-status", "brief-validate", "brief-handoff", "journey", "demo", "preview-local", "mission-control", "shadow-migration", "cutover-readiness"}
+    featured = {"start", "onboard", "brief", "brief-resume", "brief-diff", "brief-status", "brief-validate", "brief-handoff", "team", "journey", "demo", "preview-local", "mission-control", "shadow-migration", "cutover-readiness"}
     for command in COMMANDS:
         if command not in featured:
             print(f"  {command}")

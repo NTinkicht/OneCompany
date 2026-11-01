@@ -33,7 +33,7 @@ def _pull(fetch: Fetch, repo: str, number: int, step: str) -> tuple[dict[str, An
     if response.status != 200:
         raise CaptureError(f"status {response.status} for pull {step}")
     body = response.body
-    if type(body) is not dict or body.get("number") != number or type(body.get("number")) is not int:
+    if type(body) is not dict or type(body.get("number")) is not int or body["number"] != number:
         raise CaptureError(f"invalid pull {step}")
     shas = []
     for side in ("head", "base"):

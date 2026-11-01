@@ -90,7 +90,7 @@ class PullCaptureTests(unittest.TestCase):
     def test_bad_pull_bodies_are_refused(self):
         good = bundle()["pull_requests"][0]["pull"]
         for bad in (
-            [], dict(good, number=8), dict(good, number=True),
+            [], dict(good, number=8), dict(good, number=True), dict(good, number="9"), dict(good, number=None),
             moved("head", "ABC"), moved("head", "a" * 39), moved("base", ""),
             {k: v for k, v in good.items() if k != "head"},
         ):

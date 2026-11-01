@@ -108,41 +108,66 @@ class CollectTests(unittest.TestCase):
 
 
 class NextLinkTests(unittest.TestCase):
-    ENDPOINT, KEYS = f"{BASE}/issues", frozenset({"per_page", "state", "page"})
+    ENDPOINT, FIXED = f"{BASE}/issues", (("per_page", "100"), ("state", "open"))
 
     def next(self, link):
-        return next_path(link, self.ENDPOINT, self.KEYS)
+        return next_path(link, self.ENDPOINT, self.FIXED)
 
     def test_absent_or_other_rel_is_none(self):
         for link in (None, "", f'<https://api.github.com{BASE}/issues?page=9>; rel="last"'):
             self.assertIsNone(self.next(link))
 
     def test_picks_next_among_several_rels(self):
-        link = (f'<https://api.github.com{BASE}/issues?page=1>; rel="prev", '
-                f'<https://api.github.com{BASE}/issues?per_page=100&page=3>; rel="next", '
+        link = (f'<https://api.github.com{BASE}/issues?state=open&per_page=100&page=1>; rel="prev", '
+                f'<https://api.github.com{BASE}/issues?state=open&per_page=100&page=3>; rel="next", '
                 f'<https://api.github.com{BASE}/issues?page=9>; rel="last"')
-        self.assertEqual(f"{BASE}/issues?per_page=100&page=3", self.next(link))
+        self.assertEqual(f"{BASE}/issues?state=open&per_page=100&page=3", self.next(link))
+
+    def test_parameter_extensions_before_rel_do_not_hide_next(self):
+        url = f"{BASE}/issues?state=open&per_page=100&page=2"
+        for params in ("title*=UTF-8'en'page; rel=\"next\"", "x-page=2; rel=\"next\"", "rel=next", 'rel="prev next"'):
+            with self.subTest(params=params):
+                self.assertEqual(url, self.next(f"<{url}>; {params}"))
+
+    def test_unparseable_header_naming_next_is_refused(self):
+        with self.assertRaises(CaptureError):
+            self.next("<<broken; rel=next")
 
     def test_bare_path_is_accepted(self):
-        self.assertEqual(f"{BASE}/issues?page=2", self.next(f'<{BASE}/issues?page=2>; rel="next"'))
+        url = f"{BASE}/issues?state=open&per_page=100&page=2"
+        self.assertEqual(url, self.next(f'<{url}>; rel="next"'))
 
     def test_refusals(self):
         bad = [
-            f'<https://evil.example{BASE}/issues?page=2>; rel="next"',
-            f'<http://api.github.com{BASE}/issues?page=2>; rel="next"',
-            f'<https://api.github.com.evil.example{BASE}/issues?page=2>; rel="next"',
-            f'<https://user:pw@api.github.com{BASE}/issues?page=2>; rel="next"',
-            f'<{BASE}/pulls?page=2>; rel="next"',
-            f'<{BASE}/issues/../pulls?page=2>; rel="next"',
-            f'<{BASE}/issues?page=2#frag>; rel="next"',
-            f'<{BASE}/issues?page=2&access_token=x>; rel="next"',
-            f'<{BASE}/issues?page=2&page=3>; rel="next"',
-            f'<{BASE}/issues?page=2>; rel="next", <{BASE}/issues?page=3>; rel="next"',
+            f'<https://evil.example{BASE}/issues?state=open&per_page=100&page=2>; rel="next"',
+            f'<http://api.github.com{BASE}/issues?state=open&per_page=100&page=2>; rel="next"',
+            f'<https://api.github.com.evil.example{BASE}/issues?state=open&per_page=100&page=2>; rel="next"',
+            f'<https://user:pw@api.github.com{BASE}/issues?state=open&per_page=100&page=2>; rel="next"',
+            f'<{BASE}/pulls?state=open&per_page=100&page=2>; rel="next"',
+            f'<{BASE}/issues/../pulls?state=open&per_page=100&page=2>; rel="next"',
+            f'<{BASE}/issues?state=open&per_page=100&page=2#frag>; rel="next"',
+            f'<{BASE}/issues?state=open&per_page=100&page=2&access_token=x>; rel="next"',
+            f'<{BASE}/issues?state=open&per_page=100&page=2&page=3>; rel="next"',
+            f'<{BASE}/issues?state=closed&per_page=100&page=2>; rel="next"',
+            f'<{BASE}/issues?per_page=100&page=2>; rel="next"',
+            f'<{BASE}/issues?state=open&per_page=1&page=2>; rel="next"',
+            f'<{BASE}/issues?state=open&per_page=100>; rel="next"',
+            f'<{BASE}/issues?state=open&per_page=100&page=x>; rel="next"',
+            f'<{BASE}/issues?state=open&per_page=100&page=2>; rel="next", <{BASE}/issues?state=open&per_page=100&page=3>; rel="next"',
             5,
         ]
         for link in bad:
             with self.subTest(link=link), self.assertRaises(CaptureError):
                 self.next(link)
+
+    def test_changed_filter_on_next_page_stops_collection(self):
+        def link_for(parts, number):
+            return f'<{parts.path}?state=closed&per_page=100&page={number}>; rel="next"'
+
+        server = Server({f"{BASE}/issues": [[1], [2]]}, link_for=link_for)
+        with self.assertRaises(CaptureError):
+            collect_pages(server, f"{BASE}/issues?state=open&per_page=100")
+        self.assertEqual(1, len(server.calls))
 
     def test_foreign_next_stops_collection_without_requesting_it(self):
         server = Server({f"{BASE}/issues": [[1], [2]]}, host="https://evil.example")

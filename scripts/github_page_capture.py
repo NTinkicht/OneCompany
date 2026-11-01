@@ -17,8 +17,8 @@ Rules, all fail closed:
   response body;
 * the body must be a list (or an object for the check-runs endpoint);
 * a ``rel="next"`` link must point to the same endpoint path on ``api.github.com``
-  (or be a bare path), with no fragment and no query key beyond those of the first
-  request plus ``page``; anything else (another host, another endpoint, an extra
+  (or be a bare path), with no fragment and the first request's other query pairs repeated unchanged plus a numeric
+  ``page``; anything else (another host, another endpoint, an extra
   parameter) is refused, so a crafted ``Link`` cannot redirect a credentialed
   fetcher elsewhere;
 * a repeated next link is a loop and is refused;
@@ -39,7 +39,8 @@ DEFAULT_MAX_PAGES = 50
 _PER_PAGE = "per_page=100"
 _REPO = re.compile(r"[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}")
 _SHA = re.compile(r"[0-9a-f]{40}")
-_LINK_ENTRY = re.compile(r'<([^<>]*)>((?:\s*;\s*[A-Za-z]+\s*=\s*(?:"[^"]*"|[^\s;,]+))*)')
+_TOKEN = r"[!#$%&'*+.^_`|~0-9A-Za-z-]+"
+_LINK_ENTRY = re.compile(r'<([^<>]*)>((?:\s*;\s*' + _TOKEN + r'\*?\s*=\s*(?:"[^"]*"|[^\s;,]+))*)')
 _REL_NEXT = re.compile(r';\s*rel\s*=\s*"?([^";,]*)"?', re.IGNORECASE)
 
 
@@ -56,8 +57,11 @@ class Response(NamedTuple):
 Fetch = Callable[[str], Response]
 
 
-def next_path(link: object, endpoint: str, allowed_keys: frozenset[str]) -> str | None:
-    """Return the validated ``rel="next"`` path with query, or None if absent."""
+def next_path(link: object, endpoint: str, fixed: tuple[tuple[str, str], ...] = ()) -> str | None:
+    """Return the validated ``rel="next"`` path with query, or None if absent.
+
+    ``fixed`` are the first request's non-pagination query pairs; the next link
+    must repeat each unchanged and add only ``page``."""
     if link is None:
         return None
     if type(link) is not str:
@@ -68,6 +72,8 @@ def next_path(link: object, endpoint: str, allowed_keys: frozenset[str]) -> str 
         if any("next" in rel.lower().split() for rel in rels):
             found.append(url)
     if not found:
+        if re.search(r"next", link, re.IGNORECASE) and not _LINK_ENTRY.search(link):
+            raise CaptureError("unparseable Link header")
         return None
     if len(found) != 1:
         raise CaptureError("ambiguous next link")
@@ -80,7 +86,9 @@ def next_path(link: object, endpoint: str, allowed_keys: frozenset[str]) -> str 
     if parts.path != endpoint:
         raise CaptureError("refused next link endpoint")
     pairs = parse_qsl(parts.query, keep_blank_values=True)
-    if any(key not in allowed_keys for key, _ in pairs) or len({k for k, _ in pairs}) != len(pairs):
+    pages = [value for key, value in pairs if key == "page"]
+    others = sorted((key, value) for key, value in pairs if key != "page")
+    if len(pages) != 1 or not pages[0].isascii() or not pages[0].isdecimal() or others != sorted(fixed):
         raise CaptureError("refused next link query")
     return f"{parts.path}?{parts.query}" if parts.query else parts.path
 
@@ -96,7 +104,9 @@ def collect_pages(
     first = urlsplit(path)
     if first.scheme or first.netloc or not first.path.startswith("/"):
         raise CaptureError("invalid path")
-    allowed = frozenset(key for key, _ in parse_qsl(first.query, keep_blank_values=True)) | {"page"}
+    fixed = tuple(sorted(parse_qsl(first.query, keep_blank_values=True)))
+    if any(key == "page" for key, _ in fixed) or len({key for key, _ in fixed}) != len(fixed):
+        raise CaptureError("invalid path")
     pages: list[Any] = []
     seen: set[str] = set()
     current: str | None = path
@@ -115,7 +125,7 @@ def collect_pages(
         if type(response.body) is not expect:
             raise CaptureError(f"invalid body on page {index}")
         pages.append(response.body)
-        current = next_path(response.link, first.path, allowed)
+        current = next_path(response.link, first.path, fixed)
     return pages, True
 
 

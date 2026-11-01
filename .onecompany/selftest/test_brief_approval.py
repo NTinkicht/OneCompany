@@ -17,6 +17,7 @@ import brief_approval as ba
 import product_brief
 
 HEAD, BASE = "a" * 40, "b" * 40
+APPROVAL = ("--planning-ref", "EPIC-9", "--write-scope", "src/**", "--write-scope", "tests/**")
 ANSWERS = {"audience": "Families", "problem": "Keep track of small tasks",
            "outcome": "See a local checklist", "first_feature": "Add and finish a checklist item",
            "constraints": "No personal data"}
@@ -32,6 +33,8 @@ class BriefApprovalTests(unittest.TestCase):
         (self.target / ".onecompany").mkdir(parents=True)
         self.queue = self.target / ".onecompany" / "queue.json"
         self.write_queue([])
+        self.portfolio = self.target / ".onecompany" / "portfolio.json"
+        self.portfolio.write_text(json.dumps({"entities": [{"id": "EPIC-9"}], "links": []}))
         self.brief = Path(self.tmp.name) / "brief.json"
         self.save(self.make())
 
@@ -57,7 +60,7 @@ class BriefApprovalTests(unittest.TestCase):
         return code, out.getvalue(), err.getvalue()
 
     def admit(self, wu="WU-APP-001"):
-        return self.run_cli("--approve-wu", wu, "--owner-ack")
+        return self.run_cli("--approve-wu", wu, "--owner-ack", *APPROVAL)
 
     def test_preview_without_both_flags_changes_nothing(self):
         before = self.queue.read_text()
@@ -78,6 +81,11 @@ class BriefApprovalTests(unittest.TestCase):
         for forbidden in ("lease", "lease_id", "run_key", "branch_lease"):
             self.assertNotIn(forbidden, unit)
         self.assertIsNone(unit["branch"])
+        self.assertEqual(unit["planning_refs"], ["EPIC-9"])
+        self.assertEqual(unit["write_scope"], ["src/**", "tests/**"])
+        links = json.loads(self.portfolio.read_text())["links"]
+        self.assertEqual([(l["source"], l["target"], l["relationship"]) for l in links],
+                         [("EPIC-9", "WU-APP-001", "delivers")])
         self.assertEqual(unit["brief_approval"]["head"], HEAD)
         self.assertEqual(unit["brief_approval"]["brief_sha256"], ba.digest(json.loads(self.brief.read_text())))
 
@@ -91,10 +99,10 @@ class BriefApprovalTests(unittest.TestCase):
 
     def test_changed_head_base_or_brief_invalidates_existing_approval(self):
         self.admit()
-        code, _, err = self.run_cli("--approve-wu", "WU-APP-001", "--owner-ack", head="c" * 40)
+        code, _, err = self.run_cli("--approve-wu", "WU-APP-001", "--owner-ack", *APPROVAL, head="c" * 40)
         self.assertEqual(code, 2)
         self.assertIn("WU_ID_EXISTS_WITH_DIFFERENT_APPROVAL", err)
-        code, _, err = self.run_cli("--approve-wu", "WU-APP-001", "--owner-ack", base="c" * 40)
+        code, _, err = self.run_cli("--approve-wu", "WU-APP-001", "--owner-ack", *APPROVAL, base="c" * 40)
         self.assertIn("WU_ID_EXISTS_WITH_DIFFERENT_APPROVAL", err)
         self.save(self.make(dict(ANSWERS, outcome="Something else")))
         code, _, err = self.admit()
@@ -103,7 +111,7 @@ class BriefApprovalTests(unittest.TestCase):
 
     def refused(self, reason, *extra, **kw):
         before = self.queue.read_text()
-        code, _, err = self.run_cli(*(extra or ("--approve-wu", "WU-APP-001", "--owner-ack")), **kw)
+        code, _, err = self.run_cli(*(extra or ("--approve-wu", "WU-APP-001", "--owner-ack", *APPROVAL)), **kw)
         self.assertEqual(code, 2)
         self.assertIn(reason, err)
         self.assertEqual(self.queue.read_text(), before)
@@ -154,7 +162,7 @@ class BriefApprovalTests(unittest.TestCase):
     def test_refuses_bad_wu_id(self):
         for bad in ("APP-1", "WU bad", "WU/../x", ""):
             with self.subTest(bad=bad):
-                self.refused("UNKNOWN_WU_ID", "--approve-wu", bad, "--owner-ack")
+                self.refused("UNKNOWN_WU_ID", "--approve-wu", bad, "--owner-ack", *APPROVAL)
 
     def test_refuses_when_project_has_active_stream(self):
         self.write_queue([{"id": "WU-OTHER-1", "status": "IN_PROGRESS"}])
@@ -175,6 +183,46 @@ class BriefApprovalTests(unittest.TestCase):
         code, _, err = self.admit()
         self.assertEqual(code, 2)
         self.assertIn("TARGET_QUEUE_UNSAFE", err)
+
+    def test_refuses_missing_unknown_planning_ref_and_bad_write_scope(self):
+        self.refused("PLANNING_REF_REQUIRED", "--approve-wu", "WU-APP-001", "--owner-ack",
+                     "--write-scope", "src/**")
+        self.refused("UNKNOWN_PLANNING_REF", "--approve-wu", "WU-APP-001", "--owner-ack",
+                     "--planning-ref", "NOPE", "--write-scope", "src/**")
+        self.refused("WRITE_SCOPE_REQUIRED", "--approve-wu", "WU-APP-001", "--owner-ack",
+                     "--planning-ref", "EPIC-9")
+        for bad in ("**/*", "/etc", "../x", "a/../b", "*"):
+            with self.subTest(bad=bad):
+                self.refused("WRITE_SCOPE_INVALID", "--approve-wu", "WU-APP-001", "--owner-ack",
+                             "--planning-ref", "EPIC-9", "--write-scope", bad)
+
+    def test_refuses_symlinked_control_directory(self):
+        outside = Path(self.tmp.name) / "outside"
+        (self.target / ".onecompany").rename(outside)
+        os.symlink(outside, self.target / ".onecompany")
+        before = (outside / "queue.json").read_text()
+        code, _, err = self.admit()
+        self.assertEqual(code, 2)
+        self.assertIn("TARGET_QUEUE_UNSAFE", err)
+        self.assertEqual((outside / "queue.json").read_text(), before)
+
+    def test_apply_is_serialized_by_exclusive_lock(self):
+        import fcntl
+        import threading
+        import time
+        lock = os.open(self.target / ".onecompany" / ".brief-approval.lock", os.O_RDWR | os.O_CREAT, 0o600)
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        done = []
+        worker = threading.Thread(target=lambda: done.append(self.admit()))
+        worker.start()
+        time.sleep(0.5)
+        self.assertEqual(done, [])
+        self.assertEqual(self.units(), [])
+        fcntl.flock(lock, fcntl.LOCK_UN)
+        os.close(lock)
+        worker.join(10)
+        self.assertEqual(done[0][0], 0)
+        self.assertEqual(len(self.units()), 1)
 
     def test_module_has_no_network_or_provider_imports(self):
         source = (ROOT / "scripts" / "brief_approval.py").read_text()

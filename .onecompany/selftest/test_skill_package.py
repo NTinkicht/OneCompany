@@ -45,6 +45,19 @@ class SkillPackageTests(unittest.TestCase):
         self.assertNotRegex(text, r"(?i)autonomy[^\n]*\bL[2-9]\b")
         self.assertNotRegex(text, r"(?i)(api[_-]?key|token)\s*[=:]\s*\S")
 
+    def test_target_binding_and_install_before_approval(self):
+        for doc in (SKILL, ROOT / "docs" / "agent-setup" / "onecompany-skill.md"):
+            text = doc.read_text(encoding="utf-8")
+            for cmd in ("brief", "journey", "bootstrap"):
+                line = next(l for l in text.splitlines() if f"onecompany.py {cmd} " in l)
+                self.assertIn("--target <target>", line, (doc.name, cmd))
+                self.assertIn("--repository <repository>", line, (doc.name, cmd))
+            self.assertLess(text.index("onecompany.py bootstrap"), text.index("approve-brief"), doc.name)
+
+    def test_source_only_test_is_excluded_from_installation(self):
+        text = (ROOT / "scripts" / "bootstrap.py").read_text(encoding="utf-8")
+        self.assertIn('".onecompany/selftest/test_skill_package.py"', text)
+
     def test_install_doc_is_short(self):
         steps = [l for l in (ROOT / "docs" / "INSTALL-SKILL.md").read_text().splitlines()
                  if re.match(r"\d+\. ", l)]

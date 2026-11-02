@@ -58,6 +58,7 @@ SOURCE_INSTALLATION_SELFTESTS = frozenset({
     ".onecompany/selftest/test_mistral_review_packet.py",
     ".onecompany/selftest/test_mistral_cloud_work.py",
     ".onecompany/selftest/test_mistral_cloud_start.py",
+    ".onecompany/selftest/test_skill_package.py",
     ".onecompany/selftest/test_mistral_start_reconcile.py",
     ".onecompany/selftest/test_mistral_pilot_lease.py",
     ".onecompany/selftest/test_grok_cloud_bridge.py",

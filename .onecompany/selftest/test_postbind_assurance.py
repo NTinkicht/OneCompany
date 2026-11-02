@@ -41,11 +41,12 @@ class PostbindAssuranceTests(unittest.TestCase):
                 "head_sha": self.head, "base_sha": self.base, "build_digest": self.manifest["build_digest"],
                 "artifact": name, "artifact_sha256": d}
 
-    def run_assess(self, items=None, criteria=None, manifest=None, head=None):
+    def run_assess(self, items=None, criteria=None, manifest=None, head=None, digest=None):
         return pa.assess(criteria or self.criteria,
                          {"schema": pa.SCHEMA + "/evidence", "items": self.items if items is None else items},
                          manifest or self.manifest, wu_id=WU, run_key=RK, workspace=self.ws,
-                         head_sha=head or self.head, base_sha=self.base, evidence_dir=self.ev)
+                         head_sha=head or self.head, base_sha=self.base, evidence_dir=self.ev,
+                         approved_criteria_sha256=digest or pa.criteria_digest(self.criteria["criteria"]))
 
     def test_all_covered_passes(self):
         r = self.run_assess()
@@ -88,6 +89,27 @@ class PostbindAssuranceTests(unittest.TestCase):
         bad = copy.deepcopy(self.items); bad[1]["artifact"] = "link.txt"
         self.assertIn("AC2", self.run_assess(items=bad)["uncovered"])
 
+    def test_symlink_inside_evidence_dir_refused(self):
+        (self.ev / "real.txt").write_text("proof")
+        (self.ev / "alias.txt").symlink_to(self.ev / "real.txt")
+        (self.ev / "sub").mkdir(); (self.ev / "sub" / "f.txt").write_text("proof")
+        (self.ev / "dirlink").symlink_to(self.ev / "sub")
+        for name in ("alias.txt", "dirlink/f.txt"):
+            with self.subTest(name=name):
+                bad = copy.deepcopy(self.items); bad[1]["artifact"] = name
+                self.assertIn("AC2", self.run_assess(items=bad)["uncovered"])
+
+    def test_dropped_criterion_cannot_redefine_success(self):
+        approved = pa.criteria_digest(self.criteria["criteria"])
+        partial = copy.deepcopy(self.criteria); partial["criteria"] = partial["criteria"][:1]
+        with self.assertRaises(pa.AssuranceError):
+            self.run_assess(items=self.items[:1], criteria=partial, digest=approved)
+        weakened = copy.deepcopy(self.criteria); weakened["criteria"][0]["required_kinds"] = []
+        with self.assertRaises(pa.AssuranceError):
+            self.run_assess(criteria=weakened, digest=approved)
+        with self.assertRaises(pa.AssuranceError):
+            self.run_assess(digest="sha256:bad")
+
     def test_non_pass_and_unknown_inputs(self):
         bad = copy.deepcopy(self.items); bad[1]["result"] = "fail"
         self.assertIn("AC2", self.run_assess(items=bad)["uncovered"])
@@ -113,7 +135,8 @@ class PostbindAssuranceTests(unittest.TestCase):
         with self.assertRaises(pa.AssuranceError):
             self.run_assess(criteria=dup)
         r = pa.assess(self.criteria, None, self.manifest, wu_id=WU, run_key=RK, workspace=self.ws,
-                      head_sha=self.head, base_sha=self.base, evidence_dir=self.ev)
+                      head_sha=self.head, base_sha=self.base, evidence_dir=self.ev,
+                      approved_criteria_sha256=pa.criteria_digest(self.criteria["criteria"]))
         self.assertFalse(r["ok"]); self.assertEqual(r["covered"], [])
 
     def test_cli_exit_codes(self):
@@ -123,7 +146,8 @@ class PostbindAssuranceTests(unittest.TestCase):
         (d / "m.json").write_text(json.dumps({"manifest": self.manifest}))
         args = ["--wu", WU, "--run-key", RK, "--workspace", self.ws, "--head", self.head, "--base", self.base,
                 "--criteria", str(d / "c.json"), "--evidence", str(d / "e.json"), "--manifest", str(d / "m.json"),
-                "--evidence-dir", str(self.ev)]
+                "--evidence-dir", str(self.ev),
+                "--approved-criteria-sha256", pa.criteria_digest(self.criteria["criteria"])]
         self.assertEqual(pa.main(args), 0)
         (d / "e.json").write_text(json.dumps({"schema": pa.SCHEMA + "/evidence", "items": self.items[:1]}))
         self.assertEqual(pa.main(args), 1)

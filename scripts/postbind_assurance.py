@@ -39,10 +39,22 @@ class AssuranceError(ValueError):
 def _artifact_digest(base: Path, rel: object) -> str | None:
     if not isinstance(rel, str) or not rel or Path(rel).is_absolute() or ".." in Path(rel).parts:
         return None
-    p = (base / rel).resolve()
-    if base.resolve() not in p.parents or not p.is_file() or p.is_symlink():
+    root = base.resolve()
+    cur = base
+    for part in Path(rel).parts:  # inspect every unresolved component: resolve() would hide symlinks
+        cur = cur / part
+        if cur.is_symlink():
+            return None
+    p = cur.resolve()
+    if root not in p.parents or not p.is_file():
         return None
     return "sha256:" + hashlib.sha256(p.read_bytes()).hexdigest()
+
+
+def criteria_digest(crits: list[dict]) -> str:
+    """Canonical digest of the criterion set (ids + required kinds), independent of order."""
+    canon = sorted((c["id"], sorted(c.get("required_kinds", []))) for c in crits)
+    return "sha256:" + hashlib.sha256(json.dumps(canon, separators=(",", ":")).encode()).hexdigest()
 
 
 def parse_criteria(doc: object, wu_id: str) -> list[dict]:
@@ -65,9 +77,14 @@ def parse_criteria(doc: object, wu_id: str) -> list[dict]:
 
 
 def assess(criteria_doc: object, evidence_doc: object, manifest: object, *, wu_id: str, run_key: str,
-           workspace: str | Path, head_sha: str, base_sha: str, evidence_dir: str | Path) -> dict:
+           workspace: str | Path, head_sha: str, base_sha: str, evidence_dir: str | Path,
+           approved_criteria_sha256: str) -> dict:
     """Return {covered, uncovered, problems, ok}. ok only when every criterion is covered and no problem exists."""
     crits = parse_criteria(criteria_doc, wu_id)
+    # The criterion set is pinned to the digest recorded at approval, so a caller cannot
+    # drop or edit criteria (from both criteria and evidence) and still reach ok.
+    if not isinstance(approved_criteria_sha256, str) or approved_criteria_sha256 != criteria_digest(crits):
+        raise AssuranceError("criteria do not match the approved criteria digest")
     problems = [f"runtime binding: {p}" for p in rb.verify(
         manifest, wu_id=wu_id, run_key=run_key, workspace=workspace, head_sha=head_sha, base_sha=base_sha)]
     expected = {"wu_id": wu_id, "run_key": run_key, "head_sha": head_sha, "base_sha": base_sha}
@@ -119,12 +136,15 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--base", required=True); p.add_argument("--criteria", required=True)
     p.add_argument("--evidence", required=True); p.add_argument("--manifest", required=True)
     p.add_argument("--evidence-dir", required=True)
+    p.add_argument("--approved-criteria-sha256", required=True,
+                   help="criteria digest recorded at approval (see criteria_digest)")
     a = p.parse_args(argv)
     try:
         docs = [json.loads(Path(f).read_text(encoding="utf-8")) for f in (a.criteria, a.evidence, a.manifest)]
         mf = docs[2].get("manifest", docs[2]) if isinstance(docs[2], dict) else docs[2]
         report = assess(docs[0], docs[1], mf, wu_id=a.wu, run_key=a.run_key, workspace=a.workspace,
-                        head_sha=a.head, base_sha=a.base, evidence_dir=a.evidence_dir)
+                        head_sha=a.head, base_sha=a.base, evidence_dir=a.evidence_dir,
+                        approved_criteria_sha256=a.approved_criteria_sha256)
     except (AssuranceError, OSError, ValueError) as exc:
         print(f"REFUSED: {exc}", file=sys.stderr)
         return 2

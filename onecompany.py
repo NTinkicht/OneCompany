@@ -23,6 +23,7 @@ COMMANDS = {
     "demo": ["phase1_vertical_smoke.py"],
     "preview-local": ["../examples/vertical-slice/app.py"],
     "runtime-bind": ["runtime_binding.py"],
+    "postbind-assure": ["postbind_assurance.py"],
     "mission-control": ["mission_control_local.py"],
     "shadow-migration": ["shadow_migration.py"],
     "cutover-readiness": ["cutover_readiness.py"],

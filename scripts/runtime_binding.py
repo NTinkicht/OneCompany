@@ -15,13 +15,15 @@ import importlib.util
 import json
 import re
 import socket
+import subprocess
 import sys
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-APP_PATH = ROOT / "examples" / "vertical-slice" / "app.py"
+APP_REL = Path("examples") / "vertical-slice" / "app.py"
+APP_PATH = ROOT / APP_REL
 SCHEMA = "onecompany.runtime-binding/v1"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 WU_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:#-]{0,127}$")
@@ -46,12 +48,36 @@ def build_digest(app_path: Path = APP_PATH) -> str:
     return "sha256:" + hashlib.sha256(app_path.read_bytes()).hexdigest()
 
 
+def _git(workspace: Path, *args: str) -> subprocess.CompletedProcess:
+    return subprocess.run(["git", "-C", str(workspace), *args], capture_output=True, text=True, timeout=30)
+
+
+def resolve_app(workspace: Path, head_sha: str, base_sha: str) -> Path:
+    """Return the app source inside the bound workspace after proving it is the exact head."""
+    app = Path(workspace) / APP_REL
+    if not app.is_file():
+        raise BindingError("workspace does not contain the application source")
+    head = _git(workspace, "rev-parse", "HEAD")
+    if head.returncode != 0 or head.stdout.strip() != head_sha:
+        raise BindingError("workspace is not a git checkout at the supplied head_sha")
+    if _git(workspace, "merge-base", "--is-ancestor", base_sha, head_sha).returncode != 0:
+        raise BindingError("base_sha is not an ancestor of head_sha in the workspace")
+    dirty = _git(workspace, "status", "--porcelain", "--untracked-files=no", "--", str(APP_REL.parent))
+    if dirty.returncode != 0 or dirty.stdout.strip():
+        raise BindingError("application source differs from the committed head")
+    return app
+
+
 def _load_app(app_path: Path):
     spec = importlib.util.spec_from_file_location("onecompany_runtime_binding_app", app_path)
     if not spec or not spec.loader:
         raise BindingError("cannot load application module")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    previous, sys.dont_write_bytecode = sys.dont_write_bytecode, True
+    try:
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    finally:
+        sys.dont_write_bytecode = previous
     return module
 
 
@@ -85,11 +111,11 @@ def _request(port: int, method: str, path: str, body: dict | None = None):
         conn.close()
 
 
-def capture(wu_id: str, run_key: str, workspace: str | Path, head_sha: str, base_sha: str,
-            app_path: Path = APP_PATH) -> dict:
-    """Run the fixture on an ephemeral loopback port and return an evidence manifest."""
+def capture(wu_id: str, run_key: str, workspace: str | Path, head_sha: str, base_sha: str) -> dict:
+    """Run the workspace's fixture on an ephemeral loopback port and return an evidence manifest."""
     workspace = Path(workspace)
     _check_ids(wu_id, run_key, workspace, head_sha, base_sha)
+    app_path = resolve_app(workspace, head_sha, base_sha)
     app = _load_app(app_path)
     digest = build_digest(app_path)
     started = _now()
@@ -137,7 +163,7 @@ def capture(wu_id: str, run_key: str, workspace: str | Path, head_sha: str, base
 
 
 def verify(manifest: object, *, wu_id: str, run_key: str, workspace: str | Path,
-           head_sha: str, base_sha: str, app_path: Path = APP_PATH) -> list[str]:
+           head_sha: str, base_sha: str) -> list[str]:
     """Return a list of refusal reasons; empty means the manifest binds to the expectation."""
     if not isinstance(manifest, dict):
         return ["manifest is not an object"]
@@ -149,15 +175,22 @@ def verify(manifest: object, *, wu_id: str, run_key: str, workspace: str | Path,
     expected = {"wu_id": wu_id, "run_key": run_key, "head_sha": head_sha, "base_sha": base_sha,
                 "workspace": str(Path(workspace).resolve())}
     problems += [f"{k} mismatch" for k, v in expected.items() if manifest[k] != v]
-    if manifest["build_digest"] != build_digest(app_path):
-        problems.append("build_digest mismatch")
+    try:
+        app_path = resolve_app(Path(workspace), head_sha, base_sha)
+        if manifest["build_digest"] != build_digest(app_path):
+            problems.append("build_digest mismatch")
+    except (BindingError, OSError, subprocess.SubprocessError) as exc:
+        problems.append(f"workspace unverifiable: {exc}")
     if manifest["production_qualified"] is not False or manifest["scope"] != SCOPE:
         problems.append("local demo must not be production-qualified")
-    if not isinstance(manifest["health"], dict) or manifest["health"].get("status") != 200:
+    h, c, k = manifest["health"], manifest["crud_round_trip"], manifest["cleanup"]
+    if not isinstance(h, dict) or h.get("status") != 200:
         problems.append("health evidence failed")
-    if not isinstance(manifest["crud_round_trip"], dict) or manifest["crud_round_trip"].get("ok") is not True:
+    if not (isinstance(c, dict) and c.get("create") in (200, 201) and c.get("update") == 200
+            and c.get("list") == 200 and c.get("delete") in (200, 204) and c.get("ok") is True):
         problems.append("CRUD round trip failed")
-    if not isinstance(manifest["cleanup"], dict) or manifest["cleanup"].get("ok") is not True:
+    if not (isinstance(k, dict) and k.get("server_stopped") is True and k.get("port_closed") is True
+            and k.get("ok") is True):
         problems.append("cleanup not verified")
     if str(manifest["started_at"]) > str(manifest["stopped_at"]):
         problems.append("stop precedes start")
@@ -166,10 +199,10 @@ def verify(manifest: object, *, wu_id: str, run_key: str, workspace: str | Path,
 
 def project(manifest: object, *, ci_state: str | None, tests_passed: bool | None,
             current_head_sha: str, current_base_sha: str, wu_id: str, run_key: str,
-            workspace: str | Path, app_path: Path = APP_PATH) -> dict:
+            workspace: str | Path) -> dict:
     """Preview projection: only an exact, fully evidenced local run is ready_to_preview."""
     reasons = verify(manifest, wu_id=wu_id, run_key=run_key, workspace=workspace,
-                     head_sha=current_head_sha, base_sha=current_base_sha, app_path=app_path)
+                     head_sha=current_head_sha, base_sha=current_base_sha)
     if ci_state != "success":
         reasons.append("CI evidence absent or not successful")
     if tests_passed is not True:

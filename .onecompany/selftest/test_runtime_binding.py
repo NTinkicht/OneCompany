@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import copy
+import shutil
+import subprocess
 import importlib.util
 import socket
 import sys
@@ -18,8 +20,20 @@ if MOD_PATH.is_file() and APP_PATH.is_file():
     sys.modules[SPEC.name] = rb
     SPEC.loader.exec_module(rb)
 
-HEAD = "a" * 40
-BASE = "b" * 40
+def make_workspace(tmp: str, extra_commit: bool = True) -> tuple[str, str, str]:
+    """Temp git checkout containing the real fixture; returns (path, base_sha, head_sha)."""
+    def git(*a):
+        return subprocess.run(["git", "-C", tmp, "-c", "user.email=t@t", "-c", "user.name=t", *a],
+                              check=True, capture_output=True, text=True).stdout.strip()
+    git("init", "-q")
+    dst = Path(tmp) / "examples" / "vertical-slice"
+    dst.mkdir(parents=True)
+    shutil.copy(APP_PATH, dst / "app.py")
+    git("add", "-A"); git("commit", "-q", "-m", "base")
+    base = git("rev-parse", "HEAD")
+    (Path(tmp) / "note.txt").write_text("x")
+    git("add", "-A"); git("commit", "-q", "-m", "head")
+    return tmp, base, git("rev-parse", "HEAD")
 
 
 @unittest.skipUnless(APP_PATH.is_file(), "source-only disposable demo not installed")
@@ -27,8 +41,8 @@ class RuntimeBindingTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
         cls._tmp = tempfile.TemporaryDirectory()
-        cls.ws = cls._tmp.name
-        cls.manifest = rb.capture("WU-P1-RUNTIME-BINDING-001", "run/1", cls.ws, HEAD, BASE)
+        cls.ws, cls.base, cls.head = make_workspace(cls._tmp.name)
+        cls.manifest = rb.capture("WU-P1-RUNTIME-BINDING-001", "run/1", cls.ws, cls.head, cls.base)
 
     @classmethod
     def tearDownClass(cls) -> None:
@@ -36,7 +50,7 @@ class RuntimeBindingTests(unittest.TestCase):
 
     def args(self, **over):
         base = dict(wu_id="WU-P1-RUNTIME-BINDING-001", run_key="run/1", workspace=self.ws,
-                    head_sha=HEAD, base_sha=BASE)
+                    head_sha=self.head, base_sha=self.base)
         base.update(over)
         return base
 
@@ -47,7 +61,7 @@ class RuntimeBindingTests(unittest.TestCase):
         self.assertTrue(m["cleanup"]["ok"])
         self.assertFalse(m["production_qualified"])
         self.assertTrue(m["build_digest"].startswith("sha256:"))
-        self.assertEqual(m["head_sha"], HEAD)
+        self.assertEqual(m["head_sha"], self.head)
         with self.assertRaises(OSError):
             socket.create_connection(("127.0.0.1", m["port"]), timeout=1)
         self.assertEqual(rb.verify(m, **self.args()), [])
@@ -59,6 +73,7 @@ class RuntimeBindingTests(unittest.TestCase):
                 self.assertIn(f"{key} mismatch", rb.verify(self.manifest, **self.args(**{key: bad})))
         with tempfile.TemporaryDirectory() as other:
             self.assertIn("workspace mismatch", rb.verify(self.manifest, **self.args(workspace=other)))
+            self.assertTrue(any("unverifiable" in r for r in rb.verify(self.manifest, **self.args(workspace=other))))
 
     def test_missing_or_tampered_fields_are_refused(self) -> None:
         for field in rb.REQUIRED:
@@ -82,7 +97,7 @@ class RuntimeBindingTests(unittest.TestCase):
 
     def test_projection_is_ready_only_with_exact_head_ci_and_tests(self) -> None:
         kw = dict(wu_id="WU-P1-RUNTIME-BINDING-001", run_key="run/1", workspace=self.ws,
-                  current_head_sha=HEAD, current_base_sha=BASE)
+                  current_head_sha=self.head, current_base_sha=self.base)
         ok = rb.project(self.manifest, ci_state="success", tests_passed=True, **kw)
         self.assertEqual(ok["state"], "ready_to_preview")
         self.assertFalse(ok["production_qualified"])
@@ -100,7 +115,35 @@ class RuntimeBindingTests(unittest.TestCase):
                 with self.assertRaises(rb.BindingError):
                     rb.capture(**{**self.args(), **over})
 
+    def test_contradictory_nested_evidence_is_refused(self) -> None:
+        m = copy.deepcopy(self.manifest)
+        m["cleanup"] = {"ok": True, "server_stopped": False, "port_closed": False}
+        m["crud_round_trip"] = {"ok": True, "create": 500, "update": 500, "list": 500, "delete": 500}
+        r = rb.verify(m, **self.args())
+        self.assertIn("cleanup not verified", r)
+        self.assertIn("CRUD round trip failed", r)
+        m = copy.deepcopy(self.manifest)
+        m["crud_round_trip"].pop("update")
+        self.assertIn("CRUD round trip failed", rb.verify(m, **self.args()))
+
+    def test_workspace_must_be_the_exact_head_checkout(self) -> None:
+        with tempfile.TemporaryDirectory() as empty:
+            with self.assertRaises(rb.BindingError):
+                rb.capture("W1", "r1", empty, self.head, self.base)
+        with self.assertRaises(rb.BindingError):  # invented head SHA
+            rb.capture("W1", "r1", self.ws, "c" * 40, self.base)
+        with self.assertRaises(rb.BindingError):  # base not an ancestor
+            rb.capture("W1", "r1", self.ws, self.head, "c" * 40)
+        with self.assertRaises(rb.BindingError):  # base == unrelated: head is not an ancestor of base
+            rb.capture("W1", "r1", self.ws, self.base, self.head)
+        with tempfile.TemporaryDirectory() as t:
+            ws, base, head = make_workspace(t)
+            (Path(ws) / "examples" / "vertical-slice" / "app.py").write_text("# tampered\n")
+            with self.assertRaises(rb.BindingError):
+                rb.capture("W1", "r1", ws, head, base)
+
     def test_cli_exit_codes(self) -> None:
+        HEAD, BASE = self.head, self.base
         argv = ["--wu", "W1", "--run-key", "r1", "--workspace", self.ws, "--head", HEAD, "--base", BASE]
         self.assertEqual(rb.main(argv + ["--ci", "success", "--tests", "passed"]), 0)
         self.assertEqual(rb.main(argv), 1)

@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 
 import brief_handoff_proposal
+import workplan_validate
 import knowledge
 import qualification
 from lease_lifecycle import coordination_view
@@ -59,6 +60,8 @@ def consume_brief_handoff(proposal: dict, trusted_head: str, trusted_base: str) 
 
 
 def main() -> int:
+    if len(sys.argv) > 1 and sys.argv[1] == "workplan-validate":
+        return workplan_validate.main(sys.argv[2:])
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("validate")
@@ -69,6 +72,7 @@ def main() -> int:
     sub.add_parser("critical-path")
     explain = sub.add_parser("explain")
     explain.add_argument("id")
+    sub.add_parser("workplan-validate", help="validate an untrusted work plan (--input, --brief); admits nothing")
     brief = sub.add_parser("brief-handoff")
     brief.add_argument("--proposal", required=True)
     brief.add_argument("--head", required=True)

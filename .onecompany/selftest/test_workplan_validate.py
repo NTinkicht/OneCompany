@@ -85,6 +85,50 @@ class WorkplanValidateTests(unittest.TestCase):
         for prot in (".github/workflows/x.yml", "PRODUCT.md", "coordination/**", ".onecompany/config.json", ".l5/x", "AGENTS.md", "**/CODEOWNERS"):
             self.refused(lambda p, b=prot: p["work_units"][0].update(write_scope=[b]), "PROTECTED_PATH")
 
+    def test_governance_policy_paths_are_protected(self):
+        control = json.loads((ROOT / ".onecompany" / "governance.json").read_text())["control_plane"]
+        for path in ("company/CONSTITUTION.md", ".onecompany/governance.json", "scripts/merge.py"):
+            self.refused(lambda p, b=path: p["work_units"][0].update(write_scope=[b]), "PROTECTED_PATH")
+        for path in control["protected_paths"] + control["always_human_paths"]:
+            probe = path.replace("*", "x")
+            self.refused(lambda p, b=probe: p["work_units"][0].update(write_scope=[b]), "PROTECTED_PATH")
+
+    def test_unreadable_governance_policy_fails_closed(self):
+        saved, wv._PROTECTED_CACHE = wv._PROTECTED_CACHE, None
+        old = wv.GOVERNANCE
+        wv.GOVERNANCE = ROOT / "does-not-exist.json"
+        try:
+            self.refused(lambda p: p["work_units"][0].update(write_scope=["src/a/**"]), "PROTECTED_PATH")
+        finally:
+            wv.GOVERNANCE, wv._PROTECTED_CACHE = old, saved
+
+    def test_non_canonical_scopes_are_refused_like_scope_guard(self):
+        import scope_guard
+        for bad in ("src//a.py", "src/./a.py", "./src/a.py", "src/a/", "/src/a.py", "src/../a.py"):
+            self.assertTrue(scope_guard._normalize(bad) != bad)
+            self.refused(lambda p, b=bad: p["work_units"][0].update(write_scope=[b]), "WRITE_SCOPE_INVALID")
+        good = plan(unit("WU-A", "src/a.py"))
+        self.assertEqual(wv.validate(good, BRIEF)["verdict"], "ACCEPTED")
+
+    def test_malformed_types_are_refused_not_crashed(self):
+        def crit(**kw):
+            return lambda p: p["work_units"][0]["acceptance_criteria"][0].update(**kw)
+        self.refused(crit(brief_ref=[]), "CRITERION_NOT_TRACEABLE")
+        self.refused(crit(brief_ref={"a": 1}), "CRITERION_NOT_TRACEABLE")
+        self.refused(crit(brief_ref=None), "CRITERION_NOT_TRACEABLE")
+        for field, value in (("write_scope", 1), ("write_scope", "src/a"), ("write_scope", [[]]), ("write_scope", [None]),
+                             ("tests", 1), ("tests", [[]]), ("dependencies", 1), ("dependencies", [[]]),
+                             ("estimate", []), ("estimate", {"lines": []}), ("risk_class", []), ("title", []),
+                             ("requirement_ids", [[]]), ("acceptance_criteria", 1), ("acceptance_criteria", [1])):
+            p = self.good()
+            p["work_units"][0][field] = value
+            result = wv.validate(p, BRIEF)
+            self.assertEqual(result["verdict"], "REFUSED", (field, value))
+        for bad_unit in (1, None, [], "x", {"id": []}):
+            self.assertEqual(wv.validate(plan(bad_unit), BRIEF)["verdict"], "REFUSED")
+        self.assertEqual(wv.validate({"schema": wv.SCHEMA, "work_units": 5}, BRIEF)["verdict"], "REFUSED")
+        self.assertEqual(wv.validate(self.good(), {"answers": 3})["verdict"], "REFUSED")
+
     def test_overlap_requires_serialization(self):
         p = plan(unit("WU-A", "src/**"), unit("WU-B", "src/b/**"))
         self.assertIn("SCOPE_OVERLAP_UNSERIALIZED", codes(wv.validate(p, BRIEF)))

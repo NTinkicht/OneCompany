@@ -18,8 +18,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from onecompany_lib import CONTROL
 from planning_lib import (DependencyCycleError, by_id, critical_path,
                           dependency_closure, rank_work, scopes_overlap)
+from scope_guard import _normalize as canonical_scope
 
 SCHEMA = "onecompany.workplan.v1"
 RESULT_SCHEMA = "onecompany.workplan-verdict.v1"
@@ -44,6 +46,7 @@ FORBIDDEN_WORK = re.compile(
     r"\b(spend\w*|paid|pay(?:ing|ment|ments)?|billing|billable|purchas\w*|"
     r"credential\w*|secret\w*|password\w*|api[ _-]?keys?|tokens?|private[ _-]keys?|"
     r"deploy\w*|production|prod|go[ -]live|release[ -]to)\b", re.I)
+GOVERNANCE = CONTROL / "governance.json"
 CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 
 
@@ -100,15 +103,37 @@ def normalize_scope(item: Any) -> str | None:
     if not isinstance(item, str):
         return None
     text = item.strip()
-    if (not text or len(text) > 200 or text.startswith("/") or "\\" in text
-            or CONTROL_CHARS.search(text) or ".." in text.split("/")
-            or text.lstrip("./") in {"", "*", "**", "**/*"}):
+    # Same canonical form as scripts/scope_guard.py; anything it would rewrite
+    # (src//a, src/./a, ./a, a/, leading "/") or reject is refused here, so the
+    # validator and the runtime scope guard can never disagree on a scope.
+    if (not text or len(text) > 200 or "\\" in text or CONTROL_CHARS.search(text)
+            or canonical_scope(text) != text or text in {"*", "**", "**/*"}):
         return None
     return text
 
 
+_PROTECTED_CACHE: tuple[str, ...] | None = None
+
+
+def protected_paths() -> tuple[str, ...]:
+    """Static families plus the trusted governance policy; unreadable policy fails closed."""
+    global _PROTECTED_CACHE
+    if _PROTECTED_CACHE is None:
+        try:
+            control = json.loads(GOVERNANCE.read_text(encoding="utf-8"))["control_plane"]
+            derived = [p for key in ("protected_paths", "always_human_paths")
+                       for p in control[key] if isinstance(p, str) and p.strip()]
+            if not derived:
+                raise ValueError("empty")
+        except (OSError, ValueError, KeyError, TypeError):
+            # Cannot establish the trusted policy: protect the whole tree.
+            derived = ["**"]
+        _PROTECTED_CACHE = tuple(dict.fromkeys([*PROTECTED, *derived]))
+    return _PROTECTED_CACHE
+
+
 def touches_protected(scope: str) -> bool:
-    return any(scopes_overlap(scope, path) for path in PROTECTED)
+    return any(scopes_overlap(scope, path) for path in protected_paths())
 
 
 def check_unit(unit: Any, refs: dict[str, str], add) -> dict | None:
@@ -149,7 +174,7 @@ def check_unit(unit: Any, refs: dict[str, str], add) -> dict | None:
                 fail("CRITERION_INVALID", "criterion needs unique id, text and brief_ref only")
                 continue
             seen.add(crit["id"])
-            if crit.get("brief_ref") not in refs:
+            if not isinstance(crit.get("brief_ref"), str) or crit["brief_ref"] not in refs:
                 fail("CRITERION_NOT_TRACEABLE",
                      f"{crit['id']}: brief_ref must name an owner-answered brief field")
             texts.append(crit["text"])
@@ -184,7 +209,8 @@ def check_unit(unit: Any, refs: dict[str, str], add) -> dict | None:
             or any(not isinstance(d, str) for d in deps) or len(set(deps)) != len(deps)):
         fail("DEPENDENCIES_INVALID", "dependencies must be a list of unique ids")
     # Planner prose is untrusted data: it is only ever pattern-checked, never obeyed.
-    haystack = " ".join([str(unit.get("title", "")), *texts, *map(str, scopes or []),
+    haystack = " ".join([str(unit.get("title", "")), *texts,
+                         *map(str, scopes if isinstance(scopes, list) else []),
                          *map(str, tests if isinstance(tests, list) else [])])
     if FORBIDDEN_WORK.search(haystack):
         fail("FORBIDDEN_WORK", "involves spend, credentials, deployment or production")

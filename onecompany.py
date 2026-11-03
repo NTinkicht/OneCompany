@@ -25,6 +25,7 @@ COMMANDS = {
     "runtime-bind": ["runtime_binding.py"],
     "postbind-assure": ["postbind_assurance.py"],
     "mission-control": ["mission_control_local.py"],
+    "release-check": ["release_check.py"],
     "shadow-migration": ["shadow_migration.py"],
     "cutover-readiness": ["cutover_readiness.py"],
     "doctor": ["doctor.py"], "status": ["status.py"], "check": ["check.py"], "validate": ["validate_all.py"], "schema-validate": ["schema_validate.py"],

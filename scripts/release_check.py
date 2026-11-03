@@ -65,7 +65,10 @@ def check(root: Path) -> list[str]:
             if commands and command not in commands:
                 findings.add(f"UNKNOWN_COMMAND:{doc}:{command}")
         for ref in DOC_PATH.findall(text):
-            if not (root / ref).is_file():
+            target = (root / ref).resolve()
+            if not target.is_relative_to(root.resolve()):
+                findings.add(f"REFERENCED_PATH_OUTSIDE_REPO:{doc}:{ref}")
+            elif not target.is_file():
                 findings.add(f"REFERENCED_PATH_MISSING:{doc}:{ref}")
     return sorted(findings)
 

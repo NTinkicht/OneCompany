@@ -91,6 +91,12 @@ class ReleaseCheckTests(unittest.TestCase):
         path.write_text(path.read_text(encoding="utf-8") + "\nSee `docs/NOT-THERE.md`.\n", encoding="utf-8")
         self.assertEqual(rc.check(root), ["REFERENCED_PATH_MISSING:docs/RELEASE-CHECKLIST.md:docs/NOT-THERE.md"])
 
+    def test_references_escaping_the_repository_are_rejected_without_probing(self):
+        root = self.fixture()
+        path = root / "docs/RELEASE-CHECKLIST.md"
+        path.write_text(path.read_text(encoding="utf-8") + "\nSee `docs/../../etc/passwd.md`.\n", encoding="utf-8")
+        self.assertEqual(rc.check(root), ["REFERENCED_PATH_OUTSIDE_REPO:docs/RELEASE-CHECKLIST.md:docs/../../etc/passwd.md"])
+
     def test_unreadable_registry_fails_closed_and_output_is_deterministic(self):
         root = self.fixture()
         (root / "onecompany.py").write_text("COMMANDS = compute()\n", encoding="utf-8")

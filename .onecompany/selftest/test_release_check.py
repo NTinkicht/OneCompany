@@ -47,6 +47,12 @@ class ReleaseCheckTests(unittest.TestCase):
         self.edit(root, "docs/RELEASE-CHECKLIST.md", "python onecompany.py doctor", "python onecompany.py no-such-drill")
         self.assertEqual(rc.check(root), ["UNKNOWN_COMMAND:docs/RELEASE-CHECKLIST.md:no-such-drill"])
 
+    def test_a_valid_prefix_with_an_invalid_suffix_is_not_accepted(self):
+        for typo in ("doctor_typo", "doctor.py", "doctor-x"):
+            root = self.fixture()
+            self.edit(root, "docs/RELEASE-CHECKLIST.md", "python onecompany.py doctor", f"python onecompany.py {typo}")
+            self.assertEqual(rc.check(root), [f"UNKNOWN_COMMAND:docs/RELEASE-CHECKLIST.md:{typo}"], typo)
+
     def test_unknown_command_in_runbook(self):
         root = self.fixture()
         path = root / "docs/INCIDENT-RUNBOOK.md"

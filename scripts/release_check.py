@@ -24,7 +24,7 @@ REQUIRED_SECTIONS = {
     "docs/INCIDENT-RUNBOOK.md": ("## 1. Contain first", "## 4. Recover with a reversible path",
                                  "## 6. Restore autonomy gradually"),
 }
-COMMAND = re.compile(r"python3? onecompany\.py ([a-z][a-z0-9-]*)")
+COMMAND = re.compile(r"python3? onecompany\.py ([A-Za-z0-9_.:/-]+)")
 DOC_PATH = re.compile(r"`((?:docs|scripts)/[A-Za-z0-9_./-]+\.(?:md|py|json))`")
 
 

@@ -79,16 +79,29 @@ class MissionTruthTests(unittest.TestCase):
         self.assertEqual(row([wu(claimed_state="OPEN")], live({}))["state"], "OPEN")
 
     def test_ordering_is_deterministic_by_priority_risk_id(self):
-        cache = [wu("WU-C", priority=2, claimed_state="OPEN"),
-                 wu("WU-B", priority=1, risk="LOW", claimed_state="OPEN"),
-                 wu("WU-A", priority=1, risk="HIGH", claimed_state="OPEN")]
+        cache = [wu("WU-C", priority=1, claimed_state="OPEN"),
+                 wu("WU-B", priority=2, risk="LOW", claimed_state="OPEN"),
+                 wu("WU-A", priority=2, risk="HIGH", claimed_state="OPEN")]
         out = mt.project_work_units(cache, live({}), NOW, 900)
         self.assertEqual([r["id"] for r in out["work_units"]], ["WU-A", "WU-B", "WU-C"])
         self.assertEqual(out["next_action"], "CONTINUE_WORK")
 
-    def test_unknown_risk_defaults_to_high_and_authority_never_granted(self):
+    def test_critical_risk_class_is_preserved_and_ranks_first(self):
+        cache = [wu("WU-A", claimed_state="OPEN", risk="HIGH"),
+                 wu("WU-B", claimed_state="OPEN", risk=None, risk_class="CRITICAL")]
+        rows = mt.project_work_units(cache, live({}), NOW, 900)["work_units"]
+        self.assertEqual([(r["id"], r["risk"]) for r in rows],
+                         [("WU-B", "CRITICAL"), ("WU-A", "HIGH")])
+
+    def test_higher_priority_value_ranks_first_like_planner(self):
+        cache = [wu("WU-1", priority=1, claimed_state="OPEN"),
+                 wu("WU-2", priority=100, claimed_state="OPEN")]
+        rows = mt.project_work_units(cache, live({}), NOW, 900)["work_units"]
+        self.assertEqual([r["id"] for r in rows], ["WU-2", "WU-1"])
+
+    def test_unknown_risk_fails_closed_and_authority_never_granted(self):
         out = mt.project_work_units([wu(claimed_state="OPEN", risk="??")], live({}), NOW, 900)
-        self.assertEqual(out["work_units"][0]["risk"], "HIGH")
+        self.assertEqual(out["work_units"][0]["risk"], "CRITICAL")
         self.assertIs(out["authority_granted"], False)
         self.assertIs(out["all_verified"], False)
 

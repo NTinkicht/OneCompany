@@ -17,7 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from live_work_reconciliation import _same_sha, snapshot_freshness  # noqa: E402
 
 SCHEMA = "onecompany.mission-truth.v1"
-_RISKS = {"LOW": 0, "MEDIUM": 1, "HIGH": 2}
+_RISKS = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}
 
 
 def _ts(value: object) -> dt.datetime | None:
@@ -54,8 +54,10 @@ def _row(wu: dict, live_pr: object, live_findings: tuple[str, ...], live_at: dt.
         else:
             state = "DRIFT"
             problems.append("LIVE_DISAGREES_WITH_CACHE")
-    risk = wu.get("risk") if wu.get("risk") in _RISKS else "HIGH"
-    priority = wu.get("priority") if type(wu.get("priority")) is int else 10**6
+    raw_risk = wu.get("risk_class", wu.get("risk"))
+    risk = raw_risk if raw_risk in _RISKS else "CRITICAL"
+    # Higher static priority first, matching planning_lib.rank_work.
+    priority = wu.get("priority") if type(wu.get("priority")) is int else 0
     if state == "VERIFIED_MERGED":
         action = "NONE"
     elif state == "BLOCKED":
@@ -87,7 +89,7 @@ def project_work_units(cache: object, live: object, now: dt.datetime,
     findings = snapshot_freshness(live_at, now, max_age_seconds) if live_at else ("INVALID_TIMESTAMP",)
     prs = live.get("prs") if isinstance(live.get("prs"), dict) else {}
     rows = [_row(w, prs.get(w["id"]), findings, live_at) for w in cache]
-    rows.sort(key=lambda r: (r["priority"], -_RISKS[r["risk"]], r["id"]))
+    rows.sort(key=lambda r: (-r["priority"], -_RISKS[r["risk"]], r["id"]))
     verified = all(r["state"] == "VERIFIED_MERGED" for r in rows) if rows else False
     return {
         "schema": SCHEMA, "work_units": rows, "all_verified": verified,

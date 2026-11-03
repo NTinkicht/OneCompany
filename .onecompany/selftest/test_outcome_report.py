@@ -78,6 +78,26 @@ class OutcomeReportTests(unittest.TestCase):
             self.assertNotIn(leaked, dumped)
         self.assertIn("[redacted]", dumped)
 
+    def test_distinct_redacted_identities_are_never_merged(self):
+        rows = [rec("WU A", "started", "2026-11-03T10:00:00Z"), rec("WU B", "merged", "2026-11-03T11:00:00Z", outcome="merged", tokens=7)]
+        report = self.report(rows)
+        self.assertEqual([r["wu"] for r in report["work_units"]], ["[redacted-1]", "[redacted-2]"])
+        for r in report["work_units"]:
+            self.assertEqual(r["confidence"], "low")
+            self.assertIsNone(r["latency_seconds"])
+        self.assertEqual([r["tokens"] for r in report["work_units"]], [None, 7])
+
+    def test_outcome_comes_from_chronologically_latest_end_event_regardless_of_order(self):
+        base = [rec("WU-H", "started", "2026-11-03T10:00:00Z")]
+        late = rec("WU-H", "merged", "2026-11-03T12:00:00Z", outcome="merged")
+        early = rec("WU-H", "failed", "2026-11-03T11:00:00Z", outcome="failed")
+        for order in ([late, early], [early, late]):
+            h = self.row(self.report(base + order), "WU-H")
+            self.assertEqual((h["outcome"], h["latency_seconds"], h["confidence"]), ("merged", 7200, "high"))
+        tie = self.row(self.report(base + [late, rec("WU-H", "failed", "2026-11-03T12:00:00Z", outcome="failed")]), "WU-H")
+        self.assertIsNone(tie["outcome"])
+        self.assertEqual(tie["confidence"], "low")
+
     def test_non_list_input_is_rejected_and_junk_entries_do_not_crash(self):
         with self.assertRaises(ValueError):
             self.report({"wu": "x"})

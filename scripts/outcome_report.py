@@ -57,9 +57,10 @@ def build_report(receipts: object, allowed: set[str], forbidden: set[str]) -> di
     violations: list[dict] = []
     for index, raw in enumerate(receipts):
         r = raw if isinstance(raw, dict) else {}
-        wu = safe_text(r.get("wu"))
+        raw_wu = r.get("wu")
+        wu = raw_wu if isinstance(raw_wu, str) and raw_wu else None
         event = safe_text(r.get("event"))
-        wu_row = per_wu.setdefault(wu, {"wu": wu, "starts": [], "ends": [], "outcome": None, "incidents": 0,
+        wu_row = per_wu.setdefault(wu, {"starts": [], "ends": [], "incidents": 0,
                                         "pending_gates": 0, "cost_classes": {}, "tokens": 0, "tokens_known": False,
                                         "bad_timestamps": 0, "events": 0})
         wu_row["events"] += 1
@@ -70,8 +71,7 @@ def build_report(receipts: object, allowed: set[str], forbidden: set[str]) -> di
             wu_row["starts"].append(when)
         if event in END_EVENTS:
             if when:
-                wu_row["ends"].append(when)
-            wu_row["outcome"] = safe_text(r.get("outcome"), event)
+                wu_row["ends"].append((when, safe_text(r.get("outcome"), event)))
         if event in INCIDENT_EVENTS:
             wu_row["incidents"] += 1
         if event in PENDING_EVENTS:
@@ -80,25 +80,47 @@ def build_report(receipts: object, allowed: set[str], forbidden: set[str]) -> di
         shown = safe_text(cost_class, "MISSING")
         wu_row["cost_classes"][shown] = wu_row["cost_classes"].get(shown, 0) + 1
         if not isinstance(cost_class, str) or cost_class in forbidden or cost_class not in allowed:
-            violations.append({"index": index, "wu": wu, "cost_class": shown, "reason": "cost class missing, forbidden or not allowed"})
+            violations.append({"index": index, "wu_key": wu, "cost_class": shown, "reason": "cost class missing, forbidden or not allowed"})
         tokens = r.get("tokens")
         if isinstance(tokens, int) and not isinstance(tokens, bool) and tokens >= 0:
             wu_row["tokens"] += tokens
             wu_row["tokens_known"] = True
 
+    # Aggregate on the raw identity; only the displayed name is redacted, and each redacted
+    # identity gets its own stable label so unrelated work units are never merged.
+    keys = sorted(per_wu, key=lambda k: (k is None, k or ""))
+    labels: dict[str | None, str] = {}
+    redacted = 0
+    for key in keys:
+        shown = safe_text(key)
+        if shown == "[redacted]":
+            redacted += 1
+            shown = f"[redacted-{redacted}]"
+        labels[key] = shown
     rows = []
-    for wu in sorted(per_wu):
-        row = per_wu[wu]
+    for key in keys:
+        row = per_wu[key]
+        wu = labels[key]
         latency = None
+        outcome = None
         if row["starts"] and row["ends"]:
-            delta = (max(row["ends"]) - min(row["starts"])).total_seconds()
+            last_end = max(when for when, _ in row["ends"])
+            delta = (last_end - min(row["starts"])).total_seconds()
             latency = int(delta) if delta >= 0 else None
-        complete = latency is not None and row["outcome"] is not None and row["bad_timestamps"] == 0
+            outcomes = {name for when, name in row["ends"] if when == last_end}
+            outcome = outcomes.pop() if len(outcomes) == 1 else None
+        elif row["ends"]:
+            last_end = max(when for when, _ in row["ends"])
+            outcomes = {name for when, name in row["ends"] if when == last_end}
+            outcome = outcomes.pop() if len(outcomes) == 1 else None
+        complete = latency is not None and outcome is not None and row["bad_timestamps"] == 0
         rows.append({
-            "wu": wu, "outcome": row["outcome"], "latency_seconds": latency, "incidents": row["incidents"],
+            "wu": wu, "outcome": outcome, "latency_seconds": latency, "incidents": row["incidents"],
             "pending_gates": row["pending_gates"], "cost_classes": dict(sorted(row["cost_classes"].items())),
             "tokens": row["tokens"] if row["tokens_known"] else None, "confidence": "high" if complete else "low",
         })
+    for v in violations:
+        v["wu"] = labels[v.pop("wu_key")]
     violations.sort(key=lambda v: (v["index"], v["wu"]))
     return {"receipts": len(receipts), "work_units": rows, "violations": violations, "zero_spend_ok": not violations}
 

@@ -7,7 +7,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from planning_lib import DependencyCycleError, by_id, critical_path, impact_analysis, priority_score, rank_work, scopes_overlap, select_parallel_set, work_units_conflict
+from planning_lib import DependencyCycleError, by_id, critical_path, impact_analysis, priority_score, StalePlanError, graph_digest, preview_priority_change, rank_work, scopes_overlap, select_parallel_set, work_units_conflict
 
 
 class PlanningTests(unittest.TestCase):
@@ -144,6 +144,42 @@ class PlanningTests(unittest.TestCase):
             impact_analysis([a, b], "WU-NOPE")
         with self.assertRaises(DependencyCycleError):
             impact_analysis([a, b], "WU-A")
+
+    def test_priority_preview_ranks_without_mutating(self):
+        import copy
+        a = self.wu("WU-A", ["a"], priority=1)
+        b = self.wu("WU-B", ["b"], priority=5)
+        work = [a, b]
+        before = copy.deepcopy(work)
+        digest = graph_digest(work)
+        self.assertEqual(digest, graph_digest(list(reversed(work))))
+        result = preview_priority_change(work, self.planning, "WU-A", 50, digest)
+        self.assertEqual(work, before)
+        self.assertFalse(result["applied"])
+        self.assertEqual(result["digest"], digest)
+        self.assertEqual(result["order_before"], ["WU-B", "WU-A"])
+        self.assertEqual(result["order_after"], ["WU-A", "WU-B"])
+        self.assertEqual((result["rank_before"], result["rank_after"]), (2, 1))
+
+    def test_priority_preview_rejects_stale_unknown_invalid_and_cycles(self):
+        a = self.wu("WU-A", ["a"])
+        b = self.wu("WU-B", ["b"], dependencies=["WU-A"])
+        work = [a, b]
+        digest = graph_digest(work)
+        for stale in ("", "0" * 64, None, digest.upper()):
+            with self.assertRaises(StalePlanError):
+                preview_priority_change(work, self.planning, "WU-A", 5, stale)
+        moved = [self.wu("WU-A", ["a"], priority=9), b]
+        with self.assertRaises(StalePlanError):
+            preview_priority_change(moved, self.planning, "WU-A", 5, digest)
+        with self.assertRaises(KeyError):
+            preview_priority_change(work, self.planning, "WU-NOPE", 5, digest)
+        for bad in (True, -1, 1001, 5.5, "5", None):
+            with self.assertRaises(ValueError):
+                preview_priority_change(work, self.planning, "WU-A", bad, digest)
+        cyc = [self.wu("WU-A", ["a"], dependencies=["WU-B"]), b]
+        with self.assertRaises(DependencyCycleError):
+            preview_priority_change(cyc, self.planning, "WU-A", 5, graph_digest(cyc))
 
 
 if __name__ == "__main__":

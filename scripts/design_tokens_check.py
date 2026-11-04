@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT = ROOT / "config" / "design-tokens.json"
+DEFAULT = ROOT / ".onecompany" / "design-tokens.json"
 HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
 MIN_RATIO = {"text": 4.5, "ui": 3.0, "focus": 3.0}
 REQUIRED_THEMES = ("light", "dark")

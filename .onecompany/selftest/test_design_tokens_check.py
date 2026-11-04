@@ -11,7 +11,7 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 import design_tokens_check as dtc  # noqa: E402
 
-SHIPPED = json.loads((ROOT / "config" / "design-tokens.json").read_text(encoding="utf-8"))
+SHIPPED = json.loads((ROOT / ".onecompany" / "design-tokens.json").read_text(encoding="utf-8"))
 
 
 class DesignTokensTests(unittest.TestCase):

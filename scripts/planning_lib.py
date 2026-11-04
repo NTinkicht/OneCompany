@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import fnmatch
+import hashlib
+import json
 from typing import Any
 
 from scope_guard import scope_covers_path
@@ -399,6 +401,65 @@ def impact_analysis(work: list[dict[str, Any]], identifier: str) -> dict[str, An
         "dependent_job_size": sum(estimated_job_size(work_map[n]) for n in transitive),
         "longest_downstream_chain": {"job_size": longest[0], "path": longest[1]},
         "on_critical_path": identifier in set(critical_path(work).get("path", [])),
+    }
+
+
+class StalePlanError(ValueError):
+    """A proposed change was based on a plan that no longer matches the current graph."""
+
+
+def graph_digest(work: list[dict[str, Any]], planning: dict[str, Any] | None = None) -> str:
+    """Order-independent sha256 over the planning-relevant fields of every work unit and the ranking policy."""
+    rows = sorted(
+        (
+            {
+                "id": str(item.get("id", "")),
+                "status": item.get("status"),
+                "priority": item.get("priority"),
+                "dependencies": sorted(str(d) for d in item.get("dependencies", [])),
+                "estimate": item.get("estimate"),
+                "priority_inputs": item.get("priority_inputs"),
+            }
+            for item in work
+        ),
+        key=lambda row: row["id"],
+    )
+    policy = (planning or {}).get("prioritization")
+    return hashlib.sha256(json.dumps({"work": rows, "policy": policy}, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def preview_priority_change(
+    work: list[dict[str, Any]],
+    planning: dict[str, Any],
+    identifier: str,
+    new_priority: Any,
+    expected_digest: str,
+) -> dict[str, Any]:
+    """Read-only preview of a static-priority change (OC-P1-03). Never mutates `work`.
+
+    Raises StalePlanError when expected_digest differs from the current graph, KeyError for an
+    unknown id, ValueError for an invalid priority, DependencyCycleError for cyclic dependencies.
+    """
+    current = graph_digest(work, planning)
+    if not isinstance(expected_digest, str) or expected_digest != current:
+        raise StalePlanError("stale change: expected digest does not match the current graph")
+    if identifier not in by_id(work):
+        raise KeyError(identifier)
+    if isinstance(new_priority, bool) or not isinstance(new_priority, int) or not 0 <= new_priority <= 1000:
+        raise ValueError("priority must be an integer between 0 and 1000")
+    critical_path(work)  # raises DependencyCycleError on cycles
+    before = [str(item.get("id")) for item in rank_work(work, planning)]
+    changed = [dict(item, priority=new_priority) if item.get("id") == identifier else item for item in work]
+    after = [str(item.get("id")) for item in rank_work(changed, planning)]
+    return {
+        "id": identifier,
+        "digest": current,
+        "new_priority": new_priority,
+        "rank_before": before.index(identifier) + 1,
+        "rank_after": after.index(identifier) + 1,
+        "order_before": before,
+        "order_after": after,
+        "applied": False,
     }
 
 

@@ -13,7 +13,7 @@ import knowledge
 import qualification
 from lease_lifecycle import coordination_view
 from onecompany_lib import CONTROL, load_json
-from planning_lib import DependencyCycleError, by_id, critical_path, impact_analysis, priority_score, rank_work, select_parallel_set
+from planning_lib import DependencyCycleError, StalePlanError, by_id, critical_path, graph_digest, impact_analysis, preview_priority_change, priority_score, rank_work, select_parallel_set
 from planning_validate import validate_documents
 
 
@@ -72,6 +72,11 @@ def main() -> int:
     sub.add_parser("critical-path")
     impact = sub.add_parser("impact", help="read-only downstream impact of one work unit")
     impact.add_argument("id")
+    sub.add_parser("digest", help="digest of the current work graph for stale-change checks")
+    preview = sub.add_parser("priority-preview", help="read-only priority change preview; refuses stale digests")
+    preview.add_argument("--id", required=True)
+    preview.add_argument("--priority", required=True, type=int)
+    preview.add_argument("--expected-digest", required=True)
     explain = sub.add_parser("explain")
     explain.add_argument("id")
     sub.add_parser("workplan-validate", help="validate an untrusted work plan (--input, --brief); admits nothing")
@@ -161,6 +166,17 @@ def main() -> int:
         except KeyError:
             print(json.dumps({"id": args.id, "error": "unknown id"}, indent=2)); return 2
         except DependencyCycleError as exc:
+            print(json.dumps({"id": args.id, "error": str(exc)}, indent=2)); return 2
+    if args.command == "digest":
+        print(json.dumps({"digest": graph_digest(work, planning)})); return 0
+    if args.command == "priority-preview":
+        try:
+            print(json.dumps(preview_priority_change(work, planning, args.id, args.priority, args.expected_digest), indent=2, sort_keys=True)); return 0
+        except StalePlanError as exc:
+            print(json.dumps({"id": args.id, "error": str(exc), "stale": True}, indent=2)); return 2
+        except KeyError:
+            print(json.dumps({"id": args.id, "error": "unknown id"}, indent=2)); return 2
+        except (ValueError, DependencyCycleError) as exc:
             print(json.dumps({"id": args.id, "error": str(exc)}, indent=2)); return 2
     if args.command == "explain":
         identifier = args.id

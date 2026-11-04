@@ -7,7 +7,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from planning_lib import by_id, critical_path, priority_score, rank_work, scopes_overlap, select_parallel_set, work_units_conflict
+from planning_lib import DependencyCycleError, by_id, critical_path, impact_analysis, priority_score, rank_work, scopes_overlap, select_parallel_set, work_units_conflict
 
 
 class PlanningTests(unittest.TestCase):
@@ -117,6 +117,33 @@ class PlanningTests(unittest.TestCase):
         ranked = rank_work([large, small, critical], self.planning)
         ids = [item["id"] for item in ranked]
         self.assertLess(ids.index("WU-SMALL"), ids.index("WU-LARGE"))
+
+
+    def test_impact_analysis_diamond_and_chain(self):
+        a = self.wu("WU-A", ["a"], size=2)
+        b = self.wu("WU-B", ["b"], dependencies=["WU-A"], size=3)
+        c = self.wu("WU-C", ["c"], dependencies=["WU-A"], size=1)
+        d = self.wu("WU-D", ["d"], dependencies=["WU-B", "WU-C"], size=5)
+        work = [d, c, b, a]
+        result = impact_analysis(work, "WU-A")
+        self.assertEqual(result["direct_dependents"], ["WU-B", "WU-C"])
+        self.assertEqual(result["transitive_dependents"], ["WU-B", "WU-C", "WU-D"])
+        self.assertEqual(result["dependent_job_size"], 9)
+        self.assertEqual(result["longest_downstream_chain"], {"job_size": 10, "path": ["WU-A", "WU-B", "WU-D"]})
+        self.assertTrue(result["on_critical_path"])
+        self.assertEqual(impact_analysis(work, "WU-A"), impact_analysis(list(reversed(work)), "WU-A"))
+        leaf = impact_analysis(work, "WU-D")
+        self.assertEqual(leaf["transitive_dependents"], [])
+        self.assertEqual(leaf["longest_downstream_chain"], {"job_size": 5, "path": ["WU-D"]})
+        self.assertFalse(impact_analysis(work, "WU-C")["on_critical_path"])
+
+    def test_impact_analysis_rejects_unknown_id_and_cycles(self):
+        a = self.wu("WU-A", ["a"], dependencies=["WU-B"])
+        b = self.wu("WU-B", ["b"], dependencies=["WU-A"])
+        with self.assertRaises(KeyError):
+            impact_analysis([a, b], "WU-NOPE")
+        with self.assertRaises(DependencyCycleError):
+            impact_analysis([a, b], "WU-A")
 
 
 if __name__ == "__main__":

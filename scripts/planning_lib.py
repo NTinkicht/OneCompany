@@ -353,6 +353,55 @@ def critical_path(work: list[dict[str, Any]]) -> dict[str, Any]:
     return {"job_size": best[0], "path": best[1]}
 
 
+def impact_analysis(work: list[dict[str, Any]], identifier: str) -> dict[str, Any]:
+    """Read-only downstream impact of one work unit (OC-P1-03). Raises KeyError for an unknown id."""
+    work_map = by_id(work)
+    if identifier not in work_map:
+        raise KeyError(identifier)
+    dependents: dict[str, list[str]] = {}
+    for node, item in work_map.items():
+        for dep in item.get("dependencies", []):
+            dependents.setdefault(str(dep), []).append(node)
+    for children in dependents.values():
+        children.sort()
+
+    visiting: set[str] = set()
+    memo: dict[str, tuple[float, list[str]]] = {}
+
+    def chain(node: str) -> tuple[float, list[str]]:
+        if node in memo:
+            return memo[node]
+        if node in visiting:
+            raise DependencyCycleError(f"dependency cycle involving {node}")
+        visiting.add(node)
+        best_len, best_path = 0.0, []
+        for child in dependents.get(node, []):
+            length, path = chain(child)
+            if length > best_len:
+                best_len, best_path = length, path
+        visiting.remove(node)
+        memo[node] = (best_len + estimated_job_size(work_map[node]), [node, *best_path])
+        return memo[node]
+
+    longest = chain(identifier)
+    transitive: set[str] = set()
+    stack = list(dependents.get(identifier, []))
+    while stack:
+        node = stack.pop()
+        if node in transitive:
+            continue
+        transitive.add(node)
+        stack.extend(dependents.get(node, []))
+    return {
+        "id": identifier,
+        "direct_dependents": dependents.get(identifier, []),
+        "transitive_dependents": sorted(transitive),
+        "dependent_job_size": sum(estimated_job_size(work_map[n]) for n in transitive),
+        "longest_downstream_chain": {"job_size": longest[0], "path": longest[1]},
+        "on_critical_path": identifier in set(critical_path(work).get("path", [])),
+    }
+
+
 def rank_work(work: list[dict[str, Any]], planning: dict[str, Any]) -> list[dict[str, Any]]:
     """Rank deterministically according to the declared reference tie-breaker policy."""
     critical_ids = set(critical_path(work).get("path", [])) if work else set()

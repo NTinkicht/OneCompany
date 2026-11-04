@@ -408,8 +408,8 @@ class StalePlanError(ValueError):
     """A proposed change was based on a plan that no longer matches the current graph."""
 
 
-def graph_digest(work: list[dict[str, Any]]) -> str:
-    """Order-independent sha256 over the planning-relevant fields of every work unit."""
+def graph_digest(work: list[dict[str, Any]], planning: dict[str, Any] | None = None) -> str:
+    """Order-independent sha256 over the planning-relevant fields of every work unit and the ranking policy."""
     rows = sorted(
         (
             {
@@ -424,7 +424,8 @@ def graph_digest(work: list[dict[str, Any]]) -> str:
         ),
         key=lambda row: row["id"],
     )
-    return hashlib.sha256(json.dumps(rows, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    policy = (planning or {}).get("prioritization")
+    return hashlib.sha256(json.dumps({"work": rows, "policy": policy}, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 def preview_priority_change(
@@ -439,7 +440,7 @@ def preview_priority_change(
     Raises StalePlanError when expected_digest differs from the current graph, KeyError for an
     unknown id, ValueError for an invalid priority, DependencyCycleError for cyclic dependencies.
     """
-    current = graph_digest(work)
+    current = graph_digest(work, planning)
     if not isinstance(expected_digest, str) or expected_digest != current:
         raise StalePlanError("stale change: expected digest does not match the current graph")
     if identifier not in by_id(work):

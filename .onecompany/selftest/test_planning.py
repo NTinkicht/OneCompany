@@ -151,8 +151,8 @@ class PlanningTests(unittest.TestCase):
         b = self.wu("WU-B", ["b"], priority=5)
         work = [a, b]
         before = copy.deepcopy(work)
-        digest = graph_digest(work)
-        self.assertEqual(digest, graph_digest(list(reversed(work))))
+        digest = graph_digest(work, self.planning)
+        self.assertEqual(digest, graph_digest(list(reversed(work)), self.planning))
         result = preview_priority_change(work, self.planning, "WU-A", 50, digest)
         self.assertEqual(work, before)
         self.assertFalse(result["applied"])
@@ -165,7 +165,7 @@ class PlanningTests(unittest.TestCase):
         a = self.wu("WU-A", ["a"])
         b = self.wu("WU-B", ["b"], dependencies=["WU-A"])
         work = [a, b]
-        digest = graph_digest(work)
+        digest = graph_digest(work, self.planning)
         for stale in ("", "0" * 64, None, digest.upper()):
             with self.assertRaises(StalePlanError):
                 preview_priority_change(work, self.planning, "WU-A", 5, stale)
@@ -177,9 +177,13 @@ class PlanningTests(unittest.TestCase):
         for bad in (True, -1, 1001, 5.5, "5", None):
             with self.assertRaises(ValueError):
                 preview_priority_change(work, self.planning, "WU-A", bad, digest)
+        reweighted = {"prioritization": {"weights": {"business_value": 2, "time_criticality": 1, "risk_reduction": 1, "dependency_unlock": 1}}}
+        self.assertNotEqual(digest, graph_digest(work, reweighted))
+        with self.assertRaises(StalePlanError):
+            preview_priority_change(work, reweighted, "WU-A", 5, digest)
         cyc = [self.wu("WU-A", ["a"], dependencies=["WU-B"]), b]
         with self.assertRaises(DependencyCycleError):
-            preview_priority_change(cyc, self.planning, "WU-A", 5, graph_digest(cyc))
+            preview_priority_change(cyc, self.planning, "WU-A", 5, graph_digest(cyc, self.planning))
 
 
 if __name__ == "__main__":

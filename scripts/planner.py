@@ -168,7 +168,7 @@ def main() -> int:
         except DependencyCycleError as exc:
             print(json.dumps({"id": args.id, "error": str(exc)}, indent=2)); return 2
     if args.command == "digest":
-        print(json.dumps({"digest": graph_digest(work)})); return 0
+        print(json.dumps({"digest": graph_digest(work, planning)})); return 0
     if args.command == "priority-preview":
         try:
             print(json.dumps(preview_priority_change(work, planning, args.id, args.priority, args.expected_digest), indent=2, sort_keys=True)); return 0

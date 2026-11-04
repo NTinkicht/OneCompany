@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "dir_support": ["ltr", "rtl"],
+  "min_target_px": 24,
+  "spacing_px": [0, 4, 8, 12, 16, 24, 32, 48],
+  "themes": {
+    "light": {
+      "pairs": [
+        {"name": "text-on-surface", "kind": "text", "fg": "#1A1A1A", "bg": "#FFFFFF"},
+        {"name": "muted-on-surface", "kind": "text", "fg": "#595959", "bg": "#FFFFFF"},
+        {"name": "action-label", "kind": "text", "fg": "#FFFFFF", "bg": "#0B5CAD"},
+        {"name": "danger-label", "kind": "text", "fg": "#FFFFFF", "bg": "#B3261E"},
+        {"name": "border-on-surface", "kind": "ui", "fg": "#767676", "bg": "#FFFFFF"},
+        {"name": "focus-ring", "kind": "focus", "fg": "#0B5CAD", "bg": "#FFFFFF"}
+      ]
+    },
+    "dark": {
+      "pairs": [
+        {"name": "text-on-surface", "kind": "text", "fg": "#F2F2F2", "bg": "#121212"},
+        {"name": "muted-on-surface", "kind": "text", "fg": "#B0B0B0", "bg": "#121212"},
+        {"name": "action-label", "kind": "text", "fg": "#0A0A0A", "bg": "#7FB3F0"},
+        {"name": "danger-label", "kind": "text", "fg": "#0A0A0A", "bg": "#F2B8B5"},
+        {"name": "border-on-surface", "kind": "ui", "fg": "#8A8A8A", "bg": "#121212"},
+        {"name": "focus-ring", "kind": "focus", "fg": "#7FB3F0", "bg": "#121212"}
+      ]
+    }
+  }
+}

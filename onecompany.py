@@ -27,6 +27,7 @@ COMMANDS = {
     "mission-control": ["mission_control_local.py"],
     "release-check": ["release_check.py"],
     "outcome-report": ["outcome_report.py"],
+    "design-tokens-check": ["design_tokens_check.py"],
     "shadow-migration": ["shadow_migration.py"],
     "cutover-readiness": ["cutover_readiness.py"],
     "doctor": ["doctor.py"], "status": ["status.py"], "check": ["check.py"], "validate": ["validate_all.py"], "schema-validate": ["schema_validate.py"],

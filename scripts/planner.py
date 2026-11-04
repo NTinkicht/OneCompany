@@ -13,7 +13,7 @@ import knowledge
 import qualification
 from lease_lifecycle import coordination_view
 from onecompany_lib import CONTROL, load_json
-from planning_lib import by_id, critical_path, priority_score, rank_work, select_parallel_set
+from planning_lib import DependencyCycleError, by_id, critical_path, impact_analysis, priority_score, rank_work, select_parallel_set
 from planning_validate import validate_documents
 
 
@@ -70,6 +70,8 @@ def main() -> int:
     parallel = sub.add_parser("parallel")
     parallel.add_argument("--include-proposed", action="store_true")
     sub.add_parser("critical-path")
+    impact = sub.add_parser("impact", help="read-only downstream impact of one work unit")
+    impact.add_argument("id")
     explain = sub.add_parser("explain")
     explain.add_argument("id")
     sub.add_parser("workplan-validate", help="validate an untrusted work plan (--input, --brief); admits nothing")
@@ -153,6 +155,13 @@ def main() -> int:
     if args.command == "critical-path":
         print(json.dumps(critical_path(work), indent=2))
         return 0
+    if args.command == "impact":
+        try:
+            print(json.dumps(impact_analysis(work, args.id), indent=2, sort_keys=True)); return 0
+        except KeyError:
+            print(json.dumps({"id": args.id, "error": "unknown id"}, indent=2)); return 2
+        except DependencyCycleError as exc:
+            print(json.dumps({"id": args.id, "error": str(exc)}, indent=2)); return 2
     if args.command == "explain":
         identifier = args.id
         entity = next((e for e in portfolio.get("entities", []) if e.get("id") == identifier), None)

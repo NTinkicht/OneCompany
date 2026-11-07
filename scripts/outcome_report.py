@@ -122,7 +122,53 @@ def build_report(receipts: object, allowed: set[str], forbidden: set[str]) -> di
     for v in violations:
         v["wu"] = labels[v.pop("wu_key")]
     violations.sort(key=lambda v: (v["index"], v["wu"]))
-    return {"receipts": len(receipts), "work_units": rows, "violations": violations, "zero_spend_ok": not violations}
+    return {"receipts": len(receipts), "work_units": rows, "violations": violations, "zero_spend_ok": not violations,
+            "by_worker": build_rollups(receipts, "worker"), "by_pr": build_rollups(receipts, "pr")}
+
+
+def build_rollups(receipts: list, dimension: str) -> list[dict]:
+    """Group receipts by ``dimension`` (``worker`` or ``pr``); missing/invalid values form ``unattributed``."""
+    groups: dict[str | None, dict] = {}
+    for raw in receipts:
+        r = raw if isinstance(raw, dict) else {}
+        value = r.get(dimension)
+        if dimension == "pr" and isinstance(value, int) and not isinstance(value, bool) and value > 0:
+            value = f"#{value}"
+        key = value if isinstance(value, str) and value else None
+        g = groups.setdefault(key, {"events": 0, "incidents": 0, "pending_gates": 0, "cost_classes": {},
+                                    "tokens": 0, "tokens_known": False, "bad_timestamps": 0})
+        g["events"] += 1
+        if parse_time(r.get("at")) is None:
+            g["bad_timestamps"] += 1
+        event = safe_text(r.get("event"))
+        if event in INCIDENT_EVENTS:
+            g["incidents"] += 1
+        if event in PENDING_EVENTS:
+            g["pending_gates"] += 1
+        shown = safe_text(r.get("cost_class"), "MISSING")
+        g["cost_classes"][shown] = g["cost_classes"].get(shown, 0) + 1
+        tokens = r.get("tokens")
+        if isinstance(tokens, int) and not isinstance(tokens, bool) and tokens >= 0:
+            g["tokens"] += tokens
+            g["tokens_known"] = True
+    rows = []
+    redacted = 0
+    for key in sorted(groups, key=lambda k: (k is None, k or "")):
+        g = groups[key]
+        if key is None:
+            name = "unattributed"
+        else:
+            name = safe_text(key)
+            if name == "[redacted]":
+                redacted += 1
+                name = f"[redacted-{redacted}]"
+        rows.append({
+            dimension: name, "events": g["events"], "incidents": g["incidents"], "pending_gates": g["pending_gates"],
+            "cost_classes": dict(sorted(g["cost_classes"].items())),
+            "tokens": g["tokens"] if g["tokens_known"] else None,
+            "confidence": "high" if key is not None and g["bad_timestamps"] == 0 else "low",
+        })
+    return rows
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -143,6 +189,11 @@ def main(argv: list[str] | None = None) -> int:
         for row in report["work_units"]:
             print(f"{row['wu']}: outcome={row['outcome']} latency_s={row['latency_seconds']} "
                   f"incidents={row['incidents']} pending_gates={row['pending_gates']} confidence={row['confidence']}")
+        for dim in ("by_worker", "by_pr"):
+            for row in report[dim]:
+                label = row["worker" if dim == "by_worker" else "pr"]
+                print(f"{dim[3:]} {label}: events={row['events']} incidents={row['incidents']} "
+                      f"pending_gates={row['pending_gates']} confidence={row['confidence']}")
         print("zero-spend: " + ("ok" if report["zero_spend_ok"] else f"VIOLATIONS={len(report['violations'])}"))
     return 0 if report["zero_spend_ok"] else 1
 

@@ -47,7 +47,7 @@ class OutcomeReportTests(unittest.TestCase):
         extra = GOOD + [rec("WU-C", "started", "2026-11-03T08:00:00Z"), rec("WU-C", "failed", "2026-11-03T08:01:00Z", outcome="failed", tokens=5)]
         sm = self.report(extra)["summary"]
         self.assertEqual(sm, {"work_units": 3, "by_outcome": {"failed": 1, "merged": 1, "unknown": 1},
-                              "latency_seconds": {"min": 60, "median": 60, "max": 3630}, "incidents": 1,
+                              "latency_seconds": {"min": 60, "median": 1845, "max": 3630}, "incidents": 1,
                               "pending_gates": 1, "tokens": 125, "low_confidence": 1})
         self.assertEqual(sm, self.report(list(extra))["summary"])
 

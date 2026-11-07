@@ -26,6 +26,14 @@ SECRET_LIKE = re.compile(r"(gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{16,}|Bea
 SAFE_ID = re.compile(r"^[A-Za-z0-9_.:#/-]{1,80}$")
 
 
+def _median(values):
+    n = len(values)
+    if n % 2:
+        return values[n // 2]
+    total = values[n // 2 - 1] + values[n // 2]
+    return total // 2 if total % 2 == 0 else total / 2
+
+
 def parse_time(value: object) -> datetime | None:
     if not isinstance(value, str):
         return None
@@ -138,7 +146,7 @@ def build_summary(rows: list[dict]) -> dict:
     return {
         "work_units": len(rows),
         "by_outcome": dict(sorted(by_outcome.items())),
-        "latency_seconds": ({"min": latencies[0], "median": latencies[(len(latencies) - 1) // 2], "max": latencies[-1]}
+        "latency_seconds": ({"min": latencies[0], "median": _median(latencies), "max": latencies[-1]}
                             if latencies else None),
         "incidents": sum(r["incidents"] for r in rows),
         "pending_gates": sum(r["pending_gates"] for r in rows),

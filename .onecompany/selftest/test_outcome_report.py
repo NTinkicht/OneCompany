@@ -127,5 +127,55 @@ class OutcomeReportTests(unittest.TestCase):
         self.assertEqual(broken.returncode, 2)
 
 
+class RollupTests(unittest.TestCase):
+    RECEIPTS = [
+        rec("WU-A", "started", "2026-11-03T10:00:00Z", worker="codex", pr=7),
+        rec("WU-A", "incident", "2026-11-03T10:05:00Z", worker="codex", pr=7, tokens=10),
+        rec("WU-B", "gate_pending", "2026-11-03T10:06:00Z", "HUMAN", worker="claude", pr="#8", tokens=5),
+        rec("WU-B", "merged", "2026-11-03T10:07:00Z", worker="claude", pr="#8", tokens=7, outcome="merged"),
+        rec("WU-C", "started", "2026-11-03T10:08:00Z"),
+    ]
+
+    def report(self, receipts):
+        return orp.build_report(receipts, ALLOWED, FORBIDDEN)
+
+    def test_rollups_group_by_worker_and_pr_and_sum_exactly(self):
+        rep = self.report(self.RECEIPTS)
+        by_w = {r["worker"]: r for r in rep["by_worker"]}
+        self.assertEqual(by_w["codex"]["events"], 2)
+        self.assertEqual(by_w["codex"]["incidents"], 1)
+        self.assertEqual(by_w["codex"]["tokens"], 10)
+        self.assertEqual(by_w["claude"]["pending_gates"], 1)
+        self.assertEqual(by_w["claude"]["tokens"], 12)
+        self.assertEqual({r["pr"] for r in rep["by_pr"]}, {"#7", "#8", "unattributed"})
+        self.assertEqual(sum(r["events"] for r in rep["by_worker"]), rep["receipts"])
+        self.assertEqual(sum(r["events"] for r in rep["by_pr"]), rep["receipts"])
+        self.assertEqual(sum(r["incidents"] for r in rep["by_pr"]), sum(r["incidents"] for r in rep["work_units"]))
+
+    def test_unattributed_receipts_are_separate_and_low_confidence(self):
+        rep = self.report(self.RECEIPTS)
+        un = next(r for r in rep["by_worker"] if r["worker"] == "unattributed")
+        self.assertEqual((un["events"], un["confidence"], un["tokens"]), (1, "low", None))
+        self.assertEqual(next(r for r in rep["by_worker"] if r["worker"] == "codex")["confidence"], "high")
+
+    def test_bad_timestamp_lowers_group_confidence(self):
+        rep = self.report([rec("WU-A", "started", "not-a-time", worker="codex")])
+        self.assertEqual(rep["by_worker"][0]["confidence"], "low")
+
+    def test_secret_like_worker_and_pr_are_redacted_and_not_merged(self):
+        secret = "ghp_" + "a" * 30
+        rep = self.report([rec("WU-A", "started", "2026-11-03T10:00:00Z", worker=secret, pr=secret),
+                           rec("WU-A", "started", "2026-11-03T10:00:00Z", worker="bad worker!", pr="x y")])
+        self.assertEqual({r["worker"] for r in rep["by_worker"]}, {"[redacted-1]", "[redacted-2]"})
+        self.assertNotIn(secret, json.dumps(rep))
+
+    def test_deterministic_and_junk_tolerant(self):
+        self.assertEqual(json.dumps(self.report(self.RECEIPTS), sort_keys=True),
+                         json.dumps(self.report(list(self.RECEIPTS)), sort_keys=True))
+        rep = self.report([None, 5, {"pr": True, "worker": 3}])
+        self.assertEqual(rep["by_pr"][0]["pr"], "unattributed")
+        self.assertEqual(rep["by_worker"][0]["worker"], "unattributed")
+
+
 if __name__ == "__main__":
     unittest.main()

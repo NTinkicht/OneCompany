@@ -28,7 +28,7 @@ def load_run(path: Path) -> dict[str, str]:
     if not isinstance(results, dict) or not results:
         raise ValueError(f"run file has no results object: {path.name}")
     for test, outcome in results.items():
-        if not isinstance(test, str) or not test or outcome not in OUTCOMES:
+        if not isinstance(test, str) or not test or not isinstance(outcome, str) or outcome not in OUTCOMES:
             raise ValueError(f"run file has an invalid test id or outcome: {path.name}")
     return dict(results)
 
@@ -42,7 +42,7 @@ def classify(runs: list[dict[str, str]]) -> dict:
         executed = [o for o in outcomes if o != "skip"]
         if not executed:
             out["skipped"].append(name)
-        elif len(runs) < 2:
+        elif len(executed) < 2:
             out["insufficient"].append(name)
         elif all(o in BAD for o in executed):
             out["stable_fail"].append(name)

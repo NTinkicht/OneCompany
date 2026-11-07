@@ -63,6 +63,14 @@ class FlakyReportTests(unittest.TestCase):
         self.assertEqual(result["skipped"], ["t"])
         self.assertEqual(fr.exit_code(result), 0)
 
+    def test_pass_plus_skips_is_insufficient_not_stable(self):
+        a = self.run_file("a.json", {"t": "pass"})
+        b = self.run_file("b.json", {"t": "skip"})
+        result = fr.classify([fr.load_run(Path(a)), fr.load_run(Path(b))])
+        self.assertEqual(result["insufficient"], ["t"])
+        self.assertEqual(result["stable_pass"], [])
+        self.assertEqual(fr.exit_code(result), 1)
+
     def test_malformed_input_exits_2_without_traceback(self):
         good = self.run_file("g.json", {"t": "pass"})
         bad_inputs = [
@@ -70,6 +78,8 @@ class FlakyReportTests(unittest.TestCase):
             self.run_file("b2.json", '{"results": []}'),
             self.run_file("b3.json", '{"results": {"t": "maybe"}}'),
             self.run_file("b4.json", '{"results": {}}'),
+            self.run_file("b5.json", '{"results": {"t": []}}'),
+            self.run_file("b6.json", '{"results": {"t": {}}}'),
             str(self.tmp / "missing.json"),
         ]
         for bad in bad_inputs:

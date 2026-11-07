@@ -25,7 +25,7 @@ def load_regressions(path: Path) -> list[dict]:
     except (OSError, ValueError) as exc:
         raise ValueError(f"regressions file unreadable: {path.name} ({exc.__class__.__name__})") from exc
     items = data.get("regressions") if isinstance(data, dict) else None
-    if not isinstance(items, list) or not items:
+    if not isinstance(items, list):
         raise ValueError(f"regressions file has no regressions list: {path.name}")
     seen: set[str] = set()
     for item in items:

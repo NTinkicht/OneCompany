@@ -14,13 +14,16 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import io
 import sys
+import tokenize
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 TEST_GLOBS = ("tests/test_*.py", ".onecompany/selftest/test_*.py")
 ANNOTATION = re.compile(r"^\s*#\s*covers:\s*(AC-\d{3,}(?:\s*,\s*AC-\d{3,})*)\s*$")
 AC_ID = re.compile(r"AC-\d{3,}")
+AC_STATUSES = frozenset({"proposed", "approved", "verified", "retired"})
 
 
 def load_catalog(root: Path) -> dict[str, dict]:
@@ -37,6 +40,8 @@ def load_catalog(root: Path) -> dict[str, dict]:
         ident = item.get("id") if isinstance(item, dict) else None
         if not isinstance(ident, str) or not AC_ID.fullmatch(ident) or ident in catalog:
             raise ValueError("catalog has a malformed or duplicate acceptance criterion id")
+        if item.get("status") not in AC_STATUSES:
+            raise ValueError("catalog has an acceptance criterion with a missing or invalid status")
         catalog[ident] = item
     return catalog
 
@@ -49,12 +54,16 @@ def declarations(root: Path) -> dict[str, list[str]]:
             if path.is_symlink() or not path.is_file():
                 continue
             try:
-                lines = path.read_text(encoding="utf-8").splitlines()
-            except (OSError, UnicodeDecodeError):
+                source = path.read_text(encoding="utf-8")
+                comments = [t for t in tokenize.generate_tokens(io.StringIO(source).readline)
+                            if t.type == tokenize.COMMENT]
+            except (OSError, UnicodeDecodeError, tokenize.TokenError, SyntaxError):
                 continue
             rel = path.relative_to(root).as_posix()
-            for line in lines:
-                match = ANNOTATION.match(line)
+            for token in comments:
+                if token.line[: token.start[1]].strip():
+                    continue  # trailing comment after code, not a standalone annotation line
+                match = ANNOTATION.match(token.string)
                 if match:
                     for ident in AC_ID.findall(match.group(1)):
                         found.setdefault(ident, set()).add(rel)

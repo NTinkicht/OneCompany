@@ -14,7 +14,7 @@ import ac_coverage as ac  # noqa: E402
 CATALOG = {"acceptance_criteria": [
     {"id": "AC-001", "status": "approved", "negative_or_failure_case": False},
     {"id": "AC-002", "status": "approved", "negative_or_failure_case": True},
-    {"id": "AC-003", "status": "draft", "negative_or_failure_case": True},
+    {"id": "AC-003", "status": "proposed", "negative_or_failure_case": True},
 ]}
 
 
@@ -68,6 +68,18 @@ class AcCoverageTests(unittest.TestCase):
                     json.dumps({"acceptance_criteria": ["AC-001"]})):
             with self.assertRaises(ValueError):
                 ac.report(self.fixture(catalog=bad))
+
+    def test_missing_or_invalid_status_fails_closed(self):
+        for item in ({"id": "AC-001"}, {"id": "AC-001", "status": "bogus"}, {"id": "AC-001", "status": None}):
+            with self.assertRaises(ValueError):
+                ac.report(self.fixture(catalog={"acceptance_criteria": [item]}))
+
+    def test_string_content_is_not_an_annotation(self):
+        body = 'DOC = """\n# covers: AC-001\n# covers: AC-099\n"""\n\n# covers: AC-002\n'
+        result = ac.report(self.fixture(tests={"tests/test_d.py": body}))
+        self.assertEqual(result["uncovered"], ["AC-001"])
+        self.assertEqual(result["unknown"], [])
+        self.assertEqual(result["declarations"], {"AC-002": ["tests/test_d.py"]})
 
     def test_deterministic(self):
         root = self.fixture(tests={"tests/test_a.py": "# covers: AC-002\n", "tests/test_z.py": "# covers: AC-002\n"})

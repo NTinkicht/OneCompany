@@ -43,6 +43,21 @@ class OutcomeReportTests(unittest.TestCase):
         self.assertTrue(first["zero_spend_ok"])
         self.assertEqual([r["wu"] for r in first["work_units"]], ["WU-A", "WU-B"])
 
+    def test_summary_matches_hand_computed_values(self):
+        extra = GOOD + [rec("WU-C", "started", "2026-11-03T08:00:00Z"), rec("WU-C", "failed", "2026-11-03T08:01:00Z", outcome="failed", tokens=5)]
+        sm = self.report(extra)["summary"]
+        self.assertEqual(sm, {"work_units": 3, "by_outcome": {"failed": 1, "merged": 1, "unknown": 1},
+                              "latency_seconds": {"min": 60, "median": 1845, "max": 3630}, "incidents": 1,
+                              "pending_gates": 1, "tokens": 125, "low_confidence": 1})
+        self.assertEqual(sm, self.report(list(extra))["summary"])
+
+    def test_summary_invents_nothing_without_complete_work_units(self):
+        sm = self.report([rec("WU-B", "started", "2026-11-03T09:00:00Z")])["summary"]
+        self.assertEqual((sm["latency_seconds"], sm["tokens"], sm["by_outcome"], sm["low_confidence"]),
+                         (None, None, {"unknown": 1}, 1))
+        empty = self.report([])["summary"]
+        self.assertEqual((empty["work_units"], empty["latency_seconds"], empty["tokens"]), (0, None, None))
+
     def test_missing_end_event_is_low_confidence_without_invented_latency(self):
         b = self.row(self.report(GOOD), "WU-B")
         self.assertIsNone(b["latency_seconds"])

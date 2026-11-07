@@ -26,6 +26,14 @@ SECRET_LIKE = re.compile(r"(gh[pousr]_[A-Za-z0-9]{20,}|sk-[A-Za-z0-9_-]{16,}|Bea
 SAFE_ID = re.compile(r"^[A-Za-z0-9_.:#/-]{1,80}$")
 
 
+def _median(values):
+    n = len(values)
+    if n % 2:
+        return values[n // 2]
+    total = values[n // 2 - 1] + values[n // 2]
+    return total // 2 if total % 2 == 0 else total / 2
+
+
 def parse_time(value: object) -> datetime | None:
     if not isinstance(value, str):
         return None
@@ -123,7 +131,28 @@ def build_report(receipts: object, allowed: set[str], forbidden: set[str]) -> di
         v["wu"] = labels[v.pop("wu_key")]
     violations.sort(key=lambda v: (v["index"], v["wu"]))
     return {"receipts": len(receipts), "work_units": rows, "violations": violations, "zero_spend_ok": not violations,
-            "by_worker": build_rollups(receipts, "worker"), "by_pr": build_rollups(receipts, "pr")}
+            "by_worker": build_rollups(receipts, "worker"), "by_pr": build_rollups(receipts, "pr"),
+            "summary": build_summary(rows)}
+
+
+def build_summary(rows: list[dict]) -> dict:
+    """Overall roll-up derived only from the per-WU rows (no new inputs)."""
+    by_outcome: dict[str, int] = {}
+    for row in rows:
+        name = row["outcome"] if row["outcome"] is not None else "unknown"
+        by_outcome[name] = by_outcome.get(name, 0) + 1
+    latencies = sorted(r["latency_seconds"] for r in rows if r["latency_seconds"] is not None)
+    known = [r["tokens"] for r in rows if r["tokens"] is not None]
+    return {
+        "work_units": len(rows),
+        "by_outcome": dict(sorted(by_outcome.items())),
+        "latency_seconds": ({"min": latencies[0], "median": _median(latencies), "max": latencies[-1]}
+                            if latencies else None),
+        "incidents": sum(r["incidents"] for r in rows),
+        "pending_gates": sum(r["pending_gates"] for r in rows),
+        "tokens": sum(known) if known else None,
+        "low_confidence": sum(1 for r in rows if r["confidence"] != "high"),
+    }
 
 
 def build_rollups(receipts: list, dimension: str) -> list[dict]:
@@ -194,6 +223,9 @@ def main(argv: list[str] | None = None) -> int:
                 label = row["worker" if dim == "by_worker" else "pr"]
                 print(f"{dim[3:]} {label}: events={row['events']} incidents={row['incidents']} "
                       f"pending_gates={row['pending_gates']} confidence={row['confidence']}")
+        sm = report["summary"]
+        print(f"summary: work_units={sm['work_units']} by_outcome={sm['by_outcome']} latency_s={sm['latency_seconds']} "
+              f"incidents={sm['incidents']} pending_gates={sm['pending_gates']} low_confidence={sm['low_confidence']}")
         print("zero-spend: " + ("ok" if report["zero_spend_ok"] else f"VIOLATIONS={len(report['violations'])}"))
     return 0 if report["zero_spend_ok"] else 1
 

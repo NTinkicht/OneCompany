@@ -74,14 +74,21 @@ class AcCoverageTests(unittest.TestCase):
         self.assertEqual(ac.report(root), ac.report(root))
         self.assertEqual(ac.report(root)["declarations"]["AC-002"], ["tests/test_a.py", "tests/test_z.py"])
 
-    def test_cli_reports_current_repo_and_strict_exit(self):
+    def test_cli_matches_library_for_this_checkout(self):
+        """Target checkouts may carry an empty catalog; the CLI must then fail closed (exit 2)."""
         base = [sys.executable, str(ROOT / "onecompany.py"), "ac-coverage"]
         plain = subprocess.run([*base, "--json"], capture_output=True, text=True, check=False)
+        try:
+            expected = ac.report(ROOT)
+        except ValueError:
+            self.assertEqual(plain.returncode, 2)
+            self.assertEqual(plain.stdout, "")
+            return
         self.assertEqual(plain.returncode, 0, plain.stderr)
         data = json.loads(plain.stdout)
-        self.assertEqual(data["approved"], len(data["uncovered"]) + data["covered"])
+        self.assertEqual(data, expected)
         strict = subprocess.run([*base, "--strict"], capture_output=True, text=True, check=False)
-        self.assertEqual(strict.returncode, 1 if data["uncovered"] or data["unknown"] else 0)
+        self.assertEqual(strict.returncode, 1 if expected["uncovered"] or expected["unknown"] else 0)
 
 
 if __name__ == "__main__":

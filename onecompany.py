@@ -25,6 +25,7 @@ COMMANDS = {
     "runtime-bind": ["runtime_binding.py"],
     "postbind-assure": ["postbind_assurance.py"],
     "mission-control": ["mission_control_local.py"],
+    "ac-coverage": ["ac_coverage.py"],
     "release-check": ["release_check.py"],
     "outcome-report": ["outcome_report.py"],
     "design-tokens-check": ["design_tokens_check.py"],

@@ -59,6 +59,22 @@ class GraphCheckTests(unittest.TestCase):
         n[4]["depends_on"] = ["w2"]
         self.assert_fails(base(nodes=n), "CYCLE among w1,w2")
 
+    def test_dependents_of_a_cycle_are_not_cycle_members(self):
+        n = nodes() + [node("w4", "wu", "a", ["w1"])]
+        n[4]["depends_on"] = ["w2"]
+        n[5]["depends_on"] = ["w1"]
+        r = self.run_cli(base(nodes=n))
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("CYCLE among w1,w2\n", r.stdout)
+        self.assertIn("BLOCKED_BY_CYCLE w3,w4", r.stdout)
+
+    def test_long_chain_with_dependent_first_ids_does_not_overflow(self):
+        n = nodes()[:4] + [node(f"z{600 - k:03d}", "wu", "a", [f"z{600 - k + 1:03d}"] if k else [])
+                           for k in range(600)]
+        r = self.run_cli(base(nodes=n), "--json")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(len(json.loads(r.stdout)["critical_path"]), 600)
+
     def test_stale_change_fails(self):
         self.assert_fails(base(change_base="2" * 40), "STALE_CHANGE")
 

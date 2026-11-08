@@ -64,17 +64,69 @@ def load_report(path: Path) -> dict:
 
 
 def _cycle_nodes(deps: dict[str, list[str]]) -> set[str]:
-    """Nodes on a cycle: those left after repeatedly peeling nodes with no remaining dependency."""
-    remaining = {k: set(v) for k, v in deps.items()}
-    changed = True
-    while changed:
-        changed = False
-        for k in [k for k, v in remaining.items() if not v]:
-            del remaining[k]
-            for v in remaining.values():
-                v.discard(k)
-            changed = True
-    return set(remaining)
+    """Members of true cycles (SCCs of size > 1, or self-loops), via iterative Tarjan."""
+    index: dict[str, int] = {}
+    low: dict[str, int] = {}
+    on_stack: set[str] = set()
+    stack: list[str] = []
+    members: set[str] = set()
+    counter = 0
+    for root in sorted(deps):
+        if root in index:
+            continue
+        work = [(root, iter(deps[root]))]
+        index[root] = low[root] = counter
+        counter += 1
+        stack.append(root)
+        on_stack.add(root)
+        while work:
+            v, it = work[-1]
+            advanced = False
+            for w in it:
+                if w not in index:
+                    index[w] = low[w] = counter
+                    counter += 1
+                    stack.append(w)
+                    on_stack.add(w)
+                    work.append((w, iter(deps[w])))
+                    advanced = True
+                    break
+                if w in on_stack:
+                    low[v] = min(low[v], index[w])
+            if advanced:
+                continue
+            work.pop()
+            if work:
+                parent = work[-1][0]
+                low[parent] = min(low[parent], low[v])
+            if low[v] == index[v]:
+                comp = []
+                while True:
+                    w = stack.pop()
+                    on_stack.discard(w)
+                    comp.append(w)
+                    if w == v:
+                        break
+                if len(comp) > 1 or v in deps[v]:
+                    members.update(comp)
+    return members
+
+
+def _topological(deps: dict[str, list[str]], skip: set[str]) -> list[str]:
+    """Dependencies-first order over nodes outside ``skip`` (Kahn, id-ordered, no recursion)."""
+    pending = {i: {d for d in ds if d not in skip} for i, ds in deps.items() if i not in skip}
+    order: list[str] = []
+    ready = sorted(i for i, d in pending.items() if not d)
+    while ready:
+        i = ready.pop(0)
+        order.append(i)
+        for k in sorted(pending):
+            if i in pending[k]:
+                pending[k].discard(i)
+                if not pending[k]:
+                    ready.append(k)
+        ready.sort()
+    return order
 
 
 def evaluate(report: dict) -> dict:
@@ -84,8 +136,19 @@ def evaluate(report: dict) -> dict:
         problems.append(f"STALE_CHANGE edited from {report['change_base']} but current is {report['revision']}")
     deps = {i: sorted(set(n.get("depends_on", []))) for i, n in nodes.items()}
     cyclic = _cycle_nodes(deps)
+    blocked: set[str] = set()
     if cyclic:
         problems.append(f"CYCLE among {','.join(sorted(cyclic))}")
+        changed = True
+        blocked = set(cyclic)
+        while changed:
+            changed = False
+            for i in deps:
+                if i not in blocked and any(d in blocked for d in deps[i]):
+                    blocked.add(i)
+                    changed = True
+        if blocked - cyclic:
+            problems.append(f"BLOCKED_BY_CYCLE {','.join(sorted(blocked - cyclic))} depend on a cycle")
     for i in sorted(nodes):
         n = nodes[i]
         want = PARENT.get(n["kind"])
@@ -97,19 +160,14 @@ def evaluate(report: dict) -> dict:
                 m["kind"] == child and m.get("satisfies") == i for m in nodes.values()):
             problems.append(f"UNCOVERED {i} ({nodes[i]['kind']}) has no {child}")
     path: list[str] = []
-    if not cyclic:
-        best: dict[str, tuple[int, list[str]]] = {}
-
-        def solve(i: str) -> tuple[int, list[str]]:
-            if i not in best:
-                tail = min((solve(d) for d in deps[i]), key=lambda t: (-t[0], t[1]), default=(0, []))
-                best[i] = (tail[0] + nodes[i].get("effort", 0), tail[1] + [i])
-            return best[i]
-
-        wus = [i for i in sorted(nodes) if nodes[i]["kind"] == "wu"]
-        if wus:
-            total = max(solve(i)[0] for i in wus)
-            path = min((solve(i)[1] for i in wus if solve(i)[0] == total), key=lambda p: p)
+    best: dict[str, tuple[int, list[str]]] = {}
+    for i in _topological(deps, blocked):
+        tail = min((best[d] for d in deps[i]), key=lambda t: (-t[0], t[1]), default=(0, []))
+        best[i] = (tail[0] + nodes[i].get("effort", 0), tail[1] + [i])
+    wus = [i for i in sorted(best) if nodes[i]["kind"] == "wu"]
+    if wus:
+        total = max(best[i][0] for i in wus)
+        path = min(best[i][1] for i in wus if best[i][0] == total)
     return {"nodes": len(nodes), "critical_path": path, "problems": problems}
 
 

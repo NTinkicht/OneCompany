@@ -10,7 +10,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 STORE = ROOT / ".onecompany" / "knowledge"
 CURRENT = json.loads((STORE / "current" / "K-GEN-EXACT-STATE-001.json").read_text(encoding="utf-8"))
-CANDIDATE = json.loads((STORE / "candidate" / "K-OC-QUALIFICATION-TOCTOU-001.json").read_text(encoding="utf-8"))
+CANDIDATE = copy.deepcopy(CURRENT)
+CANDIDATE.update(status="candidate", bootstrap_safe=False, confidence="medium",
+                 validation={"validated": False, "method": None, "evidence_refs": [], "validated_at": None})
 
 
 class KnowledgeCheckTests(unittest.TestCase):

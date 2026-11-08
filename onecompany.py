@@ -40,6 +40,7 @@ COMMANDS = {
     "comms-check": ["comms_check.py"],
     "deps-check": ["deps_check.py"],
     "portfolio-check": ["portfolio_check.py"],
+    "graph-check": ["graph_check.py"],
     "release-check": ["release_check.py"],
     "outcome-report": ["outcome_report.py"],
     "design-tokens-check": ["design_tokens_check.py"],

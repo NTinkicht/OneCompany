@@ -15,8 +15,8 @@ import re
 import sys
 from pathlib import Path
 
-HEX40 = re.compile(r"^[0-9a-f]{40}$")
-HEX64 = re.compile(r"^[0-9a-f]{64}$")
+HEX40 = re.compile(r"[0-9a-f]{40}")
+HEX64 = re.compile(r"[0-9a-f]{64}")
 
 
 def _text(obj: dict, key: str, where: str) -> str:
@@ -45,7 +45,8 @@ def load_fixtures(path: Path) -> list[dict]:
         seen.add(fid)
         _text(item, "kind", fid)
         _text(item, "command", fid)
-        if not HEX40.match(str(item.get("revision"))):
+        revision = item.get("revision")
+        if not isinstance(revision, str) or not HEX40.fullmatch(revision):
             raise ValueError(f"{fid} needs a 40-hex revision")
         probe = item.get("probe")
         if not isinstance(probe, dict):
@@ -56,7 +57,8 @@ def load_fixtures(path: Path) -> list[dict]:
         status = probe.get("status")
         if isinstance(status, bool) or not isinstance(status, int) or not 100 <= status <= 599:
             raise ValueError(f"{fid} probe needs an integer status 100-599")
-        if not HEX64.match(str(probe.get("response_sha256"))):
+        digest = probe.get("response_sha256")
+        if not isinstance(digest, str) or not HEX64.fullmatch(digest):
             raise ValueError(f"{fid} probe needs a 64-hex response_sha256")
     return items
 

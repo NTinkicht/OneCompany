@@ -67,6 +67,8 @@ class FixtureCheckTests(unittest.TestCase):
             {"fixtures": [fx("a", digest="z")]}, {"fixtures": [fx("a", probe=None)]},
             {"fixtures": [fx("a", probe={"method": "GET", "path": "health", "status": 200, "response_sha256": "a" * 64})]},
             {"fixtures": ["x"]},
+            {"fixtures": [fx("a", probe={"method": "GET", "path": "/h", "status": 200, "response_sha256": "a" * 64 + "\n"})]},
+            {"fixtures": [fx("a", revision="1" * 40 + "\n")]},
         ]
         for body in bad:
             r = self.cli(self.write(body))

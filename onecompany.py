@@ -34,6 +34,7 @@ COMMANDS = {
     "load-check": ["load_check.py"],
     "a11y-check": ["a11y_check.py"],
     "security-check": ["security_check.py"],
+    "contract-check": ["contract_check.py"],
     "release-check": ["release_check.py"],
     "outcome-report": ["outcome_report.py"],
     "design-tokens-check": ["design_tokens_check.py"],

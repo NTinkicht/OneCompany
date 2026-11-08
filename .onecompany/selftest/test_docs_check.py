@@ -71,6 +71,7 @@ class DocsCheckTests(unittest.TestCase):
         self.run_cli()
         self.assertEqual(before, sorted(p.name for p in self.tmp.rglob("*")))
 
+    @unittest.skipUnless((ROOT / "docs" / "MASTER-EVOLUTION-ROADMAP-2026.md").is_file(), "source checkout only; bootstrapped targets carry their own docs")
     def test_repository_docs_are_complete(self):
         r = subprocess.run([sys.executable, str(ROOT / "onecompany.py"), "docs-check"], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)

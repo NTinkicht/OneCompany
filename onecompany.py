@@ -32,6 +32,7 @@ COMMANDS = {
     "fixture-check": ["fixture_check.py"],
     "mutation-check": ["mutation_check.py"],
     "load-check": ["load_check.py"],
+    "a11y-check": ["a11y_check.py"],
     "release-check": ["release_check.py"],
     "outcome-report": ["outcome_report.py"],
     "design-tokens-check": ["design_tokens_check.py"],

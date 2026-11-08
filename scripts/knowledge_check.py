@@ -21,7 +21,7 @@ import knowledge
 
 TEXT_FIELDS = ("title", "summary", "problem_pattern", "failure_mode", "root_cause",
                "prevention_rule", "applicability_notes")
-LIST_TEXT_FIELDS = ("preflight_checks",)
+LIST_TEXT_FIELDS = ("preflight_checks", "regression_tests")
 PATTERNS = (
     r"ignore (all |any )?(the )?(previous|prior|above|earlier) (instructions|rules|guidance)",
     r"disregard (all |any )?(the )?(previous|prior|above|earlier|your) (instructions|rules|guidance)",
@@ -77,6 +77,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         root = Path(args.root) if args.root else knowledge.KNOWLEDGE_ROOT
+        # load_entries() would converge interrupted transitions (writes); this check is read-only.
+        tx_root = root / ".transactions"
+        if tx_root.is_symlink() or (tx_root.exists() and (not tx_root.is_dir() or any(tx_root.iterdir()))):
+            raise knowledge.KnowledgeError("pending lifecycle transactions; recovery required before checking")
         result = evaluate(knowledge.load_entries(root))
     except (knowledge.KnowledgeError, OSError, ValueError) as exc:
         print(f"knowledge-check: UNABLE TO VERIFY ({exc.__class__.__name__}: {exc})", file=sys.stderr)

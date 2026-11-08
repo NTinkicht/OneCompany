@@ -31,6 +31,7 @@ COMMANDS = {
     "quarantine-check": ["quarantine_check.py"],
     "fixture-check": ["fixture_check.py"],
     "mutation-check": ["mutation_check.py"],
+    "load-check": ["load_check.py"],
     "release-check": ["release_check.py"],
     "outcome-report": ["outcome_report.py"],
     "design-tokens-check": ["design_tokens_check.py"],

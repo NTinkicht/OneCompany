@@ -44,8 +44,9 @@ def commands(root: Path) -> list[str]:
 
 def doc_files(root: Path) -> list[Path]:
     docs = root / "docs"
-    files = [root / "README.md"] + (sorted(docs.glob("*.md")) if docs.is_dir() else [])
-    return [p for p in files if p.is_file() and not p.is_symlink()]
+    files = [root / "README.md"] + (sorted(docs.rglob("*.md")) if docs.is_dir() else [])
+    base = root.resolve()
+    return [p for p in files if p.is_file() and not p.is_symlink() and base in p.resolve().parents]
 
 
 def broken_links(root: Path, rels: list[str]) -> list[str]:
@@ -79,7 +80,8 @@ def evaluate(root: Path) -> dict:
     text = "\n".join(_read(p) for p in doc_files(root))
     undocumented = [c for c in commands(root)
                     if not re.search(r"onecompany\.py\s+" + re.escape(c) + r"(?![\w-])", text)]
-    return {"required_missing": missing, "broken_links": broken_links(root, list(REQUIRED)),
+    pages = sorted({p.relative_to(root).as_posix() for p in doc_files(root)} | set(REQUIRED))
+    return {"required_missing": missing, "broken_links": broken_links(root, pages),
             "undocumented_commands": undocumented}
 
 

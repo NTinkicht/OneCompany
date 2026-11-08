@@ -40,6 +40,23 @@ class DocsCheckTests(unittest.TestCase):
         self.readme.write_text("`python onecompany.py alpha` `python onecompany.py beta-check-extra`\n")
         self.assertEqual(json.loads(self.run_cli("--json").stdout)["undocumented_commands"], ["beta-check"])
 
+    def test_command_documented_only_in_nested_page_counts(self):
+        self.readme.write_text("run `python onecompany.py alpha`\n")
+        nested = self.tmp / "docs" / "engineering"
+        nested.mkdir()
+        (nested / "BETA.md").write_text("use `python onecompany.py beta-check`\n")
+        r = self.run_cli("--json")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(json.loads(r.stdout)["undocumented_commands"], [])
+
+    def test_broken_link_in_non_required_page_fails(self):
+        (self.tmp / "docs" / "COMMAND-REFERENCE.md").write_text("[gone](MISSING.md)\n")
+        nested = self.tmp / "docs" / "agent-setup"
+        nested.mkdir()
+        (nested / "X.md").write_text("[ok](../FAQ.md) [bad](nope.md)\n")
+        out = json.loads(self.run_cli("--json").stdout)
+        self.assertEqual(out["broken_links"], ["docs/COMMAND-REFERENCE.md -> MISSING.md", "docs/agent-setup/X.md -> nope.md"])
+
     def test_missing_required_doc_fails(self):
         (self.tmp / "docs" / "FAQ.md").unlink()
         r = self.run_cli("--json")

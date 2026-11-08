@@ -27,6 +27,7 @@ COMMANDS = {
     "mission-control": ["mission_control_local.py"],
     "ac-coverage": ["ac_coverage.py"],
     "flaky-report": ["flaky_report.py"],
+    "regression-report": ["regression_report.py"],
     "release-check": ["release_check.py"],
     "outcome-report": ["outcome_report.py"],
     "design-tokens-check": ["design_tokens_check.py"],

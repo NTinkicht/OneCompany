@@ -90,6 +90,13 @@ class PortfolioCheckTests(unittest.TestCase):
         self.assert_unverifiable(base(leases=[{"id": "l1", "project": "zz", "repo": "o/r1"}]))
         self.assert_unverifiable(base(approvals=[{"id": "a1", "project": "p1", "scope_project": "zz"}]))
         self.assert_unverifiable(base(accesses=[{"id": "x1", "project": "p1", "target_project": "p1", "kind": "x"}]))
+        for bad in ({}, [], 1, None):
+            self.assert_unverifiable(base(leases=[{"id": "l1", "project": bad, "repo": "o/r1"}]))
+            self.assert_unverifiable(base(approvals=[{"id": "a1", "project": bad, "scope_project": "p1"}]))
+            self.assert_unverifiable(base(approvals=[{"id": "a1", "project": "p1", "scope_project": bad}]))
+            self.assert_unverifiable(base(accesses=[{"id": "x1", "project": bad, "target_project": "p1", "kind": "data"}]))
+            self.assert_unverifiable(base(accesses=[{"id": "x1", "project": "p1", "target_project": bad, "kind": "data"}]))
+            self.assert_unverifiable(base(accesses=[{"id": "x1", "project": "p1", "target_project": "p1", "kind": bad}]))
 
     def test_registered_in_cli(self):
         r = subprocess.run([sys.executable, str(ROOT / "onecompany.py"), "portfolio-check", "--help"],

@@ -30,6 +30,11 @@ def _name(value: object) -> bool:
     return isinstance(value, str) and bool(value.strip())
 
 
+def _in(value: object, allowed: set) -> bool:
+    """Membership that is False (never TypeError) for non-string values."""
+    return isinstance(value, str) and value in allowed
+
+
 def _list(data: dict, key: str) -> list:
     value = data.get(key)
     if not isinstance(value, list):
@@ -69,17 +74,17 @@ def load_report(path: Path) -> dict:
             if not _name(p.get(field)):
                 raise ValueError(f"{p['id']} {field} must be a non-empty string")
     for l in leases:
-        if l.get("project") not in ids:
+        if not _in(l.get("project"), ids):
             raise ValueError(f"{l['id']} references an unknown project")
         if not isinstance(l.get("repo"), str) or not REPO.fullmatch(l["repo"]):
             raise ValueError(f"{l['id']} repo must be owner/name")
     for a in approvals:
-        if a.get("project") not in ids or a.get("scope_project") not in ids:
+        if not _in(a.get("project"), ids) or not _in(a.get("scope_project"), ids):
             raise ValueError(f"{a['id']} references an unknown project")
     for x in accesses:
-        if x.get("project") not in ids or x.get("target_project") not in ids:
+        if not _in(x.get("project"), ids) or not _in(x.get("target_project"), ids):
             raise ValueError(f"{x['id']} references an unknown project")
-        if x.get("kind") not in KINDS:
+        if not _in(x.get("kind"), KINDS):
             raise ValueError(f"{x['id']} has unknown kind")
     return data
 

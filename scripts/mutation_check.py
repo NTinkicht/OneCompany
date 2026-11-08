@@ -45,7 +45,8 @@ def load_mutants(path: Path) -> list[dict]:
         seen.add(mid)
         if not isinstance(item.get("file"), str) or not item["file"].strip():
             raise ValueError(f"{mid} needs a non-empty string file")
-        if item.get("status") not in STATUSES:
+        status = item.get("status")
+        if not isinstance(status, str) or status not in STATUSES:
             raise ValueError(f"{mid} has an unknown status")
         just = item.get("justification")
         if just is not None and not isinstance(just, str):

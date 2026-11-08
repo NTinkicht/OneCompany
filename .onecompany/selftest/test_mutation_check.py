@@ -75,7 +75,9 @@ class MutationCheckTests(unittest.TestCase):
                json.dumps({"revision": "1" * 40, "mutants": [mu("a", "bogus")]}),
                json.dumps({"revision": "1" * 40, "mutants": [mu("a"), mu("a")]}),
                json.dumps({"revision": "1" * 40, "mutants": [mu("a", file="")]}),
-               json.dumps({"revision": "1" * 40 + "\n", "mutants": [mu("a")]})]
+               json.dumps({"revision": "1" * 40 + "\n", "mutants": [mu("a")]}),
+               json.dumps({"revision": "1" * 40, "mutants": [mu("a", [])]}),
+               json.dumps({"revision": "1" * 40, "mutants": [mu("a", {})]})]
         for body in bad:
             r = self.run_cli(body)
             self.assertEqual(r.returncode, 2, body)

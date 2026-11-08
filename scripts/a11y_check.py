@@ -52,7 +52,7 @@ def load_pages(path: Path) -> list[dict]:
                 raise ValueError(f"{pid} violation is not an object")
             if not isinstance(v.get("rule"), str) or not v["rule"].strip():
                 raise ValueError(f"{pid} violation needs a non-empty string rule")
-            if v.get("impact") not in IMPACTS:
+            if not isinstance(v.get("impact"), str) or v["impact"] not in IMPACTS:
                 raise ValueError(f"{pid} violation has unknown impact")
             nodes = v.get("nodes")
             if isinstance(nodes, bool) or not isinstance(nodes, int) or nodes < 1:

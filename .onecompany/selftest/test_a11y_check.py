@@ -74,6 +74,8 @@ class A11yCheckTests(unittest.TestCase):
             [page("a"), page("a")],
             [page("", [])],
             [page("a", [viol("r", "severe")])],
+            [page("a", [viol("r", [])])],
+            [page("a", [viol("r", {})])],
             [page("a", [viol("r", nodes=0)])],
             [page("a", [viol("r", nodes=True)])],
             [page("a", [viol("r", nodes=1.5)])],

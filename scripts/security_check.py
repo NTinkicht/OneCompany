@@ -14,7 +14,7 @@ import re
 import sys
 from pathlib import Path
 
-HEX40 = re.compile(r"[0-9a-f]{40}")
+HEX40 = re.compile(r"[0-9a-fA-F]{40}")
 SEVERITIES = {"low", "medium", "high", "critical"}
 KINDS = {"sast", "dependency", "secret"}
 BLOCKING = {"high", "critical"}

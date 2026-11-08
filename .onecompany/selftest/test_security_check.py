@@ -31,6 +31,10 @@ class SecurityCheckTests(unittest.TestCase):
     def test_clean_targets_pass(self):
         self.assertEqual(self.run_cli([tgt("a"), tgt("b")]).returncode, 0)
 
+    def test_uppercase_hex_revision_accepted(self):
+        self.assertEqual(self.run_cli([tgt("a")], revision="A" * 40).returncode, 0)
+        self.assertEqual(self.run_cli([tgt("a")], revision="aB" * 20).returncode, 0)
+
     def test_high_and_critical_block(self):
         for sev in ("high", "critical"):
             r = self.run_cli([tgt("a", [fnd("X1", sev)])])

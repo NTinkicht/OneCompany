@@ -68,7 +68,7 @@ def load_report(path: Path) -> dict:
     for d in defects:
         if not isinstance(d.get("held_out"), bool) or not isinstance(d.get("recurred"), bool):
             raise ValueError(f"{d['id']} held_out and recurred must be booleans")
-        ref = d.get("lesson")
+        ref = d.setdefault("lesson", None)
         if ref is not None and (not isinstance(ref, str) or ref not in known):
             raise ValueError(f"{d['id']} references an unknown lesson")
     return data
@@ -84,13 +84,13 @@ def evaluate(report: dict) -> dict:
             problems.append(f"NO_EVIDENCE {lid} validated lesson has no evidence_refs")
         for did in sorted(set(l["source_defects"]) & held_ids):
             problems.append(f"LEAKED_BENCHMARK {lid} learned from held-out defect {did}")
-    for d in sorted(held, key=lambda d: d["id"]):
+    for d in sorted(report["defects"], key=lambda d: d["id"]):
         lesson = lessons.get(d["lesson"]) if d["lesson"] is not None else None
         if lesson is None:
             continue
         if lesson["status"] != "validated":
             problems.append(f"STALE_LESSON_CREDITED {d['id']} credits {lesson['status']} lesson {lesson['id']}")
-        elif d["recurred"]:
+        elif d["held_out"] and d["recurred"]:
             problems.append(f"VALIDATED_LESSON_RECURRED {d['id']} recurred despite {lesson['id']}")
     if not held:
         problems.append("NO_HELD_OUT_BENCHMARK no held-out defects")

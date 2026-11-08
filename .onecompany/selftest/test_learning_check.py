@@ -97,6 +97,24 @@ class LearningCheckTests(unittest.TestCase):
              defect(3), defect(4, recurred=True)]
         self.assert_fails(base(defects=d), "NO_IMPROVEMENT")
 
+    def test_stale_credit_on_non_held_out_defect_fails(self):
+        # Positive control: base() passes; only the non-held-out credit to a retired lesson differs.
+        d = base()["defects"] + [defect(5, held_out=False, lesson="L2")]
+        self.assertEqual(self.run_cli(base(lessons=[lesson(1), lesson(2)], defects=d)).returncode, 0)
+        self.assert_fails(base(lessons=[lesson(1), lesson(2, status="retired")], defects=d),
+                          "STALE_LESSON_CREDITED h5 credits retired lesson L2")
+
+    def test_non_held_out_recurrence_with_validated_lesson_is_not_flagged(self):
+        d = base()["defects"] + [defect(5, held_out=False, lesson="L1", recurred=True)]
+        self.assertEqual(self.run_cli(base(defects=d)).returncode, 0)
+
+    def test_missing_lesson_field_is_treated_as_null(self):
+        d = base()["defects"]
+        del d[3]["lesson"]
+        r = self.run_cli(base(defects=d))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+
     def test_malformed_input_is_unverifiable(self):
         self.assert_unverifiable(raw="not json")
         self.assert_unverifiable(raw="[]")

@@ -38,6 +38,7 @@ COMMANDS = {
     "harness-check": ["harness_portability_check.py"],
     "knowledge-check": ["knowledge_check.py"],
     "comms-check": ["comms_check.py"],
+    "deps-check": ["deps_check.py"],
     "release-check": ["release_check.py"],
     "outcome-report": ["outcome_report.py"],
     "design-tokens-check": ["design_tokens_check.py"],

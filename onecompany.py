@@ -37,6 +37,7 @@ COMMANDS = {
     "contract-check": ["contract_check.py"],
     "harness-check": ["harness_portability_check.py"],
     "knowledge-check": ["knowledge_check.py"],
+    "comms-check": ["comms_check.py"],
     "release-check": ["release_check.py"],
     "outcome-report": ["outcome_report.py"],
     "design-tokens-check": ["design_tokens_check.py"],

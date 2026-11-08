@@ -66,6 +66,8 @@ def load_report(path: Path) -> dict:
         ids.add(m["id"])
         if not _hex64(m.get("manifest_digest")):
             raise ValueError(f"{m['id']} manifest_digest must be a 64-hex digest")
+        if "lockfile_digest" not in m or "lock_for_manifest_digest" not in m:
+            raise ValueError(f"{m['id']} must include lockfile_digest and lock_for_manifest_digest (64-hex or null)")
         if not _opt_hex64(m.get("lockfile_digest")) or not _opt_hex64(m.get("lock_for_manifest_digest")):
             raise ValueError(f"{m['id']} lock digests must be 64-hex or null")
     seen: set[str] = set()

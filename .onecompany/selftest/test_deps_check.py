@@ -91,6 +91,8 @@ class DepsCheckTests(unittest.TestCase):
             self.run_cli([update()], manifests=[manifest(), manifest()]),
             self.run_cli([update()], manifests=[manifest(manifest_digest="zz")]),
             self.run_cli([update()], manifests=[manifest(lockfile_digest="zz")]),
+            self.run_cli([update()], manifests=[{k: v for k, v in manifest().items() if k != "lockfile_digest"}]),
+            self.run_cli([update()], manifests=[{k: v for k, v in manifest().items() if k != "lock_for_manifest_digest"}]),
             self.run_cli([update(manifest="nope")]),
             self.run_cli([update(), update()]),
             self.run_cli([update(source_digest_actual="zz")]),

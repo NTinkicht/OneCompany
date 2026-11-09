@@ -46,6 +46,7 @@ COMMANDS = {
     "design-tokens-check": ["design_tokens_check.py"],
     "visual-golden-check": ["visual_golden_check.py"],
     "docs-check": ["docs_check.py"],
+    "app-check": ["app_check.py"],
     "shadow-migration": ["shadow_migration.py"],
     "cutover-readiness": ["cutover_readiness.py"],
     "doctor": ["doctor.py"], "status": ["status.py"], "check": ["check.py"], "validate": ["validate_all.py"], "schema-validate": ["schema_validate.py"],

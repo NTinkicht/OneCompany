@@ -39,3 +39,4 @@ The `*-check` and `*-report` commands are deterministic and read-only on supplie
 | `python onecompany.py verify-evidence` | `scripts/evidence_verify.py` | Platform-backed engineering evidence verification for CompanyOS assurance. |
 | `python onecompany.py visual-golden-check` | `scripts/visual_golden_check.py` | Deterministic, read-only visual-golden check (OC-P1-01 slice 2, #455). |
 | `python onecompany.py docs-check` | `scripts/docs_check.py` | Deterministic, read-only documentation check: required docs, relative links, command coverage (OC-P1-12 slice 1). |
+| `python onecompany.py app-check` | `scripts/app_check.py` | Deterministic, read-only guided-app evidence check (OC-P1-02 slice 1, #473). |

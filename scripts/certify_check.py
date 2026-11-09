@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -27,7 +28,7 @@ MAX_P95_MS = 2000
 
 
 def _num(value) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
 def load(path: Path) -> dict:
@@ -65,8 +66,8 @@ def load(path: Path) -> dict:
         if not _num(item.get("p95_ms")) or item["p95_ms"] < 0:
             raise ValueError(f"{sid}: p95_ms must be a non-negative number")
         acs = item.get("ac_ids")
-        if not isinstance(acs, list) or not all(isinstance(a, str) for a in acs):
-            raise ValueError(f"{sid}: ac_ids must be a list of strings")
+        if not isinstance(acs, list) or not all(isinstance(a, str) and a.strip() for a in acs):
+            raise ValueError(f"{sid}: ac_ids must be a list of non-blank strings")
     return data
 
 

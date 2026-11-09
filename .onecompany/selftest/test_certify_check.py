@@ -94,6 +94,11 @@ class CertifyCheckTests(unittest.TestCase):
             lambda m: m["scenarios"][0].update(p95_ms=-1),
             lambda m: m["scenarios"][0].update(result="maybe"),
             lambda m: m["scenarios"][0].update(ac_ids="AC-1"),
+            lambda m: m["scenarios"][0].update(ac_ids=[""]),
+            lambda m: m["scenarios"][0].update(ac_ids=["   "]),
+            lambda m: m["scenarios"][0].update(p95_ms=float("nan")),
+            lambda m: m["scenarios"][0].update(p95_ms=float("inf")),
+            lambda m: m["scenarios"][0].update(error_rate=float("nan")),
             lambda m: m["scenarios"].append(dict(m["scenarios"][0])),
         ):
             m = manifest(); mutate(m); cases.append(m)

@@ -54,6 +54,11 @@ def load(path: Path) -> dict[tuple, dict]:
         digest = item.get("completion_evidence_sha256")
         if digest is not None and not isinstance(digest, str):
             raise ValueError(f"{screen} {vp} {state}: completion_evidence_sha256 must be a string or null")
+        if (isinstance(digest, str) and not item["completion_claimed"]
+                and not HEX64.fullmatch(digest)):
+            # Hex is lowercase-only by contract (fail closed); a malformed
+            # digest is unverifiable input even when no completion is claimed.
+            raise ValueError(f"{screen} {vp} {state}: completion_evidence_sha256 must be 64 lowercase hex or null")
         key = (screen, vp, state)
         if key in out:
             raise ValueError(f"duplicate evidence entry {screen} {vp} {state}")

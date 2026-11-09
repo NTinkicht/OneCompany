@@ -80,8 +80,10 @@ class AppCheckTests(unittest.TestCase):
         bad_a = full(); bad_a[0]["a11y_serious"] = True
         bad_k = full(); bad_k[0]["keyboard_ok"] = "yes"
         bad_v = full(); bad_v[0]["viewport"] = True
+        bad_d = full(); bad_d[0]["completion_evidence_sha256"] = "short"
+        bad_u = full(); bad_u[0]["completion_evidence_sha256"] = "A" * 64
         dup = full() + [full()[0]]
-        for rows in (bad_a, bad_k, bad_v, dup, []):
+        for rows in (bad_a, bad_k, bad_v, bad_d, bad_u, dup, []):
             self.assertEqual(self.run_cli(rows).returncode, 2)
         self.assertEqual(self.run_cli(full(), revision="XYZ").returncode, 2)
         self.assertEqual(self.run_cli(raw="not json").returncode, 2)

@@ -93,6 +93,77 @@ class KnowledgeCheckTests(unittest.TestCase):
         self.put(CURRENT, "K-TEST-DANG-001", supersedes=["K-TEST-GONE-001"])
         self.assert_fails("DANGLING_SUPERSESSION K-TEST-DANG-001 K-TEST-GONE-001")
 
+    def _with_validation_refs(self, refs, **over):
+        val = copy.deepcopy(CURRENT["validation"])
+        val["evidence_refs"] = refs
+        return dict(validation=val, **over)
+
+    def test_missing_source_evidence_file_detected(self):
+        ev = [dict(CURRENT["source_evidence"][0], ref="repo:docs/DOES-NOT-EXIST.md")]
+        self.put(CURRENT, "K-TEST-PROV-001", source_evidence=ev)
+        self.assert_fails("MISSING_EVIDENCE_FILE K-TEST-PROV-001 source_evidence repo:docs/DOES-NOT-EXIST.md")
+
+    def test_missing_validation_evidence_file_detected(self):
+        self.put(CURRENT, "K-TEST-PROV-002",
+                 **self._with_validation_refs(["repo:.onecompany/selftest/test_nope_missing.py"]))
+        r = self.run_cli()
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("MISSING_EVIDENCE_FILE K-TEST-PROV-002 validation repo:.onecompany/selftest/test_nope_missing.py", r.stdout)
+        self.assertIn("UNGROUNDED_REGRESSION K-TEST-PROV-002", r.stdout)
+
+    def test_traversal_and_directory_refs_are_not_evidence(self):
+        for n, ref in enumerate(("repo:../outside.py", "repo:docs", "repo:/etc/passwd"), start=3):
+            ev = [dict(CURRENT["source_evidence"][0], ref=ref)]
+            self.put(CURRENT, f"K-TEST-PROV-00{n}", source_evidence=ev)
+        r = self.run_cli()
+        self.assertEqual(r.returncode, 1, r.stdout)
+        for n in (3, 4, 5):
+            self.assertIn(f"MISSING_EVIDENCE_FILE K-TEST-PROV-00{n}", r.stdout)
+
+    def test_regression_validation_citing_only_non_test_file_is_ungrounded(self):
+        self.put(CURRENT, "K-TEST-PROV-006", **self._with_validation_refs(["repo:docs/LEARNING-PLANE.md"]))
+        r = self.run_cli()
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("UNGROUNDED_REGRESSION K-TEST-PROV-006", r.stdout)
+        self.assertNotIn("MISSING_EVIDENCE_FILE", r.stdout)
+
+    def test_regression_validation_citing_non_test_python_source_is_ungrounded(self):
+        self.assertTrue((ROOT / "scripts" / "knowledge.py").is_file())
+        self.put(CURRENT, "K-TEST-PROV-009", **self._with_validation_refs(["repo:scripts/knowledge.py"]))
+        r = self.run_cli()
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("UNGROUNDED_REGRESSION K-TEST-PROV-009", r.stdout)
+        self.assertNotIn("MISSING_EVIDENCE_FILE", r.stdout)
+
+    def test_regression_validation_citing_existing_test_file_is_grounded(self):
+        self.put(CURRENT, "K-TEST-PROV-010",
+                 **self._with_validation_refs(["repo:.onecompany/selftest/test_knowledge_check.py"]))
+        self.assertEqual(self.run_cli().returncode, 0)
+
+    def test_symlink_loop_evidence_is_reported_not_a_crash(self):
+        repo = self.tmp / "repo"
+        (repo / "tests").mkdir(parents=True)
+        (repo / "tests" / "test_loop.py").symlink_to(repo / "tests" / "test_loop.py")
+        self.put(CURRENT, "K-TEST-PROV-011", **self._with_validation_refs(["repo:tests/test_loop.py"]))
+        r = self.run_cli("--repo-root", str(repo))
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertIn("MISSING_EVIDENCE_FILE K-TEST-PROV-011 validation repo:tests/test_loop.py", r.stdout)
+
+    def test_non_repo_refs_and_candidates_without_validation_refs_pass(self):
+        ev = [dict(CURRENT["source_evidence"][0], ref="git:" + "a" * 40)]
+        self.put(CANDIDATE, "K-TEST-PROV-007", source_evidence=ev)
+        self.assertEqual(self.run_cli().returncode, 0)
+
+    def test_repo_root_option_resolves_refs_against_given_checkout(self):
+        self.put(CURRENT, "K-TEST-PROV-008")
+        empty = self.tmp / "empty"
+        empty.mkdir()
+        r = self.run_cli("--repo-root", str(empty))
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("MISSING_EVIDENCE_FILE K-TEST-PROV-008", r.stdout)
+        self.assertEqual(self.run_cli("--repo-root", str(ROOT)).returncode, 0)
+
     def test_invalid_store_is_unable_to_verify(self):
         (self.root / "current" / "K-BAD-001.json").write_text("{", encoding="utf-8")
         r = self.run_cli()

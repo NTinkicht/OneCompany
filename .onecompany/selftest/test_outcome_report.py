@@ -213,6 +213,18 @@ class ReplayedReceiptTests(unittest.TestCase):
         rep = orp.build_report([a, dict(a)], ALLOWED, FORBIDDEN)
         self.assertEqual((rep["work_units"][0]["incidents"], rep["duplicates_ignored"]), (2, 0))
 
+    def test_violation_index_is_original_input_index_after_dedup(self):
+        a = rec("WU-A", "incident", "2026-11-03T10:00:00Z", id="r1")
+        bad = rec("WU-A", "incident", "2026-11-03T10:00:00Z", "PAID_API", id="r2")
+        rep = orp.build_report([a, dict(a), bad], ALLOWED, FORBIDDEN)
+        self.assertEqual([v["index"] for v in rep["violations"]], [2])
+
+    def test_type_differing_replay_is_a_conflict(self):
+        a = rec("WU-A", "incident", "2026-11-03T10:00:00Z", id="r1", flag=True)
+        b = rec("WU-A", "incident", "2026-11-03T10:00:00Z", id="r1", flag=1)
+        rep = orp.build_report([a, b], ALLOWED, FORBIDDEN)
+        self.assertEqual((rep["duplicates_ignored"], rep["conflicts"]), (0, [{"index": 1, "id": "r1"}]))
+
     def test_cli_exits_nonzero_on_conflict(self):
         good = rec("WU-A", "incident", "2026-11-03T10:00:00Z", id="r1")
         bad = dict(good, cost_class="HUMAN")

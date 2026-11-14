@@ -58,6 +58,14 @@ def load_budget(root: Path) -> tuple[set[str], set[str]]:
     return set(classes.get("allowed", [])), set(classes.get("forbidden", []))
 
 
+def _canon(value: object) -> str:
+    """Type-sensitive canonical form (``true`` != ``1``, ``1`` != ``1.0``)."""
+    try:
+        return json.dumps(value, sort_keys=True, separators=(",", ":"))
+    except (TypeError, ValueError):
+        return repr(value)
+
+
 def dedupe_receipts(receipts: list) -> tuple[list, int, list[dict]]:
     """Drop replayed receipts that share a receipt ``id`` so metrics never double count.
 
@@ -65,19 +73,19 @@ def dedupe_receipts(receipts: list) -> tuple[list, int, list[dict]]:
     is a conflict: the first receipt is kept and the conflict is reported (fail closed).
     Receipts without a usable ``id`` are all kept, preserving earlier behaviour.
     """
-    seen: dict[str, object] = {}
-    kept: list = []
+    seen: dict[str, str] = {}
+    kept: list = []  # (original input index, receipt)
     ignored = 0
     conflicts: list[dict] = []
     for index, raw in enumerate(receipts):
         rid = raw.get("id") if isinstance(raw, dict) else None
         if not isinstance(rid, str) or not rid:
-            kept.append(raw)
+            kept.append((index, raw))
             continue
         if rid not in seen:
-            seen[rid] = raw
-            kept.append(raw)
-        elif seen[rid] == raw:
+            seen[rid] = _canon(raw)
+            kept.append((index, raw))
+        elif seen[rid] == _canon(raw):
             ignored += 1
         else:
             conflicts.append({"index": index, "id": safe_text(rid)})
@@ -88,10 +96,11 @@ def build_report(receipts: object, allowed: set[str], forbidden: set[str]) -> di
     if not isinstance(receipts, list):
         raise ValueError("receipts must be a JSON list")
     total_receipts = len(receipts)
-    receipts, duplicates_ignored, conflicts = dedupe_receipts(receipts)
+    indexed, duplicates_ignored, conflicts = dedupe_receipts(receipts)
+    receipts = [raw for _, raw in indexed]
     per_wu: dict[str, dict] = {}
     violations: list[dict] = []
-    for index, raw in enumerate(receipts):
+    for index, raw in indexed:
         r = raw if isinstance(raw, dict) else {}
         raw_wu = r.get("wu")
         wu = raw_wu if isinstance(raw_wu, str) and raw_wu else None

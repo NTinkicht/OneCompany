@@ -11,7 +11,9 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import os
 import re
+import stat
 import sys
 from pathlib import Path
 
@@ -43,6 +45,52 @@ COLORS = {  # token pair name -> (foreground var, background var or None)
     "focus-ring": ("--focus", None),
 }
 HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
+MAX_JOURNEY_BYTES = 1_048_576
+JOURNEY_SCHEMA = "onecompany.first-run-journey.v1"
+JOURNEY_STATUSES = {  # journey stage -> conservative screen statuses; never "complete"
+    "BLOCKED": {"discovery": "error"},
+    "NEEDS_PRODUCT_BRIEF": {"discovery": "ready"},
+    "NEEDS_OWNER_ANSWERS": {"discovery": "ready", "brief": "ready"},
+    "PROPOSAL_READY_NOT_APPROVED": {"discovery": "ready", "brief": "ready", "build": "ready"},
+}
+
+
+def statuses_from_journey(data: object) -> dict[str, str]:
+    """Derive screen statuses from `journey --json` output; refuse anything not exactly that."""
+    if not isinstance(data, dict) or data.get("schema") != JOURNEY_SCHEMA:
+        raise ValueError("journey: unexpected schema")
+    if data.get("read_only") is not True or data.get("approval") != "NOT_GRANTED":
+        raise ValueError("journey: must be read-only with approval NOT_GRANTED")
+    stage = data.get("stage")
+    if not isinstance(stage, str) or stage not in JOURNEY_STATUSES:
+        raise ValueError("journey: unknown stage")
+    return dict(JOURNEY_STATUSES[stage])
+
+
+def read_journey(path: Path) -> dict[str, str]:
+    """Read one bounded regular JSON file; never follow a symlink or block on a FIFO/device."""
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise ValueError("journey: secure read unavailable on this platform")
+    flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        if path.is_symlink():
+            raise ValueError("journey: refusing to read a symlink") from None
+        raise exc
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise ValueError("journey: a regular file is required")
+        with os.fdopen(descriptor, "rb", closefd=False) as stream:
+            raw = stream.read(MAX_JOURNEY_BYTES + 1)
+    finally:
+        os.close(descriptor)
+    if len(raw) > MAX_JOURNEY_BYTES:
+        raise ValueError("journey: file too large")
+    try:
+        return statuses_from_journey(json.loads(raw.decode("utf-8")))
+    except (UnicodeError, json.JSONDecodeError):
+        raise ValueError("journey: not valid JSON") from None
 
 
 def theme_vars(data: object, theme: str) -> str:
@@ -110,11 +158,16 @@ def render(statuses: dict[str, str] | None = None, tokens: object | None = None,
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Render the static guided application.")
     parser.add_argument("--status", help='JSON file mapping screen -> ready|empty|error|slow')
+    parser.add_argument("--journey", help="saved output of `onecompany.py journey --json` to derive statuses from")
     parser.add_argument("--out", help="write HTML to this file instead of stdout")
     parser.add_argument("--rtl", action="store_true")
     args = parser.parse_args(argv)
     try:
+        if args.status and args.journey:
+            raise ValueError("use either --status or --journey, not both")
         statuses = json.loads(Path(args.status).read_text(encoding="utf-8")) if args.status else {}
+        if args.journey:
+            statuses = read_journey(Path(args.journey))
         if not isinstance(statuses, dict):
             raise ValueError("status file must be a JSON object")
         page = render(statuses, rtl=args.rtl)

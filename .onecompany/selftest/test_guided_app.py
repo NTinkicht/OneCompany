@@ -145,6 +145,61 @@ class GuidedAppTests(unittest.TestCase):
             link = d / "l.json"; link.symlink_to(j)
             self.assertEqual(run("--journey", str(link)).returncode, 2)
 
+    def test_mission_truth_maps_conservatively(self):
+        def doc(*states, **extra):
+            return {"schema": "onecompany.mission-truth.v1", "authority_granted": False,
+                    "work_units": [{"id": f"W{i}", "state": st} for i, st in enumerate(states)], **extra}
+        f = guided_app.statuses_from_mission_truth
+        self.assertEqual(f(doc("OPEN", "BLOCKED", "VERIFIED_MERGED")), {"mission-control": "ready"})
+        self.assertEqual(f(doc("VERIFIED_MERGED", "DRIFT")), {"mission-control": "error"})
+        self.assertEqual(f(doc("OPEN", "UNABLE_TO_VERIFY")), {"mission-control": "error"})
+        self.assertEqual(f(doc()), {})
+        verified = f(doc("VERIFIED_MERGED", all_verified=True))
+        page = guided_app.render(verified).lower()
+        for word in ("complete", "done", "success", "passed"):
+            self.assertNotIn(word, re.sub(r"<style>.*?</style>", "", page, flags=re.S))
+        good = doc("OPEN")
+        bad = [None, [], {**good, "schema": "x"}, {**good, "authority_granted": True},
+               {k: v for k, v in good.items() if k != "authority_granted"},
+               {**good, "work_units": {}}, {**good, "work_units": ["OPEN"]},
+               {**good, "work_units": [{"id": "a", "state": "DONE"}]},
+               {**good, "work_units": [{"id": "a"}]}]
+        for item in bad:
+            with self.assertRaises(ValueError):
+                f(item)
+
+    def test_cli_mission_truth_file_combined_and_refusals(self):
+        run = lambda *a: subprocess.run([sys.executable, str(ROOT / "scripts" / "guided_app.py"), *a],
+                                        capture_output=True, text=True)
+        good = {"schema": "onecompany.mission-truth.v1", "authority_granted": False,
+                "work_units": [{"id": "a", "state": "DRIFT"}]}
+        journey = {"schema": "onecompany.first-run-journey.v1", "read_only": True,
+                   "approval": "NOT_GRANTED", "stage": "NEEDS_PRODUCT_BRIEF"}
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            m = d / "m.json"; m.write_text(json.dumps(good))
+            r = run("--mission-truth", str(m))
+            self.assertEqual(r.returncode, 0)
+            self.assertRegex(r.stdout, r'id="mission-control".{0,200}?data-state="error"')
+            j = d / "j.json"; j.write_text(json.dumps(journey))
+            both = run("--journey", str(j), "--mission-truth", str(m))
+            self.assertEqual(both.returncode, 0)
+            self.assertEqual(both.stdout.count('data-state="error"'), 1)
+            self.assertEqual(both.stdout.count('data-state="ready"'), 1)
+            status = d / "s.json"; status.write_text("{}")
+            self.assertIn("not both", run("--mission-truth", str(m), "--status", str(status)).stderr)
+            self.assertEqual(run("--mission-truth", str(m), "--status", str(status)).returncode, 2)
+            self.assertEqual(run("--mission-truth", str(d / "missing.json")).returncode, 2)
+            m.write_text("not json")
+            self.assertIn("not valid JSON", run("--mission-truth", str(m)).stderr)
+            m.write_text(json.dumps({**good, "authority_granted": True}))
+            self.assertIn("authority_granted", run("--mission-truth", str(m)).stderr)
+            m.write_text(json.dumps({**good, "pad": "x" * guided_app.MAX_JOURNEY_BYTES}))
+            self.assertIn("too large", run("--mission-truth", str(m)).stderr)
+            m.write_text(json.dumps(good))
+            link = d / "l.json"; link.symlink_to(m)
+            self.assertIn("symlink", run("--mission-truth", str(link)).stderr)
+
     def test_journey_rejects_non_regular_files_without_blocking(self):
         import os
         script = str(ROOT / "scripts" / "guided_app.py")

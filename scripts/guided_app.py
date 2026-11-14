@@ -67,30 +67,59 @@ def statuses_from_journey(data: object) -> dict[str, str]:
     return dict(JOURNEY_STATUSES[stage])
 
 
-def read_journey(path: Path) -> dict[str, str]:
+def read_json_file(path: Path, label: str) -> object:
     """Read one bounded regular JSON file; never follow a symlink or block on a FIFO/device."""
     if not hasattr(os, "O_NOFOLLOW"):
-        raise ValueError("journey: secure read unavailable on this platform")
+        raise ValueError(f"{label}: secure read unavailable on this platform")
     flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0)
     try:
         descriptor = os.open(path, flags)
     except OSError as exc:
         if path.is_symlink():
-            raise ValueError("journey: refusing to read a symlink") from None
+            raise ValueError(f"{label}: refusing to read a symlink") from None
         raise exc
     try:
         if not stat.S_ISREG(os.fstat(descriptor).st_mode):
-            raise ValueError("journey: a regular file is required")
+            raise ValueError(f"{label}: a regular file is required")
         with os.fdopen(descriptor, "rb", closefd=False) as stream:
             raw = stream.read(MAX_JOURNEY_BYTES + 1)
     finally:
         os.close(descriptor)
     if len(raw) > MAX_JOURNEY_BYTES:
-        raise ValueError("journey: file too large")
+        raise ValueError(f"{label}: file too large")
     try:
-        return statuses_from_journey(json.loads(raw.decode("utf-8")))
+        return json.loads(raw.decode("utf-8"))
     except (UnicodeError, json.JSONDecodeError):
-        raise ValueError("journey: not valid JSON") from None
+        raise ValueError(f"{label}: not valid JSON") from None
+
+
+def read_journey(path: Path) -> dict[str, str]:
+    return statuses_from_journey(read_json_file(path, "journey"))
+
+
+MISSION_SCHEMA = "onecompany.mission-truth.v1"
+MISSION_ROW_STATES = {"OPEN", "BLOCKED", "VERIFIED_MERGED", "DRIFT", "UNABLE_TO_VERIFY"}
+
+
+def statuses_from_mission_truth(data: object) -> dict[str, str]:
+    """Derive only the Mission Control status from mission_truth output; never "complete"."""
+    if not isinstance(data, dict) or data.get("schema") != MISSION_SCHEMA:
+        raise ValueError("mission-truth: unexpected schema")
+    if data.get("authority_granted") is not False:
+        raise ValueError("mission-truth: authority_granted must be false")
+    rows = data.get("work_units")
+    if not isinstance(rows, list):
+        raise ValueError("mission-truth: work_units must be a list")
+    states = []
+    for row in rows:
+        state = row.get("state") if isinstance(row, dict) else None
+        if not isinstance(state, str) or state not in MISSION_ROW_STATES:
+            raise ValueError("mission-truth: unknown work unit state")
+        states.append(state)
+    if not states:
+        return {}
+    unverifiable = any(s in ("DRIFT", "UNABLE_TO_VERIFY") for s in states)
+    return {"mission-control": "error" if unverifiable else "ready"}
 
 
 def theme_vars(data: object, theme: str) -> str:
@@ -159,15 +188,18 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Render the static guided application.")
     parser.add_argument("--status", help='JSON file mapping screen -> ready|empty|error|slow')
     parser.add_argument("--journey", help="saved output of `onecompany.py journey --json` to derive statuses from")
+    parser.add_argument("--mission-truth", help="saved output of scripts/mission_truth.py to derive Mission Control status from")
     parser.add_argument("--out", help="write HTML to this file instead of stdout")
     parser.add_argument("--rtl", action="store_true")
     args = parser.parse_args(argv)
     try:
-        if args.status and args.journey:
-            raise ValueError("use either --status or --journey, not both")
+        if args.status and (args.journey or args.mission_truth):
+            raise ValueError("use either --status or --journey/--mission-truth, not both")
         statuses = json.loads(Path(args.status).read_text(encoding="utf-8")) if args.status else {}
         if args.journey:
             statuses = read_journey(Path(args.journey))
+        if args.mission_truth:
+            statuses = {**statuses, **statuses_from_mission_truth(read_json_file(Path(args.mission_truth), "mission-truth"))}
         if not isinstance(statuses, dict):
             raise ValueError("status file must be a JSON object")
         page = render(statuses, rtl=args.rtl)

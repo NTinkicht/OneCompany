@@ -13,7 +13,8 @@ RES = "b" * 64
 
 def backend(bid, **over):
     b = {"id": bid, "fixture_digest": FIX, "result_digest": RES, "status": "pass",
-         "sandbox_escape_attempt": "refused", "stale_context_attempt": "rejected", "crash_recovery": "recovered"}
+         "sandbox_escape_attempt": "refused", "stale_context_attempt": "rejected", "crash_recovery": "recovered",
+         "checkpoint_resume": "resumed"}
     b.update(over)
     return b
 
@@ -72,6 +73,22 @@ class HarnessPortabilityCheckTests(unittest.TestCase):
     def test_crash_not_recovered_fails(self):
         for v in ("lost", "not_run"):
             self.assert_fails([backend("claude"), backend("codex", crash_recovery=v)], "CRASH_NOT_RECOVERED codex")
+
+    def test_checkpoint_not_resumed_fails(self):
+        for v in ("lost", "not_run"):
+            self.assert_fails([backend("claude"), backend("codex", checkpoint_resume=v)], "CHECKPOINT_NOT_RESUMED codex")
+
+    def test_checkpoint_failure_is_isolated_from_other_checks(self):
+        r = self.run_cli([backend("claude"), backend("codex", checkpoint_resume="lost")])
+        self.assertEqual(r.stdout.count("  "), 1, r.stdout)
+
+    def test_missing_or_unknown_checkpoint_is_unable_to_verify(self):
+        missing = backend("codex")
+        del missing["checkpoint_resume"]
+        for bad in (missing, backend("codex", checkpoint_resume="weird"), backend("codex", checkpoint_resume=None)):
+            r = self.run_cli([backend("claude"), bad])
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+            self.assertIn("UNABLE TO VERIFY", r.stderr)
 
     def test_malformed_input_is_unable_to_verify(self):
         cases = [

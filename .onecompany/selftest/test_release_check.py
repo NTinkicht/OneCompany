@@ -113,3 +113,99 @@ class ReleaseCheckTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ReleaseEvidenceTests(unittest.TestCase):
+    NOW = rc._timestamp("2026-11-14T12:00:00Z")
+    HEAD = "a" * 40
+
+    def good(self) -> dict:
+        return {
+            "release_version": "1.4.0", "environment": "staging", "head_sha": self.HEAD,
+            "ci": {"conclusion": "success", "head_sha": self.HEAD},
+            "review": {"state": "APPROVED", "head_sha": self.HEAD},
+            "provider": {"status": "up"},
+            "rollback_drill": {"passed": True, "previous_version": "1.3.0"},
+            "stop_drill": {"passed": True}, "backup": {"verified": True},
+            "emergency_stop_active": False,
+            "observed_at": "2026-11-14T11:30:00Z", "max_age_seconds": 3600,
+        }
+
+    def findings(self, mutate=None, stop_flag=False) -> list[str]:
+        data = self.good()
+        if mutate:
+            mutate(data)
+        return rc.check_evidence(data, self.NOW, stop_flag)
+
+    def test_good_evidence_passes(self):
+        self.assertEqual(self.findings(), [])
+
+    def test_each_rule_refuses_for_exactly_its_reason(self):
+        cases = {
+            "HEAD_SHA_INVALID": lambda d: [d.update(head_sha="abc"), d["ci"].update(head_sha="abc"), d["review"].update(head_sha="abc")],
+            "RELEASE_VERSION_MISSING": lambda d: d.update(release_version=" "),
+            "ENVIRONMENT_NOT_STAGING_OR_TEST": lambda d: d.update(environment="production"),
+            "CI_NOT_GREEN": lambda d: d["ci"].update(conclusion="failure"),
+            "CI_HEAD_MISMATCH": lambda d: d["ci"].update(head_sha="b" * 40),
+            "REVIEW_NOT_APPROVED": lambda d: d["review"].update(state="CHANGES_REQUESTED"),
+            "REVIEW_HEAD_MISMATCH": lambda d: d["review"].update(head_sha="b" * 40),
+            "PROVIDER_NOT_HEALTHY": lambda d: d["provider"].update(status="down"),
+            "ROLLBACK_DRILL_NOT_PASSED": lambda d: d["rollback_drill"].update(passed="true"),
+            "ROLLBACK_PREVIOUS_VERSION_MISSING": lambda d: d["rollback_drill"].pop("previous_version"),
+            "STOP_DRILL_NOT_PASSED": lambda d: d["stop_drill"].update(passed=False),
+            "BACKUP_NOT_VERIFIED": lambda d: d["backup"].update(verified=1),
+            "EMERGENCY_STOP_ACTIVE": lambda d: d.update(emergency_stop_active=True),
+            "EVIDENCE_STALE": lambda d: d.update(observed_at="2026-11-14T10:00:00Z"),
+            "EVIDENCE_FROM_FUTURE": lambda d: d.update(observed_at="2026-11-14T13:00:00Z"),
+            "EVIDENCE_TIME_INVALID": lambda d: d.update(max_age_seconds=True),
+        }
+        for code, mutate in cases.items():
+            self.assertEqual(self.findings(mutate), [code], code)
+
+    def test_repository_stop_flag_refuses_even_if_evidence_claims_clear(self):
+        self.assertEqual(self.findings(stop_flag=True), ["EMERGENCY_STOP_ACTIVE"])
+
+    def test_missing_sections_and_naive_time_fail_closed(self):
+        self.assertIn("CI_NOT_GREEN", rc.check_evidence({}, self.NOW))
+        self.assertEqual(self.findings(lambda d: d.update(observed_at="2026-11-14T11:30:00")), ["EVIDENCE_TIME_INVALID"])
+        self.assertIn("PROVIDER_NOT_HEALTHY", self.findings(lambda d: d.update(provider="up")))
+
+    def run_cli(self, content, *extra):
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        path = tmp / "evidence.json"
+        if content is not None:
+            path.write_text(content if isinstance(content, str) else json.dumps(content), encoding="utf-8")
+        result = subprocess.run([sys.executable, str(ROOT / "onecompany.py"), "release-check", "--json",
+                                 "--evidence", str(path), "--now", "2026-11-14T12:00:00Z", *extra],
+                                capture_output=True, text=True, check=False)
+        return result.returncode, json.loads(result.stdout)
+
+    def test_cli_accepts_good_evidence_and_refuses_bad_input(self):
+        self.assertEqual(self.run_cli(self.good()), (0, {"findings": [], "ready": True}))
+        bad = self.good()
+        bad["ci"]["conclusion"] = "failure"
+        self.assertEqual(self.run_cli(bad), (1, {"findings": ["CI_NOT_GREEN"], "ready": False}))
+        self.assertEqual(self.run_cli("{not json")[1]["findings"], ["EVIDENCE_MALFORMED"])
+        self.assertEqual(self.run_cli("[]")[1]["findings"], ["EVIDENCE_NOT_OBJECT"])
+        self.assertEqual(self.run_cli(None)[1]["findings"], ["EVIDENCE_UNREADABLE"])
+        self.assertEqual(self.run_cli("x" * (rc.EVIDENCE_MAX_BYTES + 1))[1]["findings"], ["EVIDENCE_TOO_LARGE"])
+        self.assertEqual(self.run_cli(self.good(), "--now", "garbage")[1]["findings"], ["NOW_INVALID"])
+
+    def test_cli_refuses_explicitly_empty_options(self):
+        run = lambda *a: subprocess.run([sys.executable, str(ROOT / "onecompany.py"), "release-check", "--json", *a],  # noqa: E731
+                                        capture_output=True, text=True, check=False)
+        empty = run("--evidence", "")
+        self.assertEqual((empty.returncode, json.loads(empty.stdout)["findings"]), (1, ["EVIDENCE_UNREADABLE"]))
+        self.assertEqual(run().returncode, 0)
+        self.assertEqual(self.run_cli(self.good(), "--now", "")[1]["findings"], ["NOW_INVALID"])
+
+    def test_cli_refuses_a_symlinked_evidence_file(self):
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        real = tmp / "real.json"
+        real.write_text(json.dumps(self.good()), encoding="utf-8")
+        link = tmp / "link.json"
+        link.symlink_to(real)
+        data, problem = rc._load_evidence(link)
+        self.assertEqual((data, problem), (None, "EVIDENCE_UNREADABLE"))

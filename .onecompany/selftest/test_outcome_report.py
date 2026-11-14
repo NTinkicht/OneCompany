@@ -192,5 +192,50 @@ class RollupTests(unittest.TestCase):
         self.assertEqual(rep["by_worker"][0]["worker"], "unattributed")
 
 
+class ReplayedReceiptTests(unittest.TestCase):
+    def test_identical_replay_is_ignored_not_double_counted(self):
+        a = rec("WU-A", "incident", "2026-11-03T10:00:00Z", id="r1", tokens=7)
+        rep = orp.build_report([a, dict(a)], ALLOWED, FORBIDDEN)
+        row = rep["work_units"][0]
+        self.assertEqual((row["incidents"], row["tokens"]), (1, 7))
+        self.assertEqual((rep["receipts"], rep["duplicates_ignored"], rep["conflicts"]), (2, 1, []))
+        self.assertEqual(rep["by_worker"][0]["events"], 1)
+
+    def test_conflicting_replay_keeps_first_and_reports_conflict(self):
+        first = rec("WU-A", "incident", "2026-11-03T10:00:00Z", id="r1", tokens=7)
+        second = rec("WU-A", "incident", "2026-11-03T10:00:00Z", id="r1", tokens=9999)
+        rep = orp.build_report([first, second], ALLOWED, FORBIDDEN)
+        self.assertEqual(rep["work_units"][0]["tokens"], 7)
+        self.assertEqual(rep["conflicts"], [{"index": 1, "id": "r1"}])
+
+    def test_receipts_without_id_are_never_deduplicated(self):
+        a = rec("WU-A", "incident", "2026-11-03T10:00:00Z")
+        rep = orp.build_report([a, dict(a)], ALLOWED, FORBIDDEN)
+        self.assertEqual((rep["work_units"][0]["incidents"], rep["duplicates_ignored"]), (2, 0))
+
+    def test_violation_index_is_original_input_index_after_dedup(self):
+        a = rec("WU-A", "incident", "2026-11-03T10:00:00Z", id="r1")
+        bad = rec("WU-A", "incident", "2026-11-03T10:00:00Z", "PAID_API", id="r2")
+        rep = orp.build_report([a, dict(a), bad], ALLOWED, FORBIDDEN)
+        self.assertEqual([v["index"] for v in rep["violations"]], [2])
+
+    def test_type_differing_replay_is_a_conflict(self):
+        a = rec("WU-A", "incident", "2026-11-03T10:00:00Z", id="r1", flag=True)
+        b = rec("WU-A", "incident", "2026-11-03T10:00:00Z", id="r1", flag=1)
+        rep = orp.build_report([a, b], ALLOWED, FORBIDDEN)
+        self.assertEqual((rep["duplicates_ignored"], rep["conflicts"]), (0, [{"index": 1, "id": "r1"}]))
+
+    def test_cli_exits_nonzero_on_conflict(self):
+        good = rec("WU-A", "incident", "2026-11-03T10:00:00Z", id="r1")
+        bad = dict(good, cost_class="HUMAN")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "r.json"
+            path.write_text(json.dumps([good, bad]), encoding="utf-8")
+            done = subprocess.run([sys.executable, str(ROOT / "scripts" / "outcome_report.py"), "--receipts", str(path)],
+                                  capture_output=True, text=True)
+        self.assertEqual(done.returncode, 1)
+        self.assertIn("conflicts=1", done.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

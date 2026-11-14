@@ -58,12 +58,49 @@ def load_budget(root: Path) -> tuple[set[str], set[str]]:
     return set(classes.get("allowed", [])), set(classes.get("forbidden", []))
 
 
+def _canon(value: object) -> str:
+    """Type-sensitive canonical form (``true`` != ``1``, ``1`` != ``1.0``)."""
+    try:
+        return json.dumps(value, sort_keys=True, separators=(",", ":"))
+    except (TypeError, ValueError):
+        return repr(value)
+
+
+def dedupe_receipts(receipts: list) -> tuple[list, int, list[dict]]:
+    """Drop replayed receipts that share a receipt ``id`` so metrics never double count.
+
+    A repeat of an identical receipt is ignored (counted); a repeat whose content differs
+    is a conflict: the first receipt is kept and the conflict is reported (fail closed).
+    Receipts without a usable ``id`` are all kept, preserving earlier behaviour.
+    """
+    seen: dict[str, str] = {}
+    kept: list = []  # (original input index, receipt)
+    ignored = 0
+    conflicts: list[dict] = []
+    for index, raw in enumerate(receipts):
+        rid = raw.get("id") if isinstance(raw, dict) else None
+        if not isinstance(rid, str) or not rid:
+            kept.append((index, raw))
+            continue
+        if rid not in seen:
+            seen[rid] = _canon(raw)
+            kept.append((index, raw))
+        elif seen[rid] == _canon(raw):
+            ignored += 1
+        else:
+            conflicts.append({"index": index, "id": safe_text(rid)})
+    return kept, ignored, conflicts
+
+
 def build_report(receipts: object, allowed: set[str], forbidden: set[str]) -> dict:
     if not isinstance(receipts, list):
         raise ValueError("receipts must be a JSON list")
+    total_receipts = len(receipts)
+    indexed, duplicates_ignored, conflicts = dedupe_receipts(receipts)
+    receipts = [raw for _, raw in indexed]
     per_wu: dict[str, dict] = {}
     violations: list[dict] = []
-    for index, raw in enumerate(receipts):
+    for index, raw in indexed:
         r = raw if isinstance(raw, dict) else {}
         raw_wu = r.get("wu")
         wu = raw_wu if isinstance(raw_wu, str) and raw_wu else None
@@ -130,7 +167,8 @@ def build_report(receipts: object, allowed: set[str], forbidden: set[str]) -> di
     for v in violations:
         v["wu"] = labels[v.pop("wu_key")]
     violations.sort(key=lambda v: (v["index"], v["wu"]))
-    return {"receipts": len(receipts), "work_units": rows, "violations": violations, "zero_spend_ok": not violations,
+    return {"receipts": total_receipts, "duplicates_ignored": duplicates_ignored, "conflicts": conflicts,
+            "work_units": rows, "violations": violations, "zero_spend_ok": not violations,
             "by_worker": build_rollups(receipts, "worker"), "by_pr": build_rollups(receipts, "pr"),
             "summary": build_summary(rows)}
 
@@ -226,8 +264,9 @@ def main(argv: list[str] | None = None) -> int:
         sm = report["summary"]
         print(f"summary: work_units={sm['work_units']} by_outcome={sm['by_outcome']} latency_s={sm['latency_seconds']} "
               f"incidents={sm['incidents']} pending_gates={sm['pending_gates']} low_confidence={sm['low_confidence']}")
+        print(f"receipts: total={report['receipts']} duplicates_ignored={report['duplicates_ignored']} conflicts={len(report['conflicts'])}")
         print("zero-spend: " + ("ok" if report["zero_spend_ok"] else f"VIOLATIONS={len(report['violations'])}"))
-    return 0 if report["zero_spend_ok"] else 1
+    return 0 if report["zero_spend_ok"] and not report["conflicts"] else 1
 
 
 if __name__ == "__main__":

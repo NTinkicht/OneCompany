@@ -22,11 +22,13 @@ class CommsCheckTests(unittest.TestCase):
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, True)
 
-    def run_cli(self, messages, *extra, trusted=("codex", "claude"), max_attempts=3, raw=None, revision="1" * 40):
+    def run_cli(self, messages, *extra, trusted=("codex", "claude"), max_attempts=3, raw=None, revision="1" * 40,
+                approvers=("codex",)):
         path = self.tmp / "r.json"
         path.write_text(raw if raw is not None else json.dumps(
             {"revision": revision, "trusted_actors": list(trusted), "max_attempts": max_attempts,
-             "messages": messages}), encoding="utf-8")
+             **({} if approvers is None else {"approvers": list(approvers)}), "messages": messages}),
+            encoding="utf-8")
         return subprocess.run([sys.executable, str(ROOT / "scripts" / "comms_check.py"), str(path), *extra],
                               capture_output=True, text=True)
 
@@ -78,6 +80,27 @@ class CommsCheckTests(unittest.TestCase):
 
     def test_approval_without_ledger_authority_fails(self):
         self.assert_fails([msg("m1", kind="approval", authority="message")], "UNTRUSTED_APPROVAL m1")
+
+    def test_approval_from_non_approver_fails_despite_ledger_label(self):
+        self.assert_fails([msg("m1", actor="claude", kind="approval", authority="ledger")],
+                          "UNAUTHORIZED_APPROVER m1")
+
+    def test_approval_without_declared_approvers_fails_closed(self):
+        self.assert_fails([msg("m1", kind="approval", authority="ledger")], "UNAUTHORIZED_APPROVER m1",
+                          approvers=None)
+
+    def test_unapplied_approval_does_not_need_approvers(self):
+        r = self.run_cli([msg("m1", actor="claude", kind="approval", authority="ledger", effect="rejected")],
+                         approvers=None)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_malformed_approvers_are_unable_to_verify(self):
+        for bad in (["mallory"], [""], [1]):
+            r = self.run_cli([msg("m1")], approvers=bad)
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        r = self.run_cli([msg("m1")], raw=json.dumps({"revision": "1" * 40, "trusted_actors": ["codex"],
+                         "max_attempts": 3, "approvers": "codex", "messages": [msg("m1")]}))
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
 
     def test_malformed_input_is_unable_to_verify(self):
         cases = [

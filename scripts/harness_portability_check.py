@@ -3,9 +3,9 @@
 
 Input: ``{"revision": 40-hex, "required_backends": [id], "backends": [{"id", "fixture_digest",
 "result_digest", "status": pass|fail|error|skipped, "sandbox_escape_attempt": refused|allowed|not_run,
-"stale_context_attempt": rejected|accepted|not_run, "crash_recovery": recovered|lost|not_run}]}``.
+"stale_context_attempt": rejected|accepted|not_run, "crash_recovery": recovered|lost|not_run, "checkpoint_resume": resumed|lost|not_run}]}``.
 Fails on a missing required backend, a non-pass status, differing fixture or result digests across
-backends, an escape not refused, stale context not rejected, or a crash not recovered. Anything
+backends, an escape not refused, stale context not rejected, or a crash not recovered, or a checkpoint not resumed (slice 2, #489). Anything
 ``not_run`` fails closed. No network, no writes, no clock.
 """
 
@@ -23,6 +23,7 @@ STATUSES = {"pass", "fail", "error", "skipped"}
 ESCAPE = {"refused", "allowed", "not_run"}
 STALE = {"rejected", "accepted", "not_run"}
 CRASH = {"recovered", "lost", "not_run"}
+CHECKPOINT = {"resumed", "lost", "not_run"}
 
 
 def _name(value: object) -> bool:
@@ -66,7 +67,8 @@ def load_report(path: Path) -> dict:
             if not _digest(entry.get(field)):
                 raise ValueError(f"{bid} {field} must be a 64-hex digest")
         for field, allowed in (("status", STATUSES), ("sandbox_escape_attempt", ESCAPE),
-                               ("stale_context_attempt", STALE), ("crash_recovery", CRASH)):
+                               ("stale_context_attempt", STALE), ("crash_recovery", CRASH),
+                               ("checkpoint_resume", CHECKPOINT)):
             if not isinstance(entry.get(field), str) or entry[field] not in allowed:
                 raise ValueError(f"{bid} has unknown {field}")
     return data
@@ -86,6 +88,8 @@ def evaluate(report: dict) -> dict:
             problems.append(f"STALE_CONTEXT_NOT_REJECTED {bid} {b['stale_context_attempt']}")
         if b["crash_recovery"] != "recovered":
             problems.append(f"CRASH_NOT_RECOVERED {bid} {b['crash_recovery']}")
+        if b["checkpoint_resume"] != "resumed":
+            problems.append(f"CHECKPOINT_NOT_RESUMED {bid} {b['checkpoint_resume']}")
     if len({b["fixture_digest"].lower() for b in backends}) > 1:
         problems.append("FIXTURE_MISMATCH backends ran different fixtures")
     if len({b["result_digest"].lower() for b in backends}) > 1:

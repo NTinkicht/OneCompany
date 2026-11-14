@@ -99,6 +99,52 @@ class GuidedAppTests(unittest.TestCase):
             self.assertEqual(r.returncode, 0)
             self.assertIn("<!doctype html>", r.stdout)
 
+    def test_journey_stage_maps_to_conservative_statuses(self):
+        def journey(stage, **extra):
+            return {"schema": "onecompany.first-run-journey.v1", "read_only": True,
+                    "approval": "NOT_GRANTED", "stage": stage, **extra}
+        expected = {
+            "BLOCKED": {"discovery": "error"},
+            "NEEDS_PRODUCT_BRIEF": {"discovery": "ready"},
+            "NEEDS_OWNER_ANSWERS": {"discovery": "ready", "brief": "ready"},
+            "PROPOSAL_READY_NOT_APPROVED": {"discovery": "ready", "brief": "ready", "build": "ready"},
+        }
+        for stage, statuses in expected.items():
+            self.assertEqual(guided_app.statuses_from_journey(journey(stage)), statuses)
+            page = re.sub(r"<style>.*?</style>", "", guided_app.render(guided_app.statuses_from_journey(journey(stage))), flags=re.S).lower()
+            for word in ("complete", "done", "success", "passed", "all set", "approved"):
+                self.assertNotIn(word, page)
+            self.assertEqual(page.count('data-state="empty"'), len(guided_app.SCREENS) - len(statuses))
+        bad = [journey("DONE"), journey(None), journey("BLOCKED", read_only=False),
+               journey("BLOCKED", approval="GRANTED"), {**journey("BLOCKED"), "schema": "x"}, [], "BLOCKED"]
+        for item in bad:
+            with self.assertRaises(ValueError):
+                guided_app.statuses_from_journey(item)
+
+    def test_cli_journey_file_and_refusals(self):
+        run = lambda *a: subprocess.run([sys.executable, str(ROOT / "scripts" / "guided_app.py"), *a],
+                                        capture_output=True, text=True)
+        good = {"schema": "onecompany.first-run-journey.v1", "read_only": True,
+                "approval": "NOT_GRANTED", "stage": "BLOCKED"}
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            j = d / "j.json"; j.write_text(json.dumps(good))
+            r = run("--journey", str(j))
+            self.assertEqual(r.returncode, 0)
+            self.assertIn('data-state="error"', r.stdout)
+            status = d / "s.json"; status.write_text("{}")
+            self.assertEqual(run("--journey", str(j), "--status", str(status)).returncode, 2)
+            self.assertEqual(run("--journey", str(d / "missing.json")).returncode, 2)
+            j.write_text("not json")
+            self.assertEqual(run("--journey", str(j)).returncode, 2)
+            j.write_text(json.dumps({**good, "stage": "DONE"}))
+            self.assertEqual(run("--journey", str(j)).returncode, 2)
+            j.write_text(json.dumps({**good, "pad": "x" * guided_app.MAX_JOURNEY_BYTES}))
+            self.assertEqual(run("--journey", str(j)).returncode, 2)
+            j.write_text(json.dumps(good))
+            link = d / "l.json"; link.symlink_to(j)
+            self.assertEqual(run("--journey", str(link)).returncode, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

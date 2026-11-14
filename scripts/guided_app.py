@@ -43,6 +43,37 @@ COLORS = {  # token pair name -> (foreground var, background var or None)
     "focus-ring": ("--focus", None),
 }
 HEX = re.compile(r"^#[0-9A-Fa-f]{6}$")
+MAX_JOURNEY_BYTES = 1_048_576
+JOURNEY_SCHEMA = "onecompany.first-run-journey.v1"
+JOURNEY_STATUSES = {  # journey stage -> conservative screen statuses; never "complete"
+    "BLOCKED": {"discovery": "error"},
+    "NEEDS_PRODUCT_BRIEF": {"discovery": "ready"},
+    "NEEDS_OWNER_ANSWERS": {"discovery": "ready", "brief": "ready"},
+    "PROPOSAL_READY_NOT_APPROVED": {"discovery": "ready", "brief": "ready", "build": "ready"},
+}
+
+
+def statuses_from_journey(data: object) -> dict[str, str]:
+    """Derive screen statuses from `journey --json` output; refuse anything not exactly that."""
+    if not isinstance(data, dict) or data.get("schema") != JOURNEY_SCHEMA:
+        raise ValueError("journey: unexpected schema")
+    if data.get("read_only") is not True or data.get("approval") != "NOT_GRANTED":
+        raise ValueError("journey: must be read-only with approval NOT_GRANTED")
+    stage = data.get("stage")
+    if not isinstance(stage, str) or stage not in JOURNEY_STATUSES:
+        raise ValueError("journey: unknown stage")
+    return dict(JOURNEY_STATUSES[stage])
+
+
+def read_journey(path: Path) -> dict[str, str]:
+    if path.is_symlink():
+        raise ValueError("journey: refusing to read a symlink")
+    if path.stat().st_size > MAX_JOURNEY_BYTES:
+        raise ValueError("journey: file too large")
+    try:
+        return statuses_from_journey(json.loads(path.read_text(encoding="utf-8")))
+    except (UnicodeError, json.JSONDecodeError):
+        raise ValueError("journey: not valid JSON") from None
 
 
 def theme_vars(data: object, theme: str) -> str:
@@ -110,11 +141,16 @@ def render(statuses: dict[str, str] | None = None, tokens: object | None = None,
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Render the static guided application.")
     parser.add_argument("--status", help='JSON file mapping screen -> ready|empty|error|slow')
+    parser.add_argument("--journey", help="saved output of `onecompany.py journey --json` to derive statuses from")
     parser.add_argument("--out", help="write HTML to this file instead of stdout")
     parser.add_argument("--rtl", action="store_true")
     args = parser.parse_args(argv)
     try:
+        if args.status and args.journey:
+            raise ValueError("use either --status or --journey, not both")
         statuses = json.loads(Path(args.status).read_text(encoding="utf-8")) if args.status else {}
+        if args.journey:
+            statuses = read_journey(Path(args.journey))
         if not isinstance(statuses, dict):
             raise ValueError("status file must be a JSON object")
         page = render(statuses, rtl=args.rtl)

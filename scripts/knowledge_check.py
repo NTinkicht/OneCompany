@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-"""Deterministic, read-only knowledge store check (OC-P1-07 slice 1, #459).
+"""Deterministic, read-only knowledge store check (OC-P1-07 slices 1-2, #459, #487).
 
 Loads the lesson store through ``knowledge.load_entries`` and reports lessons that must not be trusted
 as injected context: instruction-override / authority / exfiltration language in free text of candidate
 and current lessons, current lessons that are already retracted (``superseded_by`` set), and
-supersession links to unknown ids. Archived lessons are never injected and are not scanned. No
+supersession links to unknown ids, ``repo:`` provenance that does not resolve to a file in the checkout
+(MISSING_EVIDENCE_FILE) and regression-validated current lessons that cite no existing test file
+(UNGROUNDED_REGRESSION; slice 2, fabricated-proof guard). Archived lessons are never injected and are not scanned. No
 network, no writes, no clock. Invalid store: exit 2.
 """
 
@@ -53,7 +55,37 @@ def _texts(entry: dict):
                 yield field, item
 
 
-def evaluate(entries: list[dict]) -> dict:
+def _repo_refs(entry: dict):
+    """Yield (field, path) for every ``repo:`` provenance reference of a lesson."""
+    for item in entry.get("source_evidence") or []:
+        ref = item.get("ref") if isinstance(item, dict) else None
+        if isinstance(ref, str) and ref.startswith("repo:"):
+            yield "source_evidence", ref[5:]
+    for ref in (entry.get("validation") or {}).get("evidence_refs") or []:
+        if isinstance(ref, str) and ref.startswith("repo:"):
+            yield "validation", ref[5:]
+
+
+def _file_exists(repo_root: Path, rel: str) -> bool:
+    """True only for a regular file that stays inside the checkout (no traversal, no symlink escape)."""
+    if not rel or rel.startswith("/") or ".." in Path(rel).parts:
+        return False
+    try:
+        base = repo_root.resolve()
+        target = (base / rel).resolve()
+        return target.is_file() and base in target.parents
+    except (OSError, RuntimeError):  # RuntimeError: symlink loop on Python < 3.13
+        return False
+
+
+def _is_test_file(rel: str) -> bool:
+    """A regression-test citation must be a test_*.py file under a tests/ or selftest/ directory."""
+    path = Path(rel)
+    return path.name.startswith("test_") and path.suffix == ".py" and any(
+        part in ("tests", "selftest") for part in path.parts[:-1])
+
+
+def evaluate(entries: list[dict], repo_root: Path | None = None) -> dict:
     known = {e["id"] for e in entries}
     problems: list[str] = []
     for entry in sorted(entries, key=lambda e: e["id"]):
@@ -63,6 +95,15 @@ def evaluate(entries: list[dict]) -> dict:
             problems.extend(f"PROMPT_INJECTION {eid} {f}" for f in hit_fields)
         if status == "current" and entry.get("superseded_by"):
             problems.append(f"RETRACTED_STILL_CURRENT {eid}")
+        if repo_root is not None and status in ("candidate", "current"):
+            for field, rel in sorted(set(_repo_refs(entry))):
+                if not _file_exists(repo_root, rel):
+                    problems.append(f"MISSING_EVIDENCE_FILE {eid} {field} repo:{rel}")
+            if status == "current" and (entry.get("validation") or {}).get("method") == "regression_test":
+                tests = [rel for field, rel in _repo_refs(entry)
+                         if field == "validation" and _is_test_file(rel) and _file_exists(repo_root, rel)]
+                if not tests:
+                    problems.append(f"UNGROUNDED_REGRESSION {eid} no existing repo test file (test_*.py under tests/ or selftest/) cited as validation evidence")
         for field in ("supersedes", "superseded_by"):
             for ref in sorted(set(entry.get(field) or [])):
                 if ref not in known:
@@ -73,6 +114,7 @@ def evaluate(entries: list[dict]) -> dict:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Read-only knowledge store check.")
     parser.add_argument("--root", help="knowledge store root (default: repository store)")
+    parser.add_argument("--repo-root", help="checkout that repo: evidence refs resolve against (default: this checkout)")
     parser.add_argument("--json", action="store_true", help="emit machine-readable output")
     args = parser.parse_args(argv)
     try:
@@ -81,7 +123,8 @@ def main(argv: list[str] | None = None) -> int:
         tx_root = root / ".transactions"
         if tx_root.is_symlink() or (tx_root.exists() and (not tx_root.is_dir() or any(tx_root.iterdir()))):
             raise knowledge.KnowledgeError("pending lifecycle transactions; recovery required before checking")
-        result = evaluate(knowledge.load_entries(root))
+        repo_root = Path(args.repo_root) if args.repo_root else Path(__file__).resolve().parent.parent
+        result = evaluate(knowledge.load_entries(root), repo_root)
     except (knowledge.KnowledgeError, OSError, ValueError) as exc:
         print(f"knowledge-check: UNABLE TO VERIFY ({exc.__class__.__name__}: {exc})", file=sys.stderr)
         return 2

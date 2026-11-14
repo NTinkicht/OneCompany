@@ -168,8 +168,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--now", help="ISO-8601 time with offset for deterministic freshness checks")
     args = parser.parse_args(argv)
     findings = check(ROOT)
-    if args.evidence:
-        now = _timestamp(args.now) if args.now else datetime.now(timezone.utc)
+    if args.evidence is not None:
+        now = _timestamp(args.now) if args.now is not None else datetime.now(timezone.utc)
         data, problem = _load_evidence(Path(args.evidence))
         if now is None:
             findings.append("NOW_INVALID")

@@ -192,6 +192,14 @@ class ReleaseEvidenceTests(unittest.TestCase):
         self.assertEqual(self.run_cli("x" * (rc.EVIDENCE_MAX_BYTES + 1))[1]["findings"], ["EVIDENCE_TOO_LARGE"])
         self.assertEqual(self.run_cli(self.good(), "--now", "garbage")[1]["findings"], ["NOW_INVALID"])
 
+    def test_cli_refuses_explicitly_empty_options(self):
+        run = lambda *a: subprocess.run([sys.executable, str(ROOT / "onecompany.py"), "release-check", "--json", *a],  # noqa: E731
+                                        capture_output=True, text=True, check=False)
+        empty = run("--evidence", "")
+        self.assertEqual((empty.returncode, json.loads(empty.stdout)["findings"]), (1, ["EVIDENCE_UNREADABLE"]))
+        self.assertEqual(run().returncode, 0)
+        self.assertEqual(self.run_cli(self.good(), "--now", "")[1]["findings"], ["NOW_INVALID"])
+
     def test_cli_refuses_a_symlinked_evidence_file(self):
         tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, tmp, True)

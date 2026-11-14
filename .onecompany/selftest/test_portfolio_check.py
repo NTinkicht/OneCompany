@@ -64,6 +64,19 @@ class PortfolioCheckTests(unittest.TestCase):
                              ("policy_id", "SHARED_POLICY pol1"), ("credential_ref", "SHARED_CREDENTIAL c1")):
             self.assert_fails(base(projects=[project(1), project(2, **{field: project(1)[field]})]), token)
 
+    def test_shared_resources_fail_despite_case_or_whitespace(self):
+        for field, token in (("queue_id", "SHARED_QUEUE q1"), ("budget_id", "SHARED_BUDGET b1"),
+                             ("policy_id", "SHARED_POLICY pol1"), ("credential_ref", "SHARED_CREDENTIAL c1")):
+            for variant in (project(1)[field].upper(), f"  {project(1)[field]} "):
+                self.assert_fails(base(projects=[project(1), project(2, **{field: variant})]), token)
+
+    def test_duplicate_repo_fails_despite_git_suffix(self):
+        self.assert_fails(base(projects=[project(1), project(2, repo="O/R1.git")]), "DUPLICATE_REPO o/r1")
+
+    def test_lease_repo_alias_is_not_cross_target(self):
+        r = self.run_cli(base(leases=[{"id": "l1", "project": "p1", "repo": "O/R1.git"}]))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
     def test_lease_for_other_repo_fails(self):
         self.assert_fails(base(leases=[{"id": "l1", "project": "p1", "repo": "o/r2"}]), "LEASE_CROSS_TARGET l1")
 

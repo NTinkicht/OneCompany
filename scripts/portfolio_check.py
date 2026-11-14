@@ -35,6 +35,17 @@ def _in(value: object, allowed: set) -> bool:
     return isinstance(value, str) and value in allowed
 
 
+def _norm(value: str) -> str:
+    """Identity form of a shared resource id: case and surrounding whitespace never make it distinct."""
+    return value.strip().casefold()
+
+
+def _repo_key(value: str) -> str:
+    """Identity form of a repo: GitHub ignores case and a trailing .git."""
+    key = value.strip().lower()
+    return key[:-4] if key.endswith(".git") else key
+
+
 def _list(data: dict, key: str) -> list:
     value = data.get(key)
     if not isinstance(value, list):
@@ -96,20 +107,20 @@ def evaluate(report: dict) -> dict:
         problems.append("SINGLE_PROJECT a portfolio needs at least two projects")
     by_repo: dict[str, list[str]] = {}
     for p in projects:
-        by_repo.setdefault(p["repo"].lower(), []).append(p["id"])
+        by_repo.setdefault(_repo_key(p["repo"]), []).append(p["id"])
     for repo, owners in sorted(by_repo.items()):
         if len(owners) > 1:
             problems.append(f"DUPLICATE_REPO {repo} used by {','.join(sorted(owners))}")
     for field, code in SHARED:
         owners: dict[str, list[str]] = {}
         for p in projects:
-            owners.setdefault(p[field], []).append(p["id"])
+            owners.setdefault(_norm(p[field]), []).append(p["id"])
         for value, ids in sorted(owners.items()):
             if len(ids) > 1:
                 problems.append(f"{code} {value} shared by {','.join(sorted(ids))}")
-    repo_of = {p["id"]: p["repo"].lower() for p in projects}
+    repo_of = {p["id"]: _repo_key(p["repo"]) for p in projects}
     for l in report["leases"]:
-        if l["repo"].lower() != repo_of[l["project"]]:
+        if _repo_key(l["repo"]) != repo_of[l["project"]]:
             problems.append(f"LEASE_CROSS_TARGET {l['id']} lease for {l['project']} names repo {l['repo']}")
     for a in report["approvals"]:
         if a["scope_project"] != a["project"]:

@@ -37,6 +37,15 @@ class GuidedAppTests(unittest.TestCase):
         for *_, cmd in guided_app.SCREENS:
             self.assertIn(f'"{cmd}":', text)
 
+    def test_steps_needing_arguments_show_them_and_help(self):
+        page = guided_app.render()
+        self.assertNotIn("onecompany.py team</code>", page)
+        self.assertIn("onecompany.py team --declare ", page)
+        self.assertIn("onecompany.py start --repository ", page)
+        for *_, cmd in guided_app.SCREENS:
+            self.assertIn(f"python onecompany.py {cmd} --help", page)
+        self.assertIn("onecompany.py brief</code>", page)  # positive control: no-arg step unchanged
+
     def test_responsive_a11y_structure(self):
         page = guided_app.render()
         for needle in ('name="viewport"', 'class="skip"', '<nav aria-label="Steps">', "<main", "min-width:768px",

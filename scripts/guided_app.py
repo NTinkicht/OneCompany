@@ -27,6 +27,10 @@ SCREENS = (
     ("preview", "Preview", "Local preview of the running application.", "preview-local"),
     ("mission-control", "Mission Control", "Read-only status of work, blockers and next action.", "mission-control"),
 )
+ARGS = {  # steps whose bare command exits with an argument error
+    "start": " --repository &lt;owner/name&gt;",
+    "team": " --declare &lt;actors, comma-separated&gt;",
+}
 STATES = {
     "ready": ("Ready", "Inputs for this step are available. Run the command to continue."),
     "empty": ("Not started", "Nothing here yet. Run the command below to begin."),
@@ -77,7 +81,8 @@ def render(statuses: dict[str, str] | None = None, tokens: object | None = None,
             f'<section id="{key}" aria-labelledby="h-{key}"><h2 id="h-{key}">{html.escape(title)}</h2>'
             f'<p class="state" data-state="{statuses.get(key, "empty")}">Status: <strong>{label}</strong></p>'
             f'<p>{html.escape(blurb)}</p><p>{note}</p>'
-            f'<p>Command: <code>python onecompany.py {cmd}</code></p></section>')
+            f'<p>Command: <code>python onecompany.py {cmd}{ARGS.get(cmd, "")}</code></p>'
+            f'<p>Options: <code>python onecompany.py {cmd} --help</code></p></section>')
     css = (
         f":root{{{light};color-scheme:light dark}}"
         f"@media (prefers-color-scheme:dark){{:root{{{dark}}}}}"

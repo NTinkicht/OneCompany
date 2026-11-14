@@ -40,5 +40,5 @@ The `*-check` and `*-report` commands are deterministic and read-only on supplie
 | `python onecompany.py visual-golden-check` | `scripts/visual_golden_check.py` | Deterministic, read-only visual-golden check (OC-P1-01 slice 2, #455). |
 | `python onecompany.py docs-check` | `scripts/docs_check.py` | Deterministic, read-only documentation check: required docs, relative links, command coverage (OC-P1-12 slice 1). |
 | `python onecompany.py app-check` | `scripts/app_check.py` | Deterministic, read-only guided-app evidence check (OC-P1-02 slice 1, #473). |
-| `python onecompany.py guided-app` | `scripts/guided_app.py` | Static no-JS guided application renderer: 8 screens, design tokens, responsive, honest empty/error/slow states, never claims completion (OC-P1-02 slice 2, #477). |
+| `python onecompany.py guided-app` | `scripts/guided_app.py` | Static no-JS guided application renderer: 8 screens, design tokens, responsive, honest empty/error/slow states, never claims completion; `--journey` and `--mission-truth` derive conservative statuses from saved read-only output (OC-P1-02 slices 2-4, #477, #479, #481). |
 | `python onecompany.py certify-check` | `scripts/certify_check.py` | Deterministic, read-only end-to-end certification go/no-go: fixed scenarios, budgets, evidence, certifier independence (OC-P1-13 slice 1, #475). |

@@ -11,7 +11,9 @@ from __future__ import annotations
 import argparse
 import html
 import json
+import os
 import re
+import stat
 import sys
 from pathlib import Path
 
@@ -66,12 +68,27 @@ def statuses_from_journey(data: object) -> dict[str, str]:
 
 
 def read_journey(path: Path) -> dict[str, str]:
-    if path.is_symlink():
-        raise ValueError("journey: refusing to read a symlink")
-    if path.stat().st_size > MAX_JOURNEY_BYTES:
+    """Read one bounded regular JSON file; never follow a symlink or block on a FIFO/device."""
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise ValueError("journey: secure read unavailable on this platform")
+    flags = os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0)
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        if path.is_symlink():
+            raise ValueError("journey: refusing to read a symlink") from None
+        raise exc
+    try:
+        if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+            raise ValueError("journey: a regular file is required")
+        with os.fdopen(descriptor, "rb", closefd=False) as stream:
+            raw = stream.read(MAX_JOURNEY_BYTES + 1)
+    finally:
+        os.close(descriptor)
+    if len(raw) > MAX_JOURNEY_BYTES:
         raise ValueError("journey: file too large")
     try:
-        return statuses_from_journey(json.loads(path.read_text(encoding="utf-8")))
+        return statuses_from_journey(json.loads(raw.decode("utf-8")))
     except (UnicodeError, json.JSONDecodeError):
         raise ValueError("journey: not valid JSON") from None
 

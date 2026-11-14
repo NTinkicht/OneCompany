@@ -145,6 +145,21 @@ class GuidedAppTests(unittest.TestCase):
             link = d / "l.json"; link.symlink_to(j)
             self.assertEqual(run("--journey", str(link)).returncode, 2)
 
+    def test_journey_rejects_non_regular_files_without_blocking(self):
+        import os
+        script = str(ROOT / "scripts" / "guided_app.py")
+        with tempfile.TemporaryDirectory() as d:
+            fifo = Path(d) / "j.fifo"
+            os.mkfifo(fifo)
+            r = subprocess.run([sys.executable, script, "--journey", str(fifo)],
+                               capture_output=True, text=True, timeout=20)
+            self.assertEqual(r.returncode, 2)
+            self.assertIn("regular file", r.stderr)
+        if os.path.exists("/dev/zero"):
+            r = subprocess.run([sys.executable, script, "--journey", "/dev/zero"],
+                               capture_output=True, text=True, timeout=20)
+            self.assertEqual(r.returncode, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

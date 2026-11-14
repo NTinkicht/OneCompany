@@ -8,7 +8,8 @@ with messages in delivery order, each ``{"id", "actor", "seq": int>=0, "idempote
 "effect": applied|ignored|rejected}``. Only ``applied`` messages are checked: they must come from a
 trusted actor with a valid signature, apply each idempotency key once with one payload, keep
 ``seq`` strictly increasing per actor, stay within ``max_attempts``, never let a non-approval
-message claim approval, and only apply an approval whose authority is the ledger. No network,
+message claim approval, and only apply an approval whose authority is the ledger and whose actor is
+a declared ``approvers`` member (slice 2, #493; absent ``approvers`` fails closed). No network,
 no writes, no clock.
 """
 
@@ -49,6 +50,12 @@ def load_report(path: Path) -> dict:
     trusted = data.get("trusted_actors")
     if not isinstance(trusted, list) or not trusted or not all(_name(a) for a in trusted):
         raise ValueError("report needs a non-empty trusted_actors list of names")
+    if "approvers" in data:
+        approvers = data["approvers"]
+        if not isinstance(approvers, list) or not all(_name(a) for a in approvers):
+            raise ValueError("approvers must be a list of names")
+        if not set(approvers) <= set(trusted):
+            raise ValueError("approvers must all be trusted_actors")
     if not _int(data.get("max_attempts"), 1):
         raise ValueError("max_attempts must be an integer >= 1")
     messages = data.get("messages")
@@ -81,6 +88,7 @@ def load_report(path: Path) -> dict:
 
 def evaluate(report: dict) -> dict:
     trusted = set(report["trusted_actors"])
+    approvers = set(report.get("approvers", []))
     problems: list[str] = []
     applied_keys: dict[str, dict] = {}
     last_seq: dict[str, int] = {}
@@ -108,6 +116,8 @@ def evaluate(report: dict) -> dict:
             problems.append(f"HANDOFF_AS_APPROVAL {mid} {m['kind']} message claims approval")
         if m["kind"] == "approval" and m["authority"] != "ledger":
             problems.append(f"UNTRUSTED_APPROVAL {mid} approval authority is {m['authority']}")
+        if m["kind"] == "approval" and actor not in approvers:
+            problems.append(f"UNAUTHORIZED_APPROVER {mid} {actor} is not a declared ledger approver")
     return {"messages": len(report["messages"]), "applied": applied, "problems": problems}
 
 

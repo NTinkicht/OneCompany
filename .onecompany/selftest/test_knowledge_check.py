@@ -127,6 +127,29 @@ class KnowledgeCheckTests(unittest.TestCase):
         self.assertIn("UNGROUNDED_REGRESSION K-TEST-PROV-006", r.stdout)
         self.assertNotIn("MISSING_EVIDENCE_FILE", r.stdout)
 
+    def test_regression_validation_citing_non_test_python_source_is_ungrounded(self):
+        self.assertTrue((ROOT / "scripts" / "knowledge.py").is_file())
+        self.put(CURRENT, "K-TEST-PROV-009", **self._with_validation_refs(["repo:scripts/knowledge.py"]))
+        r = self.run_cli()
+        self.assertEqual(r.returncode, 1, r.stdout)
+        self.assertIn("UNGROUNDED_REGRESSION K-TEST-PROV-009", r.stdout)
+        self.assertNotIn("MISSING_EVIDENCE_FILE", r.stdout)
+
+    def test_regression_validation_citing_existing_test_file_is_grounded(self):
+        self.put(CURRENT, "K-TEST-PROV-010",
+                 **self._with_validation_refs(["repo:.onecompany/selftest/test_knowledge_check.py"]))
+        self.assertEqual(self.run_cli().returncode, 0)
+
+    def test_symlink_loop_evidence_is_reported_not_a_crash(self):
+        repo = self.tmp / "repo"
+        (repo / "tests").mkdir(parents=True)
+        (repo / "tests" / "test_loop.py").symlink_to(repo / "tests" / "test_loop.py")
+        self.put(CURRENT, "K-TEST-PROV-011", **self._with_validation_refs(["repo:tests/test_loop.py"]))
+        r = self.run_cli("--repo-root", str(repo))
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+        self.assertIn("MISSING_EVIDENCE_FILE K-TEST-PROV-011 validation repo:tests/test_loop.py", r.stdout)
+
     def test_non_repo_refs_and_candidates_without_validation_refs_pass(self):
         ev = [dict(CURRENT["source_evidence"][0], ref="git:" + "a" * 40)]
         self.put(CANDIDATE, "K-TEST-PROV-007", source_evidence=ev)

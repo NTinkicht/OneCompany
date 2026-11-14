@@ -74,8 +74,15 @@ def _file_exists(repo_root: Path, rel: str) -> bool:
         base = repo_root.resolve()
         target = (base / rel).resolve()
         return target.is_file() and base in target.parents
-    except OSError:
+    except (OSError, RuntimeError):  # RuntimeError: symlink loop on Python < 3.13
         return False
+
+
+def _is_test_file(rel: str) -> bool:
+    """A regression-test citation must be a test_*.py file under a tests/ or selftest/ directory."""
+    path = Path(rel)
+    return path.name.startswith("test_") and path.suffix == ".py" and any(
+        part in ("tests", "selftest") for part in path.parts[:-1])
 
 
 def evaluate(entries: list[dict], repo_root: Path | None = None) -> dict:
@@ -94,9 +101,9 @@ def evaluate(entries: list[dict], repo_root: Path | None = None) -> dict:
                     problems.append(f"MISSING_EVIDENCE_FILE {eid} {field} repo:{rel}")
             if status == "current" and (entry.get("validation") or {}).get("method") == "regression_test":
                 tests = [rel for field, rel in _repo_refs(entry)
-                         if field == "validation" and rel.endswith(".py") and _file_exists(repo_root, rel)]
+                         if field == "validation" and _is_test_file(rel) and _file_exists(repo_root, rel)]
                 if not tests:
-                    problems.append(f"UNGROUNDED_REGRESSION {eid} no existing repo test file cited as validation evidence")
+                    problems.append(f"UNGROUNDED_REGRESSION {eid} no existing repo test file (test_*.py under tests/ or selftest/) cited as validation evidence")
         for field in ("supersedes", "superseded_by"):
             for ref in sorted(set(entry.get(field) or [])):
                 if ref not in known:

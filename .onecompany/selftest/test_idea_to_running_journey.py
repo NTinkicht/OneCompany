@@ -145,13 +145,21 @@ class IdeaToRunningJourneyTests(unittest.TestCase):
                 "head_sha": self.head, "base_sha": self.base, "build_digest": manifest["build_digest"],
                 "artifact": "api.txt", "artifact_sha256": "sha256:" + hashlib.sha256(b"api proof").hexdigest()}
 
-        def assure(items, criteria=crit_doc):
+        gates = {"schema": pa.SCHEMA + "/gates",
+                 "ci": {"head_sha": self.head, "base_sha": self.base, "conclusion": "success",
+                        "checks": [{"name": "selftest", "conclusion": "success"}]},
+                 "review": {"head_sha": self.head, "state": "APPROVED", "reviewer_login": "ntk-reviewer[bot]",
+                            "author_logins": ["claude"]}}
+
+        def assure(items, criteria=crit_doc, gates=gates):
+            (self.tmp / "gates.json").write_text(json.dumps(gates))
             (self.tmp / "criteria.json").write_text(json.dumps(criteria))
             (self.tmp / "evidence.json").write_text(json.dumps({"schema": pa.SCHEMA + "/evidence", "items": items}))
             return cli("postbind-assure", "--wu", WU, "--run-key", RK, "--workspace", str(self.ws),
                        "--head", self.head, "--base", self.base, "--criteria", str(self.tmp / "criteria.json"),
                        "--evidence", str(self.tmp / "evidence.json"), "--manifest", str(out),
-                       "--evidence-dir", str(ev_dir), "--approved-criteria-sha256", approved)
+                       "--evidence-dir", str(ev_dir), "--gates", str(self.tmp / "gates.json"),
+                       "--approved-criteria-sha256", approved)
 
         good = assure([item])
         self.assertEqual(good.returncode, 0, good.stdout + good.stderr)
@@ -161,6 +169,8 @@ class IdeaToRunningJourneyTests(unittest.TestCase):
         self.assertEqual(assure([dict(item, result="fail")]).returncode, 1)
         self.assertEqual(assure([dict(item, artifact_sha256="sha256:" + "0" * 64)]).returncode, 1)
         self.assertEqual(assure([item], criteria=dict(crit_doc, criteria=[])).returncode, 2)
+        red = dict(gates, ci=dict(gates["ci"], conclusion="failure"))
+        self.assertEqual(assure([item], gates=red).returncode, 1)
 
         # 8. Existing project assets are preserved byte-for-byte.
         self.assertEqual(digests(self.ws, PRESERVED), self.before)

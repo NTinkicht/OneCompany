@@ -104,6 +104,14 @@ class GraphCheckTests(unittest.TestCase):
             r = self.run_cli(prio(*ok))
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
+    def test_every_priority_inversion_is_reported(self):
+        n = nodes()
+        n[4]["priority"], n[5]["priority"], n[6]["priority"] = "P3", "P0", "P1"
+        r = self.run_cli(base(nodes=n))
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("PRIORITY_INVERSION w2 (P0) depends on w1 (P3)", r.stdout)
+        self.assertIn("PRIORITY_INVERSION w3 (P1) depends on w1 (P3)", r.stdout)
+
     def test_invalid_priority_is_unverifiable(self):
         for bad_value in ("P9", 0, ["P0"], True):
             bad = nodes()

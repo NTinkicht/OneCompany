@@ -11,8 +11,8 @@ Every lockfile must exist and have been generated from the current manifest dige
 must keep its source digest, may only be promoted after a passing canary with verified rollback
 proof, must be rolled back or unpromoted after a failed canary, may reach production only with
 separate human authorization after a promoted, canary-passing staging release of the same manifest
-and source digest, must have an incident alert raised when its canary failed or it was rolled back, and must not
-start while the emergency stop is active.
+and source digest, must have an incident alert raised when its canary failed or it was rolled back, must have verified
+rollback proof whenever it was rolled back, and must not start while the emergency stop is active.
 No network, no writes, no clock.
 """
 
@@ -115,6 +115,8 @@ def evaluate(report: dict) -> dict:
             problems.append(f"STOP_IGNORED {uid} started while the emergency stop is active")
         if (u["canary"] == "fail" or u["rolled_back"]) and not u["incident_alerted"]:
             problems.append(f"INCIDENT_NOT_ALERTED {uid} failed canary or rollback without an incident alert")
+        if u["rolled_back"] and u["rollback_proof"] != "verified":
+            problems.append(f"ROLLBACK_UNVERIFIED {uid} rolled back without verified rollback proof")
         if u["promoted"] and u["canary"] != "pass":
             problems.append(f"UNPROVEN_PROMOTION {uid} promoted with canary {u['canary']}")
         if u["promoted"] and u["rollback_proof"] != "verified":

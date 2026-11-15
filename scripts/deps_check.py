@@ -9,7 +9,8 @@ Input: ``{"revision": 40-hex, "stop_active": bool, "manifests": [{"id", "manifes
 Every lockfile must exist and have been generated from the current manifest digest; every update
 must keep its source digest, may only be promoted after a passing canary with verified rollback
 proof, must be rolled back or unpromoted after a failed canary, may reach production only with
-separate human authorization, and must not start while the emergency stop is active.
+separate human authorization after a promoted, canary-passing staging release of the same manifest
+and source digest, and must not start while the emergency stop is active.
 No network, no writes, no clock.
 """
 
@@ -99,6 +100,11 @@ def evaluate(report: dict) -> dict:
             problems.append(f"LOCKFILE_MISSING {mid}")
         elif m["lock_for_manifest_digest"] is None or m["lock_for_manifest_digest"].lower() != m["manifest_digest"].lower():
             problems.append(f"LOCKFILE_STALE {mid} lockfile not generated from the current manifest")
+    proven_staging = {
+        (u["manifest"], u["source_digest_actual"].lower())
+        for u in report["updates"]
+        if u["stage"] == "staging" and u["promoted"] and u["canary"] == "pass"
+    }
     for u in report["updates"]:
         uid = u["id"]
         if u["source_digest_expected"].lower() != u["source_digest_actual"].lower():
@@ -113,6 +119,9 @@ def evaluate(report: dict) -> dict:
             problems.append(f"UNRECOVERED_FAILURE {uid} failed canary was neither rolled back nor contained")
         if u["stage"] == "production" and u["promoted"] and not u["authorized"]:
             problems.append(f"PRODUCTION_UNAUTHORIZED {uid} reached production without separate human authorization")
+        if (u["stage"] == "production" and u["promoted"]
+                and (u["manifest"], u["source_digest_actual"].lower()) not in proven_staging):
+            problems.append(f"STAGING_SKIPPED {uid} reached production without a promoted, canary-passing staging release of the same source")
     return {"manifests": len(report["manifests"]), "updates": len(report["updates"]), "problems": problems}
 
 

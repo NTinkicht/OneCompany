@@ -15,9 +15,9 @@ REV = "1" * 40
 
 def manifest():
     return {"revision": REV, "certifier": "reviewer-a", "authors": ["writer-b"],
-            "scenarios": [{"id": s, "result": "pass", "evidence_sha256": "a" * 64, "revision": REV,
+            "scenarios": [{"id": s, "result": "pass", "evidence_sha256": f"{n:x}" * 64, "revision": REV,
                            "error_rate": 0.0, "p95_ms": 100, "ac_ids": ["AC-1"]}
-                          for s in certify_check.SCENARIOS]}
+                          for n, s in enumerate(certify_check.SCENARIOS, 1)]}
 
 
 class CertifyCheckTests(unittest.TestCase):
@@ -78,6 +78,29 @@ class CertifyCheckTests(unittest.TestCase):
     def test_untraced(self):
         m = manifest(); m["scenarios"][5]["ac_ids"] = []
         self.assert_nogo(m, "UNTRACED failure-budget-exhausted")
+
+    def test_reused_evidence_digest(self):
+        m = manifest(); m["scenarios"][1]["evidence_sha256"] = m["scenarios"][0]["evidence_sha256"]
+        r = self.run_cli(m)
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("DUPLICATE_EVIDENCE create-fresh", r.stdout)
+        self.assertIn("DUPLICATE_EVIDENCE adopt-existing", r.stdout)
+        self.assertNotIn("INDEPENDENCE", r.stdout)
+
+    def test_unknown_authorship(self):
+        for authors in ([], [" "]):
+            m = manifest(); m["authors"] = authors
+            self.assert_nogo(m, "UNKNOWN_AUTHORSHIP authors")
+
+    def test_json_carries_new_findings(self):
+        p = self.tmp / "j.json"
+        m = manifest(); m["authors"] = []; m["scenarios"][1]["evidence_sha256"] = "1" * 64
+        p.write_text(json.dumps(m), encoding="utf-8")
+        r = subprocess.run([sys.executable, str(ROOT / "scripts" / "certify_check.py"), str(p), "--json"],
+                           capture_output=True, text=True)
+        out = json.loads(r.stdout)
+        self.assertEqual(out["duplicate_evidence"], ["adopt-existing", "create-fresh"])
+        self.assertEqual(out["unknown_authorship"], ["authors"])
 
     def test_certifier_must_not_be_author(self):
         m = manifest(); m["authors"].append(" Reviewer-A ")

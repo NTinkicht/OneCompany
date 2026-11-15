@@ -75,7 +75,7 @@ def broken_links(root: Path, rels: list[str]) -> list[str]:
     return out
 
 
-MANIFEST = re.compile(r"requirements[^/]*\.txt|package\.json|pyproject\.toml")
+MANIFEST = re.compile(r"requirements[^/]*\.txt|package\.json|pyproject\.toml", re.I)
 SKIP_DIRS = {".git", "node_modules"}
 
 
@@ -106,7 +106,7 @@ def evaluate(root: Path) -> dict:
     text = "\n".join(_read(p) for p in doc_files(root))
     undocumented = [c for c in commands(root)
                     if not re.search(r"onecompany\.py\s+" + re.escape(c) + r"(?![\w-])", text)]
-    undocumented_manifests = [m for m in manifests(root) if not re.search(r"(?<![\w./-])" + re.escape(m) + r"(?![\w-])", text)]
+    undocumented_manifests = [m for m in manifests(root) if not re.search(r"(?<![\w./-])(?:\.?/)?" + re.escape(m) + r"(?![\w-])", text, re.I)]
     pages = sorted({p.relative_to(root).as_posix() for p in doc_files(root)} | set(REQUIRED))
     return {"required_missing": missing, "broken_links": broken_links(root, pages),
             "undocumented_commands": undocumented,

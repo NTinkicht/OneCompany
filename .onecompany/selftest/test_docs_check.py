@@ -98,6 +98,23 @@ class DocsCheckTests(unittest.TestCase):
         out = json.loads(self.run_cli("--json").stdout)
         self.assertEqual(out["undocumented_dependency_manifests"], ["requirements.txt"])
 
+    def test_dot_slash_reference_documents_root_manifest_but_not_nested(self):
+        (self.tmp / "requirements.txt").write_text("b==1\n")
+        (self.tmp / "docs" / "FAQ.md").write_text("run `pip install -r ./requirements.txt`\n")
+        self.assertEqual(self.run_cli().returncode, 0)
+        (self.tmp / "docs" / "FAQ.md").write_text("see svc/./requirements.txt and /requirements.txt\n")
+        self.assertEqual(self.run_cli().returncode, 0)
+        (self.tmp / "docs" / "FAQ.md").write_text("see svc/./requirements.txt\n")
+        self.assertEqual(json.loads(self.run_cli("--json").stdout)["undocumented_dependency_manifests"], ["requirements.txt"])
+
+    def test_manifest_detection_and_doc_match_are_case_insensitive(self):
+        (self.tmp / "Requirements.txt").write_text("b==1\n")
+        (self.tmp / "Package.JSON").write_text("{}")
+        out = json.loads(self.run_cli("--json").stdout)
+        self.assertEqual(sorted(out["undocumented_dependency_manifests"]), ["Package.JSON", "Requirements.txt"])
+        (self.tmp / "docs" / "FAQ.md").write_text("`Requirements.txt` and `package.json`\n")
+        self.assertEqual(self.run_cli().returncode, 0)
+
     def test_other_manifest_kinds_detected_but_ignored_dirs_and_symlinks_skipped(self):
         (self.tmp / "package.json").write_text("{}")
         (self.tmp / "pyproject.toml").write_text("")

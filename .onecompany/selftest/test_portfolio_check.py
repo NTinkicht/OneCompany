@@ -89,6 +89,23 @@ class PortfolioCheckTests(unittest.TestCase):
             self.assert_fails(base(accesses=[{"id": "x1", "project": "p1", "target_project": "p2", "kind": kind}]),
                               f"CROSS_TARGET_ACCESS x1 p1 reaches {kind} of p2")
 
+    def test_shared_preview_fails_despite_case_whitespace_or_slash(self):
+        a = "https://p1.example.com/app"
+        for variant in (a, a.upper(), f"  {a} ", a + "/"):
+            self.assert_fails(base(projects=[project(1, preview_url=a), project(2, preview_url=variant)]),
+                              f"SHARED_PREVIEW {a} shared by p1,p2")
+
+    def test_distinct_or_absent_previews_pass(self):
+        for projects in ([project(1, preview_url="https://a.example.com"), project(2, preview_url="https://b.example.com")],
+                         [project(1, preview_url="https://a.example.com"), project(2)],
+                         [project(1), project(2)]):
+            r = self.run_cli(base(projects=projects))
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_malformed_preview_is_unverifiable(self):
+        for bad in ("", "  ", "ftp://x.example.com", "not a url", "https://a b", 1, None, [], {}):
+            self.assert_unverifiable(base(projects=[project(1), project(2, preview_url=bad)]))
+
     def test_malformed_input_is_unverifiable(self):
         self.assert_unverifiable(raw="not json")
         self.assert_unverifiable(raw="[]")

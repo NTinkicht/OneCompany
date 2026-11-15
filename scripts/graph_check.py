@@ -2,9 +2,9 @@
 """Deterministic, read-only product-graph check (OC-P1-03 slice 1, #467).
 
 Input: ``{"revision": 40-hex, "change_base": 40-hex, "nodes": [{"id", "kind":
-objective|feature|requirement|ac|wu, "satisfies": id|null, "depends_on": [id], "effort": int>=0}]}``.
+objective|feature|requirement|ac|wu, "satisfies": id|null, "depends_on": [id], "effort": int>=0, optional "priority": P0..P3}]}``.
 Rejects dependency cycles, a change edited from a stale revision, a node that satisfies the wrong
-kind of parent, and requirements/ACs nobody builds on; reports the critical path over ``depends_on``
+kind of parent, and requirements/ACs nobody builds on, a node that depends on a lower-priority node; reports the critical path over ``depends_on``
 (longest total effort, ties broken by id). No network, no writes, no clock.
 """
 
@@ -18,6 +18,7 @@ from pathlib import Path
 
 HEX40 = re.compile(r"[0-9a-fA-F]{40}")
 PARENT = {"feature": "objective", "requirement": "feature", "ac": "requirement", "wu": "ac"}
+PRIORITIES = ("P0", "P1", "P2", "P3")
 NEEDS_CHILD = {"objective": "feature", "feature": "requirement", "requirement": "ac", "ac": "wu"}
 
 
@@ -60,6 +61,9 @@ def load_report(path: Path) -> dict:
         eff = n.get("effort", 0)
         if isinstance(eff, bool) or not isinstance(eff, int) or eff < 0:
             raise ValueError(f"{n['id']} effort must be a non-negative integer")
+        pri = n.get("priority")
+        if pri is not None and (not isinstance(pri, str) or pri not in PRIORITIES):
+            raise ValueError(f"{n['id']} priority must be one of {'/'.join(PRIORITIES)}")
     return data
 
 
@@ -159,6 +163,12 @@ def evaluate(report: dict) -> dict:
         if child and nodes[i]["kind"] in ("requirement", "ac") and not any(
                 m["kind"] == child and m.get("satisfies") == i for m in nodes.values()):
             problems.append(f"UNCOVERED {i} ({nodes[i]['kind']}) has no {child}")
+    for i in sorted(nodes):
+        pri = nodes[i].get("priority")
+        for d in deps[i]:
+            dep_pri = nodes[d].get("priority")
+            if pri and dep_pri and PRIORITIES.index(dep_pri) > PRIORITIES.index(pri):
+                problems.append(f"PRIORITY_INVERSION {i} ({pri}) depends on {d} ({dep_pri})")
     path: list[str] = []
     best: dict[str, tuple[int, list[str]]] = {}
     for i in _topological(deps, blocked):

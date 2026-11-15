@@ -93,6 +93,23 @@ class GraphCheckTests(unittest.TestCase):
         r = self.run_cli(base(nodes=n), "--json")
         self.assertEqual(json.loads(r.stdout)["critical_path"], ["w1", "w2"])
 
+    def test_priority_inversion_fails_with_positive_controls(self):
+        def prio(w1, w2):
+            n = nodes()
+            n[4]["priority"], n[5]["priority"] = w1, w2
+            return base(nodes=n)
+
+        self.assert_fails(prio("P2", "P0"), "PRIORITY_INVERSION w2 (P0) depends on w1 (P2)")
+        for ok in (("P0", "P2"), ("P1", "P1"), (None, "P0"), ("P3", None)):
+            r = self.run_cli(prio(*ok))
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_invalid_priority_is_unverifiable(self):
+        for bad_value in ("P9", 0, ["P0"], True):
+            bad = nodes()
+            bad[4]["priority"] = bad_value
+            self.assert_unverifiable(base(nodes=bad))
+
     def test_malformed_inputs_are_unverifiable(self):
         self.assert_unverifiable(raw="{not json")
         self.assert_unverifiable(base(revision="x"))

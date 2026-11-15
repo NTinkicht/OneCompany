@@ -104,6 +104,16 @@ class DepsCheckTests(unittest.TestCase):
         r = self.run_cli([update(incident_alerted=False), update("u2", incident_alerted=True)])
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
+    def test_rolled_back_update_needs_verified_rollback_proof(self):
+        failed = dict(canary="fail", promoted=False, rolled_back=True, incident_alerted=True)
+        self.assert_fails([update(rollback_proof="missing", **failed)], "ROLLBACK_UNVERIFIED u1")
+        self.assert_fails([update(rollback_proof="missing", rolled_back=True, incident_alerted=True)],
+                          "ROLLBACK_UNVERIFIED u1")
+        r = self.run_cli([update(rollback_proof="verified", **failed)])
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        r = self.run_cli([update(rollback_proof="missing", promoted=False, canary="not_run")])
+        self.assertNotIn("ROLLBACK_UNVERIFIED", r.stdout)
+
     def test_unpromoted_production_candidate_needs_no_authorization(self):
         r = self.run_cli([update(stage="production", promoted=False, canary="not_run", authorized=False)])
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)

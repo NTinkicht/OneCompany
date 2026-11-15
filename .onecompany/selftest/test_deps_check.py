@@ -19,7 +19,8 @@ def manifest(mid="m1", **over):
 def update(uid="u1", **over):
     u = {"id": uid, "manifest": "m1", "source_digest_expected": A, "source_digest_actual": A,
          "stage": "staging", "canary": "pass", "promoted": True, "rolled_back": False,
-         "rollback_proof": "verified", "authorized": False, "started_after_stop": False}
+         "rollback_proof": "verified", "authorized": False, "started_after_stop": False,
+         "incident_alerted": False}
     u.update(over)
     return u
 
@@ -44,7 +45,7 @@ class DepsCheckTests(unittest.TestCase):
 
     def test_clean_report_passes(self):
         r = self.run_cli([update(), update("u2", stage="production", authorized=True),
-                          update("u3", canary="fail", promoted=False, rolled_back=True)])
+                          update("u3", canary="fail", promoted=False, rolled_back=True, incident_alerted=True)])
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
     def test_json_output_is_deterministic(self):
@@ -83,12 +84,24 @@ class DepsCheckTests(unittest.TestCase):
         self.assert_fails([prod], "STAGING_SKIPPED p")
         # staging that is unpromoted, failed, other-manifest or other-source does not count
         self.assert_fails([update(promoted=False), prod], "STAGING_SKIPPED p")
-        self.assert_fails([update(canary="fail", promoted=False, rolled_back=True), prod], "STAGING_SKIPPED p")
+        self.assert_fails([update(canary="fail", promoted=False, rolled_back=True, incident_alerted=True), prod], "STAGING_SKIPPED p")
         self.assert_fails([update(manifest="m2"), prod], "STAGING_SKIPPED p",
                           manifests=[manifest(), manifest("m2")])
         self.assert_fails([update(source_digest_expected=B, source_digest_actual=B), prod], "STAGING_SKIPPED p")
         # positive control: proven staging of the same manifest and source
         r = self.run_cli([update(), prod])
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_failed_canary_or_rollback_needs_incident_alert(self):
+        failed = dict(canary="fail", promoted=False, rolled_back=True)
+        self.assert_fails([update(**failed)], "INCIDENT_NOT_ALERTED u1")
+        self.assert_fails([update(canary="fail", promoted=False, rolled_back=False, incident_alerted=False)],
+                          "INCIDENT_NOT_ALERTED u1")
+        self.assert_fails([update(rolled_back=True)], "INCIDENT_NOT_ALERTED u1")
+        for over in (failed, dict(rolled_back=True)):
+            r = self.run_cli([update(incident_alerted=True, **over)])
+            self.assertNotIn("INCIDENT_NOT_ALERTED", r.stdout)
+        r = self.run_cli([update(incident_alerted=False), update("u2", incident_alerted=True)])
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
     def test_unpromoted_production_candidate_needs_no_authorization(self):
@@ -110,6 +123,8 @@ class DepsCheckTests(unittest.TestCase):
             self.run_cli([update(), update()]),
             self.run_cli([update(source_digest_actual="zz")]),
             self.run_cli([update(promoted="yes")]),
+            self.run_cli([update(incident_alerted="yes")]),
+            self.run_cli([{k: v for k, v in update().items() if k != "incident_alerted"}]),
             self.run_cli([update(canary="weird")]),
             self.run_cli([update(stage="prod")]),
             self.run_cli([update()], stop="no"),

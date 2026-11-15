@@ -5,12 +5,14 @@ Input: ``{"revision": 40-hex, "stop_active": bool, "manifests": [{"id", "manifes
 "lockfile_digest": 64-hex|null, "lock_for_manifest_digest": 64-hex|null}], "updates": [{"id",
 "manifest": <manifest id>, "source_digest_expected": 64-hex, "source_digest_actual": 64-hex,
 "stage": staging|production, "canary": pass|fail|not_run, "promoted": bool, "rolled_back": bool,
-"rollback_proof": verified|missing, "authorized": bool, "started_after_stop": bool}]}``.
+"rollback_proof": verified|missing, "authorized": bool, "started_after_stop": bool,
+"incident_alerted": bool}]}``.
 Every lockfile must exist and have been generated from the current manifest digest; every update
 must keep its source digest, may only be promoted after a passing canary with verified rollback
 proof, must be rolled back or unpromoted after a failed canary, may reach production only with
 separate human authorization after a promoted, canary-passing staging release of the same manifest
-and source digest, and must not start while the emergency stop is active.
+and source digest, must have an incident alert raised when its canary failed or it was rolled back, and must not
+start while the emergency stop is active.
 No network, no writes, no clock.
 """
 
@@ -83,7 +85,7 @@ def load_report(path: Path) -> dict:
             raise ValueError(f"{uid} references an unknown manifest")
         if not _hex64(u.get("source_digest_expected")) or not _hex64(u.get("source_digest_actual")):
             raise ValueError(f"{uid} source digests must be 64-hex")
-        for field in ("promoted", "rolled_back", "authorized", "started_after_stop"):
+        for field in ("promoted", "rolled_back", "authorized", "started_after_stop", "incident_alerted"):
             if not isinstance(u.get(field), bool):
                 raise ValueError(f"{uid} {field} must be a boolean")
         for field, allowed in (("stage", STAGES), ("canary", CANARY), ("rollback_proof", ROLLBACK)):
@@ -111,6 +113,8 @@ def evaluate(report: dict) -> dict:
             problems.append(f"SOURCE_TAMPER {uid} source digest differs from the expected digest")
         if report["stop_active"] and u["started_after_stop"]:
             problems.append(f"STOP_IGNORED {uid} started while the emergency stop is active")
+        if (u["canary"] == "fail" or u["rolled_back"]) and not u["incident_alerted"]:
+            problems.append(f"INCIDENT_NOT_ALERTED {uid} failed canary or rollback without an incident alert")
         if u["promoted"] and u["canary"] != "pass":
             problems.append(f"UNPROVEN_PROMOTION {uid} promoted with canary {u['canary']}")
         if u["promoted"] and u["rollback_proof"] != "verified":

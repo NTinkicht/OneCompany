@@ -18,6 +18,7 @@ import json
 import re
 import sys
 from pathlib import Path
+from urllib.parse import urlsplit
 
 HEX40 = re.compile(r"[0-9a-fA-F]{40}")
 REPO = re.compile(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+")
@@ -41,9 +42,26 @@ def _norm(value: str) -> str:
     return value.strip().casefold()
 
 
-def _preview_key(value: str) -> str:
-    """Identity form of a preview URL: case, surrounding whitespace and trailing slashes never make it distinct."""
-    return value.strip().casefold().rstrip("/")
+def _preview_key(value: str) -> str | None:
+    """Identity form of a preview URL, or None when it is not a valid http(s) URL with a host.
+
+    Case, surrounding whitespace, trailing slashes, a fragment and the scheme's default port never make it distinct.
+    """
+    text = value.strip()
+    if not PREVIEW.fullmatch(text):
+        return None
+    try:
+        parts = urlsplit(text)
+        port = parts.port
+    except ValueError:
+        return None
+    scheme, host = parts.scheme.lower(), (parts.hostname or "").lower()
+    if scheme not in ("http", "https") or not host:
+        return None
+    if port is not None and port != {"http": 80, "https": 443}[scheme]:
+        host = f"{host}:{port}"
+    query = f"?{parts.query}" if parts.query else ""
+    return f"{scheme}://{host}{parts.path.casefold().rstrip('/')}{query.casefold()}"
 
 
 def _repo_key(value: str) -> str:
@@ -91,7 +109,7 @@ def load_report(path: Path) -> dict:
             if not _name(p.get(field)):
                 raise ValueError(f"{p['id']} {field} must be a non-empty string")
         if "preview_url" in p and (not isinstance(p["preview_url"], str)
-                                   or not PREVIEW.fullmatch(p["preview_url"].strip())):
+                                   or _preview_key(p["preview_url"]) is None):
             raise ValueError(f"{p['id']} preview_url must be an http(s) URL")
     for l in leases:
         if not _in(l.get("project"), ids):

@@ -8,4 +8,6 @@ Resolves the app from the supplied `--workspace` (it must be a git checkout whos
 
 Exit codes: 0 ready, 1 blocked, 2 refused input. Loopback only, no credentials, no deployment.
 
-Out of scope for this slice: browser evidence, per-criterion assurance (OC-P0-15), public hosting.
+Slice 2 also fetches `/`, `/app.css` and `/app.js` over loopback and records status, content type, byte count and sha256 per asset under `ui`; `verify` refuses a missing, non-200, wrong-type, empty or malformed-digest asset. This is served-surface evidence, not browser automation.
+
+Out of scope: real browser automation or screenshots, migration fixture, per-criterion assurance (OC-P0-15), public hosting.

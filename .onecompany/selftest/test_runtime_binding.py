@@ -95,6 +95,36 @@ class RuntimeBindingTests(unittest.TestCase):
         self.assertIn("cleanup not verified", rb.verify(m, **self.args()))
         self.assertTrue(rb.verify("not-a-dict", **self.args()))
 
+    def test_ui_assets_are_captured_and_verified(self) -> None:
+        ui = self.manifest["ui"]
+        self.assertEqual(set(ui), {"/", "/app.css", "/app.js"})
+        for path, ctype in rb.UI_ASSETS.items():
+            self.assertEqual(ui[path]["status"], 200)
+            self.assertEqual(ui[path]["content_type"], ctype)
+            self.assertGreater(ui[path]["bytes"], 0)
+        self.assertEqual(rb.verify(self.manifest, **self.args()), [])  # positive control
+
+    def test_bad_ui_evidence_is_refused(self) -> None:
+        def mutate(fn):
+            m = copy.deepcopy(self.manifest)
+            fn(m["ui"])
+            return rb.verify(m, **self.args())
+        cases = {
+            "missing asset": lambda u: u.pop("/app.js"),
+            "404": lambda u: u["/"].update(status=404),
+            "wrong type": lambda u: u["/app.css"].update(content_type="text/html"),
+            "empty": lambda u: u["/"].update(bytes=0),
+            "bool bytes": lambda u: u["/"].update(bytes=True),
+            "bad digest": lambda u: u["/app.js"].update(sha256="sha256:abc"),
+            "no digest": lambda u: u["/"].pop("sha256"),
+        }
+        for name, fn in cases.items():
+            with self.subTest(case=name):
+                self.assertTrue(any("UI asset evidence failed" in r for r in mutate(fn)))
+        m = copy.deepcopy(self.manifest)
+        m["ui"] = "served"
+        self.assertIn("UI evidence missing", rb.verify(m, **self.args()))
+
     def test_projection_is_ready_only_with_exact_head_ci_and_tests(self) -> None:
         kw = dict(wu_id="WU-P1-RUNTIME-BINDING-001", run_key="run/1", workspace=self.ws,
                   current_head_sha=self.head, current_base_sha=self.base)

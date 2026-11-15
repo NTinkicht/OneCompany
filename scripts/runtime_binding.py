@@ -30,9 +30,11 @@ WU_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:#-]{0,127}$")
 RUN_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$")
 REQUIRED = (
     "schema", "wu_id", "run_key", "workspace", "head_sha", "base_sha", "build_digest",
-    "started_at", "stopped_at", "health", "crud_round_trip", "cleanup",
+    "started_at", "stopped_at", "health", "crud_round_trip", "ui", "cleanup",
     "production_qualified", "scope",
 )
+UI_ASSETS = {"/": "text/html", "/app.css": "text/css", "/app.js": "text/javascript"}
+DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 SCOPE = "local-demo-loopback-only"
 
 
@@ -111,6 +113,33 @@ def _request(port: int, method: str, path: str, body: dict | None = None):
         conn.close()
 
 
+def _fetch_raw(port: int, path: str) -> dict:
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
+    try:
+        conn.request("GET", path, headers={"Host": f"127.0.0.1:{port}"})
+        resp = conn.getresponse()
+        raw = resp.read()
+        ctype = (resp.getheader("Content-Type") or "").split(";")[0].strip().lower()
+        return {"status": resp.status, "content_type": ctype, "bytes": len(raw),
+                "sha256": "sha256:" + hashlib.sha256(raw).hexdigest()}
+    finally:
+        conn.close()
+
+
+def _ui_problems(ui: object) -> list[str]:
+    if not isinstance(ui, dict):
+        return ["UI evidence missing"]
+    out = []
+    for path, ctype in UI_ASSETS.items():
+        a = ui.get(path)
+        if not (isinstance(a, dict) and a.get("status") == 200 and a.get("content_type") == ctype
+                and isinstance(a.get("bytes"), int) and not isinstance(a.get("bytes"), bool)
+                and a["bytes"] > 0 and isinstance(a.get("sha256"), str)
+                and DIGEST_RE.match(a["sha256"])):
+            out.append(f"UI asset evidence failed: {path}")
+    return out
+
+
 def capture(wu_id: str, run_key: str, workspace: str | Path, head_sha: str, base_sha: str) -> dict:
     """Run the workspace's fixture on an ephemeral loopback port and return an evidence manifest."""
     workspace = Path(workspace)
@@ -128,6 +157,7 @@ def capture(wu_id: str, run_key: str, workspace: str | Path, head_sha: str, base
     thread.start()
     health = {"status": None}
     crud = {"ok": False}
+    ui: dict = {}
     try:
         status, _ = _request(port, "GET", "/health")
         health = {"status": status}
@@ -138,6 +168,8 @@ def capture(wu_id: str, run_key: str, workspace: str | Path, head_sha: str, base
         s4, _ = _request(port, "DELETE", f"/api/items/{item_id}") if item_id else (None, None)
         items = listed.get("items", listed) if isinstance(listed, dict) else listed
         seen = isinstance(items, list) and any(i.get("id") == item_id and i.get("done") is True for i in items)
+        for path in UI_ASSETS:
+            ui[path] = _fetch_raw(port, path)
         crud = {"create": s1, "update": s2, "list": s3, "delete": s4,
                 "ok": s1 in (200, 201) and s2 == 200 and s3 == 200 and s4 in (200, 204) and bool(seen)}
     finally:
@@ -157,7 +189,7 @@ def capture(wu_id: str, run_key: str, workspace: str | Path, head_sha: str, base
         "schema": SCHEMA, "wu_id": wu_id, "run_key": run_key, "workspace": str(workspace.resolve()),
         "head_sha": head_sha, "base_sha": base_sha, "build_digest": digest,
         "started_at": started, "stopped_at": stopped, "port": port,
-        "health": health, "crud_round_trip": crud, "cleanup": cleanup,
+        "health": health, "crud_round_trip": crud, "ui": ui, "cleanup": cleanup,
         "production_qualified": False, "scope": SCOPE,
     }
 
@@ -189,6 +221,7 @@ def verify(manifest: object, *, wu_id: str, run_key: str, workspace: str | Path,
     if not (isinstance(c, dict) and c.get("create") in (200, 201) and c.get("update") == 200
             and c.get("list") == 200 and c.get("delete") in (200, 204) and c.get("ok") is True):
         problems.append("CRUD round trip failed")
+    problems += _ui_problems(manifest["ui"])
     if not (isinstance(k, dict) and k.get("server_stopped") is True and k.get("port_closed") is True
             and k.get("ok") is True):
         problems.append("cleanup not verified")

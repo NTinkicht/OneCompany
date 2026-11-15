@@ -4,8 +4,8 @@
 Input: ``{"revision": 40-hex, "change_base": 40-hex, "nodes": [{"id", "kind":
 objective|feature|requirement|ac|wu, "satisfies": id|null, "depends_on": [id], "effort": int>=0, optional "priority": P0..P3}]}``.
 Rejects dependency cycles, a change edited from a stale revision, a node that satisfies the wrong
-kind of parent, and requirements/ACs nobody builds on, a node that depends on a lower-priority node; reports the critical path over ``depends_on``
-(longest total effort, ties broken by id). No network, no writes, no clock.
+kind of parent, requirements/ACs nobody builds on, and a node that depends on a lower-priority node;
+reports the critical path over ``depends_on`` (longest total effort, ties broken by id). No network, no writes, no clock.
 """
 
 from __future__ import annotations

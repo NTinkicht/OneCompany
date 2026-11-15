@@ -26,6 +26,8 @@ def base(**over):
 
 
 class GraphCheckTests(unittest.TestCase):
+    hung = False
+
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, True)
@@ -33,8 +35,15 @@ class GraphCheckTests(unittest.TestCase):
     def run_cli(self, report, *extra, raw=None):
         path = self.tmp / "r.json"
         path.write_text(raw if raw is not None else json.dumps(report), encoding="utf-8")
-        return subprocess.run([sys.executable, str(ROOT / "scripts" / "graph_check.py"), str(path), *extra],
-                              capture_output=True, text=True)
+        # A hung checker (e.g. a mutated loop) must fail fast and leave no orphan child process.
+        if GraphCheckTests.hung:
+            self.fail("graph_check.py previously timed out")
+        try:
+            return subprocess.run([sys.executable, str(ROOT / "scripts" / "graph_check.py"), str(path), *extra],
+                                  capture_output=True, text=True, timeout=5)
+        except subprocess.TimeoutExpired:
+            GraphCheckTests.hung = True
+            raise
 
     def assert_fails(self, report, token):
         r = self.run_cli(report)
@@ -92,6 +101,31 @@ class GraphCheckTests(unittest.TestCase):
         n[5]["effort"] = n[6]["effort"] = 1
         r = self.run_cli(base(nodes=n), "--json")
         self.assertEqual(json.loads(r.stdout)["critical_path"], ["w1", "w2"])
+
+    def test_priority_inversion_fails_with_positive_controls(self):
+        def prio(w1, w2):
+            n = nodes()
+            n[4]["priority"], n[5]["priority"] = w1, w2
+            return base(nodes=n)
+
+        self.assert_fails(prio("P2", "P0"), "PRIORITY_INVERSION w2 (P0) depends on w1 (P2)")
+        for ok in (("P0", "P2"), ("P1", "P1"), (None, "P0"), ("P3", None)):
+            r = self.run_cli(prio(*ok))
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_every_priority_inversion_is_reported(self):
+        n = nodes()
+        n[4]["priority"], n[5]["priority"], n[6]["priority"] = "P3", "P0", "P1"
+        r = self.run_cli(base(nodes=n))
+        self.assertEqual(r.returncode, 1, r.stdout + r.stderr)
+        self.assertIn("PRIORITY_INVERSION w2 (P0) depends on w1 (P3)", r.stdout)
+        self.assertIn("PRIORITY_INVERSION w3 (P1) depends on w1 (P3)", r.stdout)
+
+    def test_invalid_priority_is_unverifiable(self):
+        for bad_value in ("P9", 0, ["P0"], True):
+            bad = nodes()
+            bad[4]["priority"] = bad_value
+            self.assert_unverifiable(base(nodes=bad))
 
     def test_malformed_inputs_are_unverifiable(self):
         self.assert_unverifiable(raw="{not json")

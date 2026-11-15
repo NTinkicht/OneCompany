@@ -52,9 +52,12 @@ def _preview_key(value: str) -> str | None:
         return None
     try:
         parts = urlsplit(text)
+        # parts.port raises ValueError for non-numeric or out-of-range ports (e.g. :abc, :99999) -> None below;
+        # covered by test_portfolio_check.py invalid-preview vectors.
         port = parts.port
     except ValueError:
         return None
+    # Fragment is deliberately dropped: browsers never send it, so URLs differing only by #fragment are the same endpoint.
     scheme, host = parts.scheme.lower(), (parts.hostname or "").lower()
     if scheme not in ("http", "https") or not host:
         return None

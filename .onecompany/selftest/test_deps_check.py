@@ -78,6 +78,19 @@ class DepsCheckTests(unittest.TestCase):
     def test_production_needs_human_authorization(self):
         self.assert_fails([update(stage="production", authorized=False)], "PRODUCTION_UNAUTHORIZED u1")
 
+    def test_production_without_proven_staging_fails(self):
+        prod = update("p", stage="production", authorized=True)
+        self.assert_fails([prod], "STAGING_SKIPPED p")
+        # staging that is unpromoted, failed, other-manifest or other-source does not count
+        self.assert_fails([update(promoted=False), prod], "STAGING_SKIPPED p")
+        self.assert_fails([update(canary="fail", promoted=False, rolled_back=True), prod], "STAGING_SKIPPED p")
+        self.assert_fails([update(manifest="m2"), prod], "STAGING_SKIPPED p",
+                          manifests=[manifest(), manifest("m2")])
+        self.assert_fails([update(source_digest_expected=B, source_digest_actual=B), prod], "STAGING_SKIPPED p")
+        # positive control: proven staging of the same manifest and source
+        r = self.run_cli([update(), prod])
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
     def test_unpromoted_production_candidate_needs_no_authorization(self):
         r = self.run_cli([update(stage="production", promoted=False, canary="not_run", authorized=False)])
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)

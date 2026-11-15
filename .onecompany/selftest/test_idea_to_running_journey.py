@@ -148,7 +148,7 @@ class IdeaToRunningJourneyTests(unittest.TestCase):
         gates = {"schema": pa.SCHEMA + "/gates",
                  "ci": {"head_sha": self.head, "base_sha": self.base, "conclusion": "success",
                         "checks": [{"name": "selftest", "conclusion": "success"}]},
-                 "review": {"head_sha": self.head, "state": "APPROVED", "reviewer_login": "ntk-reviewer[bot]",
+                 "review": {"head_sha": self.head, "base_sha": self.base, "state": "APPROVED", "reviewer_login": "ntk-reviewer[bot]",
                             "author_logins": ["claude"]}}
 
         def assure(items, criteria=crit_doc, gates=gates):

@@ -45,7 +45,7 @@ class PostbindAssuranceTests(unittest.TestCase):
         return {"schema": pa.SCHEMA + "/gates",
                 "ci": {"head_sha": self.head, "base_sha": self.base, "conclusion": "success",
                        "checks": [{"name": "selftest", "conclusion": "success"}]},
-                "review": {"head_sha": self.head, "state": "APPROVED", "reviewer_login": "ntk-reviewer[bot]",
+                "review": {"head_sha": self.head, "base_sha": self.base, "state": "APPROVED", "reviewer_login": "ntk-reviewer[bot]",
                            "author_logins": ["claude"]}}
 
     def run_assess(self, items=None, criteria=None, manifest=None, head=None, digest=None, gates="default"):
@@ -175,7 +175,8 @@ class PostbindAssuranceTests(unittest.TestCase):
         self.assert_gate_problem(g, "ci gate: missing")
 
     def test_review_gate_negatives(self):
-        cases = (("head_sha", "1" * 40, "review gate: stale"), ("state", "COMMENTED", "not APPROVED"),
+        cases = (("head_sha", "1" * 40, "review gate: stale"), ("base_sha", "2" * 40, "review gate: stale"),
+                 ("base_sha", None, "review gate: stale"), ("state", "COMMENTED", "not APPROVED"),
                  ("state", "CHANGES_REQUESTED", "not APPROVED"), ("reviewer_login", "", "identity missing"),
                  ("author_logins", [], "author logins missing"),
                  ("reviewer_login", "Claude", "not independent"))
@@ -185,6 +186,8 @@ class PostbindAssuranceTests(unittest.TestCase):
                 self.assert_gate_problem(g, frag)
         g = self.good_gates(); g["review"]["author_logins"] = ["codex", " NTK-Reviewer[bot] "]
         self.assert_gate_problem(g, "not independent")
+        g = self.good_gates(); del g["review"]["base_sha"]
+        self.assert_gate_problem(g, "review gate: stale or mismatched base_sha")
         g = self.good_gates(); del g["review"]
         self.assert_gate_problem(g, "review gate: missing")
 

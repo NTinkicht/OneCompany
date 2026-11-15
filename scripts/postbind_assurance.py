@@ -84,8 +84,9 @@ def check_gates(gates: object, *, head_sha: str, base_sha: str) -> list[str]:
     if not isinstance(rv, dict):
         out.append("review gate: missing")
     else:
-        if not head_sha or rv.get("head_sha") != head_sha:
-            out.append("review gate: stale or mismatched head_sha")
+        for k, want in (("head_sha", head_sha), ("base_sha", base_sha)):
+            if not want or rv.get(k) != want:
+                out.append(f"review gate: stale or mismatched {k}")
         if rv.get("state") != "APPROVED":
             out.append("review gate: state is not APPROVED")
         who, authors = rv.get("reviewer_login"), rv.get("author_logins")

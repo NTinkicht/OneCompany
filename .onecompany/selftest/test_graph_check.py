@@ -26,6 +26,8 @@ def base(**over):
 
 
 class GraphCheckTests(unittest.TestCase):
+    hung = False
+
     def setUp(self):
         self.tmp = Path(tempfile.mkdtemp())
         self.addCleanup(shutil.rmtree, self.tmp, True)
@@ -33,8 +35,15 @@ class GraphCheckTests(unittest.TestCase):
     def run_cli(self, report, *extra, raw=None):
         path = self.tmp / "r.json"
         path.write_text(raw if raw is not None else json.dumps(report), encoding="utf-8")
-        return subprocess.run([sys.executable, str(ROOT / "scripts" / "graph_check.py"), str(path), *extra],
-                              capture_output=True, text=True)
+        # A hung checker (e.g. a mutated loop) must fail fast and leave no orphan child process.
+        if GraphCheckTests.hung:
+            self.fail("graph_check.py previously timed out")
+        try:
+            return subprocess.run([sys.executable, str(ROOT / "scripts" / "graph_check.py"), str(path), *extra],
+                                  capture_output=True, text=True, timeout=5)
+        except subprocess.TimeoutExpired:
+            GraphCheckTests.hung = True
+            raise
 
     def assert_fails(self, report, token):
         r = self.run_cli(report)

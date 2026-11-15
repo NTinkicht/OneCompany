@@ -99,7 +99,7 @@ def evaluate(report: dict) -> dict:
     applied = 0
     for m in report["messages"]:
         if m["effect"] != "applied":
-            continue
+            continue  # every check below (incl. approver and STALE_APPROVAL) runs only for applied messages
         applied += 1
         mid, actor, key = m["id"], m["actor"], m["idempotency_key"]
         if actor not in trusted or m["signature"] != "valid":

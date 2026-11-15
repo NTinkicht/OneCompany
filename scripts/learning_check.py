@@ -4,7 +4,7 @@
 Input: ``{"revision": 40-hex, "lessons": [{"id", "status": validated|retired|falsified,
 "source_defects": [defect ids], "evidence_refs": [str]}], "defects": [{"id", "held_out": bool,
 "lesson": lesson id or null, "recurred": bool}]}``.
-A validated lesson needs evidence; a held-out benchmark defect must never be a lesson source
+A validated lesson needs evidence and at least one source defect; a held-out benchmark defect must never be a lesson source
 (leakage); a validated lesson credited on a held-out defect that recurred is falsified and must be
 retired; a retired or falsified lesson must not be credited (stale memory); and improvement is only
 claimed when the held-out recurrence rate with a validated lesson is strictly below the rate without
@@ -82,6 +82,8 @@ def evaluate(report: dict) -> dict:
     for lid, l in sorted(lessons.items()):
         if l["status"] == "validated" and not l["evidence_refs"]:
             problems.append(f"NO_EVIDENCE {lid} validated lesson has no evidence_refs")
+        if l["status"] == "validated" and not l["source_defects"]:
+            problems.append(f"UNGROUNDED_LESSON {lid} validated lesson has no source_defects")
         for did in sorted(set(l["source_defects"]) & held_ids):
             problems.append(f"LEAKED_BENCHMARK {lid} learned from held-out defect {did}")
     for d in sorted(report["defects"], key=lambda d: d["id"]):

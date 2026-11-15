@@ -4,6 +4,7 @@
 Checks that EACH approved acceptance criterion of a WU has at least one evidence
 item bound to the same WU, RunKey, exact head/base and build digest as the runtime
 binding manifest from OC-P0-14 (`runtime_binding.verify` is reused, not copied).
+Current CI and an independent exact-head approval are checked from a gates document.
 Evidence artifacts are files whose sha256 is recomputed here; packet-authored
 claims are never trusted. Offline: no network, no provider call. Fail closed:
 anything missing, stale, mismatched or unknown is a named problem, and an
@@ -57,6 +58,47 @@ def criteria_digest(crits: list[dict]) -> str:
     return "sha256:" + hashlib.sha256(json.dumps(canon, separators=(",", ":")).encode()).hexdigest()
 
 
+def check_gates(gates: object, *, head_sha: str, base_sha: str) -> list[str]:
+    """Named problems unless CI is green and an independent approval exists at the exact head/base.
+
+    The document is caller-supplied evidence (same trust model as the evidence items);
+    live GitHub verification stays in gate.py / evidence_verify.py. Fail closed.
+    """
+    if not isinstance(gates, dict) or gates.get("schema") != SCHEMA + "/gates":
+        return ["gates document missing, wrong schema or malformed"]
+    out: list[str] = []
+    ci, rv = gates.get("ci"), gates.get("review")
+    if not isinstance(ci, dict):
+        out.append("ci gate: missing")
+    else:
+        for k, want in (("head_sha", head_sha), ("base_sha", base_sha)):
+            if not want or ci.get(k) != want:
+                out.append(f"ci gate: stale or mismatched {k}")
+        checks = ci.get("checks")
+        if ci.get("conclusion") != "success":
+            out.append("ci gate: conclusion is not success")
+        if not isinstance(checks, list) or not checks:
+            out.append("ci gate: no checks recorded")
+        elif any(not isinstance(c, dict) or not c.get("name") or c.get("conclusion") != "success" for c in checks):
+            out.append("ci gate: a check is not success")
+    if not isinstance(rv, dict):
+        out.append("review gate: missing")
+    else:
+        for k, want in (("head_sha", head_sha), ("base_sha", base_sha)):
+            if not want or rv.get(k) != want:
+                out.append(f"review gate: stale or mismatched {k}")
+        if rv.get("state") != "APPROVED":
+            out.append("review gate: state is not APPROVED")
+        who, authors = rv.get("reviewer_login"), rv.get("author_logins")
+        if not isinstance(who, str) or not who.strip():
+            out.append("review gate: reviewer identity missing")
+        if not isinstance(authors, list) or not authors or any(not isinstance(a, str) or not a.strip() for a in authors):
+            out.append("review gate: material author logins missing")
+        elif isinstance(who, str) and who.strip().lower() in {a.strip().lower() for a in authors}:
+            out.append("review gate: reviewer is a material author (not independent)")
+    return out
+
+
 def parse_criteria(doc: object, wu_id: str) -> list[dict]:
     if not isinstance(doc, dict) or doc.get("schema") != SCHEMA + "/criteria" or doc.get("wu_id") != wu_id:
         raise AssuranceError("criteria document missing, wrong schema or wrong wu_id")
@@ -78,7 +120,7 @@ def parse_criteria(doc: object, wu_id: str) -> list[dict]:
 
 def assess(criteria_doc: object, evidence_doc: object, manifest: object, *, wu_id: str, run_key: str,
            workspace: str | Path, head_sha: str, base_sha: str, evidence_dir: str | Path,
-           approved_criteria_sha256: str) -> dict:
+           approved_criteria_sha256: str, gates: object = None) -> dict:
     """Return {covered, uncovered, problems, ok}. ok only when every criterion is covered and no problem exists."""
     crits = parse_criteria(criteria_doc, wu_id)
     # The criterion set is pinned to the digest recorded at approval, so a caller cannot
@@ -87,6 +129,7 @@ def assess(criteria_doc: object, evidence_doc: object, manifest: object, *, wu_i
         raise AssuranceError("criteria do not match the approved criteria digest")
     problems = [f"runtime binding: {p}" for p in rb.verify(
         manifest, wu_id=wu_id, run_key=run_key, workspace=workspace, head_sha=head_sha, base_sha=base_sha)]
+    problems += check_gates(gates, head_sha=head_sha, base_sha=base_sha)
     expected = {"wu_id": wu_id, "run_key": run_key, "head_sha": head_sha, "base_sha": base_sha}
     if isinstance(manifest, dict):
         expected["build_digest"] = manifest.get("build_digest")
@@ -136,15 +179,17 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--base", required=True); p.add_argument("--criteria", required=True)
     p.add_argument("--evidence", required=True); p.add_argument("--manifest", required=True)
     p.add_argument("--evidence-dir", required=True)
+    p.add_argument("--gates", required=True,
+                   help="CI + independent-review gates JSON (onecompany.postbind-assurance/v1/gates)")
     p.add_argument("--approved-criteria-sha256", required=True,
                    help="criteria digest recorded at approval (see criteria_digest)")
     a = p.parse_args(argv)
     try:
-        docs = [json.loads(Path(f).read_text(encoding="utf-8")) for f in (a.criteria, a.evidence, a.manifest)]
+        docs = [json.loads(Path(f).read_text(encoding="utf-8")) for f in (a.criteria, a.evidence, a.manifest, a.gates)]
         mf = docs[2].get("manifest", docs[2]) if isinstance(docs[2], dict) else docs[2]
         report = assess(docs[0], docs[1], mf, wu_id=a.wu, run_key=a.run_key, workspace=a.workspace,
                         head_sha=a.head, base_sha=a.base, evidence_dir=a.evidence_dir,
-                        approved_criteria_sha256=a.approved_criteria_sha256)
+                        approved_criteria_sha256=a.approved_criteria_sha256, gates=docs[3])
     except (AssuranceError, OSError, ValueError) as exc:
         print(f"REFUSED: {exc}", file=sys.stderr)
         return 2

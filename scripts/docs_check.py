@@ -106,7 +106,7 @@ def evaluate(root: Path) -> dict:
     text = "\n".join(_read(p) for p in doc_files(root))
     undocumented = [c for c in commands(root)
                     if not re.search(r"onecompany\.py\s+" + re.escape(c) + r"(?![\w-])", text)]
-    undocumented_manifests = [m for m in manifests(root) if m not in text]
+    undocumented_manifests = [m for m in manifests(root) if not re.search(r"(?<![\w./-])" + re.escape(m) + r"(?![\w-])", text)]
     pages = sorted({p.relative_to(root).as_posix() for p in doc_files(root)} | set(REQUIRED))
     return {"required_missing": missing, "broken_links": broken_links(root, pages),
             "undocumented_commands": undocumented,

@@ -89,6 +89,15 @@ class DocsCheckTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertEqual(json.loads(r.stdout)["undocumented_dependency_manifests"], [])
 
+    def test_service_manifest_doc_does_not_document_root_manifest(self):
+        svc = self.tmp / "svc"
+        svc.mkdir()
+        (svc / "requirements.txt").write_text("a==1\n")
+        (self.tmp / "requirements.txt").write_text("b==1\n")
+        (self.tmp / "docs" / "FAQ.md").write_text("install with `pip install -r svc/requirements.txt`\n")
+        out = json.loads(self.run_cli("--json").stdout)
+        self.assertEqual(out["undocumented_dependency_manifests"], ["requirements.txt"])
+
     def test_other_manifest_kinds_detected_but_ignored_dirs_and_symlinks_skipped(self):
         (self.tmp / "package.json").write_text("{}")
         (self.tmp / "pyproject.toml").write_text("")

@@ -51,6 +51,16 @@ class LearningCheckTests(unittest.TestCase):
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         self.assertIn("UNABLE TO VERIFY", r.stderr)
 
+    def test_duplicate_evidence_fails(self):
+        self.assert_fails(base(lessons=[lesson(1, evidence_refs=["pr#1", "pr#1"])]), "DUPLICATE_EVIDENCE L1")
+        self.assert_fails(base(lessons=[lesson(1, source_defects=["old1", "old1"])]), "DUPLICATE_EVIDENCE L1")
+        r = self.run_cli(base(lessons=[lesson(1, evidence_refs=["pr#1", "pr#2"])]))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_retired_lesson_duplicates_not_flagged(self):
+        r = self.run_cli(base(lessons=[lesson(1), lesson(2, status="retired", evidence_refs=["a", "a"])]))
+        self.assertEqual(r.returncode, 0, r.stdout)
+
     def test_clean_report_passes(self):
         r = self.run_cli(base())
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)

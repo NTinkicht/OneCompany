@@ -59,8 +59,8 @@ def _preview_key(value: str) -> str | None:
         return None
     # Fragment is deliberately dropped: browsers never send it, so URLs differing only by #fragment are the same endpoint.
     scheme, host = parts.scheme.lower(), (parts.hostname or "").lower()
-    if scheme not in ("http", "https") or not host:
-        return None
+    if scheme not in ("http", "https") or not host or "@" in parts.netloc:
+        return None  # userinfo (credentials in a URL) is refused, never normalised away
     if port is not None and port != {"http": 80, "https": 443}[scheme]:
         host = f"{host}:{port}"
     query = f"?{parts.query}" if parts.query else ""

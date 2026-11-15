@@ -84,6 +84,10 @@ def evaluate(data: dict) -> dict:
         "error_budget": sorted(i for i, s in by_id.items() if s["error_rate"] > MAX_ERROR_RATE),
         "latency_budget": sorted(i for i, s in by_id.items() if s["p95_ms"] > MAX_P95_MS),
         "untraced": sorted(i for i, s in by_id.items() if not s["ac_ids"]),
+        "duplicate_evidence": sorted(
+            i for i, s in by_id.items() if HEX64.fullmatch(s["evidence_sha256"])
+            and sum(o["evidence_sha256"] == s["evidence_sha256"] for o in by_id.values()) > 1),
+        "unknown_authorship": ["authors"] if not any(a.strip() for a in data["authors"]) else [],
         "independence": [data["certifier"]] if data["certifier"].strip().lower() in
                         {a.strip().lower() for a in data["authors"]} else [],
     }
@@ -92,7 +96,7 @@ def evaluate(data: dict) -> dict:
 
 
 LABELS = ("missing", "unexpected", "failed", "evidence", "stale_revision", "error_budget",
-          "latency_budget", "untraced", "independence")
+          "latency_budget", "untraced", "duplicate_evidence", "unknown_authorship", "independence")
 
 
 def main(argv: list[str] | None = None) -> int:

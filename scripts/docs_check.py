@@ -2,8 +2,10 @@
 """Deterministic, read-only documentation check (OC-P1-12 slice 1, #471).
 
 Reports (a) required docs that are missing, (b) relative markdown links that do
-not resolve inside the repository, and (c) ``onecompany.py`` commands that no
-README/docs page documents as ``onecompany.py <command>``. No network, no writes.
+not resolve inside the repository, (c) ``onecompany.py`` commands that no
+README/docs page documents as ``onecompany.py <command>``, and (d) dependency
+manifests (OC-P1-12 slice 2, #509) whose repo-relative path no page mentions.
+No network, no writes.
 Exit 0 clean, 1 findings, 2 unable to verify.
 """
 
@@ -73,6 +75,30 @@ def broken_links(root: Path, rels: list[str]) -> list[str]:
     return out
 
 
+MANIFEST = re.compile(r"requirements[^/]*\.txt|package\.json|pyproject\.toml")
+SKIP_DIRS = {".git", "node_modules"}
+
+
+def manifests(root: Path) -> list[str]:
+    out = []
+
+    def walk(directory: Path) -> None:
+        for entry in sorted(directory.iterdir()):
+            if entry.is_symlink():
+                continue
+            if entry.is_dir():
+                if entry.name not in SKIP_DIRS:
+                    walk(entry)
+            elif entry.is_file() and MANIFEST.fullmatch(entry.name):
+                out.append(entry.relative_to(root).as_posix())
+
+    try:
+        walk(root)
+    except OSError as exc:
+        raise ValueError(f"unreadable tree ({exc.__class__.__name__})") from exc
+    return out
+
+
 def evaluate(root: Path) -> dict:
     if not root.is_dir():
         raise ValueError("root is not a directory")
@@ -80,9 +106,11 @@ def evaluate(root: Path) -> dict:
     text = "\n".join(_read(p) for p in doc_files(root))
     undocumented = [c for c in commands(root)
                     if not re.search(r"onecompany\.py\s+" + re.escape(c) + r"(?![\w-])", text)]
+    undocumented_manifests = [m for m in manifests(root) if m not in text]
     pages = sorted({p.relative_to(root).as_posix() for p in doc_files(root)} | set(REQUIRED))
     return {"required_missing": missing, "broken_links": broken_links(root, pages),
-            "undocumented_commands": undocumented}
+            "undocumented_commands": undocumented,
+            "undocumented_dependency_manifests": undocumented_manifests}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -96,7 +124,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"docs-check: UNABLE TO VERIFY ({exc})", file=sys.stderr)
         return 2
     labels = (("required_missing", "REQUIRED_MISSING"), ("broken_links", "BROKEN_LINK"),
-              ("undocumented_commands", "UNDOCUMENTED_COMMAND"))
+              ("undocumented_commands", "UNDOCUMENTED_COMMAND"),
+              ("undocumented_dependency_manifests", "UNDOCUMENTED_DEPENDENCY_MANIFEST"))
     if args.json:
         print(json.dumps(result, sort_keys=True))
     else:

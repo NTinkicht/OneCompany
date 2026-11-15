@@ -77,6 +77,31 @@ class DocsCheckTests(unittest.TestCase):
         self.assertEqual(len(out["broken_links"]), 1)
         self.assertIn("escapes repository", out["broken_links"][0])
 
+    def test_undocumented_dependency_manifest_fails_until_documented(self):
+        svc = self.tmp / "svc"
+        svc.mkdir()
+        (svc / "requirements.txt").write_text("somepkg==1.0\n")
+        r = self.run_cli("--json")
+        self.assertEqual(r.returncode, 1)
+        self.assertEqual(json.loads(r.stdout)["undocumented_dependency_manifests"], ["svc/requirements.txt"])
+        (self.tmp / "docs" / "FAQ.md").write_text("install with `pip install -r svc/requirements.txt`\n")
+        r = self.run_cli("--json")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(json.loads(r.stdout)["undocumented_dependency_manifests"], [])
+
+    def test_other_manifest_kinds_detected_but_ignored_dirs_and_symlinks_skipped(self):
+        (self.tmp / "package.json").write_text("{}")
+        (self.tmp / "pyproject.toml").write_text("")
+        for ignored in (".git", "node_modules"):
+            (self.tmp / ignored).mkdir()
+            (self.tmp / ignored / "package.json").write_text("{}")
+        outside = self.tmp.parent / "outside-manifest-requirements.txt"
+        outside.write_text("x")
+        self.addCleanup(outside.unlink)
+        (self.tmp / "requirements-dev.txt").symlink_to(outside)
+        out = json.loads(self.run_cli("--json").stdout)
+        self.assertEqual(out["undocumented_dependency_manifests"], ["package.json", "pyproject.toml"])
+
     def test_unverifiable_inputs_exit_2(self):
         (self.tmp / "onecompany.py").write_text("print('no registry')\n")
         self.assertEqual(self.run_cli().returncode, 2)

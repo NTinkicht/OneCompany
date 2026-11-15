@@ -39,7 +39,7 @@ class CommsCheckTests(unittest.TestCase):
 
     def test_clean_report_passes(self):
         good = [msg("m1"), msg("m2", seq=2), msg("m3", actor="claude", seq=1),
-                msg("m4", kind="approval", authority="ledger", seq=3)]
+                msg("m4", kind="approval", authority="ledger", seq=3, revision="1" * 40)]
         r = self.run_cli(good)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
@@ -88,6 +88,29 @@ class CommsCheckTests(unittest.TestCase):
     def test_approval_without_declared_approvers_fails_closed(self):
         self.assert_fails([msg("m1", kind="approval", authority="ledger")], "UNAUTHORIZED_APPROVER m1",
                           approvers=None)
+
+    def test_approval_for_stale_revision_fails(self):
+        self.assert_fails([msg("m1", kind="approval", authority="ledger", revision="2" * 40)], "STALE_APPROVAL m1")
+
+    def test_approval_without_revision_fails_closed(self):
+        self.assert_fails([msg("m1", kind="approval", authority="ledger")], "STALE_APPROVAL m1 approval revision missing")
+
+    def test_approval_with_matching_revision_passes_case_insensitively(self):
+        r = self.run_cli([msg("m1", kind="approval", authority="ledger", revision="AB" * 20)], revision="ab" * 20)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_unapplied_stale_approval_is_ignored(self):
+        r = self.run_cli([msg("m1", kind="approval", authority="ledger", revision="2" * 40, effect="rejected")])
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_non_approval_needs_no_revision(self):
+        r = self.run_cli([msg("m1", kind="status")])
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_malformed_message_revision_is_unable_to_verify(self):
+        for bad in ("short", 5, ""):
+            r = self.run_cli([msg("m1", kind="approval", authority="ledger", revision=bad)])
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
 
     def test_unapplied_approval_does_not_need_approvers(self):
         r = self.run_cli([msg("m1", actor="claude", kind="approval", authority="ledger", effect="rejected")],

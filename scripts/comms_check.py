@@ -9,7 +9,9 @@ with messages in delivery order, each ``{"id", "actor", "seq": int>=0, "idempote
 trusted actor with a valid signature, apply each idempotency key once with one payload, keep
 ``seq`` strictly increasing per actor, stay within ``max_attempts``, never let a non-approval
 message claim approval, and only apply an approval whose authority is the ledger and whose actor is
-a declared ``approvers`` member (slice 2, #493; absent ``approvers`` fails closed). No network,
+a declared ``approvers`` member (slice 2, #493; absent ``approvers`` fails closed). An applied
+approval must also carry a ``revision`` equal to the report revision (slice 3, #517; missing or
+different is a stale approval and fails closed). No network,
 no writes, no clock.
 """
 
@@ -77,6 +79,8 @@ def load_report(path: Path) -> dict:
             raise ValueError(f"{mid} needs integer seq >= 0 and attempt >= 1")
         if not isinstance(m.get("payload_digest"), str) or not HEX64.fullmatch(m["payload_digest"]):
             raise ValueError(f"{mid} payload_digest must be a 64-hex digest")
+        if "revision" in m and (not isinstance(m["revision"], str) or not HEX40.fullmatch(m["revision"])):
+            raise ValueError(f"{mid} revision must be a 40-hex SHA")
         if not isinstance(m.get("claims_approval"), bool):
             raise ValueError(f"{mid} claims_approval must be a boolean")
         for field, allowed in (("kind", KINDS), ("authority", AUTHORITY),
@@ -95,7 +99,7 @@ def evaluate(report: dict) -> dict:
     applied = 0
     for m in report["messages"]:
         if m["effect"] != "applied":
-            continue
+            continue  # every check below (incl. approver and STALE_APPROVAL) runs only for applied messages
         applied += 1
         mid, actor, key = m["id"], m["actor"], m["idempotency_key"]
         if actor not in trusted or m["signature"] != "valid":
@@ -118,6 +122,9 @@ def evaluate(report: dict) -> dict:
             problems.append(f"UNTRUSTED_APPROVAL {mid} approval authority is {m['authority']}")
         if m["kind"] == "approval" and actor not in approvers:
             problems.append(f"UNAUTHORIZED_APPROVER {mid} {actor} is not a declared ledger approver")
+        if m["kind"] == "approval" and str(m.get("revision", "")).lower() != report["revision"].lower():
+            problems.append(f"STALE_APPROVAL {mid} approval revision {m.get('revision', 'missing')} "
+                            f"is not the report revision")
     return {"messages": len(report["messages"]), "applied": applied, "problems": problems}
 
 

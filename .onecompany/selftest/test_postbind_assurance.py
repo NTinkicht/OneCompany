@@ -41,12 +41,20 @@ class PostbindAssuranceTests(unittest.TestCase):
                 "head_sha": self.head, "base_sha": self.base, "build_digest": self.manifest["build_digest"],
                 "artifact": name, "artifact_sha256": d}
 
-    def run_assess(self, items=None, criteria=None, manifest=None, head=None, digest=None):
+    def good_gates(self):
+        return {"schema": pa.SCHEMA + "/gates",
+                "ci": {"head_sha": self.head, "base_sha": self.base, "conclusion": "success",
+                       "checks": [{"name": "selftest", "conclusion": "success"}]},
+                "review": {"head_sha": self.head, "base_sha": self.base, "state": "APPROVED", "reviewer_login": "ntk-reviewer[bot]",
+                           "author_logins": ["claude"]}}
+
+    def run_assess(self, items=None, criteria=None, manifest=None, head=None, digest=None, gates="default"):
         return pa.assess(criteria or self.criteria,
                          {"schema": pa.SCHEMA + "/evidence", "items": self.items if items is None else items},
                          manifest or self.manifest, wu_id=WU, run_key=RK, workspace=self.ws,
                          head_sha=head or self.head, base_sha=self.base, evidence_dir=self.ev,
-                         approved_criteria_sha256=digest or pa.criteria_digest(self.criteria["criteria"]))
+                         approved_criteria_sha256=digest or pa.criteria_digest(self.criteria["criteria"]),
+                         gates=self.good_gates() if gates == "default" else gates)
 
     def test_all_covered_passes(self):
         r = self.run_assess()
@@ -136,20 +144,69 @@ class PostbindAssuranceTests(unittest.TestCase):
             self.run_assess(criteria=dup)
         r = pa.assess(self.criteria, None, self.manifest, wu_id=WU, run_key=RK, workspace=self.ws,
                       head_sha=self.head, base_sha=self.base, evidence_dir=self.ev,
-                      approved_criteria_sha256=pa.criteria_digest(self.criteria["criteria"]))
+                      approved_criteria_sha256=pa.criteria_digest(self.criteria["criteria"]),
+                      gates=self.good_gates())
         self.assertFalse(r["ok"]); self.assertEqual(r["covered"], [])
+
+    def assert_gate_problem(self, gates, fragment):
+        r = self.run_assess(gates=gates)
+        self.assertFalse(r["ok"], r)
+        self.assertTrue(any(fragment in p for p in r["problems"]), r["problems"])
+        self.assertEqual(r["uncovered"], [])  # criteria stay covered: only the gate blocks
+
+    def test_gates_positive_control(self):
+        self.assertTrue(self.run_assess(gates=self.good_gates())["ok"])
+
+    def test_gates_missing_or_malformed_fail_closed(self):
+        for g in (None, {}, {"schema": "x"}, [], {"schema": pa.SCHEMA + "/gates"}):
+            with self.subTest(g=g):
+                self.assertFalse(self.run_assess(gates=g)["ok"])
+
+    def test_ci_gate_negatives(self):
+        cases = (("head_sha", "1" * 40, "ci gate: stale"), ("base_sha", "2" * 40, "ci gate: stale"),
+                 ("conclusion", "failure", "not success"), ("checks", [], "no checks"),
+                 ("checks", [{"name": "a", "conclusion": "failure"}], "a check is not success"),
+                 ("checks", [{"name": "a", "conclusion": "success"}, {"conclusion": "success"}], "a check is not success"))
+        for key, val, frag in cases:
+            with self.subTest(key=key, val=val):
+                g = self.good_gates(); g["ci"][key] = val
+                self.assert_gate_problem(g, frag)
+        g = self.good_gates(); del g["ci"]
+        self.assert_gate_problem(g, "ci gate: missing")
+
+    def test_review_gate_negatives(self):
+        cases = (("head_sha", "1" * 40, "review gate: stale"), ("base_sha", "2" * 40, "review gate: stale"),
+                 ("base_sha", None, "review gate: stale"), ("state", "COMMENTED", "not APPROVED"),
+                 ("state", "CHANGES_REQUESTED", "not APPROVED"), ("reviewer_login", "", "identity missing"),
+                 ("author_logins", [], "author logins missing"),
+                 ("reviewer_login", "Claude", "not independent"))
+        for key, val, frag in cases:
+            with self.subTest(key=key, val=val):
+                g = self.good_gates(); g["review"][key] = val
+                self.assert_gate_problem(g, frag)
+        g = self.good_gates(); g["review"]["author_logins"] = ["codex", " NTK-Reviewer[bot] "]
+        self.assert_gate_problem(g, "not independent")
+        g = self.good_gates(); del g["review"]["base_sha"]
+        self.assert_gate_problem(g, "review gate: stale or mismatched base_sha")
+        g = self.good_gates(); del g["review"]
+        self.assert_gate_problem(g, "review gate: missing")
 
     def test_cli_exit_codes(self):
         d = Path(self._t.name)
         (d / "c.json").write_text(json.dumps(self.criteria))
         (d / "e.json").write_text(json.dumps({"schema": pa.SCHEMA + "/evidence", "items": self.items}))
         (d / "m.json").write_text(json.dumps({"manifest": self.manifest}))
+        (d / "g.json").write_text(json.dumps(self.good_gates()))
         args = ["--wu", WU, "--run-key", RK, "--workspace", self.ws, "--head", self.head, "--base", self.base,
                 "--criteria", str(d / "c.json"), "--evidence", str(d / "e.json"), "--manifest", str(d / "m.json"),
-                "--evidence-dir", str(self.ev),
+                "--evidence-dir", str(self.ev), "--gates", str(d / "g.json"),
                 "--approved-criteria-sha256", pa.criteria_digest(self.criteria["criteria"])]
         self.assertEqual(pa.main(args), 0)
         (d / "e.json").write_text(json.dumps({"schema": pa.SCHEMA + "/evidence", "items": self.items[:1]}))
+        self.assertEqual(pa.main(args), 1)
+        bad = self.good_gates(); bad["review"]["state"] = "COMMENTED"
+        (d / "g.json").write_text(json.dumps(bad))
+        (d / "e.json").write_text(json.dumps({"schema": pa.SCHEMA + "/evidence", "items": self.items}))
         self.assertEqual(pa.main(args), 1)
         (d / "c.json").write_text("{not json")
         self.assertEqual(pa.main(args), 2)

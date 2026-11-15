@@ -52,9 +52,15 @@ def check_tokens(data: object) -> tuple[list[dict], list[str]]:
     dirs = data.get("dir_support")
     if not isinstance(dirs, list) or not {"ltr", "rtl"} <= set(map(str, dirs)):
         problems.append("dir_support: must list ltr and rtl")
+    spacing = data.get("spacing_px")
+    if not isinstance(spacing, list) or not spacing \
+            or any(isinstance(v, bool) or not isinstance(v, int) or v < 0 for v in spacing) \
+            or spacing[0] != 0 or any(a >= b for a, b in zip(spacing, spacing[1:])):
+        problems.append("spacing_px: must be a strictly ascending list of non-negative integers starting at 0")
     themes = data.get("themes")
     if not isinstance(themes, dict):
         return results, problems + ["themes: must be an object"]
+    names_by_theme: dict[str, set[str]] = {}
     for theme in REQUIRED_THEMES:
         if theme not in themes:
             problems.append(f"themes.{theme}: missing")
@@ -64,6 +70,7 @@ def check_tokens(data: object) -> tuple[list[dict], list[str]]:
             problems.append(f"themes.{theme}.pairs: must be a non-empty list")
             continue
         kinds = set()
+        seen: set[str] = set()
         for pair in pairs:
             name = pair.get("name") if isinstance(pair, dict) else None
             label = f"{theme}/{name}"
@@ -71,6 +78,10 @@ def check_tokens(data: object) -> tuple[list[dict], list[str]]:
             if kind not in MIN_RATIO or not isinstance(name, str) or not name:
                 problems.append(f"{label}: unknown kind or missing name")
                 continue
+            if name in seen:
+                problems.append(f"{label}: duplicate pair name")
+                continue
+            seen.add(name)
             kinds.add(kind)
             try:
                 ratio = contrast(pair.get("fg"), pair.get("bg"))
@@ -82,8 +93,13 @@ def check_tokens(data: object) -> tuple[list[dict], list[str]]:
                             "required": MIN_RATIO[kind], "ok": ok})
             if not ok:
                 problems.append(f"{label}: contrast {ratio:.2f} < {MIN_RATIO[kind]}")
+        names_by_theme[theme] = seen
         if "focus" not in kinds:
             problems.append(f"themes.{theme}: missing focus-ring pair")
+    all_names = set().union(*names_by_theme.values()) if names_by_theme else set()
+    for theme in sorted(names_by_theme):
+        for missing in sorted(all_names - names_by_theme[theme]):
+            problems.append(f"themes.{theme}: missing pair {missing} declared in another theme")
     return results, problems
 
 

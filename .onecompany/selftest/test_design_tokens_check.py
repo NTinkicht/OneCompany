@@ -50,6 +50,24 @@ class DesignTokensTests(unittest.TestCase):
         self.assertTrue(dtc.check_tokens([])[1])
         self.assertTrue(dtc.check_tokens({"themes": []})[1])
 
+    def test_duplicate_pair_name_rejected(self):
+        p = self.mutate(lambda d: d["themes"]["light"]["pairs"].append(dict(d["themes"]["light"]["pairs"][0])))
+        self.assertIn("light/text-on-surface: duplicate pair name", p)
+
+    def test_theme_parity_rejected(self):
+        p = self.mutate(lambda d: d["themes"]["dark"].update(
+            pairs=[x for x in d["themes"]["dark"]["pairs"] if x["name"] != "danger-label"]))
+        self.assertIn("themes.dark: missing pair danger-label declared in another theme", p)
+        p = self.mutate(lambda d: d["themes"]["light"]["pairs"].append(
+            {"name": "extra", "kind": "ui", "fg": "#000000", "bg": "#FFFFFF"}))
+        self.assertIn("themes.dark: missing pair extra declared in another theme", p)
+
+    def test_spacing_scale_validated(self):
+        for bad in (None, [], [4, 8], [0, 8, 4], [0, 4, 4], [0, -4], [0, 4.5], [0, True], "0,4"):
+            p = self.mutate(lambda d, b=bad: d.update(spacing_px=b))
+            self.assertTrue(any(x.startswith("spacing_px:") for x in p), bad)
+        self.assertEqual(self.mutate(lambda d: d.update(spacing_px=[0, 2, 100])), [])
+
     def run_cli(self, data=None):
         args = [sys.executable, "-I", str(ROOT / "scripts" / "design_tokens_check.py")]
         if data is not None:

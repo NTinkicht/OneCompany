@@ -63,6 +63,15 @@ class LearningCheckTests(unittest.TestCase):
         r = self.run_cli(base(lessons=[lesson(1), lesson(2, status="retired", evidence_refs=[])]))
         self.assertEqual(r.returncode, 0, r.stdout)
 
+    def test_validated_lesson_without_source_defects_fails(self):
+        self.assert_fails(base(lessons=[lesson(1, source_defects=[])]), "UNGROUNDED_LESSON L1")
+        r = self.run_cli(base())
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+
+    def test_retired_lesson_without_source_defects_is_not_flagged(self):
+        r = self.run_cli(base(lessons=[lesson(1), lesson(2, status="retired", source_defects=[])]))
+        self.assertEqual(r.returncode, 0, r.stdout)
+
     def test_leaked_benchmark_fails(self):
         self.assert_fails(base(lessons=[lesson(1, source_defects=["h3"])]), "LEAKED_BENCHMARK L1 learned from held-out defect h3")
 

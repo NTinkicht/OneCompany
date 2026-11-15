@@ -10,7 +10,7 @@ The `*-check` and `*-report` commands are deterministic and read-only on supplie
 | `python onecompany.py ac-coverage` | `scripts/ac_coverage.py` | Deterministic, read-only acceptance-criterion coverage report (OC-P1-04, #435). |
 | `python onecompany.py assurance` | `scripts/assurance_gate.py` | Engineering assurance structure gate with optional trusted attestation. |
 | `python onecompany.py attest` | `scripts/trusted_assurance.py` | Base-trusted merge-grade assurance attestation for CompanyOS. |
-| `python onecompany.py comms-check` | `scripts/comms_check.py` | Deterministic, read-only agent-communication check (OC-P1-06 slice 1, #461; slice 2, #493: approvals only from declared `approvers`). |
+| `python onecompany.py comms-check` | `scripts/comms_check.py` | Deterministic, read-only agent-communication check (OC-P1-06 slice 1, #461; slice 2, #493: approvals only from declared `approvers`; slice 3, #517: applied approvals must carry the report revision). |
 | `python onecompany.py contract-check` | `scripts/contract_check.py` | Deterministic, read-only contract/property/API/DB suite check (OC-P1-04 slice 10, #453). |
 | `python onecompany.py deps-check` | `scripts/deps_check.py` | Deterministic, read-only dependency-update / staged-release check (OC-P1-09 slice 1, #463). |
 | `python onecompany.py design-tokens-check` | `scripts/design_tokens_check.py` | Read-only design-token gate (OC-P1-01 slice 1). |

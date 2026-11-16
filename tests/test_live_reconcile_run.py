@@ -41,13 +41,14 @@ def inputs(**changes):
 
 
 class Cli(unittest.TestCase):
-    def run_cli(self, data=None, raw=None, runner=None, repo=REPO):
+    def run_cli(self, data=None, raw=None, runner=None, repo=REPO, clock=None, extra=()):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "in.json"
             path.write_text(raw if raw is not None else json.dumps(data), encoding="utf-8")
             out, err = io.StringIO(), io.StringIO()
             with redirect_stdout(out), redirect_stderr(err):
-                code = cli.main(["--repo", repo, "--inputs", str(path)], runner=runner, now=NOW)
+                code = cli.main(["--repo", repo, "--inputs", str(path), *extra], runner=runner,
+                                clock=clock or (lambda: NOW))
         return code, out.getvalue(), err.getvalue()
 
     def test_verdict_and_exit_match_reconcile_live(self):
@@ -105,6 +106,15 @@ class Cli(unittest.TestCase):
         code, out, _ = self.run_cli(inputs(main_sha="e" * 40), runner=gh_runner(Server()))
         self.assertEqual(1, code)
         self.assertIn("INCONSISTENT", out)
+
+    def test_freshness_uses_a_clock_sampled_after_capture(self):
+        import datetime as dt
+        ticks = iter([NOW, NOW + dt.timedelta(seconds=120)])  # start, then after slow capture
+        code, out, _ = self.run_cli(inputs(), runner=gh_runner(Server()),
+                                    clock=lambda: next(ticks), extra=("--max-age-seconds", "30"))
+        self.assertEqual(1, code)
+        self.assertIn("INCONSISTENT", out)
+        self.assertIn("freshness", out)
 
     def test_registry_routes_to_script(self):
         r = subprocess.run([sys.executable, str(ROOT / "onecompany.py"), "live-reconcile", "--help"],

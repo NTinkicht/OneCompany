@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import datetime as dt
 import json
-from typing import Any, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 from github_bundle_capture import capture_bundle
 from github_bundle_snapshot import InvalidBundle, snapshot_from_bundle
@@ -28,14 +28,15 @@ class LiveReconciliationRefused(ValueError):
 
 
 def reconcile_live(
-    fetch: Fetch, repo: str, pulls: Sequence[Mapping[str, Any]], *, now: dt.datetime,
+    fetch: Fetch, repo: str, pulls: Sequence[Mapping[str, Any]], *, now: "dt.datetime | Callable[[], dt.datetime]",
     observed_at: str, main_sha: str, active_lease_issue_ids: Sequence[int],
     retired_pilot_issue_ids: Sequence[int], write_attempts: Sequence[Any],
     trusted_reviewers: Sequence[str], app_slugs: Mapping[str, str],
     max_pages: int = DEFAULT_MAX_PAGES, max_age_seconds: int = DEFAULT_MAX_AGE_SECONDS,
 ) -> dict[str, Any]:
     """Return the ``build_report`` verdict for one live capture, or raise."""
-    if type(now) is not dt.datetime or now.tzinfo is None or now.utcoffset() is None:
+    sample = now if callable(now) else None  # sampled after capture so slow captures age
+    if sample is None and (type(now) is not dt.datetime or now.tzinfo is None or now.utcoffset() is None):
         raise LiveReconciliationRefused("invalid now")
     try:
         bundle = capture_bundle(
@@ -50,6 +51,10 @@ def reconcile_live(
         snapshot = snapshot_from_bundle(bundle)
     except InvalidBundle as exc:
         raise LiveReconciliationRefused(f"bundle refused: {exc}") from None
+    if sample is not None:
+        now = sample()
+        if type(now) is not dt.datetime or now.tzinfo is None or now.utcoffset() is None:
+            raise LiveReconciliationRefused("invalid now")
     try:
         return build_report(json.loads(json.dumps(snapshot)), now, max_age_seconds)
     except (InvalidSnapshot, TypeError, ValueError) as exc:

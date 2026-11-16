@@ -34,6 +34,12 @@ class LiveReconcileTests(unittest.TestCase):
         self.assertEqual("INCONSISTENT", report["status"])
         self.assertTrue(report["findings"]["freshness"])
 
+    def test_callable_now_is_sampled_after_capture(self):
+        report = run(now=lambda: NOW + dt.timedelta(hours=2))
+        self.assertEqual("INCONSISTENT", report["status"])
+        with self.assertRaises(LiveReconciliationRefused):
+            run(now=lambda: dt.datetime(2026, 10, 25, 14, 0))
+
     def test_max_age_is_passed_through(self):
         report = run(max_age_seconds=1)
         self.assertEqual(1, report["max_age_seconds"])

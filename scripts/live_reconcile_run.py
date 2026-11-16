@@ -48,7 +48,7 @@ def load_inputs(path: Path) -> dict:
 
 
 def main(argv: list[str] | None = None, runner: Callable | None = None,
-         now: dt.datetime | None = None) -> int:
+         clock: Callable[[], dt.datetime] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Read-only live GitHub reconciliation (gh api GET only).")
     parser.add_argument("--repo", required=True, help="OWNER/REPO to reconcile")
     parser.add_argument("--inputs", required=True, type=Path, help="JSON file with the caller baseline")
@@ -58,10 +58,11 @@ def main(argv: list[str] | None = None, runner: Callable | None = None,
         if not REPO.fullmatch(args.repo):
             raise ValueError("invalid repo")
         data = load_inputs(args.inputs)
-        clock = now or dt.datetime.now(dt.timezone.utc)
+        clock = clock or (lambda: dt.datetime.now(dt.timezone.utc))
+        started = clock()
         report = reconcile_live(
             make_gh_fetch(runner or subprocess_runner), args.repo, data["pulls"], now=clock,
-            observed_at=clock.isoformat(), main_sha=data["main_sha"],
+            observed_at=started.isoformat(), main_sha=data["main_sha"],
             active_lease_issue_ids=data["active_lease_issue_ids"],
             retired_pilot_issue_ids=data["retired_pilot_issue_ids"],
             write_attempts=data["write_attempts"], trusted_reviewers=data["trusted_reviewers"],

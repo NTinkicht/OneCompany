@@ -49,6 +49,7 @@ COMMANDS = {
     "app-check": ["app_check.py"],
     "guided-app": ["guided_app.py"],
     "certify-check": ["certify_check.py"],
+    "live-reconcile": ["live_reconcile_run.py"],
     "shadow-migration": ["shadow_migration.py"],
     "cutover-readiness": ["cutover_readiness.py"],
     "doctor": ["doctor.py"], "status": ["status.py"], "check": ["check.py"], "validate": ["validate_all.py"], "schema-validate": ["schema_validate.py"],

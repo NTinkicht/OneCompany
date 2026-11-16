@@ -117,6 +117,8 @@ class Cli(unittest.TestCase):
         self.assertIn("freshness", out)
 
     def findings(self, **changes):
+        """Run the CLI on the baseline ``inputs()`` overridden by ``changes``, served by the
+        fixture ``Server()`` through ``gh_runner`` (no network); return (exit code, findings dict)."""
         code, out, err = self.run_cli(inputs(**changes), runner=gh_runner(Server()))
         self.assertEqual("", err)
         return code, json.loads(out)["findings"]
@@ -137,9 +139,13 @@ class Cli(unittest.TestCase):
         self.assertIn(["ai/1-feature", "RETIRED_PILOT_REACTIVATED"], found["branches"])
 
     def test_untrusted_reviewer_approval_is_not_accepted(self):
-        code, found = self.findings(trusted_reviewers=[])
+        # The fixture approval is by ntk-reviewer[bot]; trusting only another login must
+        # surface UNTRUSTED_REVIEWER_APPROVAL (review 21 on PR 9). The clean control must not.
+        _, clean = self.findings()
+        self.assertNotIn("UNTRUSTED_REVIEWER_APPROVAL", [f[2] for f in clean["reviews"]])
+        code, found = self.findings(trusted_reviewers=["other[bot]"])
         self.assertEqual(1, code)
-        self.assertTrue(any(f[0] == 9 for f in found["reviews"]), found["reviews"])
+        self.assertIn([9, "21", "UNTRUSTED_REVIEWER_APPROVAL"], found["reviews"])
 
     def test_recorded_head_that_differs_from_live_head_is_stale(self):
         spec = pull_spec(recorded_head_sha="d" * 40)

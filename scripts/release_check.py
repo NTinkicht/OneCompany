@@ -99,6 +99,14 @@ def check_evidence(evidence, now: datetime, stop_flag=None) -> list[str]:
         findings.add("CI_NOT_GREEN")
     if ci.get("head_sha") != head:
         findings.add("CI_HEAD_MISMATCH")
+    base = top.get("base_sha")
+    if not (isinstance(base, str) and SHA.fullmatch(base)) or ci.get("base_sha") != base:
+        findings.add("CI_BASE_MISMATCH")
+    reviewer, authors = review.get("reviewer"), review.get("authors")
+    names = [a.strip().lower() for a in authors if isinstance(a, str) and a.strip()] if isinstance(authors, list) else []
+    if not (isinstance(reviewer, str) and reviewer.strip()) or not names or len(names) != len(authors) \
+            or reviewer.strip().lower() in names:
+        findings.add("REVIEWER_NOT_INDEPENDENT")
     if review.get("state") != "APPROVED":
         findings.add("REVIEW_NOT_APPROVED")
     if review.get("head_sha") != head:
@@ -110,6 +118,11 @@ def check_evidence(evidence, now: datetime, stop_flag=None) -> list[str]:
         findings.add("ROLLBACK_DRILL_NOT_PASSED")
     if not (isinstance(rollback.get("previous_version"), str) and rollback["previous_version"].strip()):
         findings.add("ROLLBACK_PREVIOUS_VERSION_MISSING")
+    if any(drill.get("head_sha") != head for drill in (rollback, stop, backup)):
+        findings.add("DRILL_HEAD_MISMATCH")
+    if isinstance(rollback.get("previous_version"), str) and isinstance(top.get("release_version"), str) \
+            and rollback["previous_version"].strip() == top["release_version"].strip():
+        findings.add("ROLLBACK_NOOP")
     if stop.get("passed") is not True:
         findings.add("STOP_DRILL_NOT_PASSED")
     if backup.get("verified") is not True:

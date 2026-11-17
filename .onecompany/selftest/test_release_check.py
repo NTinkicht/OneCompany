@@ -127,8 +127,10 @@ class ReleaseEvidenceTests(unittest.TestCase):
             "ci": {"conclusion": "success", "head_sha": self.HEAD, "base_sha": self.BASE},
             "review": {"state": "APPROVED", "head_sha": self.HEAD, "reviewer": "ntk-reviewer[bot]", "authors": ["claude"]},
             "provider": {"status": "up"},
-            "rollback_drill": {"passed": True, "previous_version": "1.3.0", "restored_version": "1.3.0", "head_sha": self.HEAD},
-            "stop_drill": {"passed": True, "head_sha": self.HEAD}, "backup": {"verified": True, "head_sha": self.HEAD, "restore_tested": True,
+            "rollback_drill": {"passed": True, "previous_version": "1.3.0", "restored_version": "1.3.0", "head_sha": self.HEAD,
+                               "observed_at": "2026-11-14T11:30:00Z"},
+            "stop_drill": {"passed": True, "head_sha": self.HEAD, "observed_at": "2026-11-14T11:30:00Z"},
+            "backup": {"verified": True, "head_sha": self.HEAD, "restore_tested": True, "observed_at": "2026-11-14T11:30:00Z",
                        "digest": "e" * 64, "restored_digest": "e" * 64},
             "emergency_stop_active": False,
             "observed_at": "2026-11-14T11:30:00Z", "max_age_seconds": 3600,
@@ -188,7 +190,8 @@ class ReleaseEvidenceTests(unittest.TestCase):
         self.assertEqual(self.findings(lambda d: d["backup"].update(digest="E" * 64, restored_digest="E" * 64)), code)
         self.assertEqual(self.findings(lambda d: d["backup"].update(digest="e" * 63, restored_digest="e" * 63)), code)
         self.assertEqual(self.findings(lambda d: d.pop("backup")), sorted(
-            ["BACKUP_NOT_VERIFIED", "BACKUP_RESTORE_NOT_PROVEN", "BACKUP_DIGEST_MISMATCH", "DRILL_HEAD_MISMATCH"]))
+            ["BACKUP_NOT_VERIFIED", "BACKUP_RESTORE_NOT_PROVEN", "BACKUP_DIGEST_MISMATCH", "DRILL_HEAD_MISMATCH",
+             "DRILL_TIME_INVALID"]))
 
     def test_independence_and_drill_binding_fail_closed(self):
         only = lambda code, mutate: self.assertEqual(self.findings(mutate), [code])  # noqa: E731
@@ -199,6 +202,19 @@ class ReleaseEvidenceTests(unittest.TestCase):
         only("CI_BASE_MISMATCH", lambda d: d.pop("base_sha"))
         for drill in ("rollback_drill", "stop_drill"):
             only("DRILL_HEAD_MISMATCH", lambda d, k=drill: d[k].pop("head_sha"))
+
+    def test_each_drill_must_be_individually_fresh(self):
+        # Evidence refreshed at the top level cannot launder an old or unstamped drill.
+        for drill in ("rollback_drill", "stop_drill", "backup"):
+            self.assertEqual(self.findings(lambda d, k=drill: d[k].update(observed_at="2026-11-14T10:00:00Z")),
+                             ["DRILL_STALE"], drill)
+            self.assertEqual(self.findings(lambda d, k=drill: d[k].pop("observed_at")), ["DRILL_TIME_INVALID"], drill)
+            self.assertEqual(self.findings(lambda d, k=drill: d[k].update(observed_at="2026-11-14T11:30:00")),
+                             ["DRILL_TIME_INVALID"], drill)
+            self.assertEqual(self.findings(lambda d, k=drill: d[k].update(observed_at="2026-11-14T13:00:00Z")),
+                             ["DRILL_TIME_INVALID"], drill)
+            self.assertEqual(self.findings(lambda d, k=drill: d[k].update(observed_at=12345)),
+                             ["DRILL_TIME_INVALID"], drill)
 
     def test_repository_stop_flag_refuses_even_if_evidence_claims_clear(self):
         self.assertEqual(self.findings(stop_flag=True), ["EMERGENCY_STOP_ACTIVE"])

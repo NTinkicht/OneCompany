@@ -43,6 +43,7 @@ def registered_commands(root: Path) -> set[str]:
 
 EVIDENCE_MAX_BYTES = 1_000_000
 SHA = re.compile(r"[0-9a-f]{40}")
+DIGEST = re.compile(r"[0-9a-f]{64}")
 ENVIRONMENTS = ("staging", "test")
 
 
@@ -131,6 +132,11 @@ def check_evidence(evidence, now: datetime, stop_flag=None) -> list[str]:
         findings.add("STOP_DRILL_NOT_PASSED")
     if backup.get("verified") is not True:
         findings.add("BACKUP_NOT_VERIFIED")
+    if backup.get("restore_tested") is not True:
+        findings.add("BACKUP_RESTORE_NOT_PROVEN")
+    digest, restored_digest = backup.get("digest"), backup.get("restored_digest")
+    if not (isinstance(digest, str) and DIGEST.fullmatch(digest)) or digest != restored_digest:
+        findings.add("BACKUP_DIGEST_MISMATCH")
     if top.get("emergency_stop_active") is not False or stop_flag is True:
         findings.add("EMERGENCY_STOP_ACTIVE")
     observed, max_age = _timestamp(top.get("observed_at")), top.get("max_age_seconds")

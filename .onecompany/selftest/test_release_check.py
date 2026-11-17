@@ -127,10 +127,10 @@ class ReleaseEvidenceTests(unittest.TestCase):
             "ci": {"conclusion": "success", "head_sha": self.HEAD, "base_sha": self.BASE, "observed_at": "2026-11-14T11:30:00Z"},
             "review": {"state": "APPROVED", "head_sha": self.HEAD, "base_sha": self.BASE, "reviewer": "ntk-reviewer[bot]", "authors": ["claude"], "observed_at": "2026-11-14T11:30:00Z"},
             "provider": {"status": "up", "observed_at": "2026-11-14T11:30:00Z"},
-            "rollback_drill": {"passed": True, "previous_version": "1.3.0", "restored_version": "1.3.0", "head_sha": self.HEAD,
+            "rollback_drill": {"passed": True, "previous_version": "1.3.0", "restored_version": "1.3.0", "head_sha": self.HEAD, "base_sha": self.BASE,
                                "observed_at": "2026-11-14T11:30:00Z"},
-            "stop_drill": {"passed": True, "writes_after_stop": 0, "head_sha": self.HEAD, "observed_at": "2026-11-14T11:30:00Z"},
-            "backup": {"verified": True, "head_sha": self.HEAD, "restore_tested": True, "observed_at": "2026-11-14T11:30:00Z",
+            "stop_drill": {"passed": True, "writes_after_stop": 0, "head_sha": self.HEAD, "base_sha": self.BASE, "observed_at": "2026-11-14T11:30:00Z"},
+            "backup": {"verified": True, "head_sha": self.HEAD, "base_sha": self.BASE, "restore_tested": True, "observed_at": "2026-11-14T11:30:00Z",
                        "digest": "e" * 64, "restored_digest": "e" * 64},
             "emergency_stop_active": False,
             "observed_at": "2026-11-14T11:30:00Z", "max_age_seconds": 3600,
@@ -155,6 +155,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
             "CI_BASE_MISMATCH": lambda d: d["ci"].update(base_sha="c" * 40),
             "REVIEWER_NOT_INDEPENDENT": lambda d: d["review"].update(reviewer="Claude"),
             "DRILL_HEAD_MISMATCH": lambda d: d["backup"].update(head_sha="b" * 40),
+            "DRILL_BASE_MISMATCH": lambda d: d["backup"].update(base_sha="c" * 40),
             "ROLLBACK_NOT_RESTORED_TO_PREVIOUS": lambda d: d["rollback_drill"].update(restored_version="1.2.0"),
             "ROLLBACK_NOOP": lambda d: d["rollback_drill"].update(previous_version=" 1.4.0", restored_version="1.4.0"),
             "REVIEW_NOT_APPROVED": lambda d: d["review"].update(state="CHANGES_REQUESTED"),
@@ -224,6 +225,18 @@ class ReleaseEvidenceTests(unittest.TestCase):
         only("CI_BASE_MISMATCH", lambda d: d.pop("base_sha"))
         for drill in ("rollback_drill", "stop_drill"):
             only("DRILL_HEAD_MISMATCH", lambda d, k=drill: d[k].pop("head_sha"))
+
+    def test_each_drill_must_be_bound_to_the_evidence_base(self):
+        # Positive control: the good fixture's drills carry the evidence base and pass.
+        self.assertEqual(self.findings(), [])
+        for drill in ("rollback_drill", "stop_drill", "backup"):
+            for mutate in (lambda d, k=drill: d[k].update(base_sha="c" * 40), lambda d, k=drill: d[k].pop("base_sha"),
+                           lambda d, k=drill: d[k].update(base_sha=7), lambda d, k=drill: d[k].update(base_sha=None)):
+                self.assertEqual(self.findings(mutate), ["DRILL_BASE_MISMATCH"])
+        # Matching CI and review bases cannot launder a drill run against another base.
+        self.assertEqual(self.findings(lambda d: d["stop_drill"].update(base_sha="b" * 40)), ["DRILL_BASE_MISMATCH"])
+        # An invalid evidence base is reported once, as CI_BASE_MISMATCH, not also per drill.
+        self.assertEqual(self.findings(lambda d: d.pop("base_sha")), ["CI_BASE_MISMATCH"])
 
     def test_review_must_be_bound_to_the_evidence_base(self):
         # Positive control: the good fixture carries a matching review base and passes.

@@ -625,3 +625,235 @@ class RetirementTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---------- codex engine ----------
+
+CLAUDE_COMMITS = [{"commit": {"message": "feat: thing\n\nMaterial-Author: claude"}}]
+CODEX = {"login": "chatgpt-codex-connector[bot]", "type": "Bot"}
+MERGE_HEAD = "e" * 40
+PATCH = "@@ -1 +1 @@\n-a\n+b"
+
+
+BASE_TIME = "2026-11-17T04:00:00Z"
+AFTER_BASE = "2026-11-17T05:00:00Z"
+BEFORE_BASE = "2026-11-17T03:00:00Z"
+
+
+def codex_state_comment(sha, status="completed", user=CODEX, updated_at=AFTER_BASE):
+    state = {"code_review": {"commit_sha": sha, "has_any_findings": True,
+                             "has_unresolved_findings": True, "status": status},
+             "security_review": {"commit_sha": None}}
+    return {"id": 5, "user": user, "updated_at": updated_at,
+            "body": f"<!-- codex-pull-request-review-summary --> <!-- codex-review-state:v1 "
+                    f"{json.dumps(state)} -->\n### Codex Review"}
+
+
+class CodexGitHub(FakeGitHub):
+    """FakeGitHub plus GraphQL review threads and the compare endpoint."""
+
+    def __init__(self, *, unresolved=0, threads_error=False, compare=None, then_files=None,
+                 base_time=BASE_TIME, **kw):
+        kw.setdefault("commits", CLAUDE_COMMITS)
+        super().__init__(**kw)
+        for f in self.files:
+            f.setdefault("status", "modified")
+            f.setdefault("patch", PATCH)
+            f.setdefault("changes", 2)
+        self.unresolved, self.threads_error = unresolved, threads_error
+        self.compare, self.then_files = compare or {}, then_files
+        self.graphql_calls = 0
+        self.base_time = base_time
+
+    def graphql(self, query, variables):
+        self.graphql_calls += 1
+        if self.threads_error:
+            return {"errors": [{"message": "nope"}]}
+        nodes = [{"isResolved": False}] * self.unresolved + [{"isResolved": True}]
+        return {"data": {"repository": {"pullRequest": {"reviewThreads": {
+            "nodes": nodes, "pageInfo": {"hasNextPage": False, "endCursor": None}}}}}}
+
+    def get(self, path):
+        if "/commits/" in path and "/pulls/" not in path:
+            return {"commit": {"committer": {"date": self.base_time}}}
+        if "/compare/" in path:
+            spec = path.rsplit("/compare/", 1)[1]
+            if spec.startswith(BASE + "..."):
+                files = self.then_files if self.then_files is not None else [dict(f) for f in self.files]
+                return {"files": files}
+            return self.compare.get(spec, {"status": "diverged", "behind_by": 1, "commits": []})
+        return super().get(path)
+
+
+def merge_only(reviewed, head=HEAD, parents=2):
+    return {f"{reviewed}...{head}": {"status": "ahead", "behind_by": 0, "ahead_by": 1,
+                                      "commits": [{"parents": [{}] * parents}]}}
+
+
+def run_codex(gh, mode="approve", now=1_000_000.0):
+    return R.review_pr(gh, "Tabibi", gh.pr(), login=LOGIN, mode=mode, run_model=Model(),
+                       calls=[0], now=now, run_url="https://x/run/1", engine="codex")
+
+
+def requests_posted(gh):
+    return [b["body"] for p, b in gh.posted if p.endswith("/comments") and "@codex review" in b["body"]]
+
+
+class CodexEngineTests(unittest.TestCase):
+    def test_codex_review_of_exact_head_approves_without_any_model_call(self):
+        gh = CodexGitHub(comments=[codex_state_comment(HEAD)])
+        self.assertEqual(run_codex(gh), "POSTED APPROVE PASS")
+        review = reviews_posted(gh)[0]
+        self.assertEqual((review["event"], review["commit_id"]), ("APPROVE", HEAD))
+        self.assertIn("engine=codex", review["body"])
+        self.assertIn("codex review (chatgpt-codex-connector)", review["body"])
+        self.assertEqual(requests_posted(gh), [])
+
+    def test_native_codex_review_on_head_also_counts(self):
+        gh = CodexGitHub(reviews=[{"user": CODEX, "commit_id": HEAD, "state": "COMMENTED", "body": "x",
+                                   "submitted_at": AFTER_BASE}])
+        self.assertEqual(run_codex(gh), "POSTED APPROVE PASS")
+
+    def test_impostor_state_comments_are_ignored(self):
+        for user in ({"login": "chatgpt-codex-connector[bot]", "type": "User"},
+                     {"login": "NTinkicht", "type": "User"}, {"login": "codex[bot]", "type": "Bot"}):
+            gh = CodexGitHub(comments=[codex_state_comment(HEAD, user=user)])
+            self.assertTrue(run_codex(gh).startswith("CODEX_PENDING CODEX_NOT_REVIEWED_AT_HEAD"), user)
+            self.assertEqual(reviews_posted(gh), [])
+
+    def test_in_progress_or_malformed_state_does_not_count(self):
+        bad = codex_state_comment(HEAD, status="in_progress")
+        broken = {"id": 6, "user": CODEX, "body": "<!-- codex-review-state:v1 {not json -->"}
+        gh = CodexGitHub(comments=[bad, broken])
+        self.assertTrue(run_codex(gh).startswith("CODEX_PENDING"))
+        self.assertEqual(reviews_posted(gh), [])
+
+    def test_unreviewed_head_requests_codex_once_per_head_and_waits(self):
+        gh = CodexGitHub(comments=[codex_state_comment("f" * 40)])
+        self.assertTrue(run_codex(gh).startswith("CODEX_PENDING CODEX_NOT_REVIEWED_AT_HEAD"))
+        self.assertEqual(len(requests_posted(gh)), 1)
+        self.assertIn(f"head={HEAD} base={BASE}", requests_posted(gh)[0])
+        # Next run finds its own request comment: no second request for the same head and
+        # base, even when the status comment was rewritten (CI_RED) or never written.
+        request = {"id": 9, "user": {"login": LOGIN}, "body": requests_posted(gh)[0]}
+        red_status = {"id": 10, "user": {"login": LOGIN}, "body": "**ntk-reviewer status** — red\n\n"
+                      '<!-- ntk-review-status v1 {"class": "CODE_ERROR", "counts": {}, '
+                      f'"detail": "CI_RED", "head": "{HEAD}"}} -->'}
+        for extra in ([request], [request, red_status]):
+            again = CodexGitHub(comments=[codex_state_comment("f" * 40)] + extra)
+            run_codex(again)
+            self.assertEqual(requests_posted(again), [])
+            self.assertEqual(reviews_posted(again), [])
+        # A request someone else wrote does not count as ours.
+        foreign = {"id": 11, "user": {"login": "NTinkicht"}, "body": requests_posted(gh)[0]}
+        third = CodexGitHub(comments=[codex_state_comment("f" * 40), foreign])
+        run_codex(third)
+        self.assertEqual(len(requests_posted(third)), 1)
+
+    def test_review_older_than_the_base_is_stale_and_rerequested(self):
+        gh = CodexGitHub(comments=[codex_state_comment(HEAD, updated_at=BEFORE_BASE)])
+        self.assertEqual(run_codex(gh), "CODEX_PENDING CODEX_REVIEW_PREDATES_BASE")
+        self.assertEqual(reviews_posted(gh), [])
+        self.assertIn(f"head={HEAD} base={BASE}", requests_posted(gh)[0])
+
+    def test_request_for_an_older_base_does_not_block_a_new_one(self):
+        old = {"id": 9, "user": {"login": LOGIN},
+               "body": f"@codex review\n\n<!-- ntk-review-request v1 head={HEAD} base={NEW_BASE} -->"}
+        gh = CodexGitHub(comments=[codex_state_comment(HEAD, updated_at=BEFORE_BASE), old])
+        run_codex(gh)
+        self.assertEqual(len(requests_posted(gh)), 1)
+
+    def test_unreadable_base_time_fails_closed(self):
+        gh = CodexGitHub(comments=[codex_state_comment(HEAD)], base_time=None)
+        self.assertEqual(run_codex(gh), "CODEX_PENDING BASE_TIME_UNREADABLE")
+        self.assertEqual(reviews_posted(gh), [])
+
+    def test_shadow_mode_never_requests_codex(self):
+        gh = CodexGitHub()
+        run_codex(gh, mode="comment")
+        self.assertEqual(requests_posted(gh), [])
+
+    def test_open_conversations_block_approval(self):
+        gh = CodexGitHub(comments=[codex_state_comment(HEAD)], unresolved=2)
+        self.assertEqual(run_codex(gh), "CODEX_PENDING UNRESOLVED_THREADS")
+        self.assertEqual(reviews_posted(gh), [])
+
+    def test_unreadable_threads_fail_closed(self):
+        gh = CodexGitHub(comments=[codex_state_comment(HEAD)], threads_error=True)
+        self.assertEqual(run_codex(gh), "CODEX_PENDING THREADS_UNREADABLE")
+        self.assertEqual(reviews_posted(gh), [])
+
+    def test_merge_only_update_with_identical_diff_is_covered(self):
+        old = "f" * 40
+        gh = CodexGitHub(comments=[codex_state_comment(old)], compare=merge_only(old))
+        self.assertEqual(run_codex(gh), "POSTED APPROVE PASS")
+        self.assertIn("only merges were added since", reviews_posted(gh)[0]["body"])
+
+    def test_non_merge_commit_after_review_needs_a_new_review(self):
+        old = "f" * 40
+        gh = CodexGitHub(comments=[codex_state_comment(old)], compare=merge_only(old, parents=1))
+        self.assertTrue(run_codex(gh).startswith("CODEX_PENDING CODEX_NOT_REVIEWED_AT_HEAD"))
+        self.assertEqual(reviews_posted(gh), [])
+
+    def test_merge_that_changes_the_pr_diff_needs_a_new_review(self):
+        old = "f" * 40
+        then = [{"filename": "src/app.py", "status": "modified", "patch": "@@ -1 +1 @@\n-a\n+c",
+                 "changes": 2}]
+        gh = CodexGitHub(comments=[codex_state_comment(old)], compare=merge_only(old), then_files=then)
+        self.assertTrue(run_codex(gh).startswith("CODEX_PENDING"))
+        self.assertEqual(reviews_posted(gh), [])
+
+    def test_missing_patch_fails_closed(self):
+        old = "f" * 40
+        gh = CodexGitHub(comments=[codex_state_comment(old)], compare=merge_only(old))
+        del gh.files[0]["patch"]
+        self.assertTrue(run_codex(gh).startswith("CODEX_PENDING"))
+
+    def test_reviewed_commit_not_an_ancestor_is_not_covered(self):
+        old = "f" * 40
+        gh = CodexGitHub(comments=[codex_state_comment(old)], compare={
+            f"{old}...{HEAD}": {"status": "diverged", "behind_by": 1, "ahead_by": 1,
+                                "commits": [{"parents": [{}, {}]}]}})
+        self.assertTrue(run_codex(gh).startswith("CODEX_PENDING"))
+
+    def test_openai_authored_pr_is_never_approved_by_codex(self):
+        gh = CodexGitHub(comments=[codex_state_comment(HEAD)],
+                         commits=[{"commit": {"message": "x\n\nMaterial-Author: chatgpt"}}])
+        self.assertEqual(run_codex(gh), "POSTED COMMENT PASS")
+        self.assertIn("OpenAI model", reviews_posted(gh)[0]["body"])
+
+    def test_control_plane_is_comment_only_under_codex(self):
+        gh = CodexGitHub(files=(".github/workflows/ci.yml",), comments=[codex_state_comment(HEAD)])
+        self.assertEqual(run_codex(gh), "POSTED COMMENT PASS")
+
+    def test_red_ci_still_blocks_before_codex(self):
+        gh = CodexGitHub(ci="failure", comments=[codex_state_comment(HEAD)])
+        self.assertEqual(run_codex(gh), "CODE_ERROR CI_RED")
+        self.assertEqual(gh.graphql_calls, 0)
+
+    def test_head_moved_before_posting_posts_nothing_under_codex(self):
+        gh = CodexGitHub(comments=[codex_state_comment(HEAD)], moves_at=2)
+        self.assertEqual(run_codex(gh), "SKIP head moved before posting")
+        self.assertEqual(reviews_posted(gh), [])
+
+
+class EngineSelectionTests(unittest.TestCase):
+    tree = RuntimeTests.tree
+    env = RuntimeTests.env
+
+    def test_unset_or_unknown_engine_is_mistral(self):
+        for value in (None, "", "bogus", "MISTRAL"):
+            gh, model = FakeGitHub(), Model(PASS)
+            env = {"REVIEWER_MODE": "approve"} | ({} if value is None else {"REVIEWER_ENGINE": value})
+            with self.env(**env), patch.dict(os.environ, {}, clear=False):
+                if value is None:
+                    os.environ.pop("REVIEWER_ENGINE", None)
+                R.main(self.tree(), gh=gh, run_model=model, now=0)
+            self.assertEqual(len(model.prompts), 1, value)
+
+    def test_codex_engine_makes_no_model_call(self):
+        gh, model = CodexGitHub(comments=[codex_state_comment(HEAD)]), Model()
+        with self.env(REVIEWER_MODE="approve", REVIEWER_ENGINE="codex"):
+            self.assertEqual(R.main(self.tree(), gh=gh, run_model=model, now=0), 0)
+        self.assertEqual(model.prompts, [])
+        self.assertEqual(reviews_posted(gh)[0]["event"], "APPROVE")

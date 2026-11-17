@@ -7,6 +7,18 @@ checks are green on the exact head, it asks Mistral Vibe for ONE verdict
 (single call, no tools) and posts ONE native GitHub review bound to that head
 and base; if either moves while it reviews, the verdict is skipped or dismissed.
 
+Engines (repository variable REVIEWER_ENGINE, default "mistral"):
+- mistral: the verdict comes from one Mistral Vibe call, as described above.
+- codex:   no model call at all. The verdict is the Codex GitHub reviewer's
+  (chatgpt-codex-connector[bot]) completed review of this exact head, or of an
+  ancestor whose PR diff is byte-identical because only merges were added since,
+  with zero unresolved review threads on the PR. When Codex has not reviewed the
+  current code, the reviewer asks once per head with an "@codex review" comment
+  and waits. Every other gate (exact head and base, green required CI, the
+  control-plane floor, stale-review dismissal) is identical in both engines.
+Unset or invalid REVIEWER_ENGINE means mistral, so removing the variable restores
+the Mistral setup unchanged.
+
 Its APPROVE counts only through GitHub's native ruleset (required approvals,
 strict up-to-date checks, stale-review dismissal). OneCompany's legacy
 scripts/gate.py does not recognise this App and fails closed; it is not the
@@ -27,6 +39,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 API = "https://api.github.com"
@@ -77,6 +90,18 @@ REVIEW_MARK = re.compile(r"<!-- ntk-review v1 head=([0-9a-f]{40}) mode=(comment|
 # The reviewer's model is Mistral; it is never the independent approver of work
 # Mistral materially authored (commit trailer "Material-Author: mistral...").
 MISTRAL_AUTHOR = re.compile(r"(?im)^Material-Author:[ \t]*mistral[a-z0-9_-]*[ \t]*$")
+# Codex engine. The Codex GitHub reviewer leaves a machine-readable state comment
+# naming the exact commit it reviewed; only the real bot account counts.
+ENGINES = ("mistral", "codex")
+CODEX_LOGIN = "chatgpt-codex-connector[bot]"
+CODEX_STATE_MARK = "<!-- codex-review-state:v1 "
+SHA = re.compile(r"[0-9a-f]{40}")
+# Codex is never the independent approver of work an OpenAI model materially authored.
+OPENAI_AUTHOR = re.compile(r"(?im)^Material-Author:[ \t]*(?:codex|chatgpt|openai)[a-z0-9_.-]*[ \t]*$")
+AUTHOR_TRAILER = {"mistral": MISTRAL_AUTHOR, "codex": OPENAI_AUTHOR}
+ENGINE_LABEL = {"mistral": "mistral-vibe", "codex": "codex review (chatgpt-codex-connector)"}
+ENGINE_VENDOR = {"mistral": "Mistral", "codex": "An OpenAI model (Codex/ChatGPT)"}
+REQUEST_MARK = re.compile(r"<!-- ntk-review-request v1 head=([0-9a-f]{40}) base=([0-9a-f]{40}) -->")
 STATUS_MARK = re.compile(r"<!-- ntk-review-status v1 (\{[^<>]*\}) -->")
 BILLING = re.compile(r"recent account payments have failed|spending limit", re.I)
 ONLY = re.compile(r"[A-Za-z0-9_.-]+#[0-9]{1,7}")
@@ -165,6 +190,9 @@ class GitHub:
 
     def put(self, path, body):
         return json.loads(self._call("PUT", path, body) or b"{}")
+
+    def graphql(self, query, variables):
+        return json.loads(self._call("POST", "/graphql", {"query": query, "variables": variables}) or b"{}")
 
 
 # ---------- pure helpers ----------
@@ -336,10 +364,10 @@ def may_call(status: dict, head: str, now: float) -> tuple[bool, str]:
 
 
 def review_body(head, base, mode, result, floor_paths, run_url, event, mistral_authored=False,
-                retiring=False):
+                retiring=False, engine="mistral"):
     outcome = {"APPROVE": "Approved", "REQUEST_CHANGES": "Changes requested"}.get(event, "Advisory")
     lines = [f"**ntk-reviewer · {outcome}** — model verdict **{result['verdict']}**",
-             f"Exact head `{head}` · base `{base}` · model mistral-vibe · [run]({run_url})", "",
+             f"Exact head `{head}` · base `{base}` · model {ENGINE_LABEL[engine]} · [run]({run_url})", "",
              result["summary"], ""]
     for f in result["findings"]:
         where = f"`{f['path']}{':' + str(f['line']) if f['line'] else ''}` " if f["path"] else ""
@@ -356,13 +384,13 @@ def review_body(head, base, mode, result, floor_paths, run_url, event, mistral_a
         lines.append("\nDeletion-only removal of old machinery listed in "
                      "`.github/ntk-reviewer/retirement.json`; no file is added or edited.")
     if mistral_authored:
-        lines.append("\nMistral materially authored part of this PR (or authorship could not be read), "
-                     "so this Mistral-based reviewer cannot be its independent approver.")
+        lines.append(f"\n{ENGINE_VENDOR[engine]} materially authored part of this PR (or authorship "
+                     "could not be read), so this reviewer cannot be its independent approver.")
     if mode == "comment":
         lines.append("\nShadow mode: advisory only, not a gate.")
     floor = 1 if floor_paths else 0
     lines.append(f"\n<!-- ntk-review v1 head={head} mode={mode} base={base} "
-                 f"verdict={result['verdict']} floor={floor} -->")
+                 f"verdict={result['verdict']} floor={floor} engine={engine} -->")
     return "\n".join(lines)
 
 
@@ -374,13 +402,153 @@ def choose_event(mode: str, verdict: str, no_approve: bool) -> str:
     return "COMMENT" if no_approve else "APPROVE"
 
 
-def mistral_authored(gh, repo, number, expected) -> bool:
-    """True if any commit carries a Mistral Material-Author trailer, or if the
-    commit list cannot be read completely (fail closed: no approval)."""
+def mistral_authored(gh, repo, number, expected, trailer=MISTRAL_AUTHOR) -> bool:
+    """True if any commit carries the engine's own Material-Author trailer, or if
+    the commit list cannot be read completely (fail closed: no approval)."""
     commits = gh.pages(f"/repos/{OWNER}/{repo}/pulls/{number}/commits", limit=3)
     if type(expected) is not int or len(commits) != expected or expected > 250:
         return True
-    return any(MISTRAL_AUTHOR.search((c.get("commit") or {}).get("message") or "") for c in commits)
+    return any(trailer.search((c.get("commit") or {}).get("message") or "") for c in commits)
+
+
+# ---------- codex engine ----------
+
+def is_codex(user) -> bool:
+    return (user or {}).get("login") == CODEX_LOGIN and (user or {}).get("type") == "Bot"
+
+
+def codex_state(body: str):
+    """The JSON object after the Codex state marker, or None."""
+    at = (body or "").find(CODEX_STATE_MARK)
+    if at < 0:
+        return None
+    try:
+        value, _ = json.JSONDecoder().raw_decode(body, at + len(CODEX_STATE_MARK))
+    except ValueError:
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def iso_time(value):
+    """Seconds since the epoch for a GitHub ISO-8601 time (UTC 'Z' or an offset)."""
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.timestamp() if parsed.tzinfo else None
+
+
+def codex_reviewed_commits(reviews, comments) -> list[tuple[str, float]]:
+    """(commit, completed-at) for every code review Codex completed: from its state
+    comment (updated when a review completes; not edited when threads are resolved)
+    and its native reviews. Comments or reviews from any other account are ignored."""
+    found = []
+    for comment in comments:
+        if not is_codex(comment.get("user")):
+            continue
+        state = codex_state(comment.get("body") or "")
+        code = (state or {}).get("code_review") or {}
+        sha, when = code.get("commit_sha"), iso_time(comment.get("updated_at"))
+        if (code.get("status") == "completed" and isinstance(sha, str) and SHA.fullmatch(sha)
+                and when is not None):
+            found.append((sha, when))
+    for review in reviews:
+        sha, when = review.get("commit_id"), iso_time(review.get("submitted_at"))
+        if (is_codex(review.get("user")) and isinstance(sha, str) and SHA.fullmatch(sha)
+                and when is not None):
+            found.append((sha, when))
+    return sorted(set(found), key=lambda item: -item[1])
+
+
+def diff_signature(files):
+    """Exact per-file change set; None (never equal) if any patch is unavailable."""
+    out = []
+    for item in files:
+        if "patch" not in item and item.get("changes", 0):
+            return None  # binary or too large to compare: fail closed
+        out.append((item.get("filename"), item.get("status"), item.get("previous_filename"),
+                    item.get("patch")))
+    return sorted(out, key=lambda x: (x[0] or "", x[1] or ""))
+
+
+def equivalent_to_head(gh, repo, reviewed, head, base, pr_files) -> bool:
+    """True if `reviewed` is head, or an ancestor of head where every later commit is
+    a merge and the PR diff is identical (only "update branch" merges since)."""
+    if reviewed == head:
+        return True
+    forward = gh.get(f"/repos/{OWNER}/{repo}/compare/{reviewed}...{head}")
+    commits = forward.get("commits") or []
+    if (forward.get("status") != "ahead" or forward.get("behind_by") != 0 or not commits
+            or len(commits) != forward.get("ahead_by") or len(commits) > 50
+            or any(len(c.get("parents") or []) != 2 for c in commits)):
+        return False
+    then = gh.get(f"/repos/{OWNER}/{repo}/compare/{base}...{reviewed}")
+    then_files = then.get("files") or []
+    if len(then_files) >= 300 or len(pr_files) >= 300:
+        return False
+    old, new = diff_signature(then_files), diff_signature(pr_files)
+    return old is not None and new is not None and old == new
+
+
+THREADS_QUERY = """query($owner:String!,$name:String!,$number:Int!,$after:String){
+ repository(owner:$owner,name:$name){pullRequest(number:$number){
+  reviewThreads(first:100,after:$after){nodes{isResolved} pageInfo{hasNextPage endCursor}}}}}"""
+
+
+def unresolved_threads(gh, repo, number):
+    """Number of unresolved review threads, or None when it cannot be read."""
+    count, after = 0, None
+    for _ in range(5):
+        try:
+            data = gh.graphql(THREADS_QUERY, {"owner": OWNER, "name": repo, "number": number,
+                                              "after": after})
+        except (urllib.error.HTTPError, urllib.error.URLError, ValueError):
+            return None
+        threads = ((((data or {}).get("data") or {}).get("repository") or {})
+                   .get("pullRequest") or {}).get("reviewThreads")
+        if (data or {}).get("errors") or not isinstance(threads, dict):
+            return None
+        count += sum(1 for t in threads.get("nodes") or [] if not t.get("isResolved"))
+        page = threads.get("pageInfo") or {}
+        if not page.get("hasNextPage"):
+            return count
+        after = page.get("endCursor")
+    return None
+
+
+def codex_verdict(gh, repo, number, head, base, files, reviews, comments):
+    """("PASS", result) or ("WAIT", detail, message). Never calls a model.
+
+    The evidence is bound to the exact base as well as the head (AGENTS.md: a moved
+    base stales the gate): a Codex review counts only if it completed after the
+    current base commit was made, so a base move always needs a fresh Codex review."""
+    base_time = iso_time(((gh.get(f"/repos/{OWNER}/{repo}/commits/{base}").get("commit") or {})
+                          .get("committer") or {}).get("date"))
+    if base_time is None:
+        return ("WAIT", "BASE_TIME_UNREADABLE", "the base commit time could not be read; no approval this run.")
+    reviewed = codex_reviewed_commits(reviews, comments)
+    fresh = [sha for sha, when in reviewed if when >= base_time]
+    covering = next((sha for sha in fresh if equivalent_to_head(gh, repo, sha, head, base, files)), None)
+    if covering is None:
+        stale = any(sha == head for sha, _ in reviewed)
+        return ("WAIT", "CODEX_REVIEW_PREDATES_BASE" if stale else "CODEX_NOT_REVIEWED_AT_HEAD",
+                f"Codex has not reviewed the code at `{head[:12]}` against base `{base[:12]}`. "
+                "A review was requested; this approves once Codex has reviewed it and no "
+                "conversation is open.")
+    open_threads = unresolved_threads(gh, repo, number)
+    if open_threads is None:
+        return ("WAIT", "THREADS_UNREADABLE", "review threads could not be read; no approval this run.")
+    if open_threads:
+        return ("WAIT", "UNRESOLVED_THREADS",
+                f"{open_threads} review conversation(s) are still open. Resolve them first.")
+    how = "this exact head" if covering == head else (
+        f"`{covering[:12]}`; only merges were added since and the PR diff is identical")
+    how += f", completed after base `{base[:12]}`"
+    return ("PASS", {"verdict": "PASS", "findings": [], "omitted": 0, "downgraded": False,
+                     "summary": f"Codex completed a code review of {how}. No review conversation "
+                                "is open and required CI is green on the exact head."})
 
 
 def build_prompt(repo, pr, diff, repair_code=""):
@@ -467,7 +635,7 @@ def write_status(gh, repo, number, comment_id, old, new, message):
 # ---------- one PR ----------
 
 def review_pr(gh, repo, pr, *, login, mode, run_model, calls, now, run_url,
-              extra_patterns=(), owners_cache=None, retire_patterns=()):
+              extra_patterns=(), owners_cache=None, retire_patterns=(), engine="mistral"):
     number = pr["number"]
     if pr.get("draft"):
         return "SKIP draft"
@@ -478,7 +646,8 @@ def review_pr(gh, repo, pr, *, login, mode, run_model, calls, now, run_url,
         return "SKIP not open"
     head, base = pr["head"]["sha"], pr["base"]["sha"]
     mine = []
-    for review in gh.pages(f"/repos/{OWNER}/{repo}/pulls/{number}/reviews"):
+    all_reviews = gh.pages(f"/repos/{OWNER}/{repo}/pulls/{number}/reviews")
+    for review in all_reviews:
         match = REVIEW_MARK.search(review.get("body") or "")
         if ((review.get("user") or {}).get("login") == login and review.get("commit_id") == head
                 and match and match.group(1) == head):
@@ -528,45 +697,64 @@ def review_pr(gh, repo, pr, *, login, mode, run_model, calls, now, run_url,
     retiring = bool(floor_paths) and retirement_only(files, retire_patterns, complete)
     if retiring:
         floor_paths = set()
-    allowed, why = may_call(status, head, now)
-    if not allowed:
-        return why
-    if calls[0] >= MAX_MODEL_CALLS_PER_RUN:
-        return "DEFERRED run cap"
-    try:
-        diff = gh.get_diff(f"/repos/{OWNER}/{repo}/pulls/{number}")
-    except urllib.error.HTTPError as error:
-        if error.code != 406:
-            raise
-        diff = None
-    if diff is None or len(diff.encode("utf-8")) > MAX_DIFF_BYTES:
-        return record("CODE_ERROR", "CHANGE_TOO_LARGE",
-                      f"diff exceeds {MAX_DIFF_BYTES} bytes; split the PR so it can be reviewed.")
-    repair = status.get("detail", "") if (status.get("head") == head
-                                          and status.get("class") == "REVIEW_FORMAT_ERROR") else ""
-    calls[0] += 1
-    text, error_class, error_detail = run_model(build_prompt(repo, pr, diff, repair))
-    if error_class == "CHANGE_TOO_LARGE":
-        return record("CODE_ERROR", "CHANGE_TOO_LARGE", "the model's context limit was exceeded; split the PR.")
-    if error_class:
-        return record(error_class, error_detail, f"review attempt failed ({error_class}: {error_detail}); "
-                      "retrying within its limit.", count=True)
-    try:
-        result = parse(text, changed)
-    except FormatError as error:
-        return record("REVIEW_FORMAT_ERROR", str(error), f"model output rejected ({error}); "
-                      "one repair attempt allowed.", count=True)
+    if engine == "codex":
+        comments = gh.pages(f"/repos/{OWNER}/{repo}/issues/{number}/comments")
+        verdict = codex_verdict(gh, repo, number, head, base, files, all_reviews, comments)
+        if verdict[0] == "WAIT":
+            _, detail, message = verdict
+            if detail in ("CODEX_NOT_REVIEWED_AT_HEAD", "CODEX_REVIEW_PREDATES_BASE") and mode == "approve":
+                # Deduplicated on the request comments themselves (head and base), so a
+                # status rewrite or a failed status write never causes a second request.
+                asked = any((c.get("user") or {}).get("login") == login
+                            and (m := REQUEST_MARK.search(c.get("body") or ""))
+                            and m.group(1) == head and m.group(2) == base for c in comments)
+                if not asked:
+                    gh.post(f"/repos/{OWNER}/{repo}/issues/{number}/comments", {
+                        "body": f"@codex review\n\n<!-- ntk-review-request v1 head={head} base={base} -->"})
+            return record("CODEX_PENDING", detail, message)
+        result = verdict[1]
+    else:
+        result = None
+    if result is None:
+        allowed, why = may_call(status, head, now)
+        if not allowed:
+            return why
+        if calls[0] >= MAX_MODEL_CALLS_PER_RUN:
+            return "DEFERRED run cap"
+        try:
+            diff = gh.get_diff(f"/repos/{OWNER}/{repo}/pulls/{number}")
+        except urllib.error.HTTPError as error:
+            if error.code != 406:
+                raise
+            diff = None
+        if diff is None or len(diff.encode("utf-8")) > MAX_DIFF_BYTES:
+            return record("CODE_ERROR", "CHANGE_TOO_LARGE",
+                          f"diff exceeds {MAX_DIFF_BYTES} bytes; split the PR so it can be reviewed.")
+        repair = status.get("detail", "") if (status.get("head") == head
+                                              and status.get("class") == "REVIEW_FORMAT_ERROR") else ""
+        calls[0] += 1
+        text, error_class, error_detail = run_model(build_prompt(repo, pr, diff, repair))
+        if error_class == "CHANGE_TOO_LARGE":
+            return record("CODE_ERROR", "CHANGE_TOO_LARGE", "the model's context limit was exceeded; split the PR.")
+        if error_class:
+            return record(error_class, error_detail, f"review attempt failed ({error_class}: {error_detail}); "
+                          "retrying within its limit.", count=True)
+        try:
+            result = parse(text, changed)
+        except FormatError as error:
+            return record("REVIEW_FORMAT_ERROR", str(error), f"model output rejected ({error}); "
+                          "one repair attempt allowed.", count=True)
     latest = gh.get(f"/repos/{OWNER}/{repo}/pulls/{number}")
     if latest.get("state") != "open" or latest["head"]["sha"] != head:
         return "SKIP head moved before posting"
     if latest["base"]["sha"] != base:
         return "SKIP base moved before posting"
-    self_authored = mistral_authored(gh, repo, number, pr.get("commits"))
+    self_authored = mistral_authored(gh, repo, number, pr.get("commits"), AUTHOR_TRAILER[engine])
     event = choose_event(mode, result["verdict"], bool(floor_paths) or self_authored)
     posted = gh.post(f"/repos/{OWNER}/{repo}/pulls/{number}/reviews", {
         "commit_id": head, "event": event,
         "body": review_body(head, base, mode, result, floor_paths, run_url, event, self_authored,
-                            retiring),
+                            retiring, engine),
     })
     if event != "COMMENT":
         # Close the race: a push between the recheck and the post must not leave
@@ -645,6 +833,8 @@ def vibe_runner(key: str):
 def main(root: Path = Path("."), gh=None, run_model=None, now=None) -> int:
     mode = os.environ.get("REVIEWER_MODE", "comment")
     mode = mode if mode in ("comment", "approve") else "comment"
+    engine = os.environ.get("REVIEWER_ENGINE", "").strip().lower()
+    engine = engine if engine in ENGINES else "mistral"
     only = os.environ.get("REVIEW_ONLY", "").strip()
     if only and not ONLY.fullmatch(only):
         print("CONFIGURATION_ERROR: REVIEW_ONLY must look like Repo#123")
@@ -668,10 +858,11 @@ def main(root: Path = Path("."), gh=None, run_model=None, now=None) -> int:
         print("CONFIGURATION_ERROR: control-plane.json or retirement.json missing or invalid")
         return 1
     gh = gh or GitHub(os.environ["REVIEWER_TOKEN"])
-    run_model = run_model or vibe_runner(os.environ.get("MISTRAL_API_KEY", ""))
+    if engine == "mistral":
+        run_model = run_model or vibe_runner(os.environ.get("MISTRAL_API_KEY", ""))
     now = time.time() if now is None else now
     calls, code, owners_cache = [0], 0, {}
-    print(f"ntk-reviewer mode={mode} login={login} repos={repos}")
+    print(f"ntk-reviewer engine={engine} mode={mode} login={login} repos={repos}")
     for repo in repos:
         try:
             for pr in gh.pages(f"/repos/{OWNER}/{repo}/pulls?state=open"):
@@ -681,7 +872,8 @@ def main(root: Path = Path("."), gh=None, run_model=None, now=None) -> int:
                                     calls=calls, now=now, run_url=run_url,
                                     extra_patterns=extras.get(f"{OWNER}/{repo}", []),
                                     owners_cache=owners_cache,
-                                    retire_patterns=retire.get(f"{OWNER}/{repo}", []))
+                                    retire_patterns=retire.get(f"{OWNER}/{repo}", []),
+                                    engine=engine)
                 print(f"{repo}#{pr['number']}: {outcome}")
         except Stop as stop:
             print(f"{repo}: {stop}")

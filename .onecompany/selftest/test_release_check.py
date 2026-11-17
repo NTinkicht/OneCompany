@@ -127,7 +127,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
             "ci": {"conclusion": "success", "head_sha": self.HEAD, "base_sha": self.BASE},
             "review": {"state": "APPROVED", "head_sha": self.HEAD, "reviewer": "ntk-reviewer[bot]", "authors": ["claude"]},
             "provider": {"status": "up"},
-            "rollback_drill": {"passed": True, "previous_version": "1.3.0", "head_sha": self.HEAD},
+            "rollback_drill": {"passed": True, "previous_version": "1.3.0", "restored_version": "1.3.0", "head_sha": self.HEAD},
             "stop_drill": {"passed": True, "head_sha": self.HEAD}, "backup": {"verified": True, "head_sha": self.HEAD},
             "emergency_stop_active": False,
             "observed_at": "2026-11-14T11:30:00Z", "max_age_seconds": 3600,
@@ -152,7 +152,8 @@ class ReleaseEvidenceTests(unittest.TestCase):
             "CI_BASE_MISMATCH": lambda d: d["ci"].update(base_sha="c" * 40),
             "REVIEWER_NOT_INDEPENDENT": lambda d: d["review"].update(reviewer="Claude"),
             "DRILL_HEAD_MISMATCH": lambda d: d["backup"].update(head_sha="b" * 40),
-            "ROLLBACK_NOOP": lambda d: d["rollback_drill"].update(previous_version=" 1.4.0"),
+            "ROLLBACK_NOT_RESTORED_TO_PREVIOUS": lambda d: d["rollback_drill"].update(restored_version="1.2.0"),
+            "ROLLBACK_NOOP": lambda d: d["rollback_drill"].update(previous_version=" 1.4.0", restored_version="1.4.0"),
             "REVIEW_NOT_APPROVED": lambda d: d["review"].update(state="CHANGES_REQUESTED"),
             "REVIEW_HEAD_MISMATCH": lambda d: d["review"].update(head_sha="b" * 40),
             "PROVIDER_NOT_HEALTHY": lambda d: d["provider"].update(status="down"),
@@ -167,6 +168,13 @@ class ReleaseEvidenceTests(unittest.TestCase):
         }
         for code, mutate in cases.items():
             self.assertEqual(self.findings(mutate), [code], code)
+
+    def test_rollback_must_restore_the_named_previous_version(self):
+        code = ["ROLLBACK_NOT_RESTORED_TO_PREVIOUS"]
+        self.assertEqual(self.findings(lambda d: d["rollback_drill"].pop("restored_version")), code)
+        self.assertEqual(self.findings(lambda d: d["rollback_drill"].update(restored_version=130)), code)
+        self.assertEqual(self.findings(lambda d: d["rollback_drill"].update(restored_version=" ")), code)
+        self.assertEqual(self.findings(lambda d: d["rollback_drill"].update(restored_version=" 1.3.0 ")), [])
 
     def test_independence_and_drill_binding_fail_closed(self):
         only = lambda code, mutate: self.assertEqual(self.findings(mutate), [code])  # noqa: E731

@@ -118,6 +118,10 @@ def check_evidence(evidence, now: datetime, stop_flag=None) -> list[str]:
         findings.add("ROLLBACK_DRILL_NOT_PASSED")
     if not (isinstance(rollback.get("previous_version"), str) and rollback["previous_version"].strip()):
         findings.add("ROLLBACK_PREVIOUS_VERSION_MISSING")
+    restored, previous = rollback.get("restored_version"), rollback.get("previous_version")
+    if isinstance(previous, str) and previous.strip() and not (
+            isinstance(restored, str) and restored.strip() == previous.strip()):
+        findings.add("ROLLBACK_NOT_RESTORED_TO_PREVIOUS")
     if any(drill.get("head_sha") != head for drill in (rollback, stop, backup)):
         findings.add("DRILL_HEAD_MISMATCH")
     if isinstance(rollback.get("previous_version"), str) and isinstance(top.get("release_version"), str) \

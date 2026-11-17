@@ -20,13 +20,13 @@ Every other gate is identical in both engines:
 
 All of these must hold:
 
-1. **Codex reviewed this code.** The Codex bot's `codex-review-state:v1` comment, or its native review, names a commit with `status: completed`, and that commit is either:
+1. **Codex reviewed this code after the current base existed.** The Codex bot's `codex-review-state:v1` comment, or its native review, names a commit with `status: completed`. The review completed after the current base commit was made: a moved base stales the gate (`AGENTS.md`), so every base move needs a fresh Codex review. The reviewed commit is either:
    - the exact head; or
    - an ancestor of the head where every later commit is a merge and the PR's per-file diff is byte-identical (only "Update branch" merges since).
 2. **No review conversation is open.** This uses GitHub's live thread state, not Codex's own `has_unresolved_findings` flag, which does not update after fixes.
 3. **The common gates pass:** CI green, no control-plane paths, head and base unchanged while posting.
 
-If Codex has not reviewed the current code, typically because fixes were pushed after its first review, the reviewer posts `@codex review` once for that head and waits. If Codex does not answer requests from the reviewer app, the writer or the owner can post `@codex review` on the PR.
+If Codex has not reviewed the current code against the current base, because fixes were pushed or main moved, the reviewer posts `@codex review` once for that head and base and waits. It finds its own earlier request comments to avoid asking twice. If Codex does not answer requests from the reviewer app, the writer or the owner can post `@codex review` on the PR.
 
 Codex reviews count against the owner's ChatGPT plan allowance for Codex code review. Keep "Use credits for reviews" **off** in Codex settings, so a used-up allowance pauses reviews instead of spending money.
 

@@ -635,11 +635,16 @@ MERGE_HEAD = "e" * 40
 PATCH = "@@ -1 +1 @@\n-a\n+b"
 
 
-def codex_state_comment(sha, status="completed", user=CODEX):
+BASE_TIME = "2026-11-17T04:00:00Z"
+AFTER_BASE = "2026-11-17T05:00:00Z"
+BEFORE_BASE = "2026-11-17T03:00:00Z"
+
+
+def codex_state_comment(sha, status="completed", user=CODEX, updated_at=AFTER_BASE):
     state = {"code_review": {"commit_sha": sha, "has_any_findings": True,
                              "has_unresolved_findings": True, "status": status},
              "security_review": {"commit_sha": None}}
-    return {"id": 5, "user": user,
+    return {"id": 5, "user": user, "updated_at": updated_at,
             "body": f"<!-- codex-pull-request-review-summary --> <!-- codex-review-state:v1 "
                     f"{json.dumps(state)} -->\n### Codex Review"}
 
@@ -647,7 +652,8 @@ def codex_state_comment(sha, status="completed", user=CODEX):
 class CodexGitHub(FakeGitHub):
     """FakeGitHub plus GraphQL review threads and the compare endpoint."""
 
-    def __init__(self, *, unresolved=0, threads_error=False, compare=None, then_files=None, **kw):
+    def __init__(self, *, unresolved=0, threads_error=False, compare=None, then_files=None,
+                 base_time=BASE_TIME, **kw):
         kw.setdefault("commits", CLAUDE_COMMITS)
         super().__init__(**kw)
         for f in self.files:
@@ -657,6 +663,7 @@ class CodexGitHub(FakeGitHub):
         self.unresolved, self.threads_error = unresolved, threads_error
         self.compare, self.then_files = compare or {}, then_files
         self.graphql_calls = 0
+        self.base_time = base_time
 
     def graphql(self, query, variables):
         self.graphql_calls += 1
@@ -667,6 +674,8 @@ class CodexGitHub(FakeGitHub):
             "nodes": nodes, "pageInfo": {"hasNextPage": False, "endCursor": None}}}}}}
 
     def get(self, path):
+        if "/commits/" in path and "/pulls/" not in path:
+            return {"commit": {"committer": {"date": self.base_time}}}
         if "/compare/" in path:
             spec = path.rsplit("/compare/", 1)[1]
             if spec.startswith(BASE + "..."):
@@ -701,7 +710,8 @@ class CodexEngineTests(unittest.TestCase):
         self.assertEqual(requests_posted(gh), [])
 
     def test_native_codex_review_on_head_also_counts(self):
-        gh = CodexGitHub(reviews=[{"user": CODEX, "commit_id": HEAD, "state": "COMMENTED", "body": "x"}])
+        gh = CodexGitHub(reviews=[{"user": CODEX, "commit_id": HEAD, "state": "COMMENTED", "body": "x",
+                                   "submitted_at": AFTER_BASE}])
         self.assertEqual(run_codex(gh), "POSTED APPROVE PASS")
 
     def test_impostor_state_comments_are_ignored(self):
@@ -722,15 +732,41 @@ class CodexEngineTests(unittest.TestCase):
         gh = CodexGitHub(comments=[codex_state_comment("f" * 40)])
         self.assertTrue(run_codex(gh).startswith("CODEX_PENDING CODEX_NOT_REVIEWED_AT_HEAD"))
         self.assertEqual(len(requests_posted(gh)), 1)
-        self.assertIn(f"head={HEAD}", requests_posted(gh)[0])
-        self.assertEqual(status_of(gh)["requested"], HEAD)
-        # Next run sees its own status comment: no second request for the same head.
-        status_body = [b["body"] for p, b in gh.posted if "ntk-reviewer status" in b["body"]][-1]
-        again = CodexGitHub(comments=[codex_state_comment("f" * 40),
-                                      {"id": 9, "user": {"login": LOGIN}, "body": status_body}])
-        run_codex(again)
-        self.assertEqual(requests_posted(again), [])
-        self.assertEqual(reviews_posted(again), [])
+        self.assertIn(f"head={HEAD} base={BASE}", requests_posted(gh)[0])
+        # Next run finds its own request comment: no second request for the same head and
+        # base, even when the status comment was rewritten (CI_RED) or never written.
+        request = {"id": 9, "user": {"login": LOGIN}, "body": requests_posted(gh)[0]}
+        red_status = {"id": 10, "user": {"login": LOGIN}, "body": "**ntk-reviewer status** — red\n\n"
+                      '<!-- ntk-review-status v1 {"class": "CODE_ERROR", "counts": {}, '
+                      f'"detail": "CI_RED", "head": "{HEAD}"}} -->'}
+        for extra in ([request], [request, red_status]):
+            again = CodexGitHub(comments=[codex_state_comment("f" * 40)] + extra)
+            run_codex(again)
+            self.assertEqual(requests_posted(again), [])
+            self.assertEqual(reviews_posted(again), [])
+        # A request someone else wrote does not count as ours.
+        foreign = {"id": 11, "user": {"login": "NTinkicht"}, "body": requests_posted(gh)[0]}
+        third = CodexGitHub(comments=[codex_state_comment("f" * 40), foreign])
+        run_codex(third)
+        self.assertEqual(len(requests_posted(third)), 1)
+
+    def test_review_older_than_the_base_is_stale_and_rerequested(self):
+        gh = CodexGitHub(comments=[codex_state_comment(HEAD, updated_at=BEFORE_BASE)])
+        self.assertEqual(run_codex(gh), "CODEX_PENDING CODEX_REVIEW_PREDATES_BASE")
+        self.assertEqual(reviews_posted(gh), [])
+        self.assertIn(f"head={HEAD} base={BASE}", requests_posted(gh)[0])
+
+    def test_request_for_an_older_base_does_not_block_a_new_one(self):
+        old = {"id": 9, "user": {"login": LOGIN},
+               "body": f"@codex review\n\n<!-- ntk-review-request v1 head={HEAD} base={NEW_BASE} -->"}
+        gh = CodexGitHub(comments=[codex_state_comment(HEAD, updated_at=BEFORE_BASE), old])
+        run_codex(gh)
+        self.assertEqual(len(requests_posted(gh)), 1)
+
+    def test_unreadable_base_time_fails_closed(self):
+        gh = CodexGitHub(comments=[codex_state_comment(HEAD)], base_time=None)
+        self.assertEqual(run_codex(gh), "CODEX_PENDING BASE_TIME_UNREADABLE")
+        self.assertEqual(reviews_posted(gh), [])
 
     def test_shadow_mode_never_requests_codex(self):
         gh = CodexGitHub()

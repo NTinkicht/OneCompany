@@ -39,6 +39,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 API = "https://api.github.com"
@@ -100,7 +101,7 @@ OPENAI_AUTHOR = re.compile(r"(?im)^Material-Author:[ \t]*(?:codex|chatgpt|openai
 AUTHOR_TRAILER = {"mistral": MISTRAL_AUTHOR, "codex": OPENAI_AUTHOR}
 ENGINE_LABEL = {"mistral": "mistral-vibe", "codex": "codex review (chatgpt-codex-connector)"}
 ENGINE_VENDOR = {"mistral": "Mistral", "codex": "An OpenAI model (Codex/ChatGPT)"}
-REQUEST_MARK = re.compile(r"<!-- ntk-review-request v1 head=([0-9a-f]{40}) -->")
+REQUEST_MARK = re.compile(r"<!-- ntk-review-request v1 head=([0-9a-f]{40}) base=([0-9a-f]{40}) -->")
 STATUS_MARK = re.compile(r"<!-- ntk-review-status v1 (\{[^<>]*\}) -->")
 BILLING = re.compile(r"recent account payments have failed|spending limit", re.I)
 ONLY = re.compile(r"[A-Za-z0-9_.-]+#[0-9]{1,7}")
@@ -428,23 +429,37 @@ def codex_state(body: str):
     return value if isinstance(value, dict) else None
 
 
-def codex_reviewed_commits(reviews, comments) -> list[str]:
-    """Commits Codex completed a code review of: from its state comments and its
-    native reviews. Comments or reviews from any other account are ignored."""
+def iso_time(value):
+    """Seconds since the epoch for a GitHub ISO-8601 time (UTC 'Z' or an offset)."""
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed.timestamp() if parsed.tzinfo else None
+
+
+def codex_reviewed_commits(reviews, comments) -> list[tuple[str, float]]:
+    """(commit, completed-at) for every code review Codex completed: from its state
+    comment (updated when a review completes; not edited when threads are resolved)
+    and its native reviews. Comments or reviews from any other account are ignored."""
     found = []
     for comment in comments:
         if not is_codex(comment.get("user")):
             continue
         state = codex_state(comment.get("body") or "")
         code = (state or {}).get("code_review") or {}
-        sha = code.get("commit_sha")
-        if code.get("status") == "completed" and isinstance(sha, str) and SHA.fullmatch(sha):
-            found.append(sha)
+        sha, when = code.get("commit_sha"), iso_time(comment.get("updated_at"))
+        if (code.get("status") == "completed" and isinstance(sha, str) and SHA.fullmatch(sha)
+                and when is not None):
+            found.append((sha, when))
     for review in reviews:
-        sha = review.get("commit_id")
-        if is_codex(review.get("user")) and isinstance(sha, str) and SHA.fullmatch(sha):
-            found.append(sha)
-    return list(dict.fromkeys(found))
+        sha, when = review.get("commit_id"), iso_time(review.get("submitted_at"))
+        if (is_codex(review.get("user")) and isinstance(sha, str) and SHA.fullmatch(sha)
+                and when is not None):
+            found.append((sha, when))
+    return sorted(set(found), key=lambda item: -item[1])
 
 
 def diff_signature(files):
@@ -503,16 +518,25 @@ def unresolved_threads(gh, repo, number):
     return None
 
 
-def codex_verdict(gh, repo, number, head, base, files, reviews):
-    """("PASS", result) or ("WAIT", detail, message). Never calls a model."""
-    comments = gh.pages(f"/repos/{OWNER}/{repo}/issues/{number}/comments")
+def codex_verdict(gh, repo, number, head, base, files, reviews, comments):
+    """("PASS", result) or ("WAIT", detail, message). Never calls a model.
+
+    The evidence is bound to the exact base as well as the head (AGENTS.md: a moved
+    base stales the gate): a Codex review counts only if it completed after the
+    current base commit was made, so a base move always needs a fresh Codex review."""
+    base_time = iso_time(((gh.get(f"/repos/{OWNER}/{repo}/commits/{base}").get("commit") or {})
+                          .get("committer") or {}).get("date"))
+    if base_time is None:
+        return ("WAIT", "BASE_TIME_UNREADABLE", "the base commit time could not be read; no approval this run.")
     reviewed = codex_reviewed_commits(reviews, comments)
-    covering = next((sha for sha in reviewed
-                     if equivalent_to_head(gh, repo, sha, head, base, files)), None)
+    fresh = [sha for sha, when in reviewed if when >= base_time]
+    covering = next((sha for sha in fresh if equivalent_to_head(gh, repo, sha, head, base, files)), None)
     if covering is None:
-        return ("WAIT", "CODEX_NOT_REVIEWED_AT_HEAD",
-                f"Codex has not reviewed the code at `{head[:12]}`. A review was requested; "
-                "this approves once Codex has reviewed it and no conversation is open.")
+        stale = any(sha == head for sha, _ in reviewed)
+        return ("WAIT", "CODEX_REVIEW_PREDATES_BASE" if stale else "CODEX_NOT_REVIEWED_AT_HEAD",
+                f"Codex has not reviewed the code at `{head[:12]}` against base `{base[:12]}`. "
+                "A review was requested; this approves once Codex has reviewed it and no "
+                "conversation is open.")
     open_threads = unresolved_threads(gh, repo, number)
     if open_threads is None:
         return ("WAIT", "THREADS_UNREADABLE", "review threads could not be read; no approval this run.")
@@ -521,6 +545,7 @@ def codex_verdict(gh, repo, number, head, base, files, reviews):
                 f"{open_threads} review conversation(s) are still open. Resolve them first.")
     how = "this exact head" if covering == head else (
         f"`{covering[:12]}`; only merges were added since and the PR diff is identical")
+    how += f", completed after base `{base[:12]}`"
     return ("PASS", {"verdict": "PASS", "findings": [], "omitted": 0, "downgraded": False,
                      "summary": f"Codex completed a code review of {how}. No review conversation "
                                 "is open and required CI is green on the exact head."})
@@ -639,14 +664,13 @@ def review_pr(gh, repo, pr, *, login, mode, run_model, calls, now, run_url,
         raise Stop(f"CONFIGURATION_ERROR: {repo} has no required status checks on {pr['base']['ref']}")
     comment_id, status = read_status(gh, repo, number, login)
 
-    def record(cls, detail, message, count=False, extra=None):
+    def record(cls, detail, message, count=False):
         counts = dict(status.get("counts", {})) if status.get("head") == head else {}
         if count:
             counts[cls] = int(counts.get(cls, 0)) + 1
         new = {"head": head, "class": cls, "detail": detail, "counts": counts}
         if count:
             new["last"] = int(now)
-        new.update(extra or {})
         write_status(gh, repo, number, comment_id, status, new, message)
         return f"{cls} {detail}"
 
@@ -674,19 +698,20 @@ def review_pr(gh, repo, pr, *, login, mode, run_model, calls, now, run_url,
     if retiring:
         floor_paths = set()
     if engine == "codex":
-        verdict = codex_verdict(gh, repo, number, head, base, files, all_reviews)
+        comments = gh.pages(f"/repos/{OWNER}/{repo}/issues/{number}/comments")
+        verdict = codex_verdict(gh, repo, number, head, base, files, all_reviews, comments)
         if verdict[0] == "WAIT":
             _, detail, message = verdict
-            extra = {}
-            if detail == "CODEX_NOT_REVIEWED_AT_HEAD":
-                asked = status.get("requested") if status.get("head") == head else None
-                if mode == "approve" and asked != head:
+            if detail in ("CODEX_NOT_REVIEWED_AT_HEAD", "CODEX_REVIEW_PREDATES_BASE") and mode == "approve":
+                # Deduplicated on the request comments themselves (head and base), so a
+                # status rewrite or a failed status write never causes a second request.
+                asked = any((c.get("user") or {}).get("login") == login
+                            and (m := REQUEST_MARK.search(c.get("body") or ""))
+                            and m.group(1) == head and m.group(2) == base for c in comments)
+                if not asked:
                     gh.post(f"/repos/{OWNER}/{repo}/issues/{number}/comments", {
-                        "body": f"@codex review\n\n<!-- ntk-review-request v1 head={head} -->"})
-                    asked = head
-                if asked:
-                    extra["requested"] = asked
-            return record("CODEX_PENDING", detail, message, extra=extra)
+                        "body": f"@codex review\n\n<!-- ntk-review-request v1 head={head} base={base} -->"})
+            return record("CODEX_PENDING", detail, message)
         result = verdict[1]
     else:
         result = None

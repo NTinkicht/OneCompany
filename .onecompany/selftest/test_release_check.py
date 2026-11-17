@@ -174,6 +174,17 @@ class ReleaseEvidenceTests(unittest.TestCase):
         for code, mutate in cases.items():
             self.assertEqual(self.findings(mutate), [code], code)
 
+    def test_evidence_cannot_declare_an_unbounded_freshness_window(self):
+        limit = rc.MAX_EVIDENCE_AGE_SECONDS
+        self.assertEqual(self.findings(lambda d: d.update(max_age_seconds=limit)), [])  # positive control
+        self.assertEqual(self.findings(lambda d: d.update(max_age_seconds=limit + 1)), ["EVIDENCE_MAX_AGE_EXCESSIVE"])
+
+        def ancient(d):
+            d.update(max_age_seconds=10 * 365 * 86400, observed_at="2025-11-14T12:00:00Z")
+            for k in ("rollback_drill", "stop_drill", "backup"):
+                d[k]["observed_at"] = "2025-11-14T12:00:00Z"
+        self.assertEqual(self.findings(ancient), ["EVIDENCE_MAX_AGE_EXCESSIVE"])
+
     def test_rollback_must_restore_the_named_previous_version(self):
         code = ["ROLLBACK_NOT_RESTORED_TO_PREVIOUS"]
         self.assertEqual(self.findings(lambda d: d["rollback_drill"].pop("restored_version")), code)

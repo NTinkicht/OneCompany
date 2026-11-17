@@ -21,6 +21,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+# Evidence must not choose its own freshness window: anything above 24h is refused (fail closed).
+MAX_EVIDENCE_AGE_SECONDS = 86400
 DOCS = ("docs/RELEASE-CHECKLIST.md", "docs/INCIDENT-RUNBOOK.md")
 REQUIRED_SECTIONS = {
     "docs/RELEASE-CHECKLIST.md": ("## Trusted control plane", "## Deterministic acceptance", "## Final promotion"),
@@ -157,6 +159,8 @@ def check_evidence(evidence, now: datetime, stop_flag=None, expected_head=None, 
         findings.add("EVIDENCE_FROM_FUTURE")
     elif (now - observed).total_seconds() > max_age:
         findings.add("EVIDENCE_STALE")
+    if type(max_age) is int and max_age > MAX_EVIDENCE_AGE_SECONDS:
+        findings.add("EVIDENCE_MAX_AGE_EXCESSIVE")
     if type(max_age) is int and max_age > 0:
         for drill in (rollback, stop, backup):
             drill_at = _timestamp(drill.get("observed_at"))

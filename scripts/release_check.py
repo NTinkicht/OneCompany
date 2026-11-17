@@ -83,8 +83,12 @@ def _timestamp(value):
     return parsed if parsed.tzinfo is not None else None
 
 
-def check_evidence(evidence, now: datetime, stop_flag=None) -> list[str]:
-    """Refuse a release unless the evidence proves a fresh, green, drilled staging/test release."""
+def check_evidence(evidence, now: datetime, stop_flag=None, expected_head=None, expected_base=None) -> list[str]:
+    """Refuse a release unless the evidence proves a fresh, green, drilled staging/test release.
+
+    ``expected_head``/``expected_base`` (when given) are the live candidate's SHAs; evidence for any other
+    revision is stale because the head or base moved after it was collected.
+    """
     findings: set[str] = set()
     obj = lambda value: value if isinstance(value, dict) else {}  # noqa: E731
     top = obj(evidence)
@@ -95,6 +99,13 @@ def check_evidence(evidence, now: datetime, stop_flag=None) -> list[str]:
         findings.add("RELEASE_VERSION_MISSING")
     if top.get("environment") not in ENVIRONMENTS:
         findings.add("ENVIRONMENT_NOT_STAGING_OR_TEST")
+    for label, expected, actual in (("HEAD", expected_head, head), ("BASE", expected_base, top.get("base_sha"))):
+        if expected is None:
+            continue
+        if not (isinstance(expected, str) and SHA.fullmatch(expected)):
+            findings.add(f"EXPECTED_{label}_INVALID")
+        elif actual != expected:
+            findings.add(f"EVIDENCE_{label}_STALE")
     ci, review, provider = obj(top.get("ci")), obj(top.get("review")), obj(top.get("provider"))
     if ci.get("conclusion") != "success":
         findings.add("CI_NOT_GREEN")
@@ -196,6 +207,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true", help="emit machine-readable output")
     parser.add_argument("--evidence", help="also gate a release-evidence JSON file (staging/test only)")
     parser.add_argument("--now", help="ISO-8601 time with offset for deterministic freshness checks")
+    parser.add_argument("--expected-head", help="live candidate head SHA; evidence for another head is refused")
+    parser.add_argument("--expected-base", help="live candidate base SHA; evidence for another base is refused")
     args = parser.parse_args(argv)
     findings = check(ROOT)
     if args.evidence is not None:
@@ -210,7 +223,7 @@ def main(argv: list[str] | None = None) -> int:
                 flag = (json.loads((ROOT / ".onecompany" / "config.json").read_text(encoding="utf-8")).get("safety") or {}).get("emergency_stop")
             except (OSError, ValueError, AttributeError):
                 flag = None
-            findings.extend(check_evidence(data, now, flag))
+            findings.extend(check_evidence(data, now, flag, args.expected_head, args.expected_base))
         findings = sorted(set(findings))
     if args.json:
         print(json.dumps({"ready": not findings, "findings": findings}, sort_keys=True))

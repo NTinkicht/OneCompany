@@ -8,6 +8,10 @@ name: ntk-reviewer
 # It never approves control-plane paths: .github/**, CODEOWNERS, stop/budget files,
 # the per-repo list in .github/ntk-reviewer/control-plane.json, and anything owned
 # in the target repo's CODEOWNERS (read from the base branch).
+# REVIEWER_ENGINE (repository variable) picks where the verdict comes from:
+# unset or "mistral" = one Mistral Vibe call (the original setup); "codex" = no
+# model call, approve on the Codex GitHub reviewer's completed review of the
+# exact head plus zero unresolved threads. See docs/NTK-REVIEWER-ENGINE.md.
 # Code: .github/ntk-reviewer/review.py  Tests: .onecompany/selftest/test_ntk_reviewer.py
 
 on:
@@ -46,6 +50,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install pinned Mistral Vibe
+        if: vars.REVIEWER_ENGINE != 'codex'
         run: python -I -m pip install --disable-pip-version-check 'mistral-vibe==2.25.3'
 
       # actions/create-github-app-token v3.1.1, immutable pin.
@@ -68,6 +73,7 @@ jobs:
           REVIEWER_TOKEN: ${{ steps.app.outputs.token }}
           REVIEWER_LOGIN: ${{ steps.app.outputs.app-slug }}[bot]
           REVIEWER_MODE: ${{ vars.REVIEWER_MODE }}
+          REVIEWER_ENGINE: ${{ vars.REVIEWER_ENGINE }}
           REVIEW_ONLY: ${{ inputs.only }}
           MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
           PAYG_DISABLED_CONFIRMED: ${{ vars.ONECOMPANY_MISTRAL_PAYG_DISABLED_CONFIRMED }}

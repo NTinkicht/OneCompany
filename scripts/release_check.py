@@ -171,6 +171,13 @@ def check_evidence(evidence, now: datetime, stop_flag=None, expected_head=None, 
                 findings.add("DRILL_TIME_INVALID")
             elif (now - drill_at).total_seconds() > max_age:
                 findings.add("DRILL_STALE")
+        # CI, review and provider health are point-in-time signals: each must be individually fresh too.
+        for signal in (ci, review, provider):
+            signal_at = _timestamp(signal.get("observed_at"))
+            if signal_at is None or signal_at > now:
+                findings.add("SIGNAL_TIME_INVALID")
+            elif (now - signal_at).total_seconds() > max_age:
+                findings.add("SIGNAL_STALE")
     return sorted(findings)
 
 

@@ -124,9 +124,9 @@ class ReleaseEvidenceTests(unittest.TestCase):
         return {
             "release_version": "1.4.0", "environment": "staging", "head_sha": self.HEAD,
             "base_sha": self.BASE,
-            "ci": {"conclusion": "success", "head_sha": self.HEAD, "base_sha": self.BASE},
-            "review": {"state": "APPROVED", "head_sha": self.HEAD, "reviewer": "ntk-reviewer[bot]", "authors": ["claude"]},
-            "provider": {"status": "up"},
+            "ci": {"conclusion": "success", "head_sha": self.HEAD, "base_sha": self.BASE, "observed_at": "2026-11-14T11:30:00Z"},
+            "review": {"state": "APPROVED", "head_sha": self.HEAD, "reviewer": "ntk-reviewer[bot]", "authors": ["claude"], "observed_at": "2026-11-14T11:30:00Z"},
+            "provider": {"status": "up", "observed_at": "2026-11-14T11:30:00Z"},
             "rollback_drill": {"passed": True, "previous_version": "1.3.0", "restored_version": "1.3.0", "head_sha": self.HEAD,
                                "observed_at": "2026-11-14T11:30:00Z"},
             "stop_drill": {"passed": True, "writes_after_stop": 0, "head_sha": self.HEAD, "observed_at": "2026-11-14T11:30:00Z"},
@@ -236,6 +236,16 @@ class ReleaseEvidenceTests(unittest.TestCase):
                              ["DRILL_TIME_INVALID"], drill)
             self.assertEqual(self.findings(lambda d, k=drill: d[k].update(observed_at=12345)),
                              ["DRILL_TIME_INVALID"], drill)
+
+    def test_ci_review_and_provider_signals_must_each_be_fresh(self):
+        # A refreshed top-level stamp cannot launder an old or unstamped CI/review/provider signal.
+        for section in ("ci", "review", "provider"):
+            self.assertEqual(self.findings(lambda d, k=section: d[k].update(observed_at="2026-11-14T10:00:00Z")),
+                             ["SIGNAL_STALE"], section)
+            self.assertEqual(self.findings(lambda d, k=section: d[k].pop("observed_at")), ["SIGNAL_TIME_INVALID"], section)
+            for bad in ("2026-11-14T11:30:00", "2026-11-14T13:00:00Z", 12345, None):
+                self.assertEqual(self.findings(lambda d, k=section, b=bad: d[k].update(observed_at=b)),
+                                 ["SIGNAL_TIME_INVALID"], (section, bad))
 
     def test_repository_stop_flag_refuses_even_if_evidence_claims_clear(self):
         self.assertEqual(self.findings(stop_flag=True), ["EMERGENCY_STOP_ACTIVE"])

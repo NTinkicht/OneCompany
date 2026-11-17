@@ -125,6 +125,10 @@ def check_evidence(evidence, now: datetime, stop_flag=None, expected_head=None, 
         findings.add("REVIEW_NOT_APPROVED")
     if review.get("head_sha") != head:
         findings.add("REVIEW_HEAD_MISMATCH")
+    # An approval is only valid for the base it was given against; base drift after review is refused.
+    # (An invalid evidence base is already refused as CI_BASE_MISMATCH.)
+    if isinstance(base, str) and SHA.fullmatch(base) and review.get("base_sha") != base:
+        findings.add("REVIEW_BASE_MISMATCH")
     if provider.get("status") != "up":
         findings.add("PROVIDER_NOT_HEALTHY")
     rollback, stop, backup = obj(top.get("rollback_drill")), obj(top.get("stop_drill")), obj(top.get("backup"))

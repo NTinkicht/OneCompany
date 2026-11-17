@@ -20,7 +20,7 @@ def level_violations(
     if not isinstance(autonomy, dict):
         return ["autonomy_policy_unavailable"]
     level = autonomy.get("level")
-    if level not in LEVELS:
+    if not isinstance(level, str) or level not in LEVELS:
         return ["autonomy_level_invalid_or_unverified"]
 
     if not unattended:

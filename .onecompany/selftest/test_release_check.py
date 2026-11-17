@@ -246,6 +246,25 @@ class ReleaseEvidenceTests(unittest.TestCase):
         self.assertEqual(self.run_cli("x" * (rc.EVIDENCE_MAX_BYTES + 1))[1]["findings"], ["EVIDENCE_TOO_LARGE"])
         self.assertEqual(self.run_cli(self.good(), "--now", "garbage")[1]["findings"], ["NOW_INVALID"])
 
+    def test_moved_head_or_base_makes_evidence_stale(self):
+        other = "b" * 40
+        run = lambda **kw: rc.check_evidence(self.good(), self.NOW, False, **kw)  # noqa: E731
+        self.assertEqual(run(), [])
+        self.assertEqual(run(expected_head=self.HEAD, expected_base=self.BASE), [])
+        self.assertEqual(run(expected_head=other), ["EVIDENCE_HEAD_STALE"])
+        self.assertEqual(run(expected_base=other), ["EVIDENCE_BASE_STALE"])
+        self.assertEqual(run(expected_head="abc"), ["EXPECTED_HEAD_INVALID"])
+        self.assertEqual(run(expected_base=""), ["EXPECTED_BASE_INVALID"])
+        self.assertEqual(run(expected_head=self.HEAD.upper()), ["EXPECTED_HEAD_INVALID"])
+
+    def test_cli_expected_head_and_base(self):
+        other = "b" * 40
+        self.assertEqual(self.run_cli(self.good(), "--expected-head", self.HEAD, "--expected-base", self.BASE)[0], 0)
+        self.assertEqual(self.run_cli(self.good(), "--expected-head", other),
+                         (1, {"findings": ["EVIDENCE_HEAD_STALE"], "ready": False}))
+        self.assertEqual(self.run_cli(self.good(), "--expected-base", other)[1]["findings"], ["EVIDENCE_BASE_STALE"])
+        self.assertEqual(self.run_cli(self.good(), "--expected-head", "")[1]["findings"], ["EXPECTED_HEAD_INVALID"])
+
     def test_cli_refuses_explicitly_empty_options(self):
         run = lambda *a: subprocess.run([sys.executable, str(ROOT / "onecompany.py"), "release-check", "--json", *a],  # noqa: E731
                                         capture_output=True, text=True, check=False)

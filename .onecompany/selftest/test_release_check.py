@@ -128,7 +128,8 @@ class ReleaseEvidenceTests(unittest.TestCase):
             "review": {"state": "APPROVED", "head_sha": self.HEAD, "reviewer": "ntk-reviewer[bot]", "authors": ["claude"]},
             "provider": {"status": "up"},
             "rollback_drill": {"passed": True, "previous_version": "1.3.0", "restored_version": "1.3.0", "head_sha": self.HEAD},
-            "stop_drill": {"passed": True, "head_sha": self.HEAD}, "backup": {"verified": True, "head_sha": self.HEAD},
+            "stop_drill": {"passed": True, "head_sha": self.HEAD}, "backup": {"verified": True, "head_sha": self.HEAD, "restore_tested": True,
+                       "digest": "e" * 64, "restored_digest": "e" * 64},
             "emergency_stop_active": False,
             "observed_at": "2026-11-14T11:30:00Z", "max_age_seconds": 3600,
         }
@@ -161,6 +162,8 @@ class ReleaseEvidenceTests(unittest.TestCase):
             "ROLLBACK_PREVIOUS_VERSION_MISSING": lambda d: d["rollback_drill"].pop("previous_version"),
             "STOP_DRILL_NOT_PASSED": lambda d: d["stop_drill"].update(passed=False),
             "BACKUP_NOT_VERIFIED": lambda d: d["backup"].update(verified=1),
+            "BACKUP_RESTORE_NOT_PROVEN": lambda d: d["backup"].update(restore_tested=1),
+            "BACKUP_DIGEST_MISMATCH": lambda d: d["backup"].update(restored_digest="f" * 64),
             "EMERGENCY_STOP_ACTIVE": lambda d: d.update(emergency_stop_active=True),
             "EVIDENCE_STALE": lambda d: d.update(observed_at="2026-11-14T10:00:00Z"),
             "EVIDENCE_FROM_FUTURE": lambda d: d.update(observed_at="2026-11-14T13:00:00Z"),
@@ -175,6 +178,17 @@ class ReleaseEvidenceTests(unittest.TestCase):
         self.assertEqual(self.findings(lambda d: d["rollback_drill"].update(restored_version=130)), code)
         self.assertEqual(self.findings(lambda d: d["rollback_drill"].update(restored_version=" ")), code)
         self.assertEqual(self.findings(lambda d: d["rollback_drill"].update(restored_version=" 1.3.0 ")), [])
+
+    def test_backup_restore_must_be_proven_with_matching_digests(self):
+        code = ["BACKUP_DIGEST_MISMATCH"]
+        self.assertEqual(self.findings(lambda d: d["backup"].pop("restore_tested")), ["BACKUP_RESTORE_NOT_PROVEN"])
+        self.assertEqual(self.findings(lambda d: d["backup"].pop("digest")), code)
+        self.assertEqual(self.findings(lambda d: d["backup"].pop("restored_digest")), code)
+        self.assertEqual(self.findings(lambda d: d["backup"].update(digest=None, restored_digest=None)), code)
+        self.assertEqual(self.findings(lambda d: d["backup"].update(digest="E" * 64, restored_digest="E" * 64)), code)
+        self.assertEqual(self.findings(lambda d: d["backup"].update(digest="e" * 63, restored_digest="e" * 63)), code)
+        self.assertEqual(self.findings(lambda d: d.pop("backup")), sorted(
+            ["BACKUP_NOT_VERIFIED", "BACKUP_RESTORE_NOT_PROVEN", "BACKUP_DIGEST_MISMATCH", "DRILL_HEAD_MISMATCH"]))
 
     def test_independence_and_drill_binding_fail_closed(self):
         only = lambda code, mutate: self.assertEqual(self.findings(mutate), [code])  # noqa: E731

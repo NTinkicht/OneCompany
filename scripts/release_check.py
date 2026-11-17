@@ -146,6 +146,13 @@ def check_evidence(evidence, now: datetime, stop_flag=None) -> list[str]:
         findings.add("EVIDENCE_FROM_FUTURE")
     elif (now - observed).total_seconds() > max_age:
         findings.add("EVIDENCE_STALE")
+    if type(max_age) is int and max_age > 0:
+        for drill in (rollback, stop, backup):
+            drill_at = _timestamp(drill.get("observed_at"))
+            if drill_at is None or drill_at > now:
+                findings.add("DRILL_TIME_INVALID")
+            elif (now - drill_at).total_seconds() > max_age:
+                findings.add("DRILL_STALE")
     return sorted(findings)
 
 

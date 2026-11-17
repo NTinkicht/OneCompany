@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime as dt
 import json
 from pathlib import Path
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -123,6 +124,32 @@ class MissionTruthTests(unittest.TestCase):
             self.assertEqual(mt.main(["--cache", str(c), "--live", str(l)]), 0)
             c.write_text("not json")
             self.assertEqual(mt.main(["--cache", str(c), "--live", str(l)]), 2)
+
+    def _cli(self, *args):
+        return subprocess.run([sys.executable, str(ROOT / "onecompany.py"), "mission-truth", *args],
+                              capture_output=True, text=True, cwd=ROOT)
+
+    def test_onecompany_command_routes_to_projection(self):
+        with tempfile.TemporaryDirectory() as d:
+            c, l = Path(d) / "c.json", Path(d) / "l.json"
+            c.write_text(json.dumps([wu()]))
+            l.write_text("{}")
+            done = self._cli("--cache", str(c), "--live", str(l))
+            self.assertEqual(done.returncode, 0, done.stderr)
+            out = json.loads(done.stdout)
+            self.assertEqual(out["schema"], mt.SCHEMA)
+            self.assertFalse(out["authority_granted"])
+            self.assertEqual(out["work_units"][0]["state"], "UNABLE_TO_VERIFY")
+            c.write_text("not json")
+            bad = self._cli("--cache", str(c), "--live", str(l))
+            self.assertEqual(bad.returncode, 2)
+            self.assertIn("MISSION_TRUTH_INPUT_REJECTED", bad.stderr)
+
+    def test_command_is_listed_and_documented(self):
+        self.assertIn("mission-truth", subprocess.run([sys.executable, str(ROOT / "onecompany.py"), "--help"],
+                                                      capture_output=True, text=True).stdout)
+        self.assertIn("python onecompany.py mission-truth",
+                      (ROOT / "docs" / "COMMAND-REFERENCE.md").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

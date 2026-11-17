@@ -125,7 +125,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
             "release_version": "1.4.0", "environment": "staging", "head_sha": self.HEAD,
             "base_sha": self.BASE,
             "ci": {"conclusion": "success", "head_sha": self.HEAD, "base_sha": self.BASE, "observed_at": "2026-11-14T11:30:00Z"},
-            "review": {"state": "APPROVED", "head_sha": self.HEAD, "reviewer": "ntk-reviewer[bot]", "authors": ["claude"], "observed_at": "2026-11-14T11:30:00Z"},
+            "review": {"state": "APPROVED", "head_sha": self.HEAD, "base_sha": self.BASE, "reviewer": "ntk-reviewer[bot]", "authors": ["claude"], "observed_at": "2026-11-14T11:30:00Z"},
             "provider": {"status": "up", "observed_at": "2026-11-14T11:30:00Z"},
             "rollback_drill": {"passed": True, "previous_version": "1.3.0", "restored_version": "1.3.0", "head_sha": self.HEAD,
                                "observed_at": "2026-11-14T11:30:00Z"},
@@ -159,6 +159,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
             "ROLLBACK_NOOP": lambda d: d["rollback_drill"].update(previous_version=" 1.4.0", restored_version="1.4.0"),
             "REVIEW_NOT_APPROVED": lambda d: d["review"].update(state="CHANGES_REQUESTED"),
             "REVIEW_HEAD_MISMATCH": lambda d: d["review"].update(head_sha="b" * 40),
+            "REVIEW_BASE_MISMATCH": lambda d: d["review"].update(base_sha="c" * 40),
             "PROVIDER_NOT_HEALTHY": lambda d: d["provider"].update(status="down"),
             "ROLLBACK_DRILL_NOT_PASSED": lambda d: d["rollback_drill"].update(passed="true"),
             "ROLLBACK_PREVIOUS_VERSION_MISSING": lambda d: d["rollback_drill"].pop("previous_version"),
@@ -223,6 +224,15 @@ class ReleaseEvidenceTests(unittest.TestCase):
         only("CI_BASE_MISMATCH", lambda d: d.pop("base_sha"))
         for drill in ("rollback_drill", "stop_drill"):
             only("DRILL_HEAD_MISMATCH", lambda d, k=drill: d[k].pop("head_sha"))
+
+    def test_review_must_be_bound_to_the_evidence_base(self):
+        # Positive control: the good fixture carries a matching review base and passes.
+        self.assertEqual(self.findings(), [])
+        for mutate in (lambda d: d["review"].update(base_sha="c" * 40), lambda d: d["review"].pop("base_sha"),
+                       lambda d: d["review"].update(base_sha=7), lambda d: d["review"].update(base_sha=None)):
+            self.assertEqual(self.findings(mutate), ["REVIEW_BASE_MISMATCH"])
+        # A matching CI base cannot launder a review given against another base.
+        self.assertEqual(self.findings(lambda d: d["review"].update(base_sha="b" * 40)), ["REVIEW_BASE_MISMATCH"])
 
     def test_each_drill_must_be_individually_fresh(self):
         # Evidence refreshed at the top level cannot launder an old or unstamped drill.

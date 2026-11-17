@@ -143,6 +143,9 @@ def check_evidence(evidence, now: datetime, stop_flag=None, expected_head=None, 
         findings.add("ROLLBACK_NOOP")
     if stop.get("passed") is not True:
         findings.add("STOP_DRILL_NOT_PASSED")
+    writes = stop.get("writes_after_stop")
+    if type(writes) is not int or writes != 0:
+        findings.add("STOP_DRILL_NOT_EFFECTIVE")
     if backup.get("verified") is not True:
         findings.add("BACKUP_NOT_VERIFIED")
     if backup.get("restore_tested") is not True:

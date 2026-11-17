@@ -129,7 +129,7 @@ class ReleaseEvidenceTests(unittest.TestCase):
             "provider": {"status": "up"},
             "rollback_drill": {"passed": True, "previous_version": "1.3.0", "restored_version": "1.3.0", "head_sha": self.HEAD,
                                "observed_at": "2026-11-14T11:30:00Z"},
-            "stop_drill": {"passed": True, "head_sha": self.HEAD, "observed_at": "2026-11-14T11:30:00Z"},
+            "stop_drill": {"passed": True, "writes_after_stop": 0, "head_sha": self.HEAD, "observed_at": "2026-11-14T11:30:00Z"},
             "backup": {"verified": True, "head_sha": self.HEAD, "restore_tested": True, "observed_at": "2026-11-14T11:30:00Z",
                        "digest": "e" * 64, "restored_digest": "e" * 64},
             "emergency_stop_active": False,
@@ -184,6 +184,16 @@ class ReleaseEvidenceTests(unittest.TestCase):
             for k in ("rollback_drill", "stop_drill", "backup"):
                 d[k]["observed_at"] = "2025-11-14T12:00:00Z"
         self.assertEqual(self.findings(ancient), ["EVIDENCE_MAX_AGE_EXCESSIVE"])
+
+    def test_stop_drill_must_prove_no_writes_after_the_stop(self):
+        code = ["STOP_DRILL_NOT_EFFECTIVE"]
+        self.assertEqual(self.findings(lambda d: d["stop_drill"].update(writes_after_stop=0)), [])  # positive control
+        self.assertEqual(self.findings(lambda d: d["stop_drill"].pop("writes_after_stop")), code)
+        for bad in (True, False, -1, 1, 7, "0", 0.0, None):
+            self.assertEqual(self.findings(lambda d, v=bad: d["stop_drill"].update(writes_after_stop=v)), code, repr(bad))
+        # A drill that claims to have passed while writers kept writing is still refused.
+        self.assertEqual(self.findings(lambda d: d["stop_drill"].update(passed=True, writes_after_stop=3)), code)
+        self.assertEqual(self.findings(lambda d: d["stop_drill"].update(passed=False)), ["STOP_DRILL_NOT_PASSED"])
 
     def test_rollback_must_restore_the_named_previous_version(self):
         code = ["ROLLBACK_NOT_RESTORED_TO_PREVIOUS"]

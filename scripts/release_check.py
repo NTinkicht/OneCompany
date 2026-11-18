@@ -142,6 +142,11 @@ def check_evidence(evidence, now: datetime, stop_flag=None, expected_head=None, 
         findings.add("ROLLBACK_NOT_RESTORED_TO_PREVIOUS")
     if any(drill.get("head_sha") != head for drill in (rollback, stop, backup)):
         findings.add("DRILL_HEAD_MISMATCH")
+    # A drill that is present must have been run against the evidence base; base drift voids it.
+    # (An empty/absent drill is already refused by its own findings; an invalid evidence base by CI_BASE_MISMATCH.)
+    if isinstance(base, str) and SHA.fullmatch(base) and any(
+            drill and drill.get("base_sha") != base for drill in (rollback, stop, backup)):
+        findings.add("DRILL_BASE_MISMATCH")
     if isinstance(rollback.get("previous_version"), str) and isinstance(top.get("release_version"), str) \
             and rollback["previous_version"].strip() == top["release_version"].strip():
         findings.add("ROLLBACK_NOOP")

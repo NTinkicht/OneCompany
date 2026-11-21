@@ -196,6 +196,47 @@ class BriefApprovalTests(unittest.TestCase):
                 self.refused("WRITE_SCOPE_INVALID", "--approve-wu", "WU-APP-001", "--owner-ack",
                              "--planning-ref", "EPIC-9", "--write-scope", bad)
 
+    def refused_untouched(self, reason):
+        """Refuse with the exact reason and leave queue and portfolio byte-identical."""
+        queue_before, portfolio_before = self.queue.read_bytes(), self.portfolio.read_bytes() if self.portfolio.exists() else None
+        code, out, err = self.admit()
+        self.assertEqual((code, out), (2, ""))
+        self.assertIn("REFUSED: " + reason, err)
+        self.assertEqual(self.queue.read_bytes(), queue_before)
+        if portfolio_before is not None:
+            self.assertEqual(self.portfolio.read_bytes(), portfolio_before)
+
+    def test_refuses_missing_portfolio_for_planning_ref(self):
+        self.portfolio.unlink()
+        self.refused_untouched("TARGET_PLANNING_NOT_FOUND")
+        self.assertFalse(self.portfolio.exists())
+
+    def test_refuses_oversized_queue(self):
+        self.queue.write_text(json.dumps({"work_units": [], "pad": "x" * (ba.MAX_QUEUE_BYTES + 1)}))
+        self.refused_untouched("TARGET_QUEUE_TOO_LARGE")
+
+    def test_refuses_corrupt_queue_shapes(self):
+        shapes = {
+            "not an object": [],
+            "units not a list": {"work_units": {}},
+            "unit not an object": {"work_units": ["WU-X"]},
+            "unit id not a string": {"work_units": [{"id": 7, "status": "DONE"}]},
+            "unit status not a string": {"work_units": [{"id": "WU-X", "status": None}]},
+        }
+        for label, body in shapes.items():
+            with self.subTest(label):
+                self.queue.write_text(json.dumps(body))
+                self.refused_untouched("TARGET_QUEUE_INVALID")
+
+    def test_refuses_portfolio_without_link_list_or_entities(self):
+        for label, body in {"links not a list": {"entities": [{"id": "EPIC-9"}], "links": {}},
+                            "links missing": {"entities": [{"id": "EPIC-9"}]}}.items():
+            with self.subTest(label):
+                self.portfolio.write_text(json.dumps(body))
+                self.refused_untouched("TARGET_PLANNING_INVALID")
+        self.portfolio.write_text(json.dumps({"entities": {}, "links": []}))
+        self.refused_untouched("UNKNOWN_PLANNING_REF")
+
     def test_refuses_symlinked_control_directory(self):
         outside = Path(self.tmp.name) / "outside"
         (self.target / ".onecompany").rename(outside)

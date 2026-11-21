@@ -319,6 +319,24 @@ class ReleaseEvidenceTests(unittest.TestCase):
         self.assertEqual(self.run_cli(self.good(), "--expected-base", other)[1]["findings"], ["EVIDENCE_BASE_STALE"])
         self.assertEqual(self.run_cli(self.good(), "--expected-head", "")[1]["findings"], ["EXPECTED_HEAD_INVALID"])
 
+    def test_duplicate_keys_are_refused_even_when_the_last_value_is_green(self):
+        good = json.dumps(self.good())
+        top = good[:-1] + ', "environment": "staging"}'
+        nested = json.dumps(self.good()).replace('"conclusion": "success"', '"conclusion": "failure", "conclusion": "success"')
+        self.assertNotEqual(nested, good)
+        for label, text in (("top", top), ("nested", nested)):
+            with self.subTest(label):
+                self.assertEqual(json.loads(text)["ci"]["conclusion"], "success")  # plain json would accept it
+                self.assertEqual(self.run_cli(text), (1, {"findings": ["EVIDENCE_DUPLICATE_KEY"], "ready": False}))
+        tmp = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, tmp, True)
+        path = tmp / "dup.json"
+        path.write_text(nested, encoding="utf-8")
+        self.assertEqual(rc._load_evidence(path), (None, "EVIDENCE_DUPLICATE_KEY"))
+        path.write_text("{not json", encoding="utf-8")
+        self.assertEqual(rc._load_evidence(path), (None, "EVIDENCE_MALFORMED"))
+        self.assertEqual(self.run_cli(self.good())[0], 0)
+
     def test_cli_refuses_explicitly_empty_options(self):
         run = lambda *a: subprocess.run([sys.executable, str(ROOT / "onecompany.py"), "release-check", "--json", *a],  # noqa: E731
                                         capture_output=True, text=True, check=False)

@@ -20,6 +20,10 @@ def snapshot(base: Path) -> dict:
     }
 
 
+SOURCE = json.loads((ROOT / ".onecompany/config.json").read_text())["project"]["repository"] == "NTinkicht/OneCompany"
+
+
+@unittest.skipUnless(SOURCE, "init is only valid on an untouched template copy; bootstrapped targets skip")
 class InitProjectTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory(prefix="onecompany-init-test-")

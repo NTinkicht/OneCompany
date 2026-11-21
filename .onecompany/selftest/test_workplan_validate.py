@@ -129,6 +129,35 @@ class WorkplanValidateTests(unittest.TestCase):
         self.assertEqual(wv.validate({"schema": wv.SCHEMA, "work_units": 5}, BRIEF)["verdict"], "REFUSED")
         self.assertEqual(wv.validate(self.good(), {"answers": 3})["verdict"], "REFUSED")
 
+    def test_exact_reason_refusals_for_dependency_criterion_and_id_branches(self):
+        def crit(**kw):
+            return lambda p: p["work_units"][0]["acceptance_criteria"][0].update(**kw)
+        self.refused(lambda p: p["work_units"][1].update(dependencies=["WU-A", "WU-A"]), "DEPENDENCIES_INVALID")
+        self.refused(lambda p: p["work_units"][1].update(dependencies=[5]), "DEPENDENCIES_INVALID")
+        self.refused(lambda p: p["work_units"][0]["acceptance_criteria"].append(
+            dict(p["work_units"][0]["acceptance_criteria"][0])), "CRITERION_INVALID")
+        self.refused(crit(extra="x"), "CRITERION_INVALID")
+        self.refused(crit(text=""), "CRITERION_INVALID")
+        for bad_id in ("", "X-1", "WU", "WU bad", "WU/x"):
+            self.refused(lambda p, b=bad_id: p["work_units"][0].update(id=b), "WU_ID_INVALID")
+
+    def test_three_node_cycle_is_refused_with_cycle_reason_only(self):
+        p = plan(unit("WU-A", "src/a/**", ["WU-C"]), unit("WU-B", "src/b/**", ["WU-A"]),
+                 unit("WU-C", "src/c/**", ["WU-B"]))
+        result = wv.validate(p, BRIEF)
+        self.assertEqual(result["verdict"], "REFUSED")
+        self.assertEqual(codes(result), {"DEPENDENCY_CYCLE"})
+        self.assertEqual(result["admitted"], [])
+        self.assertEqual(result["authorization"], "NOT_GRANTED")
+        self.assertEqual(result["proposals"], [])
+
+    def test_overlap_is_serialized_by_transitive_dependency_only(self):
+        p = plan(unit("WU-A", "src/**"), unit("WU-M", "docs/m/**", ["WU-A"]), unit("WU-B", "src/b/**", ["WU-M"]))
+        self.assertEqual(wv.validate(p, BRIEF)["verdict"], "ACCEPTED")
+        p = plan(unit("WU-A", "src/**"), unit("WU-M", "docs/m/**"), unit("WU-B", "src/b/**", ["WU-M"]))
+        result = wv.validate(p, BRIEF)
+        self.assertEqual(codes(result), {"SCOPE_OVERLAP_UNSERIALIZED"})
+
     def test_overlap_requires_serialization(self):
         p = plan(unit("WU-A", "src/**"), unit("WU-B", "src/b/**"))
         self.assertIn("SCOPE_OVERLAP_UNSERIALIZED", codes(wv.validate(p, BRIEF)))

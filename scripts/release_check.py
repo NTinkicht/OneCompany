@@ -49,6 +49,14 @@ DIGEST = re.compile(r"[0-9a-f]{64}")
 ENVIRONMENTS = ("staging", "test")
 
 
+def _reject_duplicate_keys(pairs):
+    """``object_pairs_hook``: a repeated key is ambiguous (json keeps the last), so refuse it at any depth."""
+    keys = [key for key, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate key")
+    return dict(pairs)
+
+
 def _load_evidence(path: Path):
     """Read a bounded regular non-symlink JSON file; return (data, finding)."""
     try:
@@ -67,9 +75,13 @@ def _load_evidence(path: Path):
     if len(raw) > EVIDENCE_MAX_BYTES:
         return None, "EVIDENCE_TOO_LARGE"
     try:
-        data = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, ValueError):
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
         return None, "EVIDENCE_MALFORMED"
+    try:
+        data = json.loads(text, object_pairs_hook=_reject_duplicate_keys)
+    except ValueError as exc:
+        return None, "EVIDENCE_DUPLICATE_KEY" if str(exc) == "duplicate key" else "EVIDENCE_MALFORMED"
     if not isinstance(data, dict):
         return None, "EVIDENCE_NOT_OBJECT"
     return data, None

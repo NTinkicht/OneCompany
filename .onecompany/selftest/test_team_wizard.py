@@ -47,6 +47,32 @@ class TeamWizardTests(unittest.TestCase):
             with self.assertRaises(ValueError, msg=bad):
                 tw.parse_declared(bad, ACTORS)
 
+    def test_build_plan_refuses_invalid_declarations_with_exact_reasons(self):
+        cases = (
+            ([], "declaration must be a non-empty comma-separated list of actors"),
+            (["claude", ""], "declaration must be a non-empty comma-separated list of actors"),
+            (["claude", "claude"], "duplicate actor: claude"),
+            (["copilot", "github-copilot"], "duplicate actor: github-copilot"),
+            (["nobody"], "unknown actor: nobody"),
+            (["human-owner"], "human-owner is always available and is not declared"),
+        )
+        for declared, reason in cases:
+            with self.assertRaises(ValueError, msg=declared) as ctx:
+                tw.build_plan(declared)
+            self.assertEqual(str(ctx.exception), reason, declared)
+        # positive control: a valid declaration through the same entry point is accepted
+        self.assertEqual(tw.build_plan(["claude", "codex"])["declared"], ["claude", "codex"])
+        self.assertEqual(tw.build_plan(["copilot"])["declared"], ["github-copilot"])
+
+    def test_parse_declared_exact_reasons(self):
+        empty = "declaration must be a non-empty comma-separated list of actors"
+        for raw, reason in (("", empty), ("claude,,codex", empty), ("claude,claude", "duplicate actor: claude"),
+                            ("nobody", "unknown actor: nobody")):
+            with self.assertRaises(ValueError) as ctx:
+                tw.parse_declared(raw, ACTORS)
+            self.assertEqual(str(ctx.exception), reason, raw)
+        self.assertEqual(tw.parse_declared("claude, codex", ACTORS), ["claude", "codex"])
+
     def test_property_reviewers_never_authors_for_every_subset(self):
         names = ["claude", "chatgpt", "codex", "copilot", "gemini", "mistral", "grok"]
         for size in range(1, len(names) + 1):

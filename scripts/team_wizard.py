@@ -33,13 +33,14 @@ def load(name: str) -> dict[str, Any]:
     return json.loads((CONFIG / name).read_text(encoding="utf-8"))
 
 
-def parse_declared(raw: str, actors: dict[str, dict[str, Any]]) -> list[str]:
+def validate_declared(names: list[str], actors: dict[str, dict[str, Any]]) -> list[str]:
     """Return canonical actor ids, rejecting empty, unknown, human and duplicate names."""
-    names = [part.strip() for part in raw.split(",")]
-    if not raw.strip() or any(not name for name in names):
+    if not names:
         raise ValueError("declaration must be a non-empty comma-separated list of actors")
     result: list[str] = []
     for name in names:
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("declaration must be a non-empty comma-separated list of actors")
         actor = ALIASES.get(name, name)
         if actor == HUMAN:
             raise ValueError("human-owner is always available and is not declared")
@@ -49,6 +50,11 @@ def parse_declared(raw: str, actors: dict[str, dict[str, Any]]) -> list[str]:
             raise ValueError("duplicate actor: " + name)
         result.append(actor)
     return result
+
+
+def parse_declared(raw: str, actors: dict[str, dict[str, Any]]) -> list[str]:
+    """Split a comma-separated declaration and validate it."""
+    return validate_declared([part.strip() for part in raw.split(",")], actors)
 
 
 def pick(capabilities: list[str], pool: set[str], routing: dict[str, list[str]],
@@ -63,6 +69,7 @@ def pick(capabilities: list[str], pool: set[str], routing: dict[str, list[str]],
 def build_plan(declared: list[str]) -> dict[str, Any]:
     """Deterministically map each role to a declared included-subscription actor or the human."""
     actors = {a["id"]: a for a in load("actors.json")["actors"]}
+    declared = validate_declared(list(declared), actors)
     roles = load("roles.json")["roles"]
     routing = load("routing.json")["preference_by_capability"]
     budget = load("budget.json")["ai"]

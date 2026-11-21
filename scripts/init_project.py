@@ -55,8 +55,7 @@ def configure_codeowners(owner: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def configure_root_identity(login: str) -> None:
-    identity = load_json(CONTROL / "identity.json")
+def find_root_principal(identity: dict) -> dict:
     principals = identity.get("principals", [])
     roots = [
         item
@@ -70,7 +69,19 @@ def configure_root_identity(login: str) -> None:
     root = roots[0]
     if root.get("actor_id") != "human-owner":
         raise ValueError("template root principal must map to actor_id human-owner")
-    root["login"] = login
+    return root
+
+
+def preflight_template() -> None:
+    """Refuse an invalid template copy before any file is written."""
+    if not (ROOT / ".github" / "CODEOWNERS").exists():
+        raise FileNotFoundError("template copy does not contain .github/CODEOWNERS")
+    find_root_principal(load_json(CONTROL / "identity.json"))
+
+
+def configure_root_identity(login: str) -> None:
+    identity = load_json(CONTROL / "identity.json")
+    find_root_principal(identity)["login"] = login
     save_json(CONTROL / "identity.json", identity)
 
 
@@ -285,6 +296,7 @@ def main() -> int:
             code_owner=args.code_owner,
             root_principal=args.root_principal,
         )
+        preflight_template()
         configure_codeowners(code_owner)
         reset_control_plane(project_name, repository, default_branch, root_principal)
     except (ValueError, FileNotFoundError) as exc:

@@ -18,10 +18,18 @@ OUTCOMES = frozenset({"pass", "fail", "error", "skip"})
 BAD = frozenset({"fail", "error"})
 
 
+def _reject_duplicate_keys(pairs):
+    """``object_pairs_hook``: json keeps the last repeated key, which could hide a failing test; refuse it."""
+    keys = [key for key, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate key")
+    return dict(pairs)
+
+
 def load_run(path: Path) -> dict[str, str]:
     """Return the test->outcome map of one run file; raise ValueError on anything malformed."""
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_reject_duplicate_keys)
     except (OSError, ValueError) as exc:
         raise ValueError(f"run file unreadable: {path.name} ({exc.__class__.__name__})") from exc
     results = data.get("results") if isinstance(data, dict) else None

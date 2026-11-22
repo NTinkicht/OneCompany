@@ -87,6 +87,18 @@ class FlakyReportTests(unittest.TestCase):
             self.assertEqual(proc.returncode, 2, bad)
             self.assertNotIn("Traceback", proc.stderr)
 
+    def test_duplicate_test_id_is_refused_not_last_wins(self):
+        good = self.run_file("g.json", {"t": "pass"})
+        dup = self.run_file("d1.json", '{"results": {"t": "fail", "t": "pass"}}')
+        dup_top = self.run_file("d2.json", '{"results": {"t": "fail"}, "results": {"t": "pass"}}')
+        for bad in (dup, dup_top):
+            proc = self.cli(good, bad)
+            self.assertEqual(proc.returncode, 2, bad)
+            self.assertIn("unreadable", proc.stderr + proc.stdout)
+            self.assertNotIn("Traceback", proc.stderr)
+        with self.assertRaises(ValueError):
+            fr.load_run(Path(dup))
+
     def test_output_is_deterministic_and_writes_nothing(self):
         a = self.run_file("a.json", {"z": "pass", "a": "fail"})
         b = self.run_file("b.json", {"z": "fail", "a": "fail"})

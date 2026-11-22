@@ -36,6 +36,7 @@ REQUIRED = (
 UI_ASSETS = {"/": "text/html", "/app.css": "text/css", "/app.js": "text/javascript"}
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 SCOPE = "local-demo-loopback-only"
+TS_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$")
 
 
 class BindingError(ValueError):
@@ -44,6 +45,15 @@ class BindingError(ValueError):
 
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+
+
+def _parse_ts(value: object) -> datetime | None:
+    if not isinstance(value, str) or not TS_RE.match(value):
+        return None
+    try:
+        return datetime.strptime(value, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
 
 
 def build_digest(app_path: Path = APP_PATH) -> str:
@@ -225,7 +235,13 @@ def verify(manifest: object, *, wu_id: str, run_key: str, workspace: str | Path,
     if not (isinstance(k, dict) and k.get("server_stopped") is True and k.get("port_closed") is True
             and k.get("ok") is True):
         problems.append("cleanup not verified")
-    if str(manifest["started_at"]) > str(manifest["stopped_at"]):
+    times = {f: _parse_ts(manifest[f]) for f in ("started_at", "stopped_at")}
+    for field, parsed in times.items():
+        if parsed is None:
+            problems.append(f"timestamp malformed: {field}")
+        elif parsed > datetime.now(timezone.utc):
+            problems.append(f"timestamp in the future: {field}")
+    if all(times.values()) and times["started_at"] > times["stopped_at"]:
         problems.append("stop precedes start")
     return problems
 

@@ -1,5 +1,6 @@
 """Regression tests for the provider-neutral, non-authoritative harness contract."""
 from __future__ import annotations
+import re
 import sys
 import unittest
 from dataclasses import replace
@@ -16,6 +17,69 @@ def case():
     intent = HarnessIntent(key=KEY, project="example/private-project", actor="verified-bot", capability="implementation", head=HEAD, base=BASE, tools=frozenset({"read_file", "run_tests"}))
     trusted = TrustedHarnessSnapshot(key=KEY, project="example/private-project", head=HEAD, base=BASE, lease_actor="verified-bot", lease_capability="implementation", lease_active=True, permitted_tools=frozenset({"read_file", "run_tests"}), actor_verified=True, actor_cost_class="INCLUDED_SUBSCRIPTION", stop_active=False, extra_spend_cap=0)
     return intent, trusted
+
+REFUSAL_VECTORS = (
+    ("INVALID_RUN_KEY", {"key": "not-a-key"}, {}),
+    ("EMERGENCY_STOP", {}, {"stop_active": True}),
+    ("LEASE_NOT_ACTIVE", {}, {"lease_active": False}),
+    ("STALE_GENERATION", {"key": RunKey(KEY.wu_id, KEY.run_id, 2)}, {}),
+    ("WRONG_PROJECT", {"project": " "}, {}),
+    ("WRONG_ACTOR", {"actor": ""}, {}),
+    ("CAPABILITY_NOT_LEASED", {"capability": "review"}, {}),
+    ("INVALID_REVISION", {"head": "A" * 40}, {}),
+    ("NONDISTINCT_REVISIONS", {"head": BASE}, {"head": BASE}),
+    ("STALE_REVISION", {}, {"base": "c" * 40}),
+    ("ACTOR_NOT_VERIFIED", {}, {"actor_verified": False}),
+    ("COST_CLASS_BLOCKED", {}, {"actor_cost_class": "PAYG"}),
+    ("EXTRA_SPEND_BLOCKED", {"requested_extra_spend": 1}, {}),
+    ("INVALID_RESOURCE_CEILINGS", {"max_tokens": 0}, {"max_tokens": 0}),
+    ("RESOURCE_CEILINGS_MISMATCH", {"max_seconds": 301}, {}),
+    ("INVALID_TOOL_SCOPE", {"tools": {"read_file"}}, {}),
+    ("INVALID_TOOL_SCOPE", {}, {"permitted_tools": {"read_file", "run_tests"}}),
+    ("TOOL_SCOPE_BLOCKED", {"tools": frozenset()}, {}),
+    ("TOOL_SCOPE_BLOCKED", {"tools": frozenset({"read_file", " "})}, {}),
+    ("TOOL_SCOPE_BLOCKED", {"tools": frozenset({"read_file", "write_secrets"})}, {}),
+    ("GOVERNANCE_TOOL_BLOCKED", {"tools": frozenset({"read_file", "merge_pr"})}, {"permitted_tools": frozenset({"read_file", "run_tests", "merge_pr"})}),
+    ("UNKNOWN_PROVIDER_SEAM", {"provider_seam": "shell"}, {}),
+    ("PROVIDER_UNAVAILABLE", {}, {"provider_available": False}),
+    ("INVALID_TRUSTED_SNAPSHOT", {}, {"provider_available": "yes"}),
+)
+
+
+class HarnessRefusalVectorTests(unittest.TestCase):
+    def test_positive_control_is_admitted(self):
+        intent, trusted = case()
+        self.assertTrue(assess_intent(intent, trusted).permitted)
+
+    def test_each_refusal_code_has_an_exact_reason_vector(self):
+        for code, intent_change, trusted_change in REFUSAL_VECTORS:
+            with self.subTest(code=code, intent=intent_change, trusted=trusted_change):
+                intent, trusted = case()
+                verdict = assess_intent(replace(intent, **intent_change), replace(trusted, **trusted_change))
+                self.assertFalse(verdict.permitted)
+                self.assertEqual(verdict.code, code)
+
+    def test_provider_configuration_vectors(self):
+        intent, trusted = case()
+        for configuration, code in (({"native": False}, "PROVIDER_NOT_CONFIGURED"), ({}, "PROVIDER_NOT_CONFIGURED"), (["native"], "INVALID_PROVIDER_CONFIGURATION")):
+            with self.subTest(configuration=configuration):
+                self.assertEqual(assess_intent(intent, trusted, provider_configuration=configuration).code, code)
+        self.assertTrue(assess_intent(intent, trusted, provider_configuration={"native": True}).permitted)
+
+    def test_vectors_cover_every_refusal_code_in_the_source(self):
+        source = (Path(__file__).resolve().parents[2] / "scripts" / "harness_contract.py").read_text(encoding="utf-8")
+        declared = set(re.findall(r'deny\("([A-Z_]+)"\)', source))
+        covered = {code for code, _, _ in REFUSAL_VECTORS} | {"PROVIDER_NOT_CONFIGURED", "INVALID_PROVIDER_CONFIGURATION"}
+        self.assertEqual(declared, covered)
+
+    def test_precedence_stop_then_lease_then_generation(self):
+        intent, trusted = case()
+        stale = replace(intent, key=RunKey(KEY.wu_id, KEY.run_id, 2), actor="other")
+        both = replace(trusted, stop_active=True, lease_active=False)
+        self.assertEqual(assess_intent(stale, both).code, "EMERGENCY_STOP")
+        self.assertEqual(assess_intent(stale, replace(trusted, lease_active=False)).code, "LEASE_NOT_ACTIVE")
+        self.assertEqual(assess_intent(stale, trusted).code, "STALE_GENERATION")
+
 
 class HarnessContractTests(unittest.TestCase):
     def test_parent_matching_bounded_intent_can_be_considered_not_granted(self):

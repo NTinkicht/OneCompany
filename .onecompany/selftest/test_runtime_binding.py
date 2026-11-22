@@ -156,6 +156,24 @@ class RuntimeBindingTests(unittest.TestCase):
         m["crud_round_trip"].pop("update")
         self.assertIn("CRUD round trip failed", rb.verify(m, **self.args()))
 
+    def test_timestamps_must_be_wellformed_ordered_and_not_future(self) -> None:
+        self.assertEqual(rb.verify(self.manifest, **self.args()), [])  # positive control
+        s0 = self.manifest["started_at"]
+        for field, bad in (("started_at", "a"), ("stopped_at", "2020"), ("stopped_at", "zzz"),
+                           ("started_at", "2026-13-40T00:00:00.000000Z"), ("stopped_at", 12345)):
+            m = copy.deepcopy(self.manifest)
+            m[field] = bad
+            with self.subTest(field=field, bad=bad):
+                self.assertEqual(rb.verify(m, **self.args()), [f"timestamp malformed: {field}"])
+        m = copy.deepcopy(self.manifest)
+        m["started_at"], m["stopped_at"] = "2999-01-01T00:00:00.000000Z", "2999-01-02T00:00:00.000000Z"
+        self.assertEqual(rb.verify(m, **self.args()),
+                         ["timestamp in the future: started_at", "timestamp in the future: stopped_at"])
+        m = copy.deepcopy(self.manifest)
+        m["stopped_at"] = "2000-01-01T00:00:00.000000Z"
+        self.assertEqual(rb.verify(m, **self.args()), ["stop precedes start"])
+        self.assertLess(s0, "2999")
+
     def test_workspace_must_be_the_exact_head_checkout(self) -> None:
         with tempfile.TemporaryDirectory() as empty:
             with self.assertRaises(rb.BindingError):

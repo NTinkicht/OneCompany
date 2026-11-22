@@ -149,6 +149,21 @@ class BriefApprovalTests(unittest.TestCase):
         self.assertEqual(code, 2)
         self.assertIn("SAVED_BRIEF_FILE_REQUIRED", err)
 
+    def test_refuses_duplicate_keys_in_brief_queue_and_portfolio(self):
+        good_brief = json.dumps(self.make())
+        self.brief.write_text("{" + '"audience": "x", "audience": "y", ' + good_brief[1:])
+        self.refused_untouched("DUPLICATE_JSON_KEY")
+        self.brief.write_text(good_brief)
+        # last-wins hazard: an earlier non-DONE unit status hidden behind a later DONE one
+        self.queue.write_text('{"work_units": [{"id": "WU-A", "status": "READY", "status": "DONE"}]}')
+        self.refused_untouched("DUPLICATE_JSON_KEY")
+        self.write_queue([])
+        self.portfolio.write_text('{"entities": [{"id": "EPIC-9"}], "links": [], "links": []}')
+        self.refused_untouched("DUPLICATE_JSON_KEY")
+        self.portfolio.write_text(json.dumps({"entities": [{"id": "EPIC-9"}], "links": []}))
+        code, _, err = self.admit()  # positive control: identical content without duplicates is admitted
+        self.assertEqual((code, err), (0, ""))
+
     def test_refuses_stale_repository_path_or_branch(self):
         stale = self.make()
         stale["project"]["repository"] = "other/repo"

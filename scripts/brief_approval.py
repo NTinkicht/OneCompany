@@ -21,7 +21,7 @@ from pathlib import Path
 
 from onboard import analyze
 from brief_handoff_proposal import propose as propose_brief_handoff
-from first_run_journey import read_brief, view
+from first_run_journey import read_brief, reject_duplicate_keys, view
 
 WU_ID = re.compile(r"WU[0-9A-Za-z._-]{1,80}\Z")
 FINISHED = frozenset({"DONE", "MERGED", "CANCELLED"})
@@ -64,7 +64,7 @@ def read_json(dirfd: int, name: str) -> dict:
         os.close(descriptor)
     if len(raw) > MAX_QUEUE_BYTES:
         raise ValueError("TARGET_QUEUE_TOO_LARGE")
-    data = json.loads(raw)
+    data = json.loads(raw, object_pairs_hook=reject_duplicate_keys)
     if not isinstance(data, dict):
         raise ValueError("TARGET_QUEUE_INVALID")
     return data

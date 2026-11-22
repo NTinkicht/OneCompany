@@ -98,6 +98,18 @@ def project_work_units(cache: object, live: object, now: dt.datetime,
     }
 
 
+def _reject_duplicate_keys(pairs):
+    """json keeps the last repeated key, which makes evidence ambiguous; refuse at any depth."""
+    keys = [k for k, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate key")
+    return dict(pairs)
+
+
+def _load(path: Path):
+    return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_reject_duplicate_keys)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Project per-WU mission truth (read-only)")
     parser.add_argument("--cache", type=Path, required=True)
@@ -105,8 +117,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-age-seconds", type=int, default=900)
     args = parser.parse_args(argv)
     try:
-        cache = json.loads(args.cache.read_text(encoding="utf-8"))
-        live = json.loads(args.live.read_text(encoding="utf-8"))
+        cache = _load(args.cache)
+        live = _load(args.live)
         result = project_work_units(cache, live, dt.datetime.now(dt.timezone.utc),
                                     args.max_age_seconds)
     except (OSError, ValueError) as exc:

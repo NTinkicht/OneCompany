@@ -125,6 +125,21 @@ class MissionTruthTests(unittest.TestCase):
             c.write_text("not json")
             self.assertEqual(mt.main(["--cache", str(c), "--live", str(l)]), 2)
 
+    def test_cli_rejects_duplicate_keys_at_any_depth(self):
+        good = json.dumps([wu()])
+        with tempfile.TemporaryDirectory() as d:
+            c, l = Path(d) / "c.json", Path(d) / "l.json"
+            c.write_text(good)
+            l.write_text('{"observed_at": "x", "observed_at": "y"}')
+            self.assertEqual(mt.main(["--cache", str(c), "--live", str(l)]), 2)
+            l.write_text('{"prs": {"WU-1": {"head_sha": "a", "head_sha": "b"}}}')
+            self.assertEqual(mt.main(["--cache", str(c), "--live", str(l)]), 2)
+            l.write_text("{}")
+            c.write_text('[{"id": "WU-1", "id": "WU-2"}]')
+            self.assertEqual(mt.main(["--cache", str(c), "--live", str(l)]), 2)
+            c.write_text(good)
+            self.assertEqual(mt.main(["--cache", str(c), "--live", str(l)]), 0)
+
     def _cli(self, *args):
         return subprocess.run([sys.executable, str(ROOT / "onecompany.py"), "mission-truth", *args],
                               capture_output=True, text=True, cwd=ROOT)

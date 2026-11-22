@@ -16,6 +16,14 @@ from product_brief import FIELDS, make_draft
 MAX_BRIEF_BYTES = 16_384
 
 
+def reject_duplicate_keys(pairs):
+    """``object_pairs_hook``: json keeps the last repeated key, which could hide an earlier value; refuse at any depth."""
+    keys = [k for k, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("DUPLICATE_JSON_KEY")
+    return dict(pairs)
+
+
 def read_brief(path: Path) -> dict:
     """Read one bounded owner-saved JSON draft without following a symlink."""
     if not hasattr(os, "O_NOFOLLOW"):
@@ -31,7 +39,7 @@ def read_brief(path: Path) -> dict:
         os.close(descriptor)
     if len(raw) > MAX_BRIEF_BYTES:
         raise ValueError("SAVED_BRIEF_TOO_LARGE")
-    result = json.loads(raw)
+    result = json.loads(raw, object_pairs_hook=reject_duplicate_keys)
     if not isinstance(result, dict):
         raise ValueError("SAVED_BRIEF_OBJECT_REQUIRED")
     return result

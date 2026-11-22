@@ -448,6 +448,41 @@ class MistralFencedWorkerTests(unittest.TestCase):
                 (True, "NONE"),
             )
 
+    def test_executable_test_detection_rejects_fake_scaffolds(self):
+        """OC-P0-09: string-embedded, pass-only or unparseable tests are not evidence."""
+        def edits(content: str) -> list[dict]:
+            return [{"path": SCOPE[1], "content": content.encode(), "existed": True}]
+
+        fakes = {
+            "def inside a docstring": '"""\ndef test_fake():\n    assert True\n"""\n',
+            "pass-only body": "def test_fake():\n    pass\n",
+            "docstring-only body": 'def test_fake():\n    """todo"""\n',
+            "ellipsis-only body": "def test_fake():\n    ...\n",
+            "syntax error": "def test_fake(:\n    assert True\n",
+            "non-test function": "def helper():\n    assert True\n",
+        }
+        for label, content in fakes.items():
+            with self.subTest(label):
+                self.assertFalse(w._has_executable_python_test(edits(content)))
+        # Positive controls: plain function, async function and TestCase method.
+        real = {
+            "function": "def test_ok():\n    assert 1 == 1\n",
+            "async function": "async def test_ok():\n    assert 1 == 1\n",
+            "method": (
+                "import unittest\n"
+                "class T(unittest.TestCase):\n"
+                "    def test_ok(self):\n"
+                "        self.assertEqual(1, 1)\n"
+            ),
+        }
+        for label, content in real.items():
+            with self.subTest(label):
+                self.assertTrue(w._has_executable_python_test(edits(content)))
+        # A test body outside tests/ never counts.
+        self.assertFalse(w._has_executable_python_test([
+            {"path": "scripts/x.py", "content": b"def test_ok():\n    assert 1\n"}
+        ]))
+
     def test_merged_scaffold_never_promotes_mistral_readiness(self):
         queue = json.loads((ROOT / ".onecompany/selftest/fixtures/mistral_queue_v1.json").read_text())
         readiness = json.loads((ROOT / ".onecompany/readiness.json").read_text())

@@ -8,6 +8,7 @@ This is not an alternative lease issuer, reviewer or merge agent.
 """
 from __future__ import annotations
 
+import ast
 import base64
 import hashlib
 import json
@@ -65,22 +66,34 @@ def classify_model_failure(exit_code: int, stderr: str) -> str:
     return "UNKNOWN"
 
 
+def _is_trivial_statement(node: ast.stmt) -> bool:
+    """Pass, Ellipsis, bare constants and docstrings do not exercise anything."""
+    return isinstance(node, ast.Pass) or (
+        isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
+    )
+
+
 def _has_executable_python_test(edits: list[dict]) -> bool:
-    """Require an actual Python test body, not a scaffold/comment-only file."""
+    """Require a parseable Python test function with a non-trivial body.
+
+    Comment-only, string-embedded, syntactically broken or `pass`-only tests are
+    scaffolds, not executable evidence.
+    """
     for row in edits:
         path = str(row.get("path", ""))
         if not path.startswith("tests/") or not path.endswith(".py"):
             continue
         try:
-            source = row["content"].decode("utf-8")
-        except (KeyError, AttributeError, UnicodeDecodeError):
+            tree = ast.parse(row["content"].decode("utf-8"))
+        except (KeyError, AttributeError, UnicodeDecodeError, SyntaxError, ValueError):
             continue
-        if re.search(r"(?m)^\s*(?:async\s+)?def\s+test_[A-Za-z0-9_]+\s*\(", source):
-            return True
-        if "unittest.TestCase" in source and re.search(
-            r"(?m)^\s*def\s+test_[A-Za-z0-9_]+\s*\(", source
-        ):
-            return True
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and node.name.startswith("test_")
+                and any(not _is_trivial_statement(item) for item in node.body)
+            ):
+                return True
     return False
 
 

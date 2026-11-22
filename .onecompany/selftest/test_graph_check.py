@@ -55,6 +55,20 @@ class GraphCheckTests(unittest.TestCase):
         self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
         self.assertIn("UNABLE TO VERIFY", r.stderr)
 
+    def test_duplicate_keys_are_refused_not_last_wins(self):
+        good = json.dumps(base())
+        self.assertEqual(self.run_cli(None, raw=good).returncode, 0)  # positive control
+        node_dup = good.replace('"id": "w2", "kind": "wu"', '"id": "w2", "depends_on": ["w1"], "kind": "wu"', 1)
+        self.assertNotEqual(node_dup, good)
+        top_dup = good.replace('{"revision"', '{"change_base": "' + "2" * 40 + '", "revision"', 1)
+        self.assertNotEqual(top_dup, good)
+        for raw in (node_dup, top_dup):
+            r = self.run_cli(None, raw=raw)
+            self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+            self.assertIn("UNABLE TO VERIFY", r.stderr)
+            self.assertIn("unreadable", r.stderr)
+            self.assertNotIn("Traceback", r.stderr)
+
     def test_clean_graph_passes_with_critical_path(self):
         r = self.run_cli(base(), "--json")
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)

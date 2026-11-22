@@ -172,6 +172,21 @@ def assess(criteria_doc: object, evidence_doc: object, manifest: object, *, wu_i
             "ok": not uncovered and not problems}
 
 
+def _reject_duplicate_keys(pairs):
+    """json keeps the last repeated key, which makes evidence ambiguous; refuse at any depth."""
+    keys = [k for k, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate key")
+    return dict(pairs)
+
+
+def _load_json(path: str):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"), object_pairs_hook=_reject_duplicate_keys)
+    except ValueError as exc:
+        raise AssuranceError(f"{path}: {exc}") from exc
+
+
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Per-criterion post-binding assurance (offline, fail closed)")
     p.add_argument("--wu", required=True); p.add_argument("--run-key", required=True)
@@ -185,7 +200,7 @@ def main(argv: list[str] | None = None) -> int:
                    help="criteria digest recorded at approval (see criteria_digest)")
     a = p.parse_args(argv)
     try:
-        docs = [json.loads(Path(f).read_text(encoding="utf-8")) for f in (a.criteria, a.evidence, a.manifest, a.gates)]
+        docs = [_load_json(f) for f in (a.criteria, a.evidence, a.manifest, a.gates)]
         mf = docs[2].get("manifest", docs[2]) if isinstance(docs[2], dict) else docs[2]
         report = assess(docs[0], docs[1], mf, wu_id=a.wu, run_key=a.run_key, workspace=a.workspace,
                         head_sha=a.head, base_sha=a.base, evidence_dir=a.evidence_dir,

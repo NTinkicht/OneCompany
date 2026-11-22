@@ -273,6 +273,14 @@ def build_report(data: object, now: dt.datetime,
     }
 
 
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """``object_pairs_hook``: json keeps the last of a repeated key, so a snapshot could hide a value; refuse it."""
+    keys = [key for key, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise InvalidSnapshot("duplicate key in snapshot JSON")
+    return dict(pairs)
+
+
 def render(report: dict[str, Any]) -> str:
     return json.dumps(report, sort_keys=True, indent=2) + "\n"
 
@@ -283,7 +291,7 @@ def main(argv: list[str] | None = None, now: dt.datetime | None = None) -> int:
     parser.add_argument("--max-age-seconds", type=int, default=DEFAULT_MAX_AGE_SECONDS)
     args = parser.parse_args(argv)
     try:
-        data = json.loads(args.snapshot.read_text(encoding="utf-8"))
+        data = json.loads(args.snapshot.read_text(encoding="utf-8"), object_pairs_hook=_reject_duplicate_keys)
         report = build_report(data, now or dt.datetime.now(dt.timezone.utc), args.max_age_seconds)
     except InvalidSnapshot as exc:
         print(f"invalid snapshot: {exc}", file=sys.stderr)

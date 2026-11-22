@@ -481,6 +481,17 @@ class CliTests(unittest.TestCase):
             self.assertEqual((EXIT_INVALID, ""), (code, out))
             self.assertTrue(err.startswith("invalid snapshot:"))
 
+    def test_duplicate_keys_are_refused_at_any_depth(self):
+        # Positive control: the same snapshot without a repeated key is consistent.
+        self.assertEqual(EXIT_CONSISTENT, self.run_cli(json.dumps(doc()))[0])
+        # json keeps the last value, so without the hook both of these would be CONSISTENT.
+        top = '{"schema_version": 4, ' + json.dumps(doc())[1:]
+        nested = json.dumps(doc()).replace('"observed_at"', '"observed_at": "2020-01-01T00:00:00+00:00", "observed_at"', 1)
+        for text in (top, nested):
+            code, out, err = self.run_cli(text)
+            self.assertEqual((EXIT_INVALID, ""), (code, out))
+            self.assertEqual("invalid snapshot: duplicate key in snapshot JSON\n", err)
+
     def test_missing_file_is_invalid(self):
         err = io.StringIO()
         with contextlib.redirect_stderr(err):

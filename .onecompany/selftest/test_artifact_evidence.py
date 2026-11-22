@@ -154,6 +154,28 @@ class ArtifactEvidenceTests(unittest.TestCase):
         )
         self.assertEqual(len(errors), 4, errors)
 
+    def test_duplicate_key_evidence_json_is_refused(self):
+        good_q = {"schema": "onecompany-quality-evidence-v1", "candidate_sha": CANDIDATE}
+        good_m = {"schema": "onecompany-mutation-evidence-v1", "candidate_sha": CANDIDATE, "mutation_score": 80}
+        cases = [
+            ("onecompany_quality_json_v1", good_q, '{"candidate_sha": "%s", ' % ("c" * 40)),
+            ("onecompany_mutation_json_v1", good_m, '{"mutation_score": 1, '),
+        ]
+        for kind, good, dup_prefix in cases:
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as tmp:
+                root = Path(tmp)
+                parser = {"kind": kind, "version": 1, "path": "r.json"}
+                (root / "r.json").write_text(json.dumps(good), encoding="utf-8")
+                ok, err = evidence_verify.parse_report(root, parser, CANDIDATE, None)
+                self.assertIsNone(err)
+                self.assertIsNotNone(ok)
+                forged = dup_prefix + json.dumps(good)[1:]
+                (root / "r.json").write_text(forged, encoding="utf-8")
+                self.assertEqual(json.loads(forged)["candidate_sha"], CANDIDATE)
+                bad, err = evidence_verify.parse_report(root, parser, CANDIDATE, None)
+                self.assertIsNone(bad)
+                self.assertIn("duplicate key", err)
+
     def test_unsupported_parser_version_is_rejected_before_download(self):
         reference = self.reference()
         reference["parser"]["version"] = 999

@@ -211,6 +211,35 @@ class PostbindAssuranceTests(unittest.TestCase):
         (d / "c.json").write_text("{not json")
         self.assertEqual(pa.main(args), 2)
 
+    def test_cli_refuses_duplicate_keys_in_every_input(self):
+        import contextlib
+        import io
+        d = Path(self._t.name)
+        files = {"c": json.dumps(self.criteria), "e": json.dumps({"schema": pa.SCHEMA + "/evidence", "items": self.items}),
+                 "m": json.dumps({"manifest": self.manifest}), "g": json.dumps(self.good_gates())}
+        for k, v in files.items():
+            (d / f"{k}.json").write_text(v)
+        args = ["--wu", WU, "--run-key", RK, "--workspace", self.ws, "--head", self.head, "--base", self.base,
+                "--criteria", str(d / "c.json"), "--evidence", str(d / "e.json"), "--manifest", str(d / "m.json"),
+                "--evidence-dir", str(self.ev), "--gates", str(d / "g.json"),
+                "--approved-criteria-sha256", pa.criteria_digest(self.criteria["criteria"])]
+        self.assertEqual(pa.main(args), 0)  # positive control: same content, no duplicates
+        dup = {  # a repeated key whose last value is the passing one
+            "c": files["c"].replace('"wu_id": "WU-T-1"', '"wu_id": "WU-X", "wu_id": "WU-T-1"', 1),
+            "e": files["e"].replace('"result": "pass"', '"result": "fail", "result": "pass"', 1),
+            "m": files["m"].replace('{"manifest"', '{"manifest": {}, "manifest"', 1),
+            "g": files["g"].replace('"state": "APPROVED"', '"state": "CHANGES_REQUESTED", "state": "APPROVED"', 1),
+        }
+        for k, v in dup.items():
+            self.assertNotEqual(v, files[k], k)
+            (d / f"{k}.json").write_text(v)
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                self.assertEqual(pa.main(args), 2, k)
+            self.assertIn("duplicate key", err.getvalue(), k)
+            (d / f"{k}.json").write_text(files[k])
+        self.assertEqual(pa.main(args), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

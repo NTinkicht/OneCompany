@@ -465,6 +465,18 @@ def verify_trusted_packet(
     return attestation, errors
 
 
+def _reject_duplicate_keys(pairs):
+    """``object_pairs_hook``: json keeps the last repeated key, which could hide a forged field; refuse it."""
+    keys = [key for key, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate key")
+    return dict(pairs)
+
+
+def load_packet(path: Path):
+    return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_reject_duplicate_keys)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description="Generate a base-trusted CompanyOS assurance attestation"
@@ -475,8 +487,8 @@ def main() -> int:
     parser.add_argument("--base-sha", required=True)
     args = parser.parse_args()
     try:
-        packet = json.loads(args.packet.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        packet = load_packet(args.packet)
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
         print(json.dumps({"attestation": None, "errors": [f"cannot read packet: {exc}"]}, indent=2))
         return 1
     if not isinstance(packet, dict):

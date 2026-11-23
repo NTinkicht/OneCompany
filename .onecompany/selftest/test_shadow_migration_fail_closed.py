@@ -47,6 +47,19 @@ class ShadowMigrationFailClosedTests(unittest.TestCase):
         self.assertFalse(report["mutation_ready"])
         self.assertIn("LEGACY_CONTROL_PLANE_ABSENCE_CONFLICT", report["blocker_codes"])
 
+    def test_duplicate_key_manifest_is_refused_not_last_wins(self):
+        import json
+        import tempfile
+
+        good = json.dumps(verified_idle_manifest())
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "m.json"
+            path.write_text(good, encoding="utf-8")
+            self.assertEqual(shadow_migration.load_manifest(path)["schema_version"], "1.0")
+            path.write_text(good[:-1] + ', "schema_version": "2.0"}', encoding="utf-8")
+            with self.assertRaises(ValueError):
+                shadow_migration.load_manifest(path)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -86,5 +86,29 @@ class VisualGoldenCheckTests(unittest.TestCase):
         self.assertEqual(self.run_cli(matrix(), matrix(), themes=()).returncode, 2)
 
 
+    def test_duplicate_key_is_refused_not_last_wins(self):
+        good = json.dumps(matrix())
+        hdr = '"revision": "%s", "viewports": [320, 1024], "themes": ["light", "dark"]' % REV
+        dups = [
+            '{%s, "goldens": %s, "goldens": %s}' % (hdr, json.dumps(matrix(digest="b")), good),
+            '{%s, "revision": "%s", "goldens": %s}' % (hdr, "2" * 40, good),
+            '{%s, "goldens": [{"id": "x", "id": "home", "viewport": 320, "theme": "light", "sha256": "%s"}]}' % (hdr, "a" * 64),
+        ]
+        self.assertEqual(self.run_cli(matrix(), matrix()).returncode, 0)
+        for body in dups:
+            r = self.run_cli(matrix(), matrix(), raw=body)
+            self.assertEqual(r.returncode, 2, body)
+            self.assertIn("UNABLE TO VERIFY", r.stderr)
+            self.assertIn("unreadable", r.stderr)
+            self.assertNotIn("Traceback", r.stderr)
+        c = self.tmp / "c2.json"
+        c.write_text('{"revision": "%s", "captures": %s, "captures": []}' % ("2" * 40, good), encoding="utf-8")
+        g = self.tmp / "g.json"
+        r = subprocess.run([sys.executable, str(ROOT / "scripts" / "visual_golden_check.py"), str(g), str(c)],
+                           capture_output=True, text=True)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("unreadable", r.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

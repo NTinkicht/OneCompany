@@ -364,5 +364,18 @@ class TrustedAssuranceTests(unittest.TestCase):
         artifact_verify.assert_not_called()
 
 
+    def test_duplicate_key_packet_is_refused_not_last_wins(self):
+        import tempfile
+        from pathlib import Path as _P
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = _P(tmp) / "p.json"
+            path.write_text('{"a": 1, "b": {"c": 2}}', encoding="utf-8")
+            self.assertEqual(trusted_assurance.load_packet(path), {"a": 1, "b": {"c": 2}})
+            path.write_text('{"a": 1, "b": {"c": 2, "c": 3}}', encoding="utf-8")
+            with self.assertRaises(ValueError):
+                trusted_assurance.load_packet(path)
+
+
 if __name__ == "__main__":
     unittest.main()

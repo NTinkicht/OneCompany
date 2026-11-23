@@ -88,6 +88,23 @@ class A11yCheckTests(unittest.TestCase):
             self.assertEqual(r.returncode, 2, case)
             self.assertIn("UNABLE TO VERIFY", r.stderr)
 
+    def test_duplicate_key_is_refused_not_last_wins(self):
+        rev = json.dumps("1" * 40)
+        bad_page, clean = json.dumps(page("a", [viol("r", "critical")])), json.dumps(page("a"))
+        dups = [
+            '{"revision": %s, "pages": [%s], "pages": [%s]}' % (rev, bad_page, clean),
+            '{"revision": %s, "revision": %s, "pages": [%s]}' % (rev, rev, clean),
+            '{"revision": %s, "pages": [{"id": "a", "id": "b", "violations": [], "waived": []}]}' % rev,
+        ]
+        self.assertEqual(self.run_cli([page("a", [viol("r", "critical")])]).returncode, 1)
+        self.assertEqual(self.run_cli([page("a")]).returncode, 0)
+        for body in dups:
+            r = self.run_cli(body)
+            self.assertEqual(r.returncode, 2, body)
+            self.assertIn("UNABLE TO VERIFY", r.stderr)
+            self.assertIn("unreadable", r.stderr)
+            self.assertNotIn("Traceback", r.stderr)
+
     def test_bad_revision_and_missing_file(self):
         self.assertEqual(self.run_cli([page("a")], revision="xyz").returncode, 2)
         r = subprocess.run([sys.executable, str(ROOT / "scripts" / "a11y_check.py"), str(self.tmp / "none.json")],

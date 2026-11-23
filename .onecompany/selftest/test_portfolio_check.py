@@ -144,6 +144,11 @@ class PortfolioCheckTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("portfolio", r.stdout.lower())
 
+    def test_duplicate_key_is_refused_not_last_wins(self):
+        good = json.dumps(base())
+        self.assertEqual(self.run_cli(None, raw=good).returncode, 0)
+        self.assert_unverifiable(raw=good[:-1] + ', "revision": "%s"}' % ("1" * 40))
+
 
 if __name__ == "__main__":
     unittest.main()

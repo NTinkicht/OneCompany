@@ -76,6 +76,16 @@ class RegressionReportTests(unittest.TestCase):
         proc = self.cli(self.regs(("R1", "t1", True)), self.run_file({"t1": "pass"}), "--json")
         self.assertEqual(json.loads(proc.stdout)["proven"], ["R1"])
 
+    def test_duplicate_key_is_refused_not_last_wins(self):
+        good = json.dumps({"regressions": [{"id": "R1", "test": "t1", "failed_before_fix": True}]})
+        run = self.run_file({"t1": "pass"})
+        self.assertEqual(self.cli(self.write("g.json", good), run).returncode, 0)
+        dup = self.write("d.json", good[:-1] + ', "regressions": [{"id": "R1", "test": "t1", "failed_before_fix": true}]}')
+        r = self.cli(dup, run)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("UNABLE TO VERIFY", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

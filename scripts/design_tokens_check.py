@@ -103,13 +103,21 @@ def check_tokens(data: object) -> tuple[list[dict], list[str]]:
     return results, problems
 
 
+def _reject_duplicate_keys(pairs):
+    """``object_pairs_hook``: json keeps the last repeated key, which could hide a finding or a revision; refuse it."""
+    keys = [key for key, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate key")
+    return dict(pairs)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Read-only design-token contrast gate.")
     parser.add_argument("--tokens", default=str(DEFAULT), help="token JSON file")
     parser.add_argument("--json", action="store_true", help="machine-readable output")
     args = parser.parse_args(argv)
     try:
-        data = json.loads(Path(args.tokens).read_text(encoding="utf-8"))
+        data = json.loads(Path(args.tokens).read_text(encoding="utf-8"), object_pairs_hook=_reject_duplicate_keys)
     except (OSError, ValueError):
         print("design-tokens-check: cannot read tokens", file=sys.stderr)
         return 2

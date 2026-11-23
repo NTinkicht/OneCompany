@@ -150,6 +150,17 @@ class CommsCheckTests(unittest.TestCase):
                            capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
 
+    def test_duplicate_key_is_refused_not_last_wins(self):
+        good = json.dumps({"revision": "1" * 40, "trusted_actors": ["codex"], "max_attempts": 3,
+                           "approvers": ["codex"], "messages": [msg("m1")]})
+        self.assertEqual(self.run_cli([], raw=good).returncode, 0)
+        dup = good[:-1] + ', "revision": "%s"}' % ("1" * 40)
+        r = self.run_cli([], raw=dup)
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("UNABLE TO VERIFY", r.stderr)
+        self.assertIn("unreadable", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

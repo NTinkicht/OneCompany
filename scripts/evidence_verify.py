@@ -30,6 +30,18 @@ SUPPORTED_PARSER_VERSIONS = {
 SUPPORTED_PARSERS = set(SUPPORTED_PARSER_VERSIONS)
 
 
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """``object_pairs_hook``: json keeps the last repeated key, which could forge a SHA or score; refuse it."""
+    keys = [key for key, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate key in evidence JSON")
+    return dict(pairs)
+
+
+def _load_strict_json(path: Path) -> Any:
+    return json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_reject_duplicate_keys)
+
+
 def _gh_json(path: str) -> tuple[dict[str, Any] | None, str | None]:
     if not command_exists("gh"):
         return None, "gh CLI is required to verify platform evidence"
@@ -154,7 +166,7 @@ def _percent(value: Any, field: str) -> float:
 
 
 def _parse_quality_json(path: Path, candidate_sha: str, base_sha: str | None) -> dict[str, Any]:
-    value = json.loads(path.read_text(encoding="utf-8"))
+    value = _load_strict_json(path)
     if not isinstance(value, dict) or value.get("schema") != "onecompany-quality-evidence-v1":
         raise ValueError("quality JSON must declare schema=onecompany-quality-evidence-v1")
     if value.get("candidate_sha") != candidate_sha:
@@ -233,7 +245,7 @@ def _parse_junit(path: Path, family: str | None) -> dict[str, Any]:
 
 
 def _parse_mutation_json(path: Path, candidate_sha: str) -> dict[str, Any]:
-    value = json.loads(path.read_text(encoding="utf-8"))
+    value = _load_strict_json(path)
     if not isinstance(value, dict) or value.get("schema") != "onecompany-mutation-evidence-v1":
         raise ValueError("mutation JSON must declare schema=onecompany-mutation-evidence-v1")
     if value.get("candidate_sha") != candidate_sha:
@@ -648,7 +660,11 @@ def main() -> int:
     parser.add_argument("--base-sha", required=True)
     parser.add_argument("--policy-revision", required=True)
     args = parser.parse_args()
-    packet = json.loads(args.packet.read_text(encoding="utf-8"))
+    try:
+        packet = _load_strict_json(args.packet)
+    except (OSError, ValueError) as exc:
+        print(json.dumps({"attestation": None, "errors": [f"packet unreadable: {exc.__class__.__name__}"]}, indent=2))
+        return 1
     attestation, errors = verify_packet_evidence(
         packet,
         repo=args.repo,

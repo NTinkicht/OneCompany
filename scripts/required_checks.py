@@ -16,6 +16,14 @@ RUN_ID_RE = re.compile(r"/actions/runs/(\d+)(?:/|$)")
 MANIFEST_PATH = ".onecompany/required-checks.json"
 
 
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """json keeps the last repeated key, which makes a trusted manifest ambiguous; refuse at any depth."""
+    keys = [key for key, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate key")
+    return dict(pairs)
+
+
 def required_check_manifest() -> dict[str, Any]:
     return load_json(CONTROL / "required-checks.json")
 
@@ -57,7 +65,7 @@ def _manifest_from_ref(repo: str, ref: str) -> tuple[dict[str, Any] | None, str 
         return None, f"trusted required-check manifest at {ref} is not decodable base64 content"
     try:
         text = base64.b64decode(payload["content"]).decode("utf-8")
-        manifest = json.loads(text)
+        manifest = json.loads(text, object_pairs_hook=_reject_duplicate_keys)
     except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         return None, f"trusted required-check manifest at {ref} is invalid: {exc}"
     if not isinstance(manifest, dict):

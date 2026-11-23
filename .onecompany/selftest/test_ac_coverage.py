@@ -69,6 +69,15 @@ class AcCoverageTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 ac.report(self.fixture(catalog=bad))
 
+    def test_duplicate_keys_fail_closed(self):
+        good = json.dumps({"acceptance_criteria": [{"id": "AC-001", "status": "approved"}]})
+        self.assertEqual(ac.report(self.fixture(catalog=good))["uncovered"], ["AC-001"])  # positive control
+        for bad in (good.replace('"status": "approved"', '"status": "retired", "status": "approved"', 1),
+                    good.replace('{"acceptance_criteria"', '{"acceptance_criteria": [], "acceptance_criteria"', 1)):
+            self.assertNotEqual(bad, good)
+            with self.assertRaises(ValueError):
+                ac.report(self.fixture(catalog=bad))
+
     def test_missing_or_invalid_status_fails_closed(self):
         for item in ({"id": "AC-001"}, {"id": "AC-001", "status": "bogus"}, {"id": "AC-001", "status": None}):
             with self.assertRaises(ValueError):

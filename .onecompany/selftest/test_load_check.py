@@ -77,6 +77,21 @@ class LoadCheckTests(unittest.TestCase):
             self.assertEqual(r.returncode, 2, case)
             self.assertIn("UNABLE TO VERIFY", r.stderr)
 
+    def test_duplicate_key_is_refused_not_last_wins(self):
+        rev = json.dumps("1" * 40)
+        dups = [
+            '{"revision": %s, "scenarios": [%s], "scenarios": [%s]}' % (rev, json.dumps(sc("a", errors=5)), json.dumps(sc("a"))),
+            '{"revision": %s, "revision": %s, "scenarios": [%s]}' % (rev, rev, json.dumps(sc("a"))),
+        ]
+        self.assertEqual(self.run_cli([sc("a", errors=5)]).returncode, 1)
+        self.assertEqual(self.run_cli([sc("a")]).returncode, 0)
+        for body in dups:
+            r = self.run_cli(body)
+            self.assertEqual(r.returncode, 2, body)
+            self.assertIn("UNABLE TO VERIFY", r.stderr)
+            self.assertIn("unreadable", r.stderr)
+            self.assertNotIn("Traceback", r.stderr)
+
     def test_bad_revision_and_budgets_exit_2(self):
         self.assertEqual(self.run_cli([sc("a")], revision="abc").returncode, 2)
         self.assertEqual(self.run_cli([sc("a")], revision="1" * 40 + "\n").returncode, 2)

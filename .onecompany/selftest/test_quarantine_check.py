@@ -81,6 +81,21 @@ class QuarantineCheckTests(unittest.TestCase):
         self.assertEqual(self.cli(self.tmp / "nope.json", r).returncode, 2)
         self.assertEqual(self.cli(self.write("q.json", {"quarantined": []}), self.write("r2.json", "{}")).returncode, 2)
 
+    def test_duplicate_key_is_refused_not_last_wins(self):
+        r = self.write("r.json", {"results": {"a": "pass"}})
+        one = json.dumps(entry("a"))
+        dups = [
+            '{"quarantined": [], "quarantined": [%s]}' % one,
+            '{"quarantined": [{"test": "a", "test": "b", "issue": "#1", "reason": "flaky"}]}',
+        ]
+        self.assertEqual(self.cli(self.write("ok.json", {"quarantined": [entry("a")]}), r).returncode, 1)
+        for i, body in enumerate(dups):
+            proc = self.cli(self.write(f"d{i}.json", body), r)
+            self.assertEqual(proc.returncode, 2, body)
+            self.assertIn("UNABLE TO VERIFY", proc.stderr)
+            self.assertIn("unreadable", proc.stderr)
+            self.assertNotIn("Traceback", proc.stderr)
+
     def test_json_output_is_deterministic(self):
         q = self.write("q.json", {"quarantined": [entry("z"), entry("a")]})
         r = self.write("r.json", {"results": {"z": "error", "a": "fail", "s2": "skip", "s1": "skip"}})

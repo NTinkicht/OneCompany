@@ -76,6 +76,21 @@ class FixtureCheckTests(unittest.TestCase):
             self.assertIn("UNABLE TO VERIFY", r.stderr)
         self.assertEqual(self.cli(self.tmp / "missing.json").returncode, 2)
 
+    def test_duplicate_key_is_refused_not_last_wins(self):
+        bad, good = json.dumps(fx("a", kind="mock")), json.dumps(fx("a"))
+        dups = [
+            '{"fixtures": [%s], "fixtures": [%s]}' % (bad, good),
+            '{"fixtures": [{"id": "a", "id": "b"}]}',
+        ]
+        self.assertEqual(self.cli(self.write({"fixtures": [fx("a", kind="mock")]})).returncode, 1)
+        self.assertEqual(self.cli(self.write({"fixtures": [fx("a")]})).returncode, 0)
+        for body in dups:
+            r = self.cli(self.write(body))
+            self.assertEqual(r.returncode, 2, body)
+            self.assertIn("UNABLE TO VERIFY", r.stderr)
+            self.assertIn("unreadable", r.stderr)
+            self.assertNotIn("Traceback", r.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

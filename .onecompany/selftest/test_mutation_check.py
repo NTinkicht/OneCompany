@@ -69,6 +69,21 @@ class MutationCheckTests(unittest.TestCase):
         self.assertEqual(r.returncode, 2)
         self.assertIn("UNABLE TO VERIFY", r.stderr)
 
+    def test_duplicate_key_is_refused_not_last_wins(self):
+        rev = json.dumps("1" * 40)
+        dups = [
+            '{"revision": %s, "mutants": [%s], "mutants": [%s]}' % (rev, json.dumps(mu("a", "survived")), json.dumps(mu("a"))),
+            '{"revision": %s, "revision": %s, "mutants": [%s]}' % (rev, rev, json.dumps(mu("a"))),
+        ]
+        self.assertEqual(self.run_cli([mu("a", "survived")]).returncode, 1)
+        self.assertEqual(self.run_cli([mu("a")]).returncode, 0)
+        for body in dups:
+            r = self.run_cli(body)
+            self.assertEqual(r.returncode, 2, body)
+            self.assertIn("UNABLE TO VERIFY", r.stderr)
+            self.assertIn("unreadable", r.stderr)
+            self.assertNotIn("Traceback", r.stderr)
+
     def test_malformed_input_exits_2(self):
         bad = ["not json", "[]", json.dumps({"revision": "1" * 40, "mutants": []}),
                json.dumps({"revision": "abc", "mutants": [mu("a")]}),

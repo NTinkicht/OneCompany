@@ -19,10 +19,18 @@ IMPACTS = {"minor", "moderate", "serious", "critical"}
 BLOCKING = {"serious", "critical"}
 
 
+def _reject_duplicate_keys(pairs):
+    """``object_pairs_hook``: json keeps the last repeated key, which could hide a violation or a revision; refuse it."""
+    keys = [key for key, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate key")
+    return dict(pairs)
+
+
 def load_pages(path: Path) -> list[dict]:
     """Return validated pages; raise ValueError on anything malformed."""
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_reject_duplicate_keys)
     except (OSError, ValueError) as exc:
         raise ValueError(f"report unreadable: {path.name} ({exc.__class__.__name__})") from exc
     if not isinstance(data, dict):

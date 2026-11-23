@@ -107,5 +107,23 @@ class SecurityCheckTests(unittest.TestCase):
         self.assertIn('"security-check"', (ROOT / "onecompany.py").read_text(encoding="utf-8"))
 
 
+    def test_duplicate_key_is_refused_not_last_wins(self):
+        rev = json.dumps("1" * 40)
+        bad, clean = json.dumps([tgt("a", [fnd("f", "critical")])]), json.dumps([tgt("a")])
+        dups = [
+            '{"revision": %s, "targets": %s, "targets": %s}' % (rev, bad, clean),
+            '{"revision": %s, "revision": %s, "targets": %s}' % (rev, rev, clean),
+            '{"revision": %s, "targets": [{"id": "a", "id": "b", "findings": [], "waived": []}]}' % rev,
+        ]
+        self.assertEqual(self.run_cli([tgt("a", [fnd("f", "critical")])]).returncode, 1)
+        self.assertEqual(self.run_cli([tgt("a")]).returncode, 0)
+        for body in dups:
+            r = self.run_cli(body)
+            self.assertEqual(r.returncode, 2, body)
+            self.assertIn("UNABLE TO VERIFY", r.stderr)
+            self.assertIn("unreadable", r.stderr)
+            self.assertNotIn("Traceback", r.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()

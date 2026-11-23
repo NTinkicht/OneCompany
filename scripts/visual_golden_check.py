@@ -20,9 +20,17 @@ HEX40 = re.compile(r"[0-9a-f]{40}")
 HEX64 = re.compile(r"[0-9a-f]{64}")
 
 
+def _reject_duplicate_keys(pairs):
+    """``object_pairs_hook``: json keeps the last repeated key, which could hide a finding or a revision; refuse it."""
+    keys = [key for key, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate key")
+    return dict(pairs)
+
+
 def _load(path: Path) -> dict:
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_reject_duplicate_keys)
     except (OSError, ValueError) as exc:
         raise ValueError(f"manifest unreadable: {path.name} ({exc.__class__.__name__})") from exc
     if not isinstance(data, dict):

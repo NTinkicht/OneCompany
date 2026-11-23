@@ -149,6 +149,15 @@ class DepsCheckTests(unittest.TestCase):
                            capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr)
 
+    def test_duplicate_key_is_refused_not_last_wins(self):
+        good = json.dumps({"revision": "1" * 40, "stop_active": False, "updates": [update()],
+                           "manifests": [manifest()]})
+        self.assertEqual(self.run_cli([update()], raw=good).returncode, 0)
+        r = self.run_cli([update()], raw=good[:-1] + ', "revision": "%s"}' % ("1" * 40))
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("UNABLE TO VERIFY", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

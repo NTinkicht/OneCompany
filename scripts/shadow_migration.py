@@ -114,8 +114,15 @@ def analyze_manifest(manifest: dict[str, Any]) -> dict[str, Any]:
     codes = sorted({f["code"] for f in findings if f.get("severity") == "blocker"})
     return {"repository":repository,"snapshot_sha":snapshot.get("main_sha"),"stream_mode":stream_mode,"legacy_mode":legacy_mode,"shadow_only":proposed.get("mode")=="shadow" and proposed.get("mutation_capable") is False,"target_mutated":False,"mutation_ready":not codes,"blocker_codes":codes,"findings":findings}
 
+def _reject_duplicate_keys(pairs):
+    """``object_pairs_hook``: json keeps the last repeated key, which could hide a forged field; refuse it."""
+    keys = [key for key, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate key")
+    return dict(pairs)
+
 def load_manifest(path: Path) -> dict[str, Any]:
-    data = json.loads(path.read_text(encoding="utf-8"))
+    data = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_reject_duplicate_keys)
     if not isinstance(data, dict): raise ValueError("manifest root must be an object")
     return data
 

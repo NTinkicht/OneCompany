@@ -84,6 +84,14 @@ class DesignTokensTests(unittest.TestCase):
         self.assertEqual(self.run_cli(json.dumps(bad)).returncode, 1)
         self.assertEqual(self.run_cli("not json").returncode, 2)
 
+    def test_duplicate_key_is_refused_not_last_wins(self):
+        good = json.dumps(SHIPPED)
+        self.assertEqual(self.run_cli(good).returncode, 0)
+        r = self.run_cli(good[:-1] + ', "spacing_px": %s}' % json.dumps(SHIPPED["spacing_px"]))
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("cannot read tokens", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

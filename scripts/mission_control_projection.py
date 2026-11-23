@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 from pathlib import Path
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -43,12 +44,24 @@ def project(revision: str, product_brief: dict, execution: dict, evidence: dict)
     }
 
 
+def _reject_duplicate_keys(pairs):
+    """``object_pairs_hook``: json keeps the last repeated key, which could show a stale or forged PASS; refuse it."""
+    keys = [key for key, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate key")
+    return dict(pairs)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Render read-only Phase-1 Mission Control readiness")
     parser.add_argument("--revision", required=True)
     parser.add_argument("--input", type=Path, required=True)
     args = parser.parse_args()
-    data = json.loads(args.input.read_text(encoding="utf-8"))
+    try:
+        data = json.loads(args.input.read_text(encoding="utf-8"), object_pairs_hook=_reject_duplicate_keys)
+    except (OSError, ValueError) as exc:
+        print(f"mission-control input unreadable: {exc.__class__.__name__}: {exc}", file=sys.stderr)
+        return 1
     result = project(args.revision, data["product_brief"], data["execution"], data["evidence"])
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0

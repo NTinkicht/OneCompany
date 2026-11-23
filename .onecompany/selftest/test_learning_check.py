@@ -152,6 +152,11 @@ class LearningCheckTests(unittest.TestCase):
         for bad in ({}, [], 1):
             self.assert_unverifiable(base(defects=[defect(1, lesson=bad)]))
 
+    def test_duplicate_key_is_refused_not_last_wins(self):
+        good = json.dumps(base())
+        self.assertEqual(self.run_cli(None, raw=good).returncode, 0)
+        self.assert_unverifiable(raw=good[:-1] + ', "revision": "%s"}' % ("1" * 40))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -138,6 +138,14 @@ class CertifyCheckTests(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("certification", r.stdout)
 
+    def test_duplicate_key_is_refused_not_last_wins(self):
+        good = json.dumps(manifest())
+        self.assertEqual(self.run_cli(raw=good).returncode, 0)
+        r = self.run_cli(raw=good[:-1] + ', "certifier": "reviewer-a"}')
+        self.assertEqual(r.returncode, 2, r.stdout + r.stderr)
+        self.assertIn("UNABLE TO VERIFY", r.stderr)
+        self.assertNotIn("Traceback", r.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

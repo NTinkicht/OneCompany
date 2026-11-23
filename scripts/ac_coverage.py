@@ -26,10 +26,19 @@ AC_ID = re.compile(r"AC-\d{3,}")
 AC_STATUSES = frozenset({"proposed", "approved", "verified", "retired"})
 
 
+def _reject_duplicate_keys(pairs):
+    """json keeps the last repeated key, which makes the catalog ambiguous; refuse at any depth."""
+    keys = [k for k, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate key")
+    return dict(pairs)
+
+
 def load_catalog(root: Path) -> dict[str, dict]:
     """Return approved and non-approved ACs by id; raise ValueError on any malformed catalog."""
     try:
-        data = json.loads((root / ".onecompany" / "requirements-catalog.json").read_text(encoding="utf-8"))
+        data = json.loads((root / ".onecompany" / "requirements-catalog.json").read_text(encoding="utf-8"),
+                          object_pairs_hook=_reject_duplicate_keys)
     except (OSError, ValueError) as exc:
         raise ValueError(f"catalog unreadable: {exc.__class__.__name__}") from exc
     items = data.get("acceptance_criteria") if isinstance(data, dict) else None

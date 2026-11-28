@@ -261,6 +261,23 @@ class MergeAssuranceTests(unittest.TestCase):
             )
         )
 
+    def test_assurance_packet_with_duplicate_keys_is_refused(self):
+        import tempfile
+
+        with tempfile.TemporaryDirectory(dir=ROOT) as tmp:
+            packet = Path(tmp) / "packet.json"
+            packet.write_text('{"verdict": "FAIL", "verdict": "PASS"}', encoding="utf-8")
+            loaded, name, error = merge._load_assurance_packet(str(packet))
+            self.assertIsNone(loaded)
+            self.assertIsNone(name)
+            self.assertIn("duplicate key", error)
+            packet.write_text('{"verdict": "PASS", "nested": {"a": 1, "a": 2}}', encoding="utf-8")
+            self.assertIn("duplicate key", merge._load_assurance_packet(str(packet))[2])
+            packet.write_text('{"verdict": "PASS"}', encoding="utf-8")
+            loaded, name, error = merge._load_assurance_packet(str(packet))
+            self.assertIsNone(error)
+            self.assertEqual(loaded, {"verdict": "PASS"})
+
     def test_merge_refuses_without_assurance_packet(self):
         state = self.state()
         with ExitStack() as stack:

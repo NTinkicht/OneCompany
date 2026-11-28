@@ -17,6 +17,16 @@ MAX_INPUT_BYTES = 65_536
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
+def _unique_object(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    """``object_pairs_hook``: json keeps the last repeated key, silently changing meaning; refuse it."""
+    result: dict[str, object] = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("EVIDENCE_DUPLICATE_JSON_KEY")
+        result[key] = value
+    return result
+
+
 def read_object(path: Path) -> dict:
     """Read one bounded regular JSON file without following symlinks."""
     if not hasattr(os, "O_NOFOLLOW"):
@@ -31,7 +41,7 @@ def read_object(path: Path) -> dict:
         os.close(fd)
     if len(raw) > MAX_INPUT_BYTES:
         raise ValueError("EVIDENCE_TOO_LARGE")
-    result = json.loads(raw)
+    result = json.loads(raw, object_pairs_hook=_unique_object)
     if not isinstance(result, dict):
         raise ValueError("EVIDENCE_OBJECT_REQUIRED")
     return result

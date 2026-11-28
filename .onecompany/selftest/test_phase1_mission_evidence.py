@@ -207,6 +207,26 @@ class Phase1MissionEvidenceTests(unittest.TestCase):
             self.assertEqual(bad.returncode, 2)
             self.assertIn("BLOCKED:", bad.stderr)
 
+    def test_duplicate_json_keys_are_refused_but_unique_evidence_loads(self):
+        """A repeated key at any depth must fail closed rather than keep the last value."""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "evidence.json"
+            path.write_text('{"status":"BLOCKED","nested":{"a":1}}', encoding="utf-8")
+            self.assertEqual(bridge.read_object(path)["status"], "BLOCKED")
+            for text in ('{"status":"BLOCKED","status":"READY"}',
+                         '{"nested":{"a":1,"a":2}}'):
+                path.write_text(text, encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "EVIDENCE_DUPLICATE_JSON_KEY"):
+                    bridge.read_object(path)
+            smoke = Path(tmp) / "smoke.json"
+            body = json.dumps(smoke_fixture())
+            smoke.write_text(body[:-1] + ',"status":"LOCAL_FIXTURE_PROVEN_ONLY"}', encoding="utf-8")
+            cli = subprocess.run(
+                [sys.executable, str(HELPER), "--smoke", str(smoke), "--revision", "a" * 40],
+                cwd=ROOT, text=True, capture_output=True, timeout=12)
+            self.assertEqual(cli.returncode, 2)
+            self.assertIn("EVIDENCE_DUPLICATE_JSON_KEY", cli.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()

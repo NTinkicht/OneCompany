@@ -113,6 +113,14 @@ def _local_event_path() -> Path:
     return ROOT / ".git" / "onecompany" / "lease-events.jsonl"
 
 
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """``object_pairs_hook``: json keeps the last repeated key, silently changing meaning; refuse it."""
+    keys = [key for key, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate key")
+    return dict(pairs)
+
+
 def local_events(path: Path | None = None) -> list[dict[str, Any]]:
     target = path or _local_event_path()
     if not target.exists():
@@ -123,8 +131,8 @@ def local_events(path: Path | None = None) -> list[dict[str, Any]]:
             if not line.strip():
                 continue
             try:
-                event = json.loads(line)
-            except json.JSONDecodeError as exc:
+                event = json.loads(line, object_pairs_hook=_reject_duplicate_keys)
+            except ValueError as exc:
                 raise RuntimeError(
                     f"local coordination log is corrupt at line {number}: {exc}"
                 ) from exc

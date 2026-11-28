@@ -128,6 +128,18 @@ class LeaseLifecycleTests(unittest.TestCase):
                 durable=False,
             )
 
+    def test_duplicate_key_journal_line_is_refused_but_unique_line_loads(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "events.jsonl"
+            path.write_text('{"event_type":"A","event_id":"1","timestamp":"2026-01-01T00:00:00Z"}\n', encoding="utf-8")
+            self.assertEqual(len(lease_lifecycle.local_events(path)), 1)
+            path.write_text(
+                '{"event_type":"A","event_id":"1","timestamp":"2026-01-01T00:00:00Z"}\n{"event_type":"ROLE_LEASE_ASSIGNED","event_type":"X"}\n',
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(RuntimeError, r"line 2.*duplicate key"):
+                lease_lifecycle.local_events(path)
+
     def test_assignment_has_deterministic_issue_and_expiry_and_implicit_expiry_revokes_authority(self):
         live = self.derive([assignment()], now=instant(99))
         self.assertEqual(

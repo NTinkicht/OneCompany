@@ -325,6 +325,14 @@ def _automation_policy_drift_errors(base: dict[str, dict[str, Any]]) -> list[str
     return errors
 
 
+def _reject_duplicate_keys(pairs):
+    """``object_pairs_hook``: json keeps the last repeated key, which could hide a forged verdict or head; refuse it."""
+    keys = [key for key, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate key")
+    return dict(pairs)
+
+
 def _load_assurance_packet(
     value: str | None,
 ) -> tuple[dict | None, str | None, str | None]:
@@ -346,8 +354,11 @@ def _load_assurance_packet(
     if not resolved.is_file():
         return None, None, f"assurance packet does not exist: {resolved.relative_to(ROOT)}"
     try:
-        packet = json.loads(resolved.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        packet = json.loads(
+            resolved.read_text(encoding="utf-8"),
+            object_pairs_hook=_reject_duplicate_keys,
+        )
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
         return None, None, f"cannot read assurance packet: {exc}"
     if not isinstance(packet, dict):
         return None, None, "assurance packet must be a JSON object"

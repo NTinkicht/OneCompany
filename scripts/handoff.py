@@ -270,14 +270,22 @@ def reconcile_hint(
     }
 
 
+def reject_duplicate_keys(pairs):
+    """``object_pairs_hook``: json keeps the last repeated key, which could hide a forged head or state; refuse it."""
+    keys = [key for key, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise HandoffError("duplicate key in JSON input")
+    return dict(pairs)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Reconcile a staged event-driven handoff")
     parser.add_argument("--hint-json", required=True)
     parser.add_argument("--authoritative-json", required=True)
     args = parser.parse_args()
     try:
-        hint = json.loads(args.hint_json)
-        snapshot = json.loads(args.authoritative_json)
+        hint = json.loads(args.hint_json, object_pairs_hook=reject_duplicate_keys)
+        snapshot = json.loads(args.authoritative_json, object_pairs_hook=reject_duplicate_keys)
         print(json.dumps(reconcile_hint(hint, snapshot), indent=2, sort_keys=True))
         return 0
     except (json.JSONDecodeError, HandoffError) as exc:

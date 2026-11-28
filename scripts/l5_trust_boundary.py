@@ -48,9 +48,17 @@ class TrustPolicy:
         return cls(frozenset(logins), frozenset(controller_set), sha256(canonical.encode()).hexdigest())
 
 
+def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """json keeps the last repeated key, which could hide a forged reviewer identity; refuse it."""
+    keys = [key for key, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("TRUST_POLICY_DUPLICATE_KEY")
+    return dict(pairs)
+
+
 def load_trust_policy(path: Path = POLICY_PATH) -> TrustPolicy:
     """Load the human-governed policy from the trusted controller checkout."""
-    value = json.loads(path.read_text(encoding="utf-8"))
+    value = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_reject_duplicate_keys)
     if not isinstance(value, Mapping):
         raise ValueError("TRUST_POLICY_INVALID")
     return TrustPolicy.from_mapping(value)

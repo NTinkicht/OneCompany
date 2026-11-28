@@ -34,10 +34,18 @@ def _imports(path: Path) -> list[tuple[str, int]]:
     return values
 
 
+def _reject_duplicate_keys(pairs):
+    """``object_pairs_hook``: json keeps the last repeated key, silently changing meaning; refuse it."""
+    keys = [key for key, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate key")
+    return dict(pairs)
+
+
 def boundary_errors(policy_path: Path = POLICY_PATH, scripts_dir: Path = SCRIPTS) -> list[str]:
     try:
-        policy = json.loads(policy_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        policy = json.loads(policy_path.read_text(encoding="utf-8"), object_pairs_hook=_reject_duplicate_keys)
+    except (OSError, ValueError) as exc:
         return [f"cannot load kernel boundary policy: {exc}"]
     trusted = {str(value) for value in policy.get("trusted_modules", []) if value}
     forbidden = {str(value) for value in policy.get("forbidden_repo_import_roots", []) if value}

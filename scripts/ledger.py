@@ -40,6 +40,14 @@ def _repository() -> str:
     return remote
 
 
+def reject_duplicate_keys(pairs):
+    """``object_pairs_hook``: json keeps the last repeated key, which could forge ledger event fields; refuse it."""
+    keys = [key for key, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate key in JSON input")
+    return dict(pairs)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -73,7 +81,7 @@ def main() -> int:
             print(json.dumps(payload, indent=2, ensure_ascii=False))
             return 0
 
-        payload = json.loads(args.payload_json)
+        payload = json.loads(args.payload_json, object_pairs_hook=reject_duplicate_keys)
         if not isinstance(payload, dict):
             raise ValueError("payload must be a JSON object")
         event_type = str(args.type)

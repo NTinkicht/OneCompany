@@ -37,9 +37,17 @@ def subprocess_runner(argv: list[str]) -> tuple[int, str]:
     return done.returncode, done.stdout
 
 
+def _reject_duplicate_keys(pairs):
+    """json keeps the last repeated key, which could forge a reconciliation input; refuse it."""
+    keys = [key for key, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate key in JSON input")
+    return dict(pairs)
+
+
 def load_inputs(path: Path) -> dict:
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
+        data = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=_reject_duplicate_keys)
     except (OSError, ValueError, RecursionError):
         raise ValueError("inputs unreadable or not JSON") from None
     if not isinstance(data, dict) or set(data) != KEYS:

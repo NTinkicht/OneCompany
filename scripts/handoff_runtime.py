@@ -28,8 +28,10 @@ def load_event(path: str | None) -> dict[str, Any]:
     if not path:
         return {}
     try:
-        value = json.loads(Path(path).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        value = json.loads(
+            Path(path).read_text(encoding="utf-8"), object_pairs_hook=handoff.reject_duplicate_keys
+        )
+    except (OSError, ValueError) as exc:
         raise RuntimeError(f"cannot read GitHub event hint: {exc}") from exc
     return value if isinstance(value, dict) else {}
 

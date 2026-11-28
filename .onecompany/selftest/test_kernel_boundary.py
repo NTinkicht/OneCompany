@@ -16,6 +16,22 @@ class KernelBoundaryTests(unittest.TestCase):
         errors = kernel_boundary.boundary_errors()
         self.assertEqual(errors, [])
 
+    def test_duplicate_policy_key_is_refused_but_unique_policy_loads(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            scripts = root / "scripts"
+            scripts.mkdir()
+            (scripts / "kernel.py").write_text("import json\n", encoding="utf-8")
+            policy = root / "policy.json"
+            policy.write_text('{"trusted_modules":["kernel"],"forbidden_repo_import_roots":[]}', encoding="utf-8")
+            self.assertEqual(kernel_boundary.boundary_errors(policy, scripts), [])
+            policy.write_text(
+                '{"trusted_modules":["kernel"],"trusted_modules":[],"forbidden_repo_import_roots":[]}',
+                encoding="utf-8",
+            )
+            errors = kernel_boundary.boundary_errors(policy, scripts)
+        self.assertTrue(any("duplicate key" in error for error in errors), errors)
+
     def test_userspace_import_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)

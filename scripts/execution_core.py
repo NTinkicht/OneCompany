@@ -28,6 +28,14 @@ class InvalidTransitionError(ExecutionError):
     """Raised when a lifecycle or mutation transition is not allowed."""
 
 
+def reject_duplicate_keys(pairs):
+    """json keeps the last repeated key, which could forge state or generation; refuse it."""
+    keys = [key for key, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate key in JSON input")
+    return dict(pairs)
+
+
 class JournalIntegrityError(ExecutionError):
     """Raised when execution state cannot be reconciled with its journal."""
 
@@ -1111,7 +1119,7 @@ class ExecutionStore:
         if not pending.exists():
             return
         try:
-            payload = json.loads(pending.read_text(encoding="utf-8"))
+            payload = json.loads(pending.read_text(encoding="utf-8"), object_pairs_hook=reject_duplicate_keys)
             context = RunContext.from_dict(payload["context"])
             operation_id = str(payload["operation_id"])
             event_type = str(payload["event_type"])
@@ -1178,7 +1186,13 @@ class ExecutionStore:
         with self.state_path(wu_id).open(
             "r", encoding="utf-8"
         ) as handle:
-            context = RunContext.from_dict(json.load(handle))
+            try:
+                state_doc = json.load(handle, object_pairs_hook=reject_duplicate_keys)
+            except ValueError as exc:
+                raise JournalIntegrityError(
+                    f"invalid execution state for {wu_id}"
+                ) from exc
+            context = RunContext.from_dict(state_doc)
         records = ExecutionJournal.verify(self.journal_path(wu_id))
         if not records:
             raise JournalIntegrityError(

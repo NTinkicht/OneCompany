@@ -137,12 +137,20 @@ def snapshot_from_bundle(bundle: object) -> dict[str, Any]:
         raise InvalidBundle(str(exc)) from None
 
 
+def _reject_duplicate_keys(pairs):
+    """json keeps the last repeated key, which could forge a captured bundle; refuse it."""
+    keys = [key for key, _ in pairs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("duplicate key in JSON input")
+    return dict(pairs)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("bundle", type=Path)
     args = parser.parse_args(argv)
     try:
-        snapshot = snapshot_from_bundle(json.loads(args.bundle.read_text(encoding="utf-8")))
+        snapshot = snapshot_from_bundle(json.loads(args.bundle.read_text(encoding="utf-8"), object_pairs_hook=_reject_duplicate_keys))
     except InvalidBundle as exc:
         print(f"invalid bundle: {exc}", file=sys.stderr)
         return EXIT_INVALID
